@@ -14,11 +14,13 @@ const view = (id: string, extra: Partial<TaskView> = {}): TaskView => ({
 function fakeOps() {
   const calls: string[] = [];
   const known = new Map([["w1", view("w1", { strategy: "cn-market" })]]);
+  // "old" is known to ops but outside list()'s window.
+  const has = (id: string) => known.has(id) || id === "old";
   const ops: TaskOps = {
     async start(input) { calls.push("start"); return view("w2", { title: input.title, strategy: input.strategy }); },
-    async steer(id) { calls.push("steer"); return view(id, { state: "running" }); },
-    async stop(id) { calls.push("stop"); return view(id, { state: "stopped", group: "done" }); },
-    async read(id) { calls.push("read"); return { view: known.get(id)!, text: "x".repeat(TASK_READ_MAX + 50) }; },
+    async steer(id) { calls.push("steer"); if (!has(id)) throw new Error(`no task ${id}`); return view(id, { state: "running" }); },
+    async stop(id) { calls.push("stop"); if (!has(id)) throw new Error(`no task ${id}`); return view(id, { state: "stopped", group: "done" }); },
+    async read(id) { calls.push("read"); if (!has(id)) throw new Error(`no task ${id}`); return { view: known.get(id) ?? view(id, { state: "done", group: "done" }), text: "x".repeat(TASK_READ_MAX + 50) }; },
     async list() { calls.push("list"); return [...known.values()]; },
   };
   return { ops, calls };
@@ -78,6 +80,15 @@ test("task_steer, task_stop and task_read on an unknown task throw no task <id>"
   await assert.rejects(byName(defs, "task_steer").execute({ task: "nope", text: "x" }, exec), new Error("no task nope"));
   await assert.rejects(byName(defs, "task_stop").execute({ task: "nope" }, exec), new Error("no task nope"));
   await assert.rejects(byName(defs, "task_read").execute({ task: "nope" }, exec), new Error("no task nope"));
+});
+
+test("an id absent from list() but known to ops still reaches ops.read, steer and stop", async () => {
+  const { ops, calls } = fakeOps();
+  const defs = taskToolDefinitions(ops, () => true);
+  assert.deepEqual((await byName(defs, "task_read").execute({ task: "old" }, exec) as { task: string }).task, "old");
+  assert.deepEqual(await byName(defs, "task_steer").execute({ task: "old", text: "x" }, exec), { task: "old", state: "running" });
+  assert.deepEqual(await byName(defs, "task_stop").execute({ task: "old" }, exec), { task: "old", state: "stopped" });
+  assert.deepEqual(calls, ["read", "steer", "stop"]);
 });
 
 test("a title, brief or steer text out of bounds is refused before ops is called", async () => {

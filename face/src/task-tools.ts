@@ -5,8 +5,9 @@
  *
  * A turn a worker's report or a wake opened must not start, steer or stop a task: only a turn the operator's message
  * opened may ({@link OPERATOR_ONLY}). The guard runs before anything else, so a refused call never reaches `ops`.
- * Every input the model supplied is bounded before `ops` is called, and an id `ops.list()` does not hold is
- * `no task <id>`. A {@link TaskInputError} from `ops` reaches the model as its message (dsh hands a thrown
+ * Every input the model supplied is bounded before `ops` is called. An id `ops` does not know it reports itself,
+ * as `Error("no task <id>")`: `list()` is windowed (old done tasks are absent), so the tools do not vouch for ids
+ * from it. A {@link TaskInputError} from `ops` reaches the model as its message (dsh hands a thrown
  * error to the model as "Error: <message>").
  *
  * {@link equipConversation} is `installDeskTools`'s equip (src/desk-tools.ts) with the preset test replaced by
@@ -27,7 +28,8 @@ export const OPERATOR_ONLY = "this runs only in a turn the operator's message op
 
 const BIN = "gravit-face";
 
-/** What the tools act through; src/boot.ts's wiring implements it over the tasks. */
+/** What the tools act through; src/boot.ts's wiring implements it over the tasks. `steer`, `stop` and `read` throw
+ * `Error("no task " + id)` for an id they do not know; `list()` is windowed and is not the registry. */
 export interface TaskOps {
   start(input: { title: string; brief: string; strategy?: string }): Promise<TaskView>;
   steer(id: string, text: string): Promise<TaskView>;
@@ -50,11 +52,9 @@ function stringArg(args: unknown, key: string, label: string, min: number, max: 
   return value;
 }
 
-/** The task id a call names, which `ops.list()` must hold. */
-async function knownId(ops: TaskOps, args: unknown): Promise<string> {
-  const id = stringArg(args, "task", "task", 1, 200);
-  if (!(await ops.list()).some((view) => view.id === id)) throw new Error(`no task ${id}`);
-  return id;
+/** The task id a call names: a string of 1 to 200 characters. Whether the task exists is `ops`'s to say. */
+function taskId(args: unknown): string {
+  return stringArg(args, "task", "task", 1, 200);
 }
 
 const ID_SCHEMA = { type: "string", minLength: 1, maxLength: 200 };
@@ -102,6 +102,7 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean): 
       guard();
       const title = stringArg(args, "title", "the title", 1, TASK_TITLE_MAX);
       const brief = stringArg(args, "brief", "the brief", 1, TASK_BRIEF_MAX);
+      // The strategy's length and folder are validated by startWorker (src/task-worker.ts).
       const strategy = objectOf(args).strategy;
       if (strategy !== undefined && (typeof strategy !== "string" || strategy.length < 1)) throw new Error("the strategy is a non-empty string");
       const view = await ops.start(strategy === undefined ? { title, brief } : { title, brief, strategy });
@@ -123,7 +124,7 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean): 
     async execute(args) {
       guard();
       const text = stringArg(args, "text", "the text", 1, TASK_STEER_MAX);
-      const id = await knownId(ops, args);
+      const id = taskId(args);
       const view = await ops.steer(id, text);
       return { task: view.id, state: view.state };
     },
@@ -137,7 +138,7 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean): 
     timeoutMs: 15_000,
     async execute(args) {
       guard();
-      const id = await knownId(ops, args);
+      const id = taskId(args);
       const view = await ops.stop(id);
       return { task: view.id, state: view.state };
     },
@@ -170,7 +171,7 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean): 
     },
     timeoutMs: 15_000,
     async execute(args) {
-      const id = await knownId(ops, args);
+      const id = taskId(args);
       const { view, text } = await ops.read(id);
       const value = { task: view.id, title: view.title, state: view.state, steps: view.steps, text: cut(text, TASK_READ_MAX) };
       return view.result === undefined ? value : { ...value, result: view.result };
