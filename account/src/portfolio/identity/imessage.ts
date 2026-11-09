@@ -22,11 +22,11 @@
  * secret is in none of this: PhotonError's messages carry none, and the log the connector is given is the identity's, which redacts. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Connector } from "./identity.ts";
+import type { Connector, Transport } from "./identity.ts";
 import type { InboxRing } from "./inbox.ts";
 import { chatOffLine } from "./kinds.ts";
 import { isGroupChat, PhotonError, type PhotonEvent, type PhotonLink, type PhotonMessage, type PhotonProject, type PhotonStream } from "./photon-link.ts";
-import type { ImessageSecret } from "./secret-file.ts";
+import { secretsOf, type ImessageSecret } from "./secret-file.ts";
 import { identityDir, senderRef, writeIdentityFile, type Binding, type Strangers } from "./store.ts";
 import { BACKOFF_FIRST_MS, BACKOFF_MAX_MS, PHONE_COMMAND, RECORD_EVERY_MS, TEXT_ONLY, type IdentityClock, type NetworkStatus } from "./telegram.ts";
 
@@ -54,6 +54,58 @@ export interface ImessageConnectorDeps {
   sequence: number | undefined;
   clock: IdentityClock;
   log: (l: string) => void;
+}
+
+/** an iMessage part's most code units (Photon names no limit yet: unknown U7) */
+export const IMESSAGE_PART_MAX = 4_000;
+/** Photon's codes for a send to the operator's number it will not make: the line is recorded as refused (identity/imessage.refused) */
+const LINE_REFUSED_CODES = new Set(["addressNotFound", "chatNotFound", "recipientLocked"]);
+const TARGET_NOT_ALLOWED = /target not allowed/i;
+
+export interface ImessageTransportDeps {
+  link: PhotonLink;
+  secret: ImessageSecret;
+  /** Photon refused to write to the operator's number from this line: the identity keeps the line (identity/imessage.refused) */
+  refusedLine: (line: string) => void;
+}
+
+/** THE IMESSAGE TRANSPORT — one part at a time to the 1:1 chat of the bound number, as plain text, through Photon's send. Every part goes
+ * under its own id (`<row id>:<n>`, identity.ts flush; a connector's reply under a fresh random one), Photon's clientMessageId, so a part
+ * sent again within the hour is dropped by Photon: that duplicate answers "" and counts as sent. A part with no id is refused here. What
+ * goes answers `imessage:<GUID>`. Photon refusing the number (addressNotFound, chatNotFound, recipientLocked, "Target not allowed") calls
+ * `refusedLine` before the error goes on. `classify`: Photon's `retry` waits in the outbox, `auth` is the project refused, everything else
+ * is refused outright — there is no `blocked`. Its tokens are the project secret and its Basic spelling; `dispose` disposes the link. */
+export class ImessageTransport implements Transport {
+  readonly network = "imessage" as const;
+  readonly partMax = IMESSAGE_PART_MAX;
+  readonly secrets: readonly string[];
+  private readonly project: PhotonProject;
+
+  constructor(private readonly o: ImessageTransportDeps) {
+    this.secrets = secretsOf(o.secret);
+    this.project = { projectId: o.secret.projectId, secret: o.secret.projectSecret };
+  }
+
+  async send(part: string, _replyTo?: string, partId?: string): Promise<string> {
+    if (typeof partId !== "string" || partId === "") throw new Error("an iMessage part is sent under its own id");
+    try {
+      const r = await this.o.link.sendText(this.project, this.o.secret.phone, part, partId);
+      return "duplicate" in r ? "" : `imessage:${r.guid}`;
+    } catch (err) {
+      if (err instanceof PhotonError && (LINE_REFUSED_CODES.has(err.code) || TARGET_NOT_ALLOWED.test(err.code) || TARGET_NOT_ALLOWED.test(err.message))) this.o.refusedLine(this.o.secret.line);
+      throw err;
+    }
+  }
+
+  classify(err: unknown): "retry" | "refused" | "blocked" | "auth" {
+    if (err instanceof PhotonError && err.kind === "retry") return "retry";
+    if (err instanceof PhotonError && err.kind === "auth") return "auth";
+    return "refused";
+  }
+
+  dispose(): void {
+    void this.o.link.dispose().catch(() => undefined);
+  }
 }
 
 const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
