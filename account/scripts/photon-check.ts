@@ -86,15 +86,17 @@ async function main(): Promise<void> {
 
   say("4. two replies under one clientMessageId");
   const clientId = `photon-check:${Date.now()}`;
-  const chat = hi.chatGuid;
+  // sendText takes the phone and builds the 1:1 chat itself: the operator's number, as the hi came from it
+  const to = hi.from;
   let longest = 0;
   let replyGuid: string | undefined;
-  let secondDuplicate = false;
+  // unknown until the second send answers: a send that throws, or never made, says nothing either way
+  let secondDuplicate: boolean | undefined;
   for (const len of [4000, 1000, 200]) {
     const text = "photon:check ".repeat(Math.ceil(len / 13)).slice(0, len);
     let r: { guid: string } | { duplicate: true };
     try {
-      r = await guard(() => link.sendText(project, chat, text, clientId));
+      r = await guard(() => link.sendText(project, to, text, clientId));
     } catch (e) {
       say(`   first reply (${len} chars) failed: ${e instanceof PhotonError ? `${e.kind}:${e.code}` : "error"}`);
       continue;
@@ -105,7 +107,7 @@ async function main(): Promise<void> {
     }
     say(`   first reply (${len} chars): ${"guid" in r ? `guid ${r.guid}` : "duplicate"}`);
     try {
-      const again = await guard(() => link.sendText(project, chat, text, clientId));
+      const again = await guard(() => link.sendText(project, to, text, clientId));
       secondDuplicate = !("guid" in again);
       say(`   second reply, same id: ${"guid" in again ? `guid ${again.guid}` : "duplicate"}`);
     } catch (e) {
@@ -136,7 +138,7 @@ async function main(): Promise<void> {
   say(`  token expiresIn: ${expiresIn ?? "unknown"} s`);
   say(`  error codes met: ${codes.size ? [...codes].join(", ") : "none"}`);
   say(`  longest reply part through: ${longest} chars`);
-  say(`  second send with the same id was a duplicate: ${secondDuplicate}`);
+  say(`  second send with the same id was a duplicate: ${secondDuplicate ?? "unknown"}`);
   await link.dispose();
   process.exit(0);
 }
