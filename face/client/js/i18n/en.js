@@ -1623,7 +1623,7 @@ export const EN = Object.freeze({
   'desk.tab.pages': 'Pages opened today',
   'desk.tab.pagesNone': 'None today',
 
-  // a channel (host/channels.js, render/channel.js, host/runs-view.js): its page, its rosters, its research runs and their
+  // a channel (host/channels.js, render/strategy.js, host/runs-view.js): its page, its rosters, its research runs and their
   // chips, a write that failed
   'channel.failed': 'failed',
   'channel.name.rule': 'Letters, digits, - or _',
@@ -1658,12 +1658,25 @@ export const EN = Object.freeze({
   'channel.none': 'None',
   'channel.next': 'Next: {next}',
   'channel.retry': 'Retry',
-  'channel.notFound': 'Channel not found',
-  'channel.unavailable': 'Channel unavailable',
   'channel.stale': 'As of {at} · stale',
   'channel.backtests': 'Backtests',
   'channel.journal': 'Journal',
   'channel.files': 'Files',
+
+  // a strategy's page (render/strategy.js, host/channels.js): not found, unavailable, its tasks and its paper positions
+  'strategy.notFound': 'Strategy not found',
+  'strategy.unavailable': 'Strategy unavailable',
+  'strategy.tasks': 'Tasks',
+  'strategy.noTasks': 'No tasks for this strategy',
+  'strategy.positions.title': 'Paper positions',
+  'strategy.positions.at': 'Paper positions · {venue}',
+  'strategy.positions.noVenue': 'No paper venue is named in status.yaml',
+  'strategy.positions.none': 'No open positions',
+  'strategy.positions.unavailable': 'Positions unavailable',
+  'strategy.positions.symbol': 'Symbol',
+  'strategy.positions.side': 'Side',
+  'strategy.positions.qty': 'Quantity',
+  'strategy.positions.unrealized': 'Unrealized P&L',
 
   // the six Lunhui modules (host/modules-view.js, render/modules.js): their titles, what they read and write, their chips,
   // the Appendix A legends' English, a module's page

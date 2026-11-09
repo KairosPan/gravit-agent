@@ -1618,7 +1618,7 @@ export const ZH = Object.freeze({
   'desk.tab.pages': '今天打开的网页',
   'desk.tab.pagesNone': '今天没有',
 
-  // a channel (host/channels.js, render/channel.js, host/runs-view.js): its page, its rosters, its research runs and their
+  // a channel (host/channels.js, render/strategy.js, host/runs-view.js): its page, its rosters, its research runs and their
   // chips, a write that failed
   'channel.failed': '失败',
   'channel.name.rule': '字母、数字、- 或 _',
@@ -1653,12 +1653,25 @@ export const ZH = Object.freeze({
   'channel.none': '无',
   'channel.next': '下一步：{next}',
   'channel.retry': '重试',
-  'channel.notFound': '未找到频道',
-  'channel.unavailable': '频道不可用',
   'channel.stale': '截至 {at} · 已过时',
   'channel.backtests': '回测',
   'channel.journal': '日志',
   'channel.files': '文件',
+
+  // a strategy's page (render/strategy.js, host/channels.js): not found, unavailable, its tasks and its paper positions
+  'strategy.notFound': '未找到策略',
+  'strategy.unavailable': '策略不可用',
+  'strategy.tasks': '任务',
+  'strategy.noTasks': '这个策略没有任务',
+  'strategy.positions.title': '模拟持仓',
+  'strategy.positions.at': '模拟持仓 · {venue}',
+  'strategy.positions.noVenue': 'status.yaml 中没有指定模拟交易场所',
+  'strategy.positions.none': '没有持仓',
+  'strategy.positions.unavailable': '持仓不可用',
+  'strategy.positions.symbol': '代码',
+  'strategy.positions.side': '方向',
+  'strategy.positions.qty': '数量',
+  'strategy.positions.unrealized': '未实现盈亏',
 
   // the six Lunhui modules (host/modules-view.js, render/modules.js): their titles, what they read and write, their chips,
   // the Appendix A legends' English, a module's page

@@ -8,7 +8,7 @@ import { wordsCalls } from './words-scan.js';
 
 export const AREAS = ['common', 'time', 'status', 'nav', 'list', 'search', 'thread', 'composer', 'details', 'jobs', 'settings', 'shortcuts', 'owner',
   'sheet', 'account', 'money', 'venues', 'agents', 'cards', 'rules', 'identity', 'markets', 'trade', 'desk', 'discover', 'channel', 'modules',
-  'runSheet', 'lunhui', 'tasks', 'history'];
+  'runSheet', 'lunhui', 'tasks', 'history', 'strategy'];
 export const KEY = new RegExp(`^(?:${AREAS.join('|')})(?:\\.[a-z][a-zA-Z0-9]*){1,2}$`);
 export const ROOT = fileURLToPath(new URL('../../../client/js/', import.meta.url));
 export const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith('.js') ? [join(dir, e.name)] : []);

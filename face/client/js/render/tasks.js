@@ -36,7 +36,8 @@ function keys(task, busy) {
 /** A line's dot: waiting while a gate waits on the operator; a waiting task answered here reads running until the next read. */
 export const dotOf = ({ task, gate }, group) => (gate ? 'waiting' : task.state === 'waiting' && group === 'running' ? 'running' : task.state);
 
-function line({ task, gate, status }, group, state, open) {
+/** One task's line, as the rail draws it; a strategy's page draws its tasks' lines with it (render/strategy.js). */
+export function taskLineHtml({ task, gate, status }, group, state, open) {
   const record = gate ? state.conversations.find(c => c.id === task.id) : null;
   const dot = dotOf({ task, gate }, group);
   const strategy = typeof task.strategy === 'string' && task.strategy !== ''
@@ -55,7 +56,7 @@ export function renderTaskRail(state, now, { open = null } = {}) {
   const rail = railOf(state, now);
   const groups = GROUPS.filter(([g]) => rail[g].length);
   if (!groups.length) return '';
-  const body = groups.map(([g, head]) => `<section class="task-group"><h3 class="task-group-head">${head()}</h3>${rail[g].map(l => line(l, g, state, open)).join('')}</section>`).join('');
+  const body = groups.map(([g, head]) => `<section class="task-group"><h3 class="task-group-head">${head()}</h3>${rail[g].map(l => taskLineHtml(l, g, state, open)).join('')}</section>`).join('');
   return `<aside class="tasks" aria-label="${th('tasks.rail')}"><details class="tasks-fold" id="tasks-fold"><summary class="tasks-fold-key">${th('tasks.fold', { n: rail.you.length })}</summary></details>` +
     `<h2 class="tasks-title">${th('tasks.rail')}</h2><div class="tasks-body">${body}</div></aside>`;
 }

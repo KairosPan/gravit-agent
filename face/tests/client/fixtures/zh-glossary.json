@@ -196,7 +196,7 @@
     "ALPHA_EDGAR_USER_AGENT",
     "budget.dailyTokens",
     "standing.yml",
-    "levels.yml",
+    "levels.yml", "status.yaml",
     "sessionId",
     "cn-market",
     "yesterday_negative_tail",

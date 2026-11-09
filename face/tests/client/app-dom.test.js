@@ -63,20 +63,22 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
   const posted = [];
   // an overview's body by workspace id, for a test that reads a channel's runs
   const overviews = {};
+  // an overview's status.yaml by workspace id, for a test that names a strategy's paper venue
+  const statuses = {};
   const postJson = async (path, body) => {
     posted.push([path, body]);
     // the face's two session routes, as the host would apply them to the next list
     if (path === '/data/sessions/delete') { const i = rows.findIndex(r => r.sessionId === body.sessionId); if (i >= 0) rows.splice(i, 1); }
     if (path === '/data/sessions/archive') meta.archived = body.archived ? [...meta.archived, body.sessionId] : meta.archived.filter(id => id !== body.sessionId);
     if (path === '/data/channels') { const dir = `/r/strategies/${body.name}`; channelRows.push({ workspaceId: `w-${body.name}`, name: body.name, title: body.name, dir, isRoot: false, sessionIds: [] }); return { ok: true, name: body.name, dir, isRoot: false }; }
-    if (path === '/data/channels/overview') return { ok: true, channel: channelRows.find(c => c.workspaceId === body.workspaceId), status: {}, body: overviews[body.workspaceId] ?? {}, agents: [], bots: ['buffett'], allBots: [{ id: 'gravit', name: 'Gravit' }, { id: 'kairos', name: 'Kairos' }, { id: 'buffett', name: 'Buffett' }, { id: 'drill-bear', name: 'Bear' }] };
+    if (path === '/data/channels/overview') return { ok: true, channel: channelRows.find(c => c.workspaceId === body.workspaceId), status: statuses[body.workspaceId] ?? {}, body: overviews[body.workspaceId] ?? {}, agents: [], bots: ['buffett'], allBots: [{ id: 'gravit', name: 'Gravit' }, { id: 'kairos', name: 'Kairos' }, { id: 'buffett', name: 'Buffett' }, { id: 'drill-bear', name: 'Bear' }] };
     if (path === '/data/channels/bots') return { ok: true, bots: body.bots };
     if (path === '/data/bots/settings') { const b = inventory['/data/bots.json'].bots[0]; inventory['/data/bots.json'] = { ok: true, bots: [{ ...b, name: body.name, description: body.description, soul: body.soul, model: body.model ?? undefined, revision: 'r2' }] }; return { ok: true }; }
     if (path === '/data/bots') { inventory['/data/bots.json'] = { ok: true, bots: [...inventory['/data/bots.json'].bots, { id: body.id ?? 'macro', name: body.name, description: '', homeCwd: '/r/bots/macro/home', soul: '', revision: 'm1', isDefault: false, listed: true, skills: [], setupIssues: [] }] }; return { ok: true, bot: { id: body.id ?? 'macro', name: body.name, listed: true } }; }
     if (path === '/data/agents/connect') { const c = inventory['/data/agents.json'].candidates.find(a => a.bin === body.bin); inventory['/data/agents.json'] = { ...inventory['/data/agents.json'], local: [{ ...c, found: true, auth: { state: 'ok' } }], candidates: [] }; return { ok: true, agent: c }; }
     return { ok: true, addressed: [] };
   };
-  return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, reads, inventory, overviews, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
+  return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, reads, inventory, overviews, statuses, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
 }
 const started = (f, h) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
 const send = f => f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'send' } }) } });
@@ -1596,14 +1598,63 @@ test('an old channel link lands on its strategy page, which reads its overview o
   assert.deepEqual(store.get().route, { screen: 'strategy', id: 'alpha' });
   assert.equal(f.win.location.hash, '#/strategy/alpha');
   assert.deepEqual(h.posted.filter(p => p[0] === '/data/channels/overview'), [['/data/channels/overview', { workspaceId: 'w1' }]]);
-  assert.match(f.html(), /<main class="main chan">/);
-  assert.match(f.html(), /class="rail-rows"/, 'the list stays beside the channel page');
+  assert.match(f.html(), /<main class="main chan strat">/);
+  assert.match(f.html(), /class="rail-rows"/, 'the side panel stays beside the strategy page');
   store.dispatch('toggleRail');
   assert.equal(h.posted.filter(p => p[0] === '/data/channels/overview').length, 1, 'a render reads nothing');
   f.win.location.hash = '#/channel/w0';
   f.fire('win', 'hashchange');
   await settle();
   assert.deepEqual(store.get().route, { screen: 'messages', id: null }, 'the root is the conversation');
+  store.timers.clear();
+});
+
+test("a strategy's page whose status.yaml names a venue reads that venue's positions once, and draws its tasks", async () => {
+  const f = fakeWindow({ hash: '#/strategy/alpha' });
+  const h = host({ rows: [row('conv', { updatedAt: 9 }), row('t1')], conversation: 'conv', tasks: [taskRow('t1', { strategy: 'alpha', title: 'Size the hedge' })], channels: [{ workspaceId: 'w1', name: 'alpha', title: 'Alpha', isRoot: false, sessionIds: [] }] });
+  h.statuses.w1 = { status: 'paper', venue: 'paper-us' };
+  h.inventory['/data/account/positions?venue=paper-us'] = { ok: true, positions: [{ venue: 'paper-us', symbol: 'NVDA', side: 'long', qty: 12, entryPrice: 120.5, markPrice: 131.25, unrealizedUsd: 129, paper: true }] };
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'strategy', id: 'alpha' });
+  assert.deepEqual(h.reads.filter(p => p.startsWith('/data/account/positions')), ['/data/account/positions?venue=paper-us']);
+  assert.match(f.html(), />Paper positions · paper-us<[\s\S]*?<td>NVDA<\/td>/);
+  assert.match(f.html(), />Tasks<[\s\S]*?data-task="t1"[\s\S]*?Size the hedge/);
+  assert.doesNotMatch(f.html(), /class="composer"|data-action="newRound"/, 'read-only: no composer, no New round');
+  store.dispatch('toggleRail');
+  await store.tasks.refresh();
+  await settle();
+  assert.equal(h.reads.filter(p => p.startsWith('/data/account/positions')).length, 1, 'a render or a tasks poll reads no positions');
+  store.timers.clear();
+});
+
+test('an unknown strategy is not found once the channels read answered — failed or empty; an old channel link then lands on Messages', async () => {
+  const f = fakeWindow({ hash: '#/strategy/ghost' });
+  const h = host({ rows: [row('s1')] });
+  h.inventory['/data/channels.json'] = () => { throw Object.assign(new Error('HTTP 500'), { status: 500 }); };
+  const store = started(f, h);
+  assert.match(f.html(), /Loading…/, 'waits while the channels are unread');
+  await h.ready();
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'strategy', id: 'ghost' });
+  assert.match(f.html(), /chan-none">Strategy not found</);
+  f.win.location.hash = '#/channel/w9';
+  f.fire('win', 'hashchange');
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null }, 'no channel is coming: Messages');
+  store.timers.clear();
+});
+
+test('a list read that fails leaves no strategy page waiting', async () => {
+  const f = fakeWindow({ hash: '#/strategy/ghost' });
+  const h = host({ rows: [row('s1')] });
+  const call = h.call;
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: async (endpoint, args) => { if (endpoint === 'session/list') throw new Error('down'); return call(endpoint, args); }, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
+  await h.ready();
+  await settle();
+  assert.equal(store.get().channelsRead, true);
+  assert.match(f.html(), /chan-none">Strategy not found</);
   store.timers.clear();
 });
 
@@ -3487,10 +3538,11 @@ test('a stock choice opens the drawer', async () => {
 
 test('Open run goes to the strategy page', async () => {
   const { f, store } = await choiceAnswer([]);
-  assert.match(f.html(), /data-action="lunhuiOpenRun" data-id="w-cn">Open run ›/);
-  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiOpenRun', id: 'w-cn' } }));
+  assert.match(f.html(), /data-action="lunhuiOpenRun" data-strategy="cn-market">Open run ›/);
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiOpenRun', strategy: 'cn-market' } }));
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'strategy', id: 'cn-market' }, 'the old channel route lands on the strategy page');
+  assert.deepEqual(store.get().route, { screen: 'strategy', id: 'cn-market' }, "straight to the strategy's page, by its name");
+  assert.equal(f.win.location.hash, '#/strategy/cn-market');
   store.timers.clear();
 });
 

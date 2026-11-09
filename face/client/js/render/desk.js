@@ -13,8 +13,8 @@ const section = (label, inner) => `<section class="dsec" aria-label="${esc(label
 const line = (mark, t1, t2 = '', markClass = '') => `<div class="mk-line"><span class="mk-mark${markClass ? ` ${markClass}` : ''}">${mark}</span><div class="mk-line-b"><div class="mk-t1">${t1}</div>${t2 ? `<div class="mk-t2">${t2}</div>` : ''}</div></div>`;
 const feed = lines => (lines.length ? `<div class="mk-feed">${lines.join('')}</div>` : '');
 const tag = text => `<span class="mk-tag">${esc(text)}</span>`;
-// the session an order's last firing woke, on the Messages route (P4 ruling 6): its report, read where it was said
-const sessionLink = id => (id ? `<a href="#/messages/${esc(encodeURIComponent(id))}">${th('desk.tab.session')}</a>` : '');
+// the session an order's last firing woke, read as history (P4 ruling 6; one-entry plan 2: desk sessions are history until plan 3)
+const sessionLink = id => (id ? `<a href="#/history/${esc(encodeURIComponent(id))}">${th('desk.tab.session')}</a>` : '');
 
 /** The Desk tab: `view` deskViewOf's (null before a status has landed), `read` the slice's `{ status, message }` — the last
  *  failure's sentence (kept while the next read is on its way, cleared when one answers) said over the view kept, or, with

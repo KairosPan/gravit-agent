@@ -418,7 +418,7 @@ test('choices draw while the view is loading and after it failed', () => {
 
 test('Open run appears only for a known channel', () => {
   const view = { ...VIEW_1027, strategy: 'cn-market' };
-  assert.match(footerHtml(view, CHANNELS), /<button type="button" class="lh-open-run" data-action="lunhuiOpenRun" data-id="w-cn">Open run ›<\/button>/);
+  assert.match(footerHtml(view, CHANNELS), /<button type="button" class="lh-open-run" data-action="lunhuiOpenRun" data-strategy="cn-market">Open run ›<\/button>/);
   assert.doesNotMatch(footerHtml(view, [{ name: 'other', workspaceId: 'w-o' }]), /lh-open-run/);
   assert.doesNotMatch(footerHtml(view), /lh-open-run/);
   assert.doesNotMatch(footerHtml(view, []), /lh-open-run/);

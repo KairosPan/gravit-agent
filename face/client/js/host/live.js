@@ -371,10 +371,11 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       ]);
     } catch (err) {
       say(failedLine(said('status.verb.list'), err), true);
+      if (token === listSeq) store.dispatch('hostListFailed');
       return;
     }
     if (token !== listSeq) return;
-    if (!Array.isArray(list?.items)) { say(said('status.noSessionList'), true); return; }
+    if (!Array.isArray(list?.items)) { say(said('status.noSessionList'), true); store.dispatch('hostListFailed'); return; }
     if (Array.isArray(index?.channels)) lastIndex = index; else index = lastIndex;
     if (Array.isArray(meta?.archived)) lastMeta = meta; else meta = lastMeta;
     if (Array.isArray(botsBody?.bots)) lastBots = botsBody; else botsBody = lastBots;

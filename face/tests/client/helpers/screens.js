@@ -15,7 +15,7 @@ import { renderTradeScreen } from '../../../client/js/render/trade.js';
 import { ticketOf } from '../../../client/js/host/trade-view.js';
 import { fieldsOf } from '../../../client/js/host/sheet-view.js';
 import { askedOf } from '../../../client/js/host/sheet.js';
-import { renderChannelScreen } from '../../../client/js/render/channel.js';
+import { renderStrategyScreen } from '../../../client/js/render/strategy.js';
 import { renderDiscover, renderPlugin } from '../../../client/js/render/discover.js';
 import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
@@ -242,8 +242,9 @@ function tradeStates() {
 // Messages with `id` the conversation /data/tasks names (plan 2 of one entry)
 export const onConv = (s, id) => R.nav(R.tasksLoaded(s, { conversation: id, tasks: [], at: NOW }), { screen: 'messages', id: null });
 
-// the channel page: loaded with every section, loading, unavailable, stale after a failed re-read, not found
-function channelStates() {
+// a strategy's page: loaded with every section, loading, unavailable, stale after a failed re-read, not found (listed or after
+// a failed list read); its tasks, one open; its paper positions — no venue named, being read, read, none open, refused, failed
+function strategyStates() {
   const alpha = { workspaceId: 'w1', name: 'alpha', title: 'Alpha', dir: '/r/strategies/alpha', isRoot: false, missingDir: false, sessionIds: [] };
   const on = R.nav(R.hostList(emptyState(), { conversations: [conv('c1', { channel: { workspaceId: 'w1', name: 'alpha' } })], channels: [alpha] }), { screen: 'strategy', id: 'alpha' });
   const data = {
@@ -253,7 +254,21 @@ function channelStates() {
   };
   const loaded = R.channelLoaded(on, { workspaceId: 'w1', data, at: NOW });
   const editing = R.editFailed(R.startEdit(loaded, { kind: 'roster', which: 'bots', workspaceId: 'w1', choices: [{ value: 'buffett', label: 'Buffett Type' }], ticked: ['buffett'] }), { error: 'roster write refused' });
-  return [loaded, editing, R.channelLoading(on, { workspaceId: 'w1' }), R.channelFailed(on, { workspaceId: 'w1', at: NOW }), R.channelFailed(loaded, { workspaceId: 'w1', at: NOW }), R.nav(on, { screen: 'strategy', id: 'w9' })];
+  const task = (id, over) => ({ id, title: `Size the hedge ${id}`, origin: 'web', state: 'running', group: 'running', steps: ['Read the book'], startedAt: NOW - 3 * MIN, lastEventAt: NOW, lastSeq: 1, strategy: 'alpha', ...over });
+  const tasked = R.tasksLoaded(loaded, { conversation: 'c1', tasks: [task('t1'), task('t2', { state: 'done', group: 'done', result: { text: 'Hedged a third' } }), task('t3', { strategy: 'beta' })], at: NOW });
+  const venued = R.channelLoaded(on, { workspaceId: 'w1', data: { ...data, status: { ...data.status, venue: 'paper-us' } }, at: NOW });
+  const asked = R.channelPositionsLoading(venued, { workspaceId: 'w1', venue: 'paper-us' });
+  const rows = [
+    { venue: 'paper-us', venueName: 'Paper US', symbol: 'NVDA', name: 'NVIDIA', side: 'long', qty: 12, entryPrice: 120.5, markPrice: 131.25, usd: 1575, unrealizedUsd: 129, paper: true, kind: 'stock', leverage: null },
+    { venue: 'paper-us', venueName: 'Paper US', symbol: 'TSLA', name: 'Tesla', side: 'short', qty: 3, entryPrice: 250, markPrice: 262, usd: 786, unrealizedUsd: -36, paper: true, kind: 'stock', leverage: null },
+  ];
+  return [
+    loaded, editing, R.channelLoading(on, { workspaceId: 'w1' }), R.channelFailed(on, { workspaceId: 'w1', at: NOW }), R.channelFailed(loaded, { workspaceId: 'w1', at: NOW }), R.nav(on, { screen: 'strategy', id: 'w9' }),
+    R.hostListFailed(R.nav(emptyState(), { screen: 'strategy', id: 'w9' })),
+    tasked, R.tasksLoaded(loaded, { conversation: 'c1', tasks: [task('t3', { strategy: 'beta' })], at: NOW }),
+    asked, R.channelPositionsLoaded(asked, { workspaceId: 'w1', venue: 'paper-us', rows }), R.channelPositionsLoaded(asked, { workspaceId: 'w1', venue: 'paper-us', rows: [] }),
+    R.channelPositionsFailed(asked, { workspaceId: 'w1', venue: 'paper-us', message: 'paper-us is not a paper venue' }), R.channelPositionsFailed(asked, { workspaceId: 'w1', venue: 'paper-us' }),
+  ];
 }
 
 // Discover: the shelves, a failed shelf, a query, a shelf's grid, every kind of page, its own line
@@ -330,7 +345,7 @@ export function everyState() {
     ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), // (where the pinned row stood: one-entry plan 2 Task 6) the side panel beside a strategy's page, Gravit's dot on
     R.nav(R.hostList(open, { conversations: open.conversations.map(c => (c.id === 's1' ? { ...c, updatedAt: NOW + MIN } : c)) }), { screen: 'strategy', id: 'cn-market' }),
     R.traceLoaded(onConv(base, 'g'), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
-    R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(), ...tradeStates(),
+    R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...strategyStates(), ...discoverStates(), ...tradeStates(),
     // the golden is append-only (golden-write.js): a state added later goes after these, so every pinned name keeps its state
     ...laterStates(),
     ...shortcutStates(open),
@@ -630,7 +645,7 @@ function composerBuild() {
 export const composerPieces = () => composerBuild().pieces;
 export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
-  : st.route.screen === 'strategy' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
+  : st.route.screen === 'strategy' ? renderStrategyScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
   : st.route.screen === 'history' ? renderHistoryScreen(st, now)
   : st.route.screen === 'task' ? renderTaskScreen(st, now)
   : st.route.screen === 'plugin' ? renderPlugin(st, now) : st.route.screen === 'module' ? renderModule(st, now) : renderMessagesScreen(st, now));
@@ -722,10 +737,11 @@ const CONTENT_FIELDS = new Set([
   'watch',
 ]);
 // the parts of a state that are an upstream's content as a whole, drawn as they come, every string in them and its keys too
-// (a metric's name): a run's view and its artifacts (Lunhui's output), a strategy's files (Gravit's), What you sign's lines
+// (a metric's name): a run's view and its artifacts (Lunhui's output), a strategy's files (Gravit's) and its paper positions
+// (the venue its status.yaml names and the Account's rows or refusal), What you sign's lines
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); `*` is any one key
-const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['**', 'shown'],
+const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 

@@ -29,7 +29,7 @@ import { startAccount } from './host/account.js';
 import { startSeat } from './host/seat.js';
 import { startChannels } from './host/channels.js';
 import { startTasks, followUpText } from './host/tasks.js';
-import { renderChannelScreen } from './render/channel.js';
+import { renderStrategyScreen } from './render/strategy.js';
 import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
 import { startModules } from './host/modules.js';
@@ -660,7 +660,7 @@ export function boot(win, host = {}) {
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
-      : s.route.screen === 'strategy' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
+      : s.route.screen === 'strategy' ? renderStrategyScreen(s, now(), { open: tasksOpen }) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'history' ? renderHistoryScreen(s, now(), { revealed, anchor: anchorSeq, rail })
       : s.route.screen === 'task' ? renderTaskScreen(s, now(), { revealed, anchor: anchorSeq, rail })
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail, tasksOpen });
@@ -1706,7 +1706,7 @@ export function boot(win, host = {}) {
       if (el.dataset.code) store.dispatch('lunhuiStockOpen', { key: el.dataset.key, code: el.dataset.code });
       else if (el.dataset.label) followUp(el.dataset.label);
     },
-    lunhuiOpenRun: el => go({ screen: 'channel', id: el.dataset.id }),
+    lunhuiOpenRun: el => go({ screen: 'strategy', id: el.dataset.strategy }),
     lunhuiStockClose: () => store.dispatch('lunhuiStockClose'),
     // a pointer on a menu row chooses it (the press kept the editor's focus): the row under the press, though an answer
     // that landed before the click redrew the rows
@@ -2397,7 +2397,7 @@ export function boot(win, host = {}) {
     const otherClosed = type === 'sheetClose' && sheetKind !== 'order';
     sheetKind = s.sheet?.kind ?? null;
     if (type === 'ownerStanding' || otherClosed) schedule(resumeTicket, 0);
-    if (type !== 'hostList' && type !== 'tasksLoaded' && type !== 'tasksOff' && type !== 'tasksFailed') return;
+    if (type !== 'hostList' && type !== 'hostListFailed' && type !== 'tasksLoaded' && type !== 'tasksOff' && type !== 'tasksFailed') return;
     if (type === 'hostList') void tasks.refresh();
     // the list or the tasks answered: an old link waiting on them lands, the session on screen the list now carries opens (or,
     // gone from it, is let go), a strategy page whose channel is now known reads it — each once, by follow()

@@ -85,3 +85,47 @@ test('agentChoices are the connected agents that answered', async () => {
   });
   assert.deepEqual(await r.channels.agentChoices(), [{ bin: 'codex', label: 'Codex' }, { bin: 'claude', label: 'claude' }]);
 });
+
+// one-entry plan 2: the paper positions at the venue a strategy's status.yaml names
+test('positions reads /data/account/positions?venue=… and maps through positionsOf', async () => {
+  const reads = [];
+  const r = rig(() => ({ ok: true, channel: { workspaceId: 'w1' }, status: {}, body: {} }), {
+    getJson: async path => { reads.push(path); return { ok: true, positions: [{ venue: 'paper-us', symbol: 'NVDA', side: 'long', qty: '12', entryPrice: 120.5, markPrice: '131.25', unrealizedUsd: 129, paper: true, extra: 'x' }] }; },
+  });
+  await r.channels.overview('w1');
+  assert.deepEqual(reads, [], 'an overview naming no venue reads none');
+  await r.channels.positions('paper/us');
+  assert.deepEqual(reads, ['/data/account/positions?venue=paper%2Fus']);
+  const p = r.store.get().channel.positions;
+  assert.equal(p.status, 'ready'); assert.equal(p.venue, 'paper/us');
+  assert.deepEqual(p.rows, [{ venue: 'paper-us', venueName: '', symbol: 'NVDA', name: '', side: 'long', qty: 12, entryPrice: 120.5, markPrice: 131.25, usd: null, unrealizedUsd: 129, paper: true, kind: '', leverage: null }]);
+});
+
+test('an overview naming a venue reads its positions once', async () => {
+  const reads = [];
+  const r = rig(() => ({ ok: true, channel: { workspaceId: 'w1' }, status: { venue: 'paper-us' }, body: {} }), {
+    getJson: async path => { reads.push(path); return { ok: true, positions: [] }; },
+  });
+  await r.channels.overview('w1');
+  await new Promise(res => setImmediate(res));
+  assert.deepEqual(reads, ['/data/account/positions?venue=paper-us']);
+  assert.equal(r.store.get().channel.positions.status, 'ready');
+});
+
+test('a 409 refusal is a line, not a throw', async () => {
+  const r = rig(() => ({ ok: true, channel: { workspaceId: 'w1' }, status: {}, body: {} }), {
+    getJson: async () => { throw Object.assign(new Error('HTTP 409'), { status: 409, body: { ok: false, refusal: { code: 'NOT_PAPER', message: 'paper-x is not a paper venue' } } }); },
+  });
+  await r.channels.overview('w1');
+  await assert.doesNotReject(r.channels.positions('paper-x'));
+  assert.deepEqual(r.store.get().channel.positions, { status: 'refused', venue: 'paper-x', rows: [], message: 'paper-x is not a paper venue' });
+  // a refusal with a code alone says its code; the Account down (no body) fails, with no words of its own
+  const coded = rig(() => ({ ok: true }), { getJson: async () => { throw Object.assign(new Error('HTTP 409'), { status: 409, body: { ok: false, refusal: { code: 'NOT_PAPER' } } }); } });
+  await coded.channels.overview('w1');
+  await coded.channels.positions('paper-x');
+  assert.equal(coded.store.get().channel.positions.message, 'NOT_PAPER');
+  const down = rig(() => ({ ok: true }), { getJson: async () => { throw Object.assign(new Error('HTTP 502'), { status: 502 }); } });
+  await down.channels.overview('w1');
+  await down.channels.positions('paper-x');
+  assert.deepEqual(down.store.get().channel.positions, { status: 'failed', venue: 'paper-x', rows: [], message: null });
+});

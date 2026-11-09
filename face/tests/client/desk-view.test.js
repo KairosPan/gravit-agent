@@ -204,7 +204,7 @@ test('the Desk tab lists today\'s opened pages as escaped text, newest first, an
   });
 });
 
-test("a standing row links its last firing's session as #/messages/<sessionId>", async () => {
+test("a standing row links its last firing's session as #/history/<sessionId>", async () => {
   const s = deskStatus();
   s.standing.orders = [
     { ...s.standing.orders[0], last: { ...s.standing.orders[0].last, sessionId: 'session-7' } },
@@ -214,8 +214,9 @@ test("a standing row links its last firing's session as #/messages/<sessionId>",
   assert.deepEqual(v.standing.map(o => o.sessionId), ['session-7', null]);
   const { renderDeskTab } = await import('../../client/js/render/desk.js');
   const html = renderDeskTab(v);
-  assert.ok(html.includes('href="#/messages/session-7"'), html);
-  assert.equal((html.match(/#\/messages\//g) ?? []).length, 1, 'a firing with no session links none');
+  assert.ok(html.includes('href="#/history/session-7"'), html);
+  assert.equal((html.match(/#\/history\//g) ?? []).length, 1, 'a firing with no session links none');
+  assert.doesNotMatch(html, /#\/messages\//, 'desk sessions are history until plan 3');
 });
 
 test("the desk's lines are in the table's order: a market's error, a suppression's reason, a refused entry, an anchor; its lists' separators the table's", async () => {

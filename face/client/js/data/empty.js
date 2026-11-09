@@ -26,6 +26,8 @@ export function emptyState() {
     // a room member's trace by the answer it explains, under its conversation (host/traces.js)
     traces: {},
     channels: [],
+    // the channels read has answered — listed, empty or failed (host/live.js): an unknown strategy is then not found, not waited on
+    channelsRead: false,
     // the operator's images in the thread by attachment id: a data: URL, or null for one the host cannot give back (plan 4)
     thumbs: {},
     // the image open at full size over the page, { attachmentId, name } (its src is its thumb), or null (plan 4)
@@ -34,8 +36,9 @@ export function emptyState() {
     shortcuts: null,
     // the workspace's pinned conversation ids (host/live.js, workspace/follow)
     pinned: [],
-    // the channel page's read (host/channels.js)
-    channel: { id: null, status: 'idle', data: null, at: null },
+    // a strategy page's reads (host/channels.js): its channel's overview, and the paper positions of the venue its status.yaml
+    // names
+    channel: { id: null, status: 'idle', data: null, at: null, positions: { status: 'idle', venue: null, rows: [], message: null } },
     bots: [],
     status: { line: said('status.connecting'), bad: false, connected: false },
     orphanGates: {},

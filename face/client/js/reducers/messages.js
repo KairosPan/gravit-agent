@@ -26,7 +26,7 @@ export function landingOf(state, route) {
   const isTask = id => tasks.items.some(t => t.id === id);
   if (route.screen === 'messages' && route.channel) {
     const channels = state.channels ?? [];
-    if (channels.length === 0) return route;
+    if (channels.length === 0 && state.channelsRead !== true) return route;
     const ch = channels.find(c => c.workspaceId === route.channel);
     return ch && !ch.isRoot && ch.name ? { screen: 'strategy', id: ch.name } : MESSAGES;
   }
