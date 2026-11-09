@@ -546,6 +546,18 @@ describe("the real Photon link", () => {
       expect(r.failures).toEqual([]);
     });
 
+    it("a catch-up that throws a ValidationError at once, before it yields, is a gap too, and the stream goes on live", async () => {
+      catchUp = (_since, live) => {
+        live.push(received(9));
+        throw imError(ValidationError, "invalidArgument");
+      };
+      const r = handlers();
+      link.stream(p, 3, r.h);
+      await vi.waitFor(() => expect(r.handled).toEqual([9]));
+      expect(r.gaps()).toBe(1);
+      expect(r.failures).toEqual([]);
+    });
+
     it("renewal reopens from the last delivered sequence", async () => {
       expiresIn = 100;
       catchUp = async function* (since) {

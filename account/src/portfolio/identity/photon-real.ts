@@ -317,8 +317,10 @@ export function realPhotonLink(o: RealPhotonLinkOptions): PhotonLink {
         this.timer = clock.setTimeout(() => void this.renew(g), Math.max(0, on.renewAt - clock.now()));
         log(`imessage: stream open${this.last !== undefined ? ` from ${this.last}` : ""}`);
         if (this.last !== undefined) {
-          const cu = on.im.events.catchUp(this.last);
+          // made inside the try: a catchUp that throws at once is mapped the same as one that throws as it is read
+          let cu: ReturnType<typeof on.im.events.catchUp> | undefined;
           try {
+            cu = on.im.events.catchUp(this.last);
             for await (const e of cu) {
               if (g !== this.gen) return;
               if (isRecord(e) && e.type === "catchup.complete") break;
@@ -330,7 +332,7 @@ export function realPhotonLink(o: RealPhotonLinkOptions): PhotonLink {
             log("imessage: catch-up could not reach back; going on live");
             this.h.gap();
           } finally {
-            void cu.close().catch(() => {});
+            void cu?.close().catch(() => {});
           }
         }
         for (;;) {
