@@ -31,7 +31,7 @@ import { composedMarketRow } from "./market-row.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
-import type { DeskConversationCtxLike } from "./desk-conversation.ts";
+import type { DeliverOpts, DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
 import { conversationDir, conversationFence, installConversation, type ConversationCtxLike, type ConversationHandle } from "./conversation.ts";
 import { installRouter, installTasks, routerEnabled, type TasksCtxLike, type TasksHandle } from "./tasks.ts";
@@ -474,6 +474,7 @@ console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "r
  * the stalls. Its route is `FACE_ROUTER_MODEL`, read as `FACE_DESK_MODEL` is; the workers run on the same route. The
  * root is this process's cwd, as the desk's is. */
 if (routerEnabled(process.env)) {
+  const deskConversation = desk.conversation;
   const routerRoute = await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_ROUTER_MODEL, console.log);
   const routerInstall = (agentCtx: object, ref: Parameters<typeof installModelSelection>[1]) => installModelSelection(agentCtx as unknown as Context, ref);
   const router = await installRouter({
@@ -482,6 +483,9 @@ if (routerEnabled(process.env)) {
       home: dshHome,
       route: routerRoute,
       installModelSelection: routerInstall,
+      /* the desk's deliver, the pause's choke point: a phone turn's answer and a phone task's report go back to the
+       * phone through it; with the desk off there is none, and nothing is sent */
+      ...(deskConversation === undefined ? {} : { deliver: (text: string, opts: DeliverOpts) => deskConversation.deliver(text, opts) }),
     }),
     tasks: (held) => installTasks(booted.ctx.webServer, {
       ctx: booted.ctx as unknown as TasksCtxLike,

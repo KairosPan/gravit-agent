@@ -12,6 +12,7 @@ import {
   strategyDir, taskReportTool, type WorkerAgentLike, type WorkerCtxLike, type WorkerToolsCtxLike,
 } from "../src/task-worker.ts";
 import type { CreateDeskAgentOptions } from "../src/desk-session.ts";
+import { taskViewOf } from "../src/task-view.ts";
 import type { DeskToolDefinition } from "../src/desk-tools.ts";
 import type { AgentCtxLike, AgentLike, ModelSelectionRefLike, SessionLike } from "../src/room.ts";
 import type { MessageLike } from "../src/room-rules.ts";
@@ -235,4 +236,18 @@ test("task_report refuses an unknown status, an empty text and a text over 600 c
   }
   assert.deepEqual(tool.output.render({ status: "ready", text: "x" }, { kind: "reported", status: "ready" }), [{ type: "text", text: "reported ready" }]);
   assert.equal(tool.presentCall({ status: "blocked", text: "x" }).kind, "read");
+});
+
+test("a phone-started task's brief carries origin phone and its network, and its view reads them", async () => {
+  const root = await repo(["alpha"]);
+  const f = new Fake();
+  const w = await startWorker(f.deps(root), { ...input, origin: "phone", network: "slack" });
+  const m = f.followups[0] as unknown as { source: unknown };
+  assert.deepEqual(m.source, { kind: "task", form: "brief", conversation: "session-conv", origin: "phone", network: "slack" });
+  const v = taskViewOf({
+    id: w.sessionId, header: { cwd: root, createdAt: 1 }, root, now: 2,
+    events: [{ type: "user/message", seq: 1, data: f.followups[0] }],
+  });
+  assert.equal(v.origin, "phone");
+  assert.equal(v.network, "slack");
 });

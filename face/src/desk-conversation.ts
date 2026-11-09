@@ -376,14 +376,24 @@ const notOpenedLine = (reason: string): string => `the desk could not open a tur
 /** Why a keyed post refuses on a face with no session persistence. */
 const NO_PERSISTENCE = "this face has no session persistence, so a phone text cannot be checked against the desk session's log";
 
-/** What a turn's end sends: the refusal line for a refused turn; else its final text - with a line naming the cut
+/** The lines {@link replyOf} is written with: src/desk-session.ts's three - the refusal line of the fence that cut the
+ * turn, the cut line, and the duration's spelling. The desk passes the module itself; the router conversation
+ * (src/conversation.ts) its own refusal line beside the other two. */
+export type ReplyLines = {
+  fenceRefusalLine(path: string): string;
+  cutOffLine(r: DeskTurnRecord): string;
+  formatDuration(ms: number): string;
+};
+
+/** What a turn's end sends: the refusal line for a refused turn (at `fallbackPath`, the journal by default, when the
+ * record names no violation); else its final text - with a line naming the cut
  * when a cut interrupted it mid-stream; else why it said nothing - cut by its deadline, or failed - and `""`,
  * nothing to send, for one that just ended on a tool or was cancelled before it said anything (the phone's `/stop`
- * is answered by the bridge, a shutdown by nobody). */
-function replyOf(r: DeskTurnRecord, m: Machinery): string {
-  if (r.outcome === "refused") return m.session.fenceRefusalLine(r.violation ?? JOURNAL);
-  if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${m.session.cutOffLine(r)}` : r.finalText;
-  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, m.session.formatDuration);
+ * is answered by the bridge, a shutdown by nobody). The desk's and the router conversation's (src/conversation.ts). */
+export function replyOf(r: DeskTurnRecord, lines: ReplyLines, fallbackPath: string = JOURNAL): string {
+  if (r.outcome === "refused") return lines.fenceRefusalLine(r.violation ?? fallbackPath);
+  if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${lines.cutOffLine(r)}` : r.finalText;
+  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, lines.formatDuration);
   if (r.outcome === "failed") return notAnsweredLine(r.error ?? "error");
   return "";
 }
@@ -620,7 +630,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   const deliverTurn = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
     const opts = deliverOptsOf(r);
     if (opts === undefined) return;
-    const text = replyOf(r, m);
+    const text = replyOf(r, m.session);
     if (text === "") return; // it ended on a tool: there is nothing to say
     await sendOut(text, opts,
       `${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent`, "; the next reply goes ahead");

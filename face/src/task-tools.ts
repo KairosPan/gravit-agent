@@ -15,6 +15,7 @@
  * sweep of the agents already live.
  * @module
  */
+import type { TaskOrigin } from "./conversation.ts";
 import type { DeskAgentLike, DeskToolDefinition, DeskToolsCtxLike } from "./desk-tools.ts";
 import { TASK_BRIEF_MAX, TASK_TITLE_MAX } from "./task-worker.ts";
 import { randomBytes } from "node:crypto";
@@ -36,7 +37,8 @@ const BIN = "gravit-face";
 /** What the tools act through; src/boot.ts's wiring implements it over the tasks. `steer`, `stop` and `read` throw
  * `Error("no task " + id)` for an id they do not know; `list()` is windowed and is not the registry. */
 export interface TaskOps {
-  start(input: { title: string; brief: string; strategy?: string }): Promise<TaskView>;
+  /** `origin`, where the turn that starts it came from (`web` when absent). */
+  start(input: { title: string; brief: string; strategy?: string; origin?: TaskOrigin }): Promise<TaskView>;
   steer(id: string, text: string): Promise<TaskView>;
   stop(id: string): Promise<TaskView>;
   read(id: string): Promise<{ view: TaskView; text: string }>;
@@ -64,8 +66,9 @@ function taskId(args: unknown): string {
 
 const ID_SCHEMA = { type: "string", minLength: 1, maxLength: 200 };
 
-/** The five tools over `ops`, in this order. `operatorTurn()` is read on every guarded call. */
-export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean): DeskToolDefinition[] {
+/** The five tools over `ops`, in this order. `operatorTurn()` is read on every guarded call; `turnOrigin()` on every
+ * `task_start`, whose task records it (`web` when absent). */
+export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean, turnOrigin?: () => TaskOrigin): DeskToolDefinition[] {
   const guard = (): void => {
     if (!operatorTurn()) throw new Error(OPERATOR_ONLY);
   };
@@ -110,7 +113,8 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean): 
       // The strategy's length and folder are validated by startWorker (src/task-worker.ts).
       const strategy = objectOf(args).strategy;
       if (strategy !== undefined && (typeof strategy !== "string" || strategy.length < 1)) throw new Error("the strategy is a non-empty string");
-      const view = await ops.start(strategy === undefined ? { title, brief } : { title, brief, strategy });
+      const origin = turnOrigin?.() ?? { kind: "web" as const };
+      const view = await ops.start(strategy === undefined ? { title, brief, origin } : { title, brief, strategy, origin });
       return view.strategy === undefined ? { task: view.id, title: view.title } : { task: view.id, title: view.title, strategy: view.strategy };
     },
     presentCall: (args) => ({ card: "generic", title: `Start task: ${String(objectOf(args).title ?? "")}`, kind: "read" }),

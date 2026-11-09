@@ -30,6 +30,13 @@
  * message, its provenance line first, and the log flushed. A phone text's turn is the operator's, as the browser's is
  * ({@link OPERATOR_SOURCES}); a schedule or alert line injected into the conversation ({@link INJECTED_KINDS}) never
  * names a turn and never makes one someone else's.
+ *
+ * ANSWERS (plan 3). At a turn's end the conversation answers the phone through `deps.deliver` - the desk
+ * conversation's `deliver`, the pause's choke point (src/desk-conversation.ts), absent with the desk off, when nothing
+ * is sent: a phone text's turn sends its reply (src/desk-conversation.ts `replyOf`: the answer, the cut line, the
+ * refusal) as `chat` to the network the text came through; a task report's turn sends it to the network of the
+ * phone that asked for the task (its brief's `origin`, src/task-view.ts `briefOrigin`); every other turn - the
+ * browser's, a web task's report - sends nothing. Deliveries go in turn order. Still no `desk-turn` is written.
  * @module
  */
 import { randomUUID } from "node:crypto";
@@ -40,15 +47,17 @@ import { installModelSelection as installDshModelSelection } from "@deepseek-ai/
 import { MessageId, freezeMessage, type MessageSource } from "@deepseek-ai/dsh-llm";
 import { appendEvent, clearOff, deskTime, lastConversation, readEvents, readOffState } from "./desk.ts";
 import {
-  loggedId, pauseInForce, pausedLine, phoneContent, waiting, type PhonePost, type PostResult,
+  loggedId, pauseInForce, pausedLine, phoneContent, replyOf, waiting,
+  type DeliverOpts, type DeliverResult, type PhonePost, type PostResult, type ReplyLines,
 } from "./desk-conversation.ts";
 import { CONVERSATION_PRESET } from "./desk-names.ts";
 import {
-  findFenceViolation, provenanceLine, readSessionEvents, superviseDeskTurns,
+  cutOffLine, findFenceViolation, formatDuration, provenanceLine, readSessionEvents, superviseDeskTurns,
   type DeskSessionCtxLike, type DeskTurnRecord, type SessionEventsOn,
 } from "./desk-session.ts";
 import type { AgentLike, MemberSetup, RoomDeps, SessionLike } from "./room.ts";
-import type { MessageLike } from "./room-rules.ts";
+import type { EventLike, MessageLike } from "./room-rules.ts";
+import { briefOrigin } from "./task-view.ts";
 
 const BIN = "gravit-face";
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -132,7 +141,22 @@ export interface ConversationDeps {
   installModelSelection: RoomDeps["installModelSelection"];
   now?: () => number;
   log?: (line: string) => void;
+  /** How an answer reaches the phone: the desk conversation's `deliver` (src/desk-conversation.ts), absent with the
+   * desk off (`FACE_DESK=0`) - then no turn sends anything. Never rejects. */
+  deliver?: (text: string, opts: DeliverOpts) => Promise<DeliverResult>;
 }
+
+/** The label a fence check that rejects names: the turn is cut as a violation here. */
+const FENCE_LABEL = "the conversation's folder";
+
+/** The lines a conversation turn's reply is written with ({@link replyOf}): its own fence's refusal line. */
+const CONVERSATION_LINES: ReplyLines = {
+  fenceRefusalLine: (path) => (path === FENCE_LABEL
+    ? "refused: the conversation's folder could not be checked, so the turn was cut. Write again; if it goes on, look at the face's log."
+    : conversationFenceRefusalLine(path)),
+  cutOffLine,
+  formatDuration,
+};
 
 /** The conversation's composition, the desk's three steps (src/desk-session.ts `deskSetup`): the model selection, the
  * `gravit-router` join and, for a new session only, the `workspace-write` pin on setup's own agent. */
@@ -364,8 +388,8 @@ function turnEndLine(r: DeskTurnRecord): string | undefined {
 /**
  * The face's hold on the conversation: {@link ensureConversation} serialised, and, once the agent is had, src/desk-
  * session.ts `superviseDeskTurns` over it - the {@link CONVERSATION_DEADLINE_MS} cut, {@link conversationFence} at every
- * turn's start (a check that rejects counts as a violation at "the conversation's folder"), and an `onTurnEnd` that only
- * logs: its turns write no `desk-turn` and count against no budget.
+ * turn's start (a check that rejects counts as a violation at "the conversation's folder"), and an `onTurnEnd` that logs
+ * and answers the phone (the module header's ANSWERS): its turns write no `desk-turn` and count against no budget.
  * @param deps - see {@link ConversationDeps}.
  */
 export function installConversation(deps: ConversationDeps): ConversationHandle {
@@ -388,11 +412,12 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
         await mkdir(dir, { recursive: true });
         return conversationFence(dir);
       },
-      fenceLabel: "the conversation's folder",
+      fenceLabel: FENCE_LABEL,
       skipKinds: SKIPPED,
       onTurnEnd: (record) => {
         const line = turnEndLine(record);
         if (line !== undefined) log(line);
+        answer(record);
       },
       log,
     });
@@ -438,6 +463,49 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
         return { kind: "phone", network: isPhoneNetwork(network) ? network : "telegram" };
       },
     };
+  };
+
+  /** Where task `task`'s report goes: its phone's network when its brief says a phone on this conversation
+   * (`conversationId`) asked for it; else `undefined`. The live log first, the stored one when it holds no brief. */
+  const taskNetwork = async (task: string, conversationId: string): Promise<"telegram" | "slack" | undefined> => {
+    let found = briefOrigin((deps.ctx.agents.get(task)?.session.snapshotEvents() ?? []) as readonly EventLike[]);
+    if (found === undefined) {
+      try {
+        found = briefOrigin(await readSessionEvents(deps.ctx, task));
+      } catch (err) {
+        log(`${BIN}: conversation: task ${task}'s log could not be read (${errText(err)}); its report goes to no phone`);
+        return undefined;
+      }
+    }
+    return found?.origin === "phone" && found.conversation === conversationId ? found.network : undefined;
+  };
+
+  /** How turn `r`'s answer goes ({@link ConversationDeps.deliver}): a phone text's to its network, a phone task's
+   * report to that task's; else `undefined`. */
+  const answerOpts = async (r: DeskTurnRecord): Promise<DeliverOpts | undefined> => {
+    if (r.source === "telegram") {
+      const network = r.message?.network;
+      return isPhoneNetwork(network) ? { kind: "chat", network } : { kind: "chat" };
+    }
+    if (r.source !== TASK_KIND || r.message?.form !== "report" || typeof r.message.task !== "string") return undefined;
+    const network = await taskNetwork(r.message.task, r.sessionId);
+    return network === undefined ? undefined : { kind: "chat", network };
+  };
+
+  /* a turn's answer, in turn order; the chain never rejects */
+  let answering: Promise<void> = Promise.resolve();
+  const answer = (r: DeskTurnRecord): void => {
+    const deliver = deps.deliver;
+    if (deliver === undefined) return;
+    answering = answering.then(async () => {
+      const opts = await answerOpts(r);
+      if (opts === undefined) return;
+      const text = replyOf(r, CONVERSATION_LINES, FENCE_LABEL);
+      if (text === "") return; // it ended on a tool: there is nothing to say
+      await deliver(text, opts);
+    }).catch((err: unknown) => {
+      log(`${BIN}: conversation: the answer to turn ${r.turn} on ${r.sessionId} could not be delivered: ${errText(err)}`);
+    });
   };
 
   const open = async (): Promise<{ agent: AgentLike; sessionId: string }> => {

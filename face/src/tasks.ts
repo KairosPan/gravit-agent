@@ -304,7 +304,8 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
       const conv = convId();
       if (conv === undefined) throw new Error("there is no conversation");
       const started = await startWorker(workerDeps, {
-        conversationId: conv, title: input.title, brief: input.brief, origin: "web",
+        conversationId: conv, title: input.title, brief: input.brief,
+        ...(input.origin?.kind === "phone" ? { origin: "phone", network: input.origin.network } : { origin: "web" }),
         ...(input.strategy === undefined ? {} : { strategy: input.strategy }),
       });
       const agent = started.agent as TaskAgent;
@@ -396,7 +397,7 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     const conv = convId();
     return conv === undefined || conv === agent.id;
   };
-  const offTools = equipConversation(ctx, isConversation, taskToolDefinitions(ops, () => deps.conversation.operatorTurn()), { log });
+  const offTools = equipConversation(ctx, isConversation, taskToolDefinitions(ops, () => deps.conversation.operatorTurn(), () => deps.conversation.turnOrigin()), { log });
   const offReport = equipWorkers(ctx as unknown as WorkerToolsCtxLike, isWorker, { log });
 
   /* the bus: note, and leave the work to a microtask */

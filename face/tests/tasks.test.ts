@@ -10,7 +10,7 @@ import { Readable } from "node:stream";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { routerEnabled, installRouter, installTasks, RECOVERY_NOTE, CONTINUE_NOTE, IDLE_DISPOSE_MS, type TasksDeps, type TasksHandle } from "../src/tasks.ts";
-import type { ConversationHandle } from "../src/conversation.ts";
+import type { ConversationHandle, TaskOrigin } from "../src/conversation.ts";
 import type { EventLike, MessageLike } from "../src/room-rules.ts";
 import type { AgentLike } from "../src/room.ts";
 import { FakeAgent, FakeSession, FakeTree, toolResultMessage } from "./room-fake.ts";
@@ -40,6 +40,7 @@ class Harness {
   readonly tree = new FakeTree();
   readonly conv: FakeAgent;
   operator = true;
+  origin: TaskOrigin = { kind: "web" };
   readonly lines: string[] = [];
   readonly disposed: string[] = [];
   readonly cwdSets: { agent: string; path: string }[] = [];
@@ -70,7 +71,7 @@ class Harness {
       ensure: async () => ({ agent: conv as unknown as AgentLike, sessionId: CONV }),
       current: () => ({ agent: conv as unknown as AgentLike, sessionId: CONV }),
       operatorTurn: () => this.operator,
-      turnOrigin: () => ({ kind: "web" }),
+      turnOrigin: () => this.origin,
       post: async () => ({ refused: "error", line: "no phone here" }),
       dispose: async () => {},
     };
@@ -665,4 +666,20 @@ test("the Stop and Continue routes: an unknown task is 404, a bad body 400, GET 
     assert.equal((await rec.post(path, { task: "x" }, "127.0.0.1:3090", "GET")).status, 405);
     assert.equal((await rec.post(path, { task: "x" }, "evil.example")).status, 403);
   }
+});
+
+test("task_start in a phone turn starts a phone task", async (t) => {
+  const h = await harness();
+  const tasks = await install(h);
+  t.after(() => tasks.dispose());
+  h.origin = { kind: "phone", network: "slack" };
+  const out = await h.tool("task_start").execute({ title: "From the phone", brief: "look" }) as { task: string };
+  const brief = h.tree.sessions.get(out.task)!.snapshotEvents().find((e) => e.type === "user/message" && (e.data as MessageLike).id === `task-brief:${out.task}`)!;
+  assert.deepEqual((brief.data as { source: unknown }).source, { kind: "task", form: "brief", conversation: CONV, origin: "phone", network: "slack" });
+  const { view } = await tasks.ops.read(out.task);
+  assert.equal(view.origin, "phone");
+  assert.equal(view.network, "slack");
+  h.origin = { kind: "web" };
+  const web = await h.tool("task_start").execute({ title: "From the browser", brief: "look" }) as { task: string };
+  assert.equal((await tasks.ops.read(web.task)).view.origin, "web");
 });

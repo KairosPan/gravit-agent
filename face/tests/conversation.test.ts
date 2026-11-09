@@ -17,7 +17,7 @@ import {
   type ConversationCtxLike, type ConversationDeps,
 } from "../src/conversation.ts";
 import { appendEvent, readEvents, writeOff, type DeskEvent } from "../src/desk.ts";
-import type { PhonePost } from "../src/desk-conversation.ts";
+import type { DeliverOpts, PhonePost } from "../src/desk-conversation.ts";
 import { CONVERSATION_PRESET } from "../src/desk-names.ts";
 import type { CreateDeskAgentOptions } from "../src/desk-session.ts";
 import type { AgentCtxLike, AgentLike, ModelSelectionRefLike, ResumeMemberOptions, SessionLike } from "../src/room.ts";
@@ -821,4 +821,143 @@ test("turnOrigin is phone with its network in a phone turn and web otherwise", a
   assert.deepEqual(handle.turnOrigin(), { kind: "web" }, "a task's turn");
   tree.bus.emit(sessionId, "turn/end", { turn: 4, reason: { kind: "completed" } });
   await settle();
+});
+
+/* ---------- plan 3 task 2: answers go back to the phone ---------- */
+
+type Delivered = { text: string; opts: DeliverOpts };
+/** deps with a `deliver` that records what it was handed. */
+function delivering(tree: FakeConversationTree, home: string, lines: string[], sent: Delivered[]): ConversationDeps {
+  return { ...deps(tree, home, lines), deliver: async (text, opts) => { sent.push({ text, opts }); return { sent: ["x:1"] }; } };
+}
+/** Turn `n` answers `text`, as the loop logs an assistant message; `interrupted` when a cut stopped it mid-stream. */
+function answer(bus: FakeBus, sessionId: string, n: number, text: string, interrupted = false): void {
+  bus.emit(sessionId, "assistant/message", {
+    turn: n, step: 1, ...(interrupted ? { interrupted: true } : {}),
+    message: { id: `a-${n}`, role: "assistant", content: [{ type: "text", text }], source: { kind: "model", provider: "stub", model: "echo" } },
+  });
+}
+function wholeTurn(bus: FakeBus, sessionId: string, n: number, source: Record<string, unknown>, text: string): void {
+  startTurn(bus, sessionId, n, source);
+  answer(bus, sessionId, n, text);
+  bus.emit(sessionId, "turn/end", { turn: n, reason: { kind: "completed" } });
+}
+/** A worker's log on disk: its brief, from `origin`. */
+function workerLog(tree: FakeConversationTree, id: string, conversation: string, origin: Record<string, unknown>): void {
+  tree.logs.set(id, [{
+    type: "user/message", seq: 1,
+    data: { id: `task-brief:${id}`, role: "user", content: [{ type: "text", text: "T\n\nb" }], source: { kind: "task", form: "brief", conversation, ...origin } },
+  }]);
+}
+
+test("a phone turn's answer goes to its network as chat", async (t) => {
+  const home = await scratch("deliver-phone");
+  const tree = new FakeConversationTree();
+  const sent: Delivered[] = [];
+  const handle = install(t, delivering(tree, home, [], sent));
+  const { sessionId } = await handle.ensure();
+  wholeTurn(tree.bus, sessionId, 1, { kind: "telegram", network: "slack", messageId: "slack:1" }, "the answer");
+  await until(() => sent.length === 1, "the delivery");
+  assert.deepEqual(sent, [{ text: "the answer", opts: { kind: "chat", network: "slack" } }]);
+  wholeTurn(tree.bus, sessionId, 2, { kind: "telegram", network: "telegram", messageId: "telegram:2" }, "second");
+  await until(() => sent.length === 2, "the second delivery");
+  assert.deepEqual(sent[1], { text: "second", opts: { kind: "chat", network: "telegram" } });
+});
+
+test("a browser turn's answer goes nowhere", async (t) => {
+  const home = await scratch("deliver-web");
+  const tree = new FakeConversationTree();
+  const sent: Delivered[] = [];
+  const handle = install(t, delivering(tree, home, [], sent));
+  const { sessionId } = await handle.ensure();
+  wholeTurn(tree.bus, sessionId, 1, { kind: "user", rpcId: "rpc-1" }, "for the browser");
+  await settle();
+  assert.deepEqual(sent, []);
+});
+
+test("a relay turn for a phone-started task answers that task's network", async (t) => {
+  const home = await scratch("deliver-relay-phone");
+  const tree = new FakeConversationTree();
+  const sent: Delivered[] = [];
+  const handle = install(t, delivering(tree, home, [], sent));
+  const { sessionId } = await handle.ensure();
+  workerLog(tree, "session-w1", sessionId, { origin: "phone", network: "slack" });
+  wholeTurn(tree.bus, sessionId, 1, { kind: "task", form: "report", task: "session-w1", status: "ready" }, "the task is done");
+  await until(() => sent.length === 1, "the delivery");
+  assert.deepEqual(sent, [{ text: "the task is done", opts: { kind: "chat", network: "slack" } }]);
+  /* a brief another conversation wrote is not this conversation's task: nothing goes */
+  workerLog(tree, "session-w2", "session-other", { origin: "phone", network: "telegram" });
+  wholeTurn(tree.bus, sessionId, 2, { kind: "task", form: "report", task: "session-w2", status: "ready" }, "not ours");
+  await settle();
+  assert.equal(sent.length, 1);
+});
+
+test("a relay turn for a web task delivers nothing", async (t) => {
+  const home = await scratch("deliver-relay-web");
+  const tree = new FakeConversationTree();
+  const sent: Delivered[] = [];
+  const handle = install(t, delivering(tree, home, [], sent));
+  const { sessionId } = await handle.ensure();
+  workerLog(tree, "session-w1", sessionId, { origin: "web" });
+  workerLog(tree, "session-w0", sessionId, {});
+  wholeTurn(tree.bus, sessionId, 1, { kind: "task", form: "report", task: "session-w1", status: "ready" }, "done");
+  wholeTurn(tree.bus, sessionId, 2, { kind: "task", form: "report", task: "session-w0", status: "ready" }, "done, an old brief");
+  wholeTurn(tree.bus, sessionId, 3, { kind: "task", form: "report", task: "session-gone", status: "ready" }, "no log");
+  await settle();
+  assert.deepEqual(sent, []);
+});
+
+test("a cut phone turn sends the cut line", async (t) => {
+  const home = await scratch("deliver-cut");
+  const tree = new FakeConversationTree();
+  const sent: Delivered[] = [];
+  const handle = install(t, delivering(tree, home, [], sent));
+  const { sessionId } = await handle.ensure();
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    startTurn(tree.bus, sessionId, 1, { kind: "telegram", network: "slack", messageId: "slack:1" });
+    await settle();
+    mock.timers.tick(CONVERSATION_DEADLINE_MS);
+    await settle();
+    tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "cancelled" } });
+    await settle();
+    startTurn(tree.bus, sessionId, 2, { kind: "telegram", network: "telegram", messageId: "telegram:2" });
+    answer(tree.bus, sessionId, 2, "half an answer", true);
+    await settle();
+    mock.timers.tick(CONVERSATION_DEADLINE_MS);
+    await settle();
+    tree.bus.emit(sessionId, "turn/end", { turn: 2, reason: { kind: "cancelled" } });
+    await settle();
+  } finally {
+    mock.timers.reset();
+  }
+  await until(() => sent.length === 2, "both lines");
+  assert.deepEqual(sent, [
+    { text: "timed out after 5 min; a card or a long tool was pending", opts: { kind: "chat", network: "slack" } },
+    { text: "half an answer\n(cut off: timed out after 5 min)", opts: { kind: "chat", network: "telegram" } },
+  ]);
+});
+
+test("no desk-turn event is written", async (t) => {
+  const home = await scratch("deliver-ledger");
+  const tree = new FakeConversationTree();
+  const sent: Delivered[] = [];
+  const handle = install(t, delivering(tree, home, [], sent));
+  const { sessionId } = await handle.ensure();
+  wholeTurn(tree.bus, sessionId, 1, { kind: "telegram", network: "slack", messageId: "slack:1" }, "an answer");
+  wholeTurn(tree.bus, sessionId, 2, { kind: "user", rpcId: "rpc-2" }, "another");
+  await until(() => sent.length === 1, "the delivery");
+  await settle();
+  assert.deepEqual((await readEvents(home)).events.map((e) => e.kind), ["conversation"]);
+});
+
+test("with no deliver (the desk off) a phone turn sends nothing", async (t) => {
+  const home = await scratch("deliver-off");
+  const tree = new FakeConversationTree();
+  const lines: string[] = [];
+  const handle = install(t, deps(tree, home, lines));
+  const { sessionId } = await handle.ensure();
+  wholeTurn(tree.bus, sessionId, 1, { kind: "telegram", network: "slack", messageId: "slack:1" }, "the answer");
+  await settle();
+  assert.deepEqual(lines, []);
 });

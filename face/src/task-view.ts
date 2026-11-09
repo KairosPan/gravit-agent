@@ -40,7 +40,10 @@ export interface TaskView {
   id: string;
   title: string;
   strategy?: string;
-  origin: "web";
+  /** Where the task was asked: the brief's `origin` (src/task-worker.ts), `web` for a brief that names none. */
+  origin: "web" | "phone";
+  /** For a phone task, the network its text came through. */
+  network?: "telegram" | "slack";
   state: TaskState;
   group: TaskGroup;
   waitingFor?: { kind: "approval" | "question"; id: string; tool: string };
@@ -105,12 +108,40 @@ interface Gate { at: number; id: string; kind: "approval" | "question"; tool: st
 
 interface Scan {
   title?: string;
+  origin?: BriefOrigin;
   turns: Turn[];
   reports: Report[];
   gates: Gate[];
   lastStart: number;
   lastEnd: number;
   lastStopped: number;
+}
+
+/** Where a task was asked, as its brief's source names it (src/task-worker.ts `TaskMessageSource`): the conversation
+ * that started it, `origin` - `web` for a brief that names none or one it does not know - and, for a phone task, its
+ * `network`, `telegram` when it names none it knows (src/conversation.ts `turnOrigin` reads a phone text so). */
+export interface BriefOrigin {
+  conversation?: string;
+  origin: "web" | "phone";
+  network?: "telegram" | "slack";
+}
+
+function originOfBrief(source: Data): BriefOrigin {
+  const conversation = typeof source.conversation === "string" ? { conversation: source.conversation } : {};
+  if (source.origin !== "phone") return { ...conversation, origin: "web" };
+  const network = source.network === "slack" || source.network === "telegram" ? source.network : "telegram";
+  return { ...conversation, origin: "phone", network };
+}
+
+/** The origin of the task whose log is `events`: its first brief's ({@link BriefOrigin}), or `undefined` when the log
+ * holds no brief. */
+export function briefOrigin(events: readonly EventLike[]): BriefOrigin | undefined {
+  for (const event of events) {
+    if (event.type !== "user/message") continue;
+    const source = dataOf(event).source as Data | undefined;
+    if (source?.kind === "task" && source.form === "brief") return originOfBrief(source);
+  }
+  return undefined;
 }
 
 function textOf(content: unknown): string {
@@ -148,7 +179,10 @@ function scan(events: readonly EventLike[]): Scan {
       case "user/message": {
         const source = data.source as Data | undefined;
         if (source?.kind !== "task") break;
-        if (source.form === "brief" && s.title === undefined) s.title = (textOf(data.content).split(/\r?\n/, 1)[0] ?? "").trim();
+        if (source.form === "brief" && s.title === undefined) {
+          s.title = (textOf(data.content).split(/\r?\n/, 1)[0] ?? "").trim();
+          s.origin = originOfBrief(source);
+        }
         else if (source.form === "stopped") s.lastStopped = at;
         break;
       }
@@ -342,7 +376,8 @@ export function taskViewOf(input: { id: string; header: { createdAt: number; cwd
     id: input.id,
     title: s.title !== undefined && s.title !== "" ? s.title : input.id,
     ...(strategy === undefined ? {} : { strategy }),
-    origin: "web",
+    origin: s.origin?.origin ?? "web",
+    ...(s.origin?.network === undefined ? {} : { network: s.origin.network }),
     state,
     group: GROUP[state],
     ...(waitingFor === undefined ? {} : { waitingFor }),
