@@ -13,7 +13,7 @@ import {
   ANALYSIS_RUN_RE, MODULE_HEADLINES, parseChannelStatus, presetHintsOf, readAnalysisRuns, readChannelStatus, readChannelBody, readRunManifests, reconcileChannels, registerChannelRoutes, statusOfText,
   RUN_MANIFEST_MAX_BYTES, WORKBENCH,
 } from "../src/channels.ts";
-import { rosterFor, setRoster } from "../src/roster.ts";
+import { rosterFor } from "../src/roster.ts";
 import { HttpError } from "../src/http.ts";
 import { MODULES } from "../plugins/lunhui/lib/modules.mjs";
 import { addEvidence, openRun, sealRun } from "../plugins/lunhui/lib/runs.mjs";
@@ -803,20 +803,6 @@ test("reconcileChannels never overwrites a title the operator renamed", async ()
   const renamed = second.channels.find((c) => c.name === "alpha")!;
   assert.equal(renamed.title, "动量", "a listing is a read of the title, never a write");
   assert.equal(renamed.name, "alpha", "and the rename never touched the directory-side name");
-});
-
-test("reconcileChannels seeds each channel's roster once, from the connected bins", async () => {
-  const root = await makeRoot();
-  const home = await mkdtemp(join(tmpdir(), "face-home2-"));
-  const { registry } = fakeRegistry();
-  const run = () => reconcileChannels({ registry, root, home, sessions: [], connectedBins: ["codex"] });
-  const first = await run();
-  const alpha = first.channels.find((c) => c.name === "alpha")!;
-  assert.deepEqual(await rosterFor(home, alpha.workspaceId), ["codex"]);
-
-  await setRoster(home, alpha.workspaceId, []);
-  await run();
-  assert.deepEqual(await rosterFor(home, alpha.workspaceId), [], "a second listing never re-seeds over the operator");
 });
 
 test("reconcileChannels carries status and reports a missing directory instead of deleting it", async () => {

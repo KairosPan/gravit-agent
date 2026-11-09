@@ -16,7 +16,7 @@ import { load } from "js-yaml";
 import type { RouteRegistrar } from "./static.ts";
 import { isBotId } from "./bots.ts";
 import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
-import { botsFor, logBotsWrite, logRosterWrite, rosterFor, seedRoster, setBots, setRoster } from "./roster.ts";
+import { botsFor, logBotsWrite, logRosterWrite, rosterFor, setBots, setRoster } from "./roster.ts";
 import { ROOM_CAPS } from "./room-rules.ts";
 import { NAME_RE } from "./channel-name.ts";
 
@@ -805,8 +805,7 @@ export interface ChannelRow {
  *
  * Idempotent by construction: `create` returns an existing record for a
  * canonical path and is passed no title to change, `attachSession` early-outs
- * on membership before any validation, and `seedRoster` is a no-op once an
- * entry exists. Safe on every listing; in the steady state it performs no
+ * on membership before any validation. Safe on every listing; in the steady state it performs no
  * writes.
  *
  * A workspace whose directory has vanished is REPORTED, never deleted -
@@ -815,11 +814,13 @@ export interface ChannelRow {
 export async function reconcileChannels(deps: {
   registry: RegistryLike;
   root: string;
-  home: string;
   sessions: readonly SessionHeadLike[];
+  /** @deprecated unread since the one roster (plan 4 Task 1), which ensureRoster seeds at boot; Task 4 removes it */
+  home: string;
+  /** @deprecated as `home` */
   connectedBins: readonly string[];
 }): Promise<{ channels: ChannelRow[]; ungrouped: SessionHeadLike[] }> {
-  const { registry, root, home, sessions, connectedBins } = deps;
+  const { registry, root, sessions } = deps;
 
   const dirs = await listChannelDirs(root);
   /* The real registry canonicalizes `path` (e.g. via fs.realpath) on create,
@@ -859,7 +860,6 @@ export async function reconcileChannels(deps: {
         claimed.add(session.sessionId);
       } catch { /* the host validates the header cwd and refuses; not ours to force */ }
     }
-    await seedRoster(home, ws.id, connectedBins);
     const status = await readChannelStatus(d.dir);
     const row: ChannelRow = {
       workspaceId: ws.id, name: d.name, title: ws.title, dir: d.dir, isRoot: d.isRoot,
@@ -1202,16 +1202,14 @@ export function registerChannelRoutes(webServer: RouteRegistrar, deps: ChannelRo
       }
       /* I3: the directory is ON DISK once createChannel above returns - the
        * channel exists whether or not this reconcile succeeds. A throw here
-       * (EACCES out of listChannelDirs, a withFileLock timeout in
-       * seedRoster, an EIO in ws.status()) must NOT be reported as "create
+       * (EACCES out of listChannelDirs, an EIO in ws.status()) must NOT be reported as "create
        * failed": that would be a successful creation answered as a 500, the
        * client showing no row, and a retry hitting 409 "channel already
-       * exists" - the face contradicting its own filesystem. Adoption and
-       * roster-seeding are a convenience that also runs on every ordinary
+       * exists" - the face contradicting its own filesystem. Adoption is a convenience that also runs on every ordinary
        * listing, so a failure here just means the NEXT listing does the
        * adopting instead - never fatal to this response. */
       try {
-        await reconcile(); // adopt it and seed its roster before the client asks
+        await reconcile(); // adopt it before the client asks
       } catch (err) {
         /* Not fatal to this response - the next listing adopts it instead - but
          * the codebase says a swallowed failure still gets a line. */

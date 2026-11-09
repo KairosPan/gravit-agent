@@ -1,136 +1,157 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { botsFor, logBotsWrite, logRosterWrite, readRosters, rosterFor, seedRoster, setBots, setRoster } from "../src/roster.ts";
+import { ensureRoster, logAvailable, readRoster, ROSTER_V1_BACKUP, setAvailable } from "../src/roster.ts";
+import { HttpError } from "../src/http.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-roster-"));
+const fileOf = (h: string): string => join(h, "face", "channels.json");
+const backupOf = (h: string): string => join(h, "face", ROSTER_V1_BACKUP);
 
-async function corrupt(h: string): Promise<void> {
+async function put(h: string, text: string): Promise<void> {
   await mkdir(join(h, "face"), { recursive: true });
-  await writeFile(join(h, "face", "channels.json"), "{not json");
+  await writeFile(fileOf(h), text);
 }
 
-test("an absent file reads as no rosters and is not corrupt", async () => {
-  assert.deepEqual(await readRosters(await home()), { rosters: {}, corrupt: false });
-});
+const exists = async (path: string): Promise<boolean> => {
+  try { await access(path); return true; } catch { return false; }
+};
 
-test("seedRoster writes once and never overwrites an existing entry", async () => {
+test("ensureRoster on an absent file seeds the connected bins and no bots", async () => {
   const h = await home();
-  await seedRoster(h, "ws-1", ["claude", "codex"]);
-  await seedRoster(h, "ws-1", ["claude"]);
-  assert.deepEqual(await rosterFor(h, "ws-1"), ["claude", "codex"]);
+  const result = await ensureRoster(h, ["claude", "codex"]);
+  assert.deepEqual(result, { roster: { agents: ["claude", "codex"], bots: [] }, corrupt: false, migrated: "seeded" });
+  assert.deepEqual(JSON.parse(await readFile(fileOf(h), "utf8")), { version: 2, agents: ["claude", "codex"], bots: [] });
+  assert.equal((await stat(fileOf(h))).mode & 0o777, 0o600);
 });
 
-test("setRoster is the operator's explicit write and replaces the set", async () => {
+test("ensureRoster turns a v1 file into the union of its channels", async () => {
   const h = await home();
-  await seedRoster(h, "ws-1", ["claude", "codex"]);
-  await setRoster(h, "ws-1", ["codex"]);
-  assert.deepEqual(await rosterFor(h, "ws-1"), ["codex"]);
-  await setRoster(h, "ws-1", []);
-  assert.deepEqual(await rosterFor(h, "ws-1"), [], "an empty roster is a real, definite set");
+  const v1 = JSON.stringify({
+    version: 1,
+    channels: {
+      a: { agents: ["claude"], bots: ["drill-bull"] },
+      b: { agents: ["codex", "claude"], bots: ["drill-bear", "drill-bull"] },
+    },
+  }, null, 2);
+  await put(h, v1);
+  const result = await ensureRoster(h, ["claude"]);
+  assert.deepEqual(result, {
+    roster: { agents: ["claude", "codex"], bots: ["drill-bull", "drill-bear"] }, corrupt: false, migrated: "v1",
+  });
+  assert.deepEqual(JSON.parse(await readFile(fileOf(h), "utf8")), {
+    version: 2, agents: ["claude", "codex"], bots: ["drill-bull", "drill-bear"],
+  });
+  assert.equal(await readFile(backupOf(h), "utf8"), v1, "the old text is kept byte for byte");
 });
 
-test("rosterFor: an unknown workspace is null, not an empty set", async () => {
-  assert.equal(await rosterFor(await home(), "ws-nope"), null);
-});
-
-test("a corrupt file fails CLOSED: no rosters, and seeding never overwrites it", async () => {
+test("ensureRoster never overwrites a v1 backup that already exists", async () => {
   const h = await home();
-  await corrupt(h);
-  assert.deepEqual(await readRosters(h), { rosters: {}, corrupt: true });
-  assert.equal(await rosterFor(h, "ws-1"), null);
-  await seedRoster(h, "ws-1", ["claude"]);
-  assert.equal(await readFile(join(h, "face", "channels.json"), "utf8"), "{not json", "the operator's file is never clobbered by a background seed");
+  await put(h, JSON.stringify({ version: 1, channels: { a: { agents: ["codex"], bots: [] } } }));
+  await writeFile(backupOf(h), "an older backup");
+  await ensureRoster(h, []);
+  assert.equal(await readFile(backupOf(h), "utf8"), "an older backup");
+  assert.deepEqual((await readRoster(h)).roster, { agents: ["codex"], bots: [] });
 });
 
-test("setRoster REFUSES over a corrupt file - it must not replace every other channel's roster with just this one entry (I1)", async () => {
-  const h = await home();
-  await corrupt(h);
-  const path = join(h, "face", "channels.json");
-  const before = await readFile(path, "utf8");
-  await assert.rejects(
-    setRoster(h, "ws-1", ["claude"]),
-    (err: Error) => err.message.includes(path) && /corrupt/i.test(err.message),
-    "the refusal names the file's absolute path",
-  );
-  assert.equal(
-    await readFile(path, "utf8"),
-    before,
-    "the operator's bytes on disk are unchanged - a click on one channel must not wipe the others",
-  );
+test("ensureRoster leaves a corrupt file alone", async () => {
+  for (const text of ["{", "null", JSON.stringify({ version: 3, agents: [], bots: [] }), JSON.stringify({ version: 1, channels: 7 })]) {
+    const h = await home();
+    await put(h, text);
+    const result = await ensureRoster(h, ["claude"]);
+    assert.deepEqual(result, { roster: null, corrupt: true }, text);
+    assert.equal(await readFile(fileOf(h), "utf8"), text, `${text}: unchanged byte for byte`);
+    assert.equal(await exists(backupOf(h)), false, `${text}: no backup written`);
+  }
 });
 
-test("concurrent seed and toggle: the operator's write survives", async () => {
+test("ensureRoster on a v2 file changes nothing", async () => {
   const h = await home();
-  await seedRoster(h, "ws-1", ["claude", "codex"]);
-  /* a sidebar poll seeding a NEW channel races an operator toggle on an old one */
-  await Promise.all([
-    seedRoster(h, "ws-2", ["claude"]),
-    setRoster(h, "ws-1", ["codex"]),
-  ]);
-  assert.deepEqual(await rosterFor(h, "ws-1"), ["codex"], "the toggle was not reverted");
-  assert.deepEqual(await rosterFor(h, "ws-2"), ["claude"], "the seed still landed");
+  const text = `${JSON.stringify({ version: 2, agents: ["codex"], bots: ["drill-bull"] }, null, 2)}\n`;
+  await put(h, text);
+  const before = (await stat(fileOf(h))).mtimeMs;
+  const result = await ensureRoster(h, ["claude", "codex"]);
+  assert.deepEqual(result, { roster: { agents: ["codex"], bots: ["drill-bull"] }, corrupt: false });
+  assert.equal((await stat(fileOf(h))).mtimeMs, before, "mtime unchanged");
+  assert.equal(await readFile(fileOf(h), "utf8"), text);
 });
 
-test("bins are stored as given but junk entries are dropped on read", async () => {
+test("readRoster: absent is null and not corrupt; a v1 file reads as corrupt", async () => {
   const h = await home();
-  await mkdir(join(h, "face"), { recursive: true });
-  await writeFile(join(h, "face", "channels.json"), JSON.stringify({
-    version: 1, channels: { "ws-1": { agents: ["codex", 7, null, "codex"] } },
-  }));
-  assert.deepEqual(await rosterFor(h, "ws-1"), ["codex"], "non-strings and duplicates drop");
+  assert.deepEqual(await readRoster(h), { roster: null, corrupt: false });
+  await put(h, JSON.stringify({ version: 1, channels: {} }));
+  assert.deepEqual(await readRoster(h), { roster: null, corrupt: true });
 });
 
-test("logRosterWrite appends a dated, append-only line naming the workspace and the resulting roster (I2)", async () => {
+test("readRoster drops junk entries", async () => {
   const h = await home();
-  await logRosterWrite(h, "ws-1", ["claude", "codex"]);
-  const first = (await readFile(join(h, "face", "roster.log"), "utf8")).trim().split("\n");
-  assert.equal(first.length, 1);
-  assert.match(first[0]!, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z roster ws-1 = \[claude, codex\]$/);
-
-  await logRosterWrite(h, "ws-1", []);
-  const second = (await readFile(join(h, "face", "roster.log"), "utf8")).trim().split("\n");
-  assert.equal(second.length, 2, "append-only: a second write grows the log, never replaces it");
-  assert.match(second[1]!, /roster ws-1 = \[\]$/);
+  await put(h, JSON.stringify({ version: 2, agents: ["claude", "", 7, "claude"], bots: ["drill-bull", "Bad Id", "gravit"] }));
+  assert.deepEqual(await readRoster(h), { roster: { agents: ["claude"], bots: ["drill-bull"] }, corrupt: false });
 });
 
-test("logRosterWrite swallows a write failure - the log is a record, never a gate on the roster write it follows (I2)", async () => {
+test("setAvailable adds and removes, keeps order, logs a dated line", async () => {
   const h = await home();
-  // A FILE named "face" blocks `mkdir(home/face, {recursive:true})` with
-  // ENOTDIR - the write failure the durable half of this log can hit for real.
+  await ensureRoster(h, ["claude"]);
+  assert.deepEqual(await setAvailable(h, "agent", "codex", true), { agents: ["claude", "codex"], bots: [] });
+  assert.deepEqual(await setAvailable(h, "agent", "codex", true), { agents: ["claude", "codex"], bots: [] }, "adding twice is one entry");
+  assert.deepEqual(await setAvailable(h, "bot", "drill-bull", true), { agents: ["claude", "codex"], bots: ["drill-bull"] });
+  assert.deepEqual(await setAvailable(h, "bot", "drill-bear", true), { agents: ["claude", "codex"], bots: ["drill-bull", "drill-bear"] });
+  assert.deepEqual(await setAvailable(h, "agent", "claude", false), { agents: ["codex"], bots: ["drill-bull", "drill-bear"] });
+  assert.deepEqual(await setAvailable(h, "bot", "drill-bull", false), { agents: ["codex"], bots: ["drill-bear"] });
+  assert.deepEqual((await readRoster(h)).roster, { agents: ["codex"], bots: ["drill-bear"] }, "what it answered is on disk");
+
+  await logAvailable(h, "bot", "drill-bear", true);
+  await logAvailable(h, "agent", "claude", false);
+  const lines = (await readFile(join(h, "face", "roster.log"), "utf8")).trim().split("\n");
+  assert.equal(lines.length, 2, "append-only");
+  assert.match(lines[0]!, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z available bot drill-bear = on$/);
+  assert.match(lines[1]!, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z available agent claude = off$/);
+});
+
+test("logAvailable never throws - the log is a record, not a gate", async () => {
+  const h = await home();
   await writeFile(join(h, "face"), "not a directory");
-  await assert.doesNotReject(logRosterWrite(h, "ws-1", ["claude"]));
+  await assert.doesNotReject(logAvailable(h, "agent", "claude", true));
 });
 
-test("bots ride beside agents: seeded empty, set independently, and a legacy file reads bots as []", async () => {
-  const h = await home();
-  await seedRoster(h, "ws-1", ["claude"]);
-  assert.deepEqual(await botsFor(h, "ws-1"), []);
-  await setBots(h, "ws-1", ["buffett", "speculator", "buffett"]);
-  assert.deepEqual(await botsFor(h, "ws-1"), ["buffett", "speculator"], "deduplicated, order kept");
-  assert.deepEqual(await rosterFor(h, "ws-1"), ["claude"], "setBots leaves agents alone");
-  await setRoster(h, "ws-1", ["codex"]);
-  assert.deepEqual(await botsFor(h, "ws-1"), ["buffett", "speculator"], "setRoster leaves bots alone");
-  assert.equal(await botsFor(h, "ws-nope"), null);
-  // a file written before bots existed
-  await mkdir(join(h, "face"), { recursive: true });
-  await writeFile(join(h, "face", "channels.json"), JSON.stringify({ version: 1, channels: { "ws-old": { agents: ["claude"] } } }));
-  assert.deepEqual((await readRosters(h)).rosters["ws-old"], { agents: ["claude"], bots: [] });
+test("setAvailable refuses a corrupt or absent file with 409", async () => {
+  const absent = await home();
+  await assert.rejects(setAvailable(absent, "agent", "claude", true),
+    (err: unknown) => err instanceof HttpError && err.status === 409 && err.message.includes(fileOf(absent)));
+  assert.equal(await exists(fileOf(absent)), false, "an absent file is not created by a switch");
+
+  const broken = await home();
+  const text = JSON.stringify({ version: 3, agents: [], bots: [] });
+  await put(broken, text);
+  await assert.rejects(setAvailable(broken, "bot", "drill-bull", true),
+    (err: unknown) => err instanceof HttpError && err.status === 409 && err.message.includes(fileOf(broken)));
+  assert.equal(await readFile(fileOf(broken), "utf8"), text, "the file is left byte for byte");
 });
 
-test("setBots refuses over a corrupt file and refuses non-id junk", async () => {
+test("setAvailable refuses a bot id outside isBotId with 400", async () => {
   const h = await home();
-  await corrupt(h);
-  await assert.rejects(setBots(h, "ws-1", ["buffett"]), /corrupt/i);
-  const clean = await home();
-  await assert.rejects(setBots(clean, "ws-1", ["Not An Id"]), (err: Error) => /bot id/.test(err.message));
+  await ensureRoster(h, []);
+  for (const id of ["Bad Id", "gravit", "gravit-desk", "role-cn-reviewer", "_template", ""]) {
+    await assert.rejects(setAvailable(h, "bot", id, true),
+      (err: unknown) => err instanceof HttpError && err.status === 400, id);
+  }
+  assert.deepEqual((await readRoster(h)).roster, { agents: [], bots: [] });
 });
 
-test("logBotsWrite appends its own dated line kind", async () => {
+test("concurrent setAvailable calls all land", async () => {
   const h = await home();
-  await logBotsWrite(h, "ws-1", ["buffett"]);
-  const log = await readFile(join(h, "face", "roster.log"), "utf8");
-  assert.match(log, /^\d{4}-\d{2}-\d{2}T[^ ]+ bots ws-1 = \[buffett\]\n$/);
+  await ensureRoster(h, ["claude"]);
+  await Promise.all([
+    setAvailable(h, "agent", "codex", true),
+    setAvailable(h, "bot", "drill-bull", true),
+    setAvailable(h, "bot", "drill-bear", true),
+    setAvailable(h, "bot", "drill-bull", false),
+  ]);
+  const { roster } = await readRoster(h);
+  assert.ok(roster !== null);
+  assert.ok(roster.agents.includes("codex"), "the agent switch was not reverted");
+  assert.ok(roster.agents.includes("claude"));
+  assert.deepEqual(roster.bots, ["drill-bear"], "each bot switch landed in the order it was issued");
 });

@@ -47,6 +47,8 @@ import type { StoredEvent } from "./search-text.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
 import { hasExec, lunhuiMounted, panelDeps, readAgentsMeta, registerPanelRoutes } from "./panels.ts";
 import { installRoom, registerRoomRoutes, type RoomContextLike } from "./room.ts";
+import { ensureRoster } from "./roster.ts";
+import { registerRosterRoutes } from "./roster-routes.ts";
 
 /** Diagnostic label, the same string boot.ts uses for `BIN`. Not imported
  * because boot.ts does not export it, and it is a label rather than a contract:
@@ -329,6 +331,22 @@ const botPresets = booted.botPresets;
  * directories on disk, dsh's roster, and the face's own declaration failures
  * as broken reasons - one reader, so no surface can show a bot another hides. */
 const allBots = () => listBots(BOTS_ROOT, () => agentPresets.list(), botPresets.errors);
+/* Only a bin with a recipe can become an `agent_<bin>` tool (`hasExec`), so only those are worth
+ * seeding into a roster. */
+const connectedBins = async (): Promise<string[]> => (await readAgentsMeta(dshHome)).connected
+  .map((row) => row.bin).filter((bin) => hasExec(bin));
+/* The one roster (one-entry plan 4): seeded or turned from v1 once, here, before the agent tools
+ * sync below; a file it cannot read is left as it is and refuses every agent and bot. A failure
+ * to reach the file is said and the boot goes on - the roster's readers fail closed. */
+try {
+  const ensured = await ensureRoster(dshHome, await connectedBins());
+  if (ensured.corrupt) console.error(`${BIN}: roster: unreadable, every agent and bot refused`);
+  else if (ensured.migrated === "v1") console.log(`${BIN}: roster: migrated v1`);
+  else if (ensured.migrated === "seeded") console.log(`${BIN}: roster: seeded`);
+} catch (err) {
+  console.error(`${BIN}: roster: the roster file could not be checked at boot:`, err);
+}
+registerRosterRoutes(booted.ctx.webServer, { home: dshHome });
 registerChannelRoutes(booted.ctx.webServer, {
   registry: workspaceRegistry,
   root: process.cwd(),
@@ -340,10 +358,7 @@ registerChannelRoutes(booted.ctx.webServer, {
     () => sessions.list().map((s) => ({ sessionId: String(s.id), cwd: s.header.cwd, agentPreset: s.header.agentPreset })),
     (err) => console.error(`${BIN}: the durable session listing failed; this listing groups only live sessions:`, err),
   ),
-  /* Only a bin with a recipe can become an `agent_<bin>` tool (`hasExec`), so
-   * only those are worth seeding into a newly adopted channel's roster. */
-  connectedBins: async () => (await readAgentsMeta(dshHome)).connected
-    .map((row) => row.bin).filter((bin) => hasExec(bin)),
+  connectedBins,
   listBots: allBots,
   /* the same live row tree panelDeps wraps, read on each request: whether include:lunhui-runs
    * is active now, not at boot */
