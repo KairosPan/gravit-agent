@@ -357,6 +357,37 @@ describe("a stalled network holds up only its own rows", () => {
   });
 });
 
+describe("a line Photon moved", () => {
+  let home: string;
+  const made: Identity[] = [];
+  afterEach(async () => {
+    for (const i of made.splice(0)) await i.dispose();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("a send after movedAt reaches no Photon sendText: refused and dropped, with one line", async () => {
+    home = mkdtempSync(join(tmpdir(), "imessage-moved-"));
+    // Photon names another line for the operator now
+    const fake = fakePhotonLink({ project: PROJECT, users: [{ ...USER, line: "+14155559999" }] });
+    const clock = heldClock();
+    const lines: string[] = [];
+    const routing = emptyRouting();
+    routing.alerts = ["imessage"];
+    saveIdentity(home, { bindings: [BINDING], routing, quiet: null, blocked: [] });
+    expect(writeNetworkSecret(home, "imessage", SECRET)).toMatchObject({ ok: true });
+    const identity = new Identity({ home, apiBase: "http://127.0.0.1:9", photon: fake, clock, now: clock.now, log: (l) => lines.push(l) });
+    made.push(identity);
+    await settle();
+    expect(imessageRow(identity.view()).movedAt).toBeDefined();
+    const a = await identity.send({ kind: "alert", text: "x" });
+    expect(a).toMatchObject({ ok: false });
+    expect(fake.sent).toEqual([]);
+    expect(readOutbox(home)).toEqual([]);
+    expect(lines.filter((l) => l.includes("no longer names the signed line") && l.includes("dropped"))).toHaveLength(1);
+    expect(imessageRow(identity.view()).movedAt).toBeDefined();
+  });
+});
+
 describe("the iMessage transport", () => {
   it("refuses a part with no id, and classifies Photon's failures", async () => {
     const fake = fakePhotonLink({ project: PROJECT, users: [USER] });

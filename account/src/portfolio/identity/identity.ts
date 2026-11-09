@@ -32,7 +32,7 @@
  * under its own id (`<row id>:<n>`, Photon's clientMessageId) and taken off the row as it goes, so a restart sends only what is left under
  * the same ids (deliverRow); Telegram's and Slack's go straight out and are written only when they cannot. What a network refuses outright is
  * dropped with one line — a 403 makes Telegram's status read `blocked` until a line goes, and tokens a network no longer takes its
- * pollFailing. A network disconnected takes its queued messages with it: whoever connects next never
+ * pollFailing; an iMessage row whose line Photon moved (movedAt) is dropped, never sent. A network disconnected takes its queued messages with it: whoever connects next never
  * receives them. The account's own notices (notices.ts) go the same way: `onFill` for each fill the pages are told of, `onLedgerRow` for
  * each Guard card raised.
  *
@@ -155,6 +155,8 @@ export const SLACK_FLUSH_MS = 30_000;
 const TIMER_FLUSHED: ReadonlySet<Network> = new Set(["slack", "imessage"]);
 /** a written-ahead row's id: 16 random hex */
 const rowId = (): string => randomBytes(8).toString("hex");
+/** why an iMessage row is dropped once the connector says Photon moved the line (spec §5.4: it stops) */
+const IMESSAGE_MOVED = "Photon no longer names the signed line for the operator; disconnect and connect iMessage again";
 const codeOf = (err: unknown): string => (err instanceof Error ? ((err as NodeJS.ErrnoException).code ?? err.name) : "error");
 
 /** what a transport's failure means: sent again later (`retry`), refused outright (`refused`), a bot the operator blocked (`blocked`),
@@ -613,7 +615,8 @@ export class Identity {
   /** what waits in the outbox sent, in order, network by network: a message that does not go (`retry`) stays where it is, cut to what did
    * not go (a written-ahead row keeps its remaining parts and their ids), and its network is `stalled` for the rest of the pass — every
    * later row of that network is passed over, so its order holds, while the other networks' rows go on. One refused outright is dropped
-   * with one line, as is one quiet hours hold now, one too old, and one for a network not connected. `watch` names a written-ahead row a send is waiting on: the ids of its parts
+   * with one line, as is one quiet hours hold now, one too old, and one for a network not connected. An iMessage row whose line Photon
+   * moved (the connector's movedAt) is dropped, never sent. `watch` names a written-ahead row a send is waiting on: the ids of its parts
    * sent, and why it was refused, are noted there. `stalled` is shared by the flushes of one send */
   private async flush(watch?: RowWatch, stalled: Set<Network> = new Set()): Promise<void> {
     let i = 0;
@@ -644,6 +647,13 @@ export class Identity {
         const mine = watch !== undefined && head.id === watch.id;
         if (head.parts.length === 0) {
           this.outbox.removeAt(i);
+          continue;
+        }
+        // a line Photon moved is not the one the operator signed: nothing more goes from it (the status keeps saying movedAt)
+        if (head.network === "imessage" && this.connectors.get("imessage")?.status().movedAt !== undefined) {
+          this.outbox.removeAt(i);
+          if (mine) watch.refused = IMESSAGE_MOVED;
+          this.log(`identity: a message for iMessage is dropped, not sent: ${IMESSAGE_MOVED}`);
           continue;
         }
         try {
