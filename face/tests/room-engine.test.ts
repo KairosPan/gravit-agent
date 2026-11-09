@@ -1,17 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RoomEngine, dispatchToolDefinition, eventsOf, gatePending, installRoom, isQuiet, registerRoomRoutes, unreadableLog, type RoomDeps } from "../src/room.ts";
+import { RoomEngine, dispatchToolDefinition, eventsOf, gatePending, installRoom, isQuiet, placeOf, registerRoomRoutes, unreadableLog, type RoomDeps } from "../src/room.ts";
 import { ROOM_CAPS, type EventLike, type RosterBot } from "../src/room-rules.ts";
-import { setBots } from "../src/roster.ts";
+import { ensureRoster, setAvailable } from "../src/roster.ts";
 import type { DiscussionSummary } from "../src/room-contract.ts";
 import { fakeRoomContext, legacyToolResultMessage, makeFakeTree, toolResultMessage, type FakeAgentCtx, type FakeTree } from "./room-fake.ts";
 import { recorder } from "./route-recorder.ts";
 
-const CHANNEL = { workspaceId: "ws-1", name: "storage-chain", dir: "/repo/strategies/storage-chain" };
+/** The repository root the engine's places are named against. */
+const ROOT = "/repo";
+const CHANNEL = { name: "storage-chain", dir: "/repo/strategies/storage-chain" };
+
+/** A scratch home holding the one roster with exactly these bots on. */
+async function rosterHome(bots: readonly string[]): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), "face-room-"));
+  await ensureRoster(home, []);
+  for (const id of bots) await setAvailable(home, "bot", id, true);
+  return home;
+}
 const roster: RosterBot[] = [
   { id: "buffett", name: "巴菲特型", model: "stub/echo" },
   { id: "speculator", name: "投机型" },
@@ -22,7 +32,7 @@ function engineOn(tree: FakeTree, over: Partial<RoomDeps> = {}): RoomEngine {
   return new RoomEngine({
     ctx: fakeRoomContext(tree),
     home: "/nowhere",
-    channelFor: async (cwd) => (cwd === CHANNEL.dir ? CHANNEL : null),
+    placeFor: (cwd) => placeOf(ROOT, cwd),
     listBots: async () => roster.map((b) => ({ ...b })),
     clock: tree.clock,
     installModelSelection: (agentCtx, ref) => { tree.selections.push({ agent: (agentCtx as FakeAgentCtx).fakeAgentId, selection: ref.current }); return () => {}; },
@@ -32,7 +42,7 @@ function engineOn(tree: FakeTree, over: Partial<RoomDeps> = {}): RoomEngine {
 }
 const sources = (events: readonly EventLike[]) => events.filter((e) => e.type === "user/message").map((e) => (e.data as { source: Record<string, unknown> }).source);
 
-test("ensureMember creates a member once: root-created, parented, preset-joined, read-only before publish, attached to the channel, model from preset.yml", async () => {
+test("members are created in the caller's folder, read-only, and attached to no workspace: once, root-created, parented, preset-joined, model from preset.yml", async () => {
   const tree = makeFakeTree();
   tree.newRoom("session-room", CHANNEL.dir);
   const engine = engineOn(tree);
@@ -51,7 +61,7 @@ test("ensureMember creates a member once: root-created, parented, preset-joined,
   assert.deepEqual(a.agent.session.snapshotEvents().filter((e) => e.type === "permission/preset").map((e) => (e.data as { preset: string }).preset), ["read-only"],
     "the pin is the session's first and only permission fact - dsh's announcement pin of the user default never fired");
   assert.equal(a.agent.session.snapshotEvents()[0].type, "permission/preset", "the pin is the session's first fact - inside setup, before publish (a fresh session has no end-seed marker)");
-  assert.deepEqual(tree.attached, [created.sessionId]);
+  assert.deepEqual(tree.attached, [], "a member joins no workspace: rooms need no channel");
 });
 
 test("a member whose pin did not take is refused before its first prompt (fails closed)", async () => {
@@ -612,15 +622,15 @@ test("say on a cold room resumes it through the session controller's own composi
   assert.deepEqual(sources(gravit.session.snapshotEvents()).at(0), { kind: "user", mention: ["buffett"] }, "the @ landed on the resumed room");
 });
 
-test("rosterFor refuses a channel with no roster row and an unreadable roster file, each with the repair the operator needs", async () => {
+test("rosterFor reads the one roster: an absent or unreadable file refuses naming channels.json; a v2 file is named by the bot roster", async () => {
   const tree = makeFakeTree();
-  await assert.rejects(engineOn(tree).rosterFor(CHANNEL), /has no roster yet/, "an absent file is not corrupt - the channel simply has no row");
   const home = mkdtempSync(join(tmpdir(), "room-roster-"));
+  await assert.rejects(engineOn(tree, { home }).rosterFor(), /channels\.json/, "an absent file after boot means ensureRoster failed");
   mkdirSync(join(home, "face"), { recursive: true });
   writeFileSync(join(home, "face", "channels.json"), "{not json", "utf8");
-  await assert.rejects(engineOn(tree, { home }).rosterFor(CHANNEL), /roster is unreadable/);
-  writeFileSync(join(home, "face", "channels.json"), JSON.stringify({ channels: { "ws-1": { agents: [], bots: ["buffett", "macro"] } } }), "utf8");
-  assert.deepEqual((await engineOn(tree, { home }).rosterFor(CHANNEL)).map((b) => `${b.id}:${b.name}`), ["buffett:巴菲特型", "macro:Macro View"], "the file's ids, named by the bot roster");
+  await assert.rejects(engineOn(tree, { home }).rosterFor(), /channels\.json/);
+  writeFileSync(join(home, "face", "channels.json"), JSON.stringify({ version: 2, agents: [], bots: ["buffett", "macro"] }), "utf8");
+  assert.deepEqual((await engineOn(tree, { home }).rosterFor()).map((b) => `${b.id}:${b.name}`), ["buffett:巴菲特型", "macro:Macro View"], "the file's ids, named by the bot roster");
 });
 
 /* 0.1.1's `apiProxy.sessions.models` resolved without saying whether it
@@ -675,17 +685,16 @@ test("describe reports the roster, the runtime members and the caps left", async
 
 /** A room session id the face's own `SESSION_ID_RE` accepts (the routes check it). */
 const ROOM_ID = "session-2f0f4e2c-9d61-4c0e-8b7a-3f8a1c2d4e5f";
-const NO_CHANNEL_ID = "session-11111111-2222-4333-8444-555555555555";
+const NO_FOLDER_ID = "session-11111111-2222-4333-8444-555555555555";
 
-test("the dispatch tool: global, Gravit-only, channel-only, roster-checked; validates, starts the round and names who was not called", async () => {
+test("the dispatch tool: global, Gravit-only, roster-checked; validates, starts the round and names who was not called", async () => {
   const tree = makeFakeTree();
-  const home = await mkdtemp(join(tmpdir(), "face-room-"));
-  await setBots(home, CHANNEL.workspaceId, ["buffett", "speculator"]);
+  const home = await rosterHome(["buffett", "speculator"]);
   const gravit = tree.newRoom("session-room", CHANNEL.dir);
   tree.script("buffett", () => ({ kind: "answer", text: "b" }));
   const engine = installRoom({
     ctx: fakeRoomContext(tree), home,
-    channelFor: async (cwd) => (cwd === CHANNEL.dir ? CHANNEL : null),
+    placeFor: (cwd) => placeOf(ROOT, cwd),
     listBots: async () => roster, clock: tree.clock, installModelSelection: () => () => {}, log: () => {},
   });
   assert.deepEqual(tree.registeredTools.map((t) => t.name), ["dispatch"]);
@@ -696,7 +705,7 @@ test("the dispatch tool: global, Gravit-only, channel-only, roster-checked; vali
    * not leave the model reading an instruction the engine no longer enforces. */
   assert.match(tool.description, /Caps per operator message: 3 rounds, 10 bot messages, 2 peer continuations per round\./);
   const tightEngine = engineOn(tree, { caps: { maxRounds: 1, maxBotMessages: 1, maxContinuations: 1 } });
-  assert.match(dispatchToolDefinition(tightEngine, { channelFor: async () => CHANNEL }).description, /Caps per operator message: 1 round, 1 bot message, 1 peer continuation per round\./);
+  assert.match(dispatchToolDefinition(tightEngine, { placeFor: () => CHANNEL }).description, /Caps per operator message: 1 round, 1 bot message, 1 peer continuation per round\./);
   tightEngine.dispose();
   const exec = (agent: unknown) => ({ agent, signal: new AbortController().signal }) as never;
 
@@ -709,9 +718,7 @@ test("the dispatch tool: global, Gravit-only, channel-only, roster-checked; vali
   const reselected = tree.newRoom("session-reselected", CHANNEL.dir);
   tree.emit(reselected.session, { type: "agent-preset/selected", seq: reselected.session.seq, data: { agentPreset: "buffett" } });
   await assert.rejects(tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, exec(reselected)), /Gravit's tool/, "the running preset refuses even under a gravit header");
-  const nowhere = tree.newRoom("session-nowhere", "/elsewhere");
-  await assert.rejects(tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, exec(nowhere)), /in no channel/);
-  await assert.rejects(tool.execute({ to: ["macro"], mode: "parallel", brief: "q", reason: "r" }, exec(gravit)), /macro is not on this channel's roster.*buffett, speculator/);
+  await assert.rejects(tool.execute({ to: ["macro"], mode: "parallel", brief: "q", reason: "r" }, exec(gravit)), /macro is not on the roster.*buffett, speculator.*turns bots on in Discover/);
 
   const value = await tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "first" }, exec(gravit)) as { text: string; round: number; notCalled: string[] };
   assert.equal(value.round, 1);
@@ -729,12 +736,11 @@ test("the dispatch tool: global, Gravit-only, channel-only, roster-checked; vali
 
 test("the dispatch lock admits the pre-rename host id, alone or beside the new one, and still refuses a voice", async () => {
   const tree = makeFakeTree();
-  const home = await mkdtemp(join(tmpdir(), "face-room-"));
-  await setBots(home, CHANNEL.workspaceId, ["buffett", "speculator"]);
+  const home = await rosterHome(["buffett", "speculator"]);
   tree.script("buffett", () => ({ kind: "answer", text: "b" }));
   const engine = installRoom({
     ctx: fakeRoomContext(tree), home,
-    channelFor: async (cwd) => (cwd === CHANNEL.dir ? CHANNEL : null),
+    placeFor: (cwd) => placeOf(ROOT, cwd),
     listBots: async () => roster, clock: tree.clock, installModelSelection: () => () => {}, log: () => {},
   });
   assert.deepEqual(tree.registeredTools.map((t) => t.name), ["dispatch"]);
@@ -756,13 +762,12 @@ test("the dispatch lock admits the pre-rename host id, alone or beside the new o
 
 test("the two routes: say and state, fenced like every /data route", async () => {
   const tree = makeFakeTree();
-  const home = await mkdtemp(join(tmpdir(), "face-room-"));
-  await setBots(home, CHANNEL.workspaceId, ["buffett"]);
+  const home = await rosterHome(["buffett"]);
   tree.newRoom(ROOM_ID, CHANNEL.dir);
   tree.script("buffett", () => ({ kind: "answer", text: "b" }));
   const engine = installRoom({
     ctx: fakeRoomContext(tree), home,
-    channelFor: async (cwd) => (cwd === CHANNEL.dir ? CHANNEL : null),
+    placeFor: (cwd) => placeOf(ROOT, cwd),
     listBots: async () => roster, clock: tree.clock, installModelSelection: () => () => {}, log: () => {},
   });
   const routes = recorder();
@@ -780,6 +785,89 @@ test("the two routes: say and state, fenced like every /data route", async () =>
   assert.equal(state.status, 200);
   assert.deepEqual(state.body.roster.map((b: { id: string }) => b.id), ["buffett"]);
   assert.ok(state.body.members.buffett.sessionId);
-  const nowhere = JSON.parse(await routes.call("/data/rooms/state", { method: "POST", json: { sessionId: NO_CHANNEL_ID } }));
+  const nowhere = JSON.parse(await routes.call("/data/rooms/state", { method: "POST", json: { sessionId: NO_FOLDER_ID } }));
   assert.equal(nowhere.status, 404);
+});
+
+/* ---------- the one roster, from any folder (one-entry plan 4 task 2) ---------- */
+
+test("placeOf names a folder: the root is the workbench, a strategy is its name, anything else its last segment; no cwd is no place", () => {
+  assert.equal(placeOf("/repo", undefined), null);
+  assert.equal(placeOf("/repo", ""), null);
+  assert.deepEqual(placeOf("/repo", "/repo"), { dir: "/repo", name: "workbench" });
+  assert.deepEqual(placeOf("/repo", "/repo/"), { dir: "/repo/", name: "workbench" });
+  assert.deepEqual(placeOf("/repo", "/repo/strategies/alpha"), { dir: "/repo/strategies/alpha", name: "alpha" });
+  assert.deepEqual(placeOf("/repo", "/repo/strategies/alpha/analysis/run-1"), { dir: "/repo/strategies/alpha/analysis/run-1", name: "alpha" });
+  assert.deepEqual(placeOf("/repo", "/somewhere/scratch-dir"), { dir: "/somewhere/scratch-dir", name: "scratch-dir" });
+  assert.deepEqual(placeOf("/repo", "/repo/desk/journal"), { dir: "/repo/desk/journal", name: "journal" });
+});
+
+const toolOf = (tree: FakeTree) => tree.registeredTools[0] as unknown as ReturnType<typeof dispatchToolDefinition>;
+const execOf = (agent: unknown) => ({ agent, signal: new AbortController().signal }) as never;
+
+test("dispatch works from a worker folder in no channel", async () => {
+  const tree = makeFakeTree();
+  const home = await rosterHome(["buffett", "speculator"]);
+  /* A worker's folder: a scratch strategy directory never adopted as a workspace. */
+  const scratch = mkdtempSync(join(tmpdir(), "face-room-worker-"));
+  const worker = tree.newRoom("session-worker", scratch);
+  tree.script("buffett", () => ({ kind: "answer", text: "b" }));
+  const engine = installRoom({
+    ctx: fakeRoomContext(tree), home, placeFor: (cwd) => placeOf(ROOT, cwd),
+    listBots: async () => roster, clock: tree.clock, installModelSelection: () => () => {}, log: () => {},
+  });
+  const value = await toolOf(tree).execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, execOf(worker)) as { round: number; notCalled: string[] };
+  assert.equal(value.round, 1);
+  assert.deepEqual(value.notCalled, ["speculator"]);
+  await tree.clock.advance(100);
+  const created = tree.agentsCreated[0] as { meta: Record<string, unknown> };
+  assert.deepEqual(created.meta, { cwd: scratch, parentSession: "session-worker", agentPreset: "buffett" }, "the member is created in the caller's folder");
+  assert.deepEqual(tree.attached, [], "and attached to no workspace");
+  assert.deepEqual(answers(worker.session.snapshotEvents()), ["buffett"]);
+  assert.equal(worker.inbox.nextTurn.length, 1, "the round ends and wakes the worker once");
+  engine.dispose();
+});
+
+test("dispatch to a bot switched off is refused with the bots available; a member mid-turn finishes", async () => {
+  /* Review Focus 3: a debate already hosts buffett; the operator switches it off;
+   * the next dispatch naming it is refused, and buffett's running turn ends normally. */
+  const tree = makeFakeTree();
+  const home = await rosterHome(["buffett", "speculator"]);
+  const gravit = tree.newRoom("session-room", CHANNEL.dir);
+  tree.script("buffett", () => ({ kind: "answer", text: "b", afterMs: 60 }));
+  const engine = installRoom({
+    ctx: fakeRoomContext(tree), home, placeFor: (cwd) => placeOf(ROOT, cwd),
+    listBots: async () => roster, clock: tree.clock, installModelSelection: () => () => {}, log: () => {},
+  });
+  const tool = toolOf(tree);
+  await tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "first" }, execOf(gravit));
+  await tree.clock.advance(10);
+  assert.equal(tree.agentsCreated.length, 1, "buffett is hosted and mid-turn");
+  await setAvailable(home, "bot", "buffett", false);
+  await assert.rejects(
+    tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "again" }, execOf(gravit)),
+    (err: Error) => /buffett is not on the roster/.test(err.message) && /It currently offers: speculator\./.test(err.message) && /turns bots on in Discover/.test(err.message),
+  );
+  await tree.clock.advance(200);
+  assert.deepEqual(answers(gravit.session.snapshotEvents()), ["buffett"], "the member's turn finished and its answer landed");
+  assert.equal(gravit.inbox.nextTurn.length, 1, "the round ended and woke Gravit once");
+  engine.dispose();
+});
+
+test("a corrupt roster refuses dispatch naming channels.json, and the file is left as it was", async () => {
+  const tree = makeFakeTree();
+  const gravit = tree.newRoom("session-room", CHANNEL.dir);
+  for (const text of ["{not json", JSON.stringify({ version: 3, agents: [], bots: ["buffett"] }), JSON.stringify({ version: 1, channels: "x" })]) {
+    const home = await mkdtemp(join(tmpdir(), "face-room-"));
+    mkdirSync(join(home, "face"), { recursive: true });
+    writeFileSync(join(home, "face", "channels.json"), text, "utf8");
+    const engine = installRoom({
+      ctx: fakeRoomContext(tree), home, placeFor: (cwd) => placeOf(ROOT, cwd),
+      listBots: async () => roster, clock: tree.clock, installModelSelection: () => () => {}, log: () => {},
+    });
+    await assert.rejects(toolOf(tree).execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, execOf(gravit)), /channels\.json/);
+    assert.equal(readFileSync(join(home, "face", "channels.json"), "utf8"), text);
+    assert.equal(tree.agentsCreated.length, 0, "no member was created");
+    engine.dispose();
+  }
 });

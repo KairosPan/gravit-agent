@@ -1,8 +1,8 @@
 /** The agent tools: a connected local CLI becomes `agent_<bin>` in the dsh
- * tree, and Gravit calls it from a channel session.
+ * tree, and Gravit calls it from any session.
  *
  * Split out of panels.ts because that module had grown to hold four unrelated
- * jobs; the per-channel roster check lives here, on `execute`.
+ * jobs; the one roster's check lives here, on `execute`.
  *
  * The GREEN rows of docs/research/2026-09-01-agent-connection-survey.md: the
  * face spawns the operator's own UNMODIFIED CLI as a child, lets it perform
@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HttpError } from "./http.ts";
 import { isAgentBin, readAgentsMeta, type PanelDeps } from "./panels.ts";
-import { readRosters } from "./roster.ts";
+import { readRoster } from "./roster.ts";
 
 /** What one run reads out of the child's output. */
 export interface RunParse {
@@ -410,8 +410,8 @@ export interface AgentToolValue {
 
 /**
  * The tool Gravit gets for one connected agent. `execute` first checks the
- * calling session's channel roster (see the module docstring), then runs the
- * recipe in the CALLING SESSION's directory (a strategy's workspace),
+ * one roster (see the module docstring), then runs the
+ * recipe in the CALLING SESSION's directory (whatever folder it runs in),
  * forwards the call's cancellation to the child, and throws on a failed run
  * so the registry hands Gravit an error result with the cause. The rendered
  * text carries the CLI's session id so Gravit can continue the conversation.
@@ -461,37 +461,22 @@ export function agentToolDefinition(deps: PanelDeps, bin: string, label: string)
     timeoutMs: RUN_TIMEOUT_MS,
     async execute(args, exec) {
       const cwd = exec.agent?.session.header.cwd;
-      /* The channel's roster. NOT a fence: dsh registers tools tree-wide with
-       * no per-session scope, and a shell turn can invoke the same CLI
+      /* The one roster (one-entry plan 4), the same for every session in
+       * every folder. NOT a fence: dsh registers tools tree-wide with no
+       * per-session scope, and a shell turn can invoke the same CLI
        * directly. This refusal is a MENU - it states the operator's intent
        * and keeps an off-roster agent out of the way. The message IS the
-       * roster contract, so it names the channel and the current set; that
-       * is how the model learns the roster without a prompt that could
-       * drift from the operator's file. A session in NO channel (`null`)
-       * fails OPEN — there is no roster to consult, and tools are tree-wide
-       * anyway, so refusing there would be a behaviour change with no
-       * safety story. */
-      const channel = await deps.channelFor(cwd);
-      if (channel !== null) {
-        /* `readRosters`, not `rosterFor`: the two ways this can come back
-         * empty are different facts and need different messages. A file
-         * that fails to PARSE is an operator-side break - repair it. A file
-         * that parses fine but simply has no entry for this workspace yet
-         * is the ORDINARY state of a channel the reconcile hasn't seeded
-         * (created straight through the registry, before /data/channels.json
-         * ever loaded) - nothing is broken, there is just nothing to read
-         * yet, and it fills in on its own once the channel list loads. */
-        const { rosters, corrupt } = await readRosters(deps.home);
-        if (corrupt) {
-          throw new Error(`the channel roster is unreadable, so ${label} is refused here; repair ${join(deps.home, "face", "channels.json")}`);
-        }
-        if (!Object.hasOwn(rosters, channel.workspaceId)) {
-          throw new Error(`this channel has no roster yet, so ${label} is refused here; it gets one the first time the channel list loads, and the operator sets it on the channel page.`);
-        }
-        const roster = rosters[channel.workspaceId].agents;
-        if (!roster.includes(bin)) {
-          throw new Error(`${label} is not on this channel's roster. Channel "${channel.name}" currently offers: ${roster.length === 0 ? "(none)" : roster.join(", ")}. The operator adds agents on the channel page.`);
-        }
+       * roster contract, so it names the current set; that is how the model
+       * learns the roster without a prompt that could drift from the
+       * operator's file. It fails CLOSED: a file the face does not
+       * understand, or no file at all (after boot that means ensureRoster
+       * failed), refuses every call and names the file to repair. */
+      const { roster, corrupt } = await readRoster(deps.home);
+      if (roster === null) {
+        throw new Error(`the roster ${join(deps.home, "face", "channels.json")} ${corrupt ? "cannot be read" : "is missing"}, so ${label} is refused; repair channels.json in the harness home. Available agents: (none). The operator turns agents on in Discover.`);
+      }
+      if (!roster.agents.includes(bin)) {
+        throw new Error(`${label} is not on the roster. Available agents: ${roster.agents.length === 0 ? "(none)" : roster.agents.join(", ")}. The operator turns agents on in Discover.`);
       }
       const a = (args !== null && typeof args === "object" ? args : {}) as Record<string, unknown>;
       const run = await runAgentRecipe(deps, {

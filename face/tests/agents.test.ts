@@ -1,25 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentToolDefinition, runAgentRecipe, scrubbedEnv, type RunOutcome } from "../src/agents.ts";
 import type { PanelDeps } from "../src/panels.ts";
-import { setRoster } from "../src/roster.ts";
 
 /** A roster home of its own per test. */
 const freshHome = (): Promise<string> => mkdtemp(join(tmpdir(), "face-agents-"));
+
+/** The one roster, written by hand as a v2 file (`face/channels.json`). */
+async function seedRoster(home: string, roster: { agents?: string[]; bots?: string[] }): Promise<void> {
+  await mkdir(join(home, "face"), { recursive: true });
+  await writeFile(join(home, "face", "channels.json"), JSON.stringify({ version: 2, agents: roster.agents ?? [], bots: roster.bots ?? [] }));
+}
 
 /** A clean run outcome, for fakes. */
 const ran = (stdout: string, over: Partial<RunOutcome> = {}): RunOutcome =>
   ({ code: 0, stdout, stderr: "", timedOut: false, truncated: false, ...over });
 
 /** A minimal but type-complete {@link PanelDeps}: `runAgentRecipe` and
- * `agentToolDefinition` only ever read `cwd`, `home`, `channelFor` and
- * `runAgent` off it, so the other fields (skills/tools/loader/probes) are
- * stubs that must never be reached. `channelFor` defaults to "no channel"
- * (fail open) — the roster tests below override it per case. */
+ * `agentToolDefinition` only ever read `cwd`, `home` and `runAgent` off it,
+ * so the other fields (skills/tools/loader/probes) are stubs that must never
+ * be reached. The roster is the file under `home` - seed it per case. */
 function fakeDeps(home: string): PanelDeps {
   return {
     skills: { list: async () => [], get: async () => undefined },
@@ -28,7 +32,6 @@ function fakeDeps(home: string): PanelDeps {
     loaderEntries: () => [],
     cwd: home,
     home,
-    channelFor: async () => null,
     probeAgent: async () => null,
     probeAuth: async () => ({ state: "unknown" }),
     runAgent: async () => { throw new Error("runAgent not injected"); },
@@ -141,6 +144,7 @@ test("runAgentRecipe: gates, fixed argv, prompt on stdin, scrubbed env, session 
 
 test("agentToolDefinition: the tool Gravit gets — schema, read card, session cwd, cancellation, error propagation", async () => {
   const home = await freshHome();
+  await seedRoster(home, { agents: ["claude"] });
   await mkdir(join(home, "strategies", "alpha"), { recursive: true });
   const calls: { argv: string[]; opts: { cwd: string; input: string; signal?: AbortSignal } }[] = [];
   const deps: PanelDeps = {
@@ -183,22 +187,19 @@ test("agentToolDefinition: the tool Gravit gets — schema, read card, session c
 });
 
 /* ====================================================================== */
-/* the per-channel roster check                                            */
+/* the one roster check (one-entry plan 4)                                 */
 /* ====================================================================== */
 
 /** Deps enough to build one tool: the run never happens when the roster
  * refuses, and when it does we only care that it was reached. `cwd` is a
- * real directory (`home` itself, not the brief's illustrative "/repo"):
- * `runAgentRecipe` resolves the session directory through `stat`, and a
- * fictional root would throw ENOENT before the roster check is even
- * reached — which would fail the ON-roster and no-channel cases (which must
- * actually complete a run) for the wrong reason. */
-function toolDeps(home: string, channel: { workspaceId: string; name: string } | null) {
+ * real directory (`home` itself): `runAgentRecipe` resolves the session
+ * directory through `stat`, and a fictional root would throw ENOENT before
+ * the roster check is even reached. */
+function toolDeps(home: string) {
   const ran: string[] = [];
   const deps = {
     home,
     cwd: home,
-    async channelFor() { return channel; },
     async runAgent(bin: string) {
       ran.push(bin);
       return { code: 0, stdout: JSON.stringify({ result: "hi", session_id: "s1" }), stderr: "", timedOut: false, truncated: false };
@@ -209,92 +210,56 @@ function toolDeps(home: string, channel: { workspaceId: string; name: string } |
 
 const exec = (cwd: string) => ({ agent: { session: { header: { cwd } } }, signal: new AbortController().signal });
 
-test("an agent NOT on the channel's roster is refused, and the CLI never spawns", async () => {
+test("an agent call is refused when the agent is off the roster, from any folder", async () => {
   const home = await freshHome();
-  await setRoster(home, "ws-1", ["claude"]);
-  const { deps, ran } = toolDeps(home, { workspaceId: "ws-1", name: "alpha" });
+  await seedRoster(home, { agents: ["claude", "gemini"] });
+  const { deps, ran } = toolDeps(home);
   const tool = agentToolDefinition(deps, "codex", "Codex");
-
-  await assert.rejects(
-    tool.execute({ prompt: "hi" }, exec("/repo/strategies/alpha")),
-    (err: Error) => /not on this channel/i.test(err.message) && /alpha/.test(err.message) && /claude/.test(err.message),
-    "the refusal names the channel and its current roster - it IS the contract",
-  );
+  /* The repository root, a strategy folder, and a folder in no channel - the
+   * last one failed OPEN before the one roster. */
+  for (const cwd of [home, join(home, "strategies", "alpha"), "/somewhere/else"]) {
+    await assert.rejects(
+      tool.execute({ prompt: "hi" }, exec(cwd)),
+      (err: Error) => /Codex is not on the roster/.test(err.message) && /claude, gemini/.test(err.message) && /turns agents on in Discover/.test(err.message) && !/channel/i.test(err.message),
+      `refused from ${cwd}, naming the available agents and where the operator turns them on`,
+    );
+  }
   assert.deepEqual(ran, [], "no child process was spawned");
 });
 
-test("an agent ON the roster runs", async () => {
+test("an agent call runs when the agent is on the roster", async () => {
   const home = await freshHome();
-  await setRoster(home, "ws-1", ["codex"]);
-  const { deps, ran } = toolDeps(home, { workspaceId: "ws-1", name: "alpha" });
-  await agentToolDefinition(deps, "codex", "Codex").execute({ prompt: "hi" }, exec("/repo/strategies/alpha"));
-  assert.deepEqual(ran, ["codex"]);
+  await seedRoster(home, { agents: ["codex"] });
+  const { deps, ran } = toolDeps(home);
+  const tool = agentToolDefinition(deps, "codex", "Codex");
+  await tool.execute({ prompt: "hi" }, exec("/somewhere/else"));
+  await tool.execute({ prompt: "hi" }, exec(join(home, "strategies", "alpha")));
+  assert.deepEqual(ran, ["codex", "codex"]);
 });
 
-test("execute passes channelFor the SESSION's real cwd, not something else - a guard never drilled is presumed broken (charter Rule 4)", async () => {
-  // Every other roster test above stubs channelFor to ignore its argument
-  // (`toolDeps`'s `async channelFor() { return channel; }`), so none of them
-  // actually pin that `exec.agent?.session.header.cwd` - the entire input to
-  // the roster decision - is what reaches it. A recording stub closes that.
-  const home = await freshHome();
-  const seen: (string | undefined)[] = [];
-  const deps = {
-    home,
-    cwd: home,
-    async channelFor(cwd: string | undefined) { seen.push(cwd); return null; },
-    async runAgent(bin: string) {
-      return { code: 0, stdout: JSON.stringify({ result: "hi", session_id: "s1" }), stderr: "", timedOut: false, truncated: false };
-    },
-  } as any;
-  await agentToolDefinition(deps, "codex", "Codex").execute({ prompt: "hi" }, exec("/repo/strategies/alpha"));
-  assert.deepEqual(seen, ["/repo/strategies/alpha"], "channelFor must see the exec context's own session cwd, verbatim");
-
-  // And when the exec carries no agent (a session-less call, drilled
-  // elsewhere in this file), the cwd handed to channelFor is genuinely
-  // undefined - not silently defaulted to something that would mask the
-  // no-agent case as a real session.
-  await agentToolDefinition(deps, "codex", "Codex").execute({ prompt: "hi" }, { signal: new AbortController().signal });
-  assert.deepEqual(seen, ["/repo/strategies/alpha", undefined]);
-});
-
-test("a session in no channel fails OPEN - which is exactly today's behaviour", async () => {
-  const home = await freshHome();
-  const { deps, ran } = toolDeps(home, null);
-  await agentToolDefinition(deps, "codex", "Codex").execute({ prompt: "hi" }, exec("/somewhere/else"));
-  assert.deepEqual(ran, ["codex"], "no channel means no roster to consult; tools are tree-wide anyway");
-});
-
-test("a corrupt roster file fails CLOSED", async () => {
-  const home = await freshHome();
-  await mkdir(join(home, "face"), { recursive: true });
-  await writeFile(join(home, "face", "channels.json"), "{not json");
-  const { deps, ran } = toolDeps(home, { workspaceId: "ws-1", name: "alpha" });
-  await assert.rejects(
-    agentToolDefinition(deps, "codex", "Codex").execute({ prompt: "hi" }, exec("/repo/strategies/alpha")),
-    /unreadable/i,
-    // Deliberately distinct from the off-roster message above: a corrupt
-    // file is not the same fact as an empty roster, and `readRosters`'s
-    // `corrupt` flag must not fold into "no entry for this workspace" and
-    // answer with "no roster yet" — that would report a genuinely broken
-    // file as merely unseeded.
-  );
-  assert.deepEqual(ran, []);
-});
-
-test("a channel with no roster entry yet - file present and valid, just not seeded - fails CLOSED with its own message, not 'unreadable'", async () => {
-  const home = await freshHome();
-  // A perfectly healthy file: it just has no entry for ws-1. This is the
-  // ordinary state of a workspace the dsh client created directly through
-  // the registry, before /data/channels.json (the reconcile) ever ran for
-  // it - not the same fact as a corrupt file, and the refusal must say so.
-  await setRoster(home, "ws-other", ["claude"]);
-  const { deps, ran } = toolDeps(home, { workspaceId: "ws-1", name: "alpha" });
-  await assert.rejects(
-    agentToolDefinition(deps, "codex", "Codex").execute({ prompt: "hi" }, exec("/repo/strategies/alpha")),
-    (err: Error) => /no roster yet/i.test(err.message) && !/unreadable/i.test(err.message),
-    "names the not-yet-seeded situation, and must not misdiagnose it as an unreadable file",
-  );
-  assert.deepEqual(ran, []);
+test("an unreadable roster refuses every agent call and names channels.json", async () => {
+  /* Review Focus 1: a file the face does not understand - junk JSON, a future
+   * version, a v1 file left unturned - or no file at all (after boot an absent
+   * file means ensureRoster failed) refuses, and the file is left as it was. */
+  const cases: [string, string | undefined][] = [
+    ["junk", "{not json"],
+    ["version 3", JSON.stringify({ version: 3, agents: ["codex"], bots: [] })],
+    ["v1 with a bad channels", JSON.stringify({ version: 1, channels: [] })],
+    ["absent", undefined],
+  ];
+  for (const [what, text] of cases) {
+    const home = await freshHome();
+    await mkdir(join(home, "face"), { recursive: true });
+    if (text !== undefined) await writeFile(join(home, "face", "channels.json"), text);
+    const { deps, ran } = toolDeps(home);
+    await assert.rejects(
+      agentToolDefinition(deps, "codex", "Codex").execute({ prompt: "hi" }, exec(home)),
+      (err: Error) => /channels\.json/.test(err.message) && /Codex is refused/.test(err.message) && /turns agents on in Discover/.test(err.message),
+      `${what}: refused, naming the file`,
+    );
+    assert.deepEqual(ran, [], `${what}: no child process was spawned`);
+    if (text !== undefined) assert.equal(await readFile(join(home, "face", "channels.json"), "utf8"), text, `${what}: the file is left byte for byte`);
+  }
 });
 
 /* The face holds the desk's Telegram bot token in its own environment ($DSH_HOME/.env, read at boot);

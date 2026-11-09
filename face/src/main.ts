@@ -46,7 +46,7 @@ import { makeSearch, readEventsFrom, registerSearchRoutes, unavailableSearch, ty
 import type { StoredEvent } from "./search-text.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
 import { hasExec, lunhuiMounted, panelDeps, readAgentsMeta, registerPanelRoutes } from "./panels.ts";
-import { installRoom, registerRoomRoutes, type RoomContextLike } from "./room.ts";
+import { installRoom, placeOf, registerRoomRoutes, type RoomContextLike } from "./room.ts";
 import { ensureRoster } from "./roster.ts";
 import { registerRosterRoutes } from "./roster-routes.ts";
 
@@ -413,15 +413,17 @@ const botRuntime = installBotRuntime(booted.ctx, allBots, {
 registerBotRuntimeRoutes(booted.ctx.webServer, botRuntime);
 /* Rooms: the engine lives on the ROOT context (a root-created member is a
  * runtime root, so it can ask the operator a question; a root listener sees
- * every session). `channelFor` is the same lookup the agent tools use, now
- * carrying the channel directory a member session is created in. The booted
- * ctx carries `sessionController` (the overlay's session-controller row), which
- * the engine resumes cold rooms through. */
+ * every session). A room needs no channel (one-entry plan 4): `placeFor`
+ * names the caller's folder against the repository root, and a member session
+ * is created in that folder, attached to no workspace. The booted ctx carries
+ * `sessionController` (the overlay's session-controller row), which the engine
+ * resumes cold rooms through. */
 const deps = panelDeps(booted.ctx, process.cwd());
+const roomRoot = process.cwd();
 const room = installRoom({
   ctx: booted.ctx as unknown as RoomContextLike,
   home: dshHome,
-  channelFor: deps.channelFor,
+  placeFor: (cwd) => placeOf(roomRoot, cwd),
   listBots: allBots,
 });
 disposeRoom = () => { room.dispose(); botRuntime.dispose(); };

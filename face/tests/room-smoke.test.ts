@@ -23,9 +23,8 @@ import type { GenerateOptions } from "@deepseek-ai/dsh-llm";
 import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 import { createBot, listBots } from "../src/bots.ts";
-import { panelDeps } from "../src/panels.ts";
-import { setBots } from "../src/roster.ts";
-import { installRoom, registerRoomRoutes, type RoomContextLike } from "../src/room.ts";
+import { ensureRoster, setAvailable } from "../src/roster.ts";
+import { installRoom, placeOf, registerRoomRoutes, type RoomContextLike } from "../src/room.ts";
 import { REPO, makeRepoBotsRoot } from "./bots-fixture.ts";
 import { assertOutsideTempRoots } from "./fixture-root.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
@@ -85,7 +84,6 @@ test("room smoke: dispatch → two members → answers in the room log → one w
       /* `current` takes the SESSION now (NEW packages/interaction/permission-presets/src/index.ts:343-345). */
       const permission = ctx.get("permissionPresets") as unknown as { current(session: object): string };
       const systemPrompt = ctx.get("systemPrompt") as { assemble(context: { scope?: object; agent?: object }): Promise<Parameters<typeof renderPrompt>[0]> };
-      const registry = ctx.get("workspaceRegistry") as { create(path: string): Promise<{ id: string; path: string }> };
       const projections = ctx.get("sessionProjections") as { snapshot(session: object): { values: Record<string, unknown> } };
       const llm = ctx.get("llm") as { registerAdapter(providers: string[], adapter: object): () => void };
 
@@ -124,12 +122,13 @@ test("room smoke: dispatch → two members → answers in the room log → one w
         return { kind: "text", text: "home: noted" };
       }));
 
-      const ws = await registry.create(channelDir);
-      await setBots(home, ws.id, ["alpha", "beta", "gamma"]);
-      const deps = panelDeps(ctx, root, home);
+      /* The one roster (one-entry plan 4): seeded once, the same from every folder.
+       * The room runs from a worker-like folder never adopted as a workspace. */
+      await ensureRoster(home, []);
+      for (const id of ["alpha", "beta", "gamma"]) await setAvailable(home, "bot", id, true);
       const engine = installRoom({
         ctx: ctx as unknown as RoomContextLike, home,
-        channelFor: deps.channelFor,
+        placeFor: (cwd) => placeOf(root, cwd),
         listBots: () => listBots(bots, () => presets.list()),
       });
       registerRoomRoutes(ctx.webServer, engine);
@@ -150,7 +149,7 @@ test("room smoke: dispatch → two members → answers in the room log → one w
       };
 
       /* Gravit's room session, on the stub route. */
-      const created = await rpc<{ sessionId: string; agentPreset?: string }>("session/create", { request: { workspaceId: ws.id } });
+      const created = await rpc<{ sessionId: string; agentPreset?: string }>("session/create", { request: { cwd: channelDir } });
       const roomId = String(created.sessionId);
       assert.equal(created.agentPreset, "gravit");
       await rpc("session/selectModel", { request: { sessionId: roomId, provider: "stub", model: "echo" } });
@@ -218,7 +217,7 @@ test("room smoke: dispatch → two members → answers in the room log → one w
          * message is only a content carrier - what dsh-agent-instructions publishes
          * onto the log is the `agent-instructions`/`instructions` source. */
         const chain = agent.session.snapshotEvents().find((e) => e.type === "user/message" && sourceOf(e)?.kind === "agent-instructions" && JSON.stringify(e.data).includes(MARKER));
-        assert.ok(chain !== undefined, `${m.agentPreset}: the channel's GRAVIT.md chain reached the member; user/message sources seen: ${JSON.stringify(agent.session.snapshotEvents().filter((e) => e.type === "user/message").map((e) => sourceOf(e)?.kind))}`);
+        assert.ok(chain !== undefined, `${m.agentPreset}: the folder's GRAVIT.md chain reached the member; user/message sources seen: ${JSON.stringify(agent.session.snapshotEvents().filter((e) => e.type === "user/message").map((e) => sourceOf(e)?.kind))}`);
       }
       const alpha = members.find((m) => m.agentPreset === "alpha")!;
       const alphaDelta = agents.get(alpha.sessionId)!.session.snapshotEvents().find((e) => sourceOf(e)?.form === "delta");
@@ -271,7 +270,7 @@ test("room smoke: dispatch → two members → answers in the room log → one w
       assert.equal(await readFile(join(bots, "alpha", "SOUL.md"), "utf8"), soulBefore);
 
       /* The pre-rename id: a room created under `kairos` is the host and keeps dispatch. */
-      const legacyRoom = await rpc<{ sessionId: string; agentPreset?: string }>("session/create", { request: { workspaceId: ws.id, agentPreset: "kairos" } });
+      const legacyRoom = await rpc<{ sessionId: string; agentPreset?: string }>("session/create", { request: { cwd: channelDir, agentPreset: "kairos" } });
       assert.equal(legacyRoom.agentPreset, "kairos");
       assert.ok(tools.schemas(agents.get(String(legacyRoom.sessionId)) as object).some((s) => s.name === "dispatch"), "a pre-rename room keeps dispatch");
     } finally {

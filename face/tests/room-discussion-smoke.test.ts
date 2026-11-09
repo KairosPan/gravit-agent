@@ -25,9 +25,8 @@ import { createBot, listBots } from "../src/bots.ts";
 import { readBotJournal } from "../src/bot-journal.ts";
 import { installBotRuntime } from "../src/bot-runtime.ts";
 import type { DiscussionSummary, MemberView, StructuredBrief } from "../src/room-contract.ts";
-import { panelDeps } from "../src/panels.ts";
-import { setBots } from "../src/roster.ts";
-import { installRoom, type RoomContextLike } from "../src/room.ts";
+import { ensureRoster, setAvailable } from "../src/roster.ts";
+import { installRoom, placeOf, type RoomContextLike } from "../src/room.ts";
 import { makeRepoBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
@@ -148,7 +147,6 @@ test("room discussion smoke: structured brief, private journals, serial disagree
       const savedBots = () => listBots(bots, () => presets.list());
       const runtime = installBotRuntime(ctx, savedBots, { readJournal: (bot) => readBotJournal(bots, bot) });
       disposeRuntime = runtime.dispose;
-      const registry = ctx.get("workspaceRegistry") as { create(path: string): Promise<{ id: string }> };
       /* 0.1.1's `readRaw`/`load` are gone with the handle-based seam
        * (bec6805d6a). A READ handle never takes ownership and, opened after a
        * flush, observes at least the flushed prefix (handle.ts:48-57). */
@@ -163,17 +161,17 @@ test("room discussion smoke: structured brief, private journals, serial disagree
           await handle.close();
         }
       };
-      const ws = await registry.create(channelDir);
-      await setBots(home, ws.id, ["alpha", "beta", "gamma"]);
-      const deps = panelDeps(ctx, root, home);
-      const engine = installRoom({ ctx: ctx as unknown as RoomContextLike, home, channelFor: deps.channelFor, listBots: savedBots });
+      /* The one roster, and a worker-like folder never adopted as a workspace (one-entry plan 4). */
+      await ensureRoster(home, []);
+      for (const id of ["alpha", "beta", "gamma"]) await setAvailable(home, "bot", id, true);
+      const engine = installRoom({ ctx: ctx as unknown as RoomContextLike, home, placeFor: (cwd) => placeOf(root, cwd), listBots: savedBots });
       disposeRoom = () => engine.dispose();
       const base = `http://127.0.0.1:${ctx.webServer.port}`;
       mountClient(ctx);
       const cookie = await signIn(ctx, base);
       const rpc = (endpoint: string, args: object): Promise<Record<string, unknown>> =>
         remote<Record<string, unknown>>(base, cookie, endpoint, args);
-      const created = await rpc("session/create", { request: { workspaceId: ws.id } });
+      const created = await rpc("session/create", { request: { cwd: channelDir } });
       const roomId = SessionId(String(created.sessionId));
       assert.equal(created.agentPreset, "gravit");
       const room = ctx.agents.get(roomId)!;

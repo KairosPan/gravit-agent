@@ -76,7 +76,6 @@ function fakeDeps(home = "/face-panels-nowhere"): PanelDeps {
     /* no channel by default — the roster check (agents.test.ts) is the one
      * place that cares; every other test here exercises code the roster
      * check never gates, so "no channel" (fail open) is the right default. */
-    channelFor: async () => null,
     /* claude answers, gemini answers (installed, no exec recipe), zed answers
      * (installed, not on the known list), hermes throws (a prober crash reads
      * as absent), the rest are not installed. */
@@ -533,7 +532,6 @@ test("panelDeps: the attached count is the live agent registry's, and a tree wit
     skills: fakeDeps().skills,
     tools: { schemas: () => [], register: () => () => {} },
     loader: { entries: () => [] },
-    workspaceRegistry: { resolveByPath: async () => undefined },
     agents: { list: () => [{}, {}, {}] },
   };
   const ctx = (present: Record<string, unknown>) => ({ get: (name: string) => present[name] }) as unknown as Context;

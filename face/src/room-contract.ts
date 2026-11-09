@@ -122,7 +122,7 @@ function normalizeMemberView(value: unknown, rosterIds: readonly string[], self:
       const disagreement = record(item, label);
       onlyKeys(disagreement, ["with", "point"], label);
       const withId = stringField(disagreement.with, `${label}.with`, 1_500);
-      if (withId === self || !rosterIds.includes(withId)) throw new Error(`${label}.with must name another bot on this channel's roster.`);
+      if (withId === self || !rosterIds.includes(withId)) throw new Error(`${label}.with must name another bot on the roster.`);
       return { with: withId, point: stringField(disagreement.point, `${label}.point`, 1_500) };
     });
   }

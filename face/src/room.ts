@@ -41,10 +41,14 @@
  *
  * WHAT THIS IS NOT. Dispatch grants nothing: a member's tools are its mask,
  * its writes are its `read-only` sandbox mode (pinned inside creation setup),
- * its orders are Gate 2. The roster it checks is a menu (channels spec §5).
+ * its orders are Gate 2. The roster it checks - the one roster, the same from
+ * every folder - is a menu (channels spec §5; one-entry spec §5.3). A room is
+ * keyed by the calling session, not by a channel: its members are created in
+ * the caller's folder and join no workspace.
  * @module
  */
 import { randomUUID } from "node:crypto";
+import { join, relative, sep } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
@@ -52,7 +56,7 @@ import { createUserMessage, type ReasoningEffortId } from "@deepseek-ai/dsh-llm"
 import type { BotRow } from "./bots.ts";
 import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
 import { isHostPreset } from "./overlay.ts";
-import { readRosters } from "./roster.ts";
+import { readRoster } from "./roster.ts";
 import { registerRoomProjection } from "./room-projection.ts";
 import { BRIEF_SCHEMA, formatDiscussionSummary, parseMemberView, type DiscussionSummary, type RoomBrief } from "./room-contract.ts";
 import {
@@ -146,7 +150,6 @@ export interface RoomContextLike {
   agentPresets: { mount(agentCtx: AgentCtxLike, id: string): Promise<unknown> };
   agentDefaultModel: { currentSelection(): ModelSelectionLike };
   llm: { resolveCallConfig(config: { provider: string; model: string }): Promise<unknown> };
-  workspaceRegistry: { resolveByPath(path: string): Promise<{ attachSession(id: string): Promise<void> } | undefined> };
   /** The session domain (service `sessionController`, NEW packages/api/session-controller/src/index.ts:71-76):
    * `resolveAgent` resumes a cold session through the host's OWN composition
    * (`composeAgent` = model selection + preset mount, agent.ts:381-397) - the
@@ -158,14 +161,34 @@ export interface RoomContextLike {
 
 /* ---------- the engine's own seams ---------- */
 
-export interface RoomChannel { workspaceId: string; name: string; dir: string }
+/** Where a room is: the calling session's folder and the name the members' prompt gives it. */
+export interface RoomPlace { dir: string; name: string }
+
+/**
+ * The place a session's folder is: `workbench` for the repository root itself,
+ * `<name>` for `<root>/strategies/<name>` and anything under it, otherwise the
+ * folder's last segment; `null` when there is no cwd. Pure - it never asks a
+ * registry, so a folder never adopted as a workspace is a place like any other.
+ * @param root - the repository root.
+ * @param cwd - the session header's cwd.
+ */
+export function placeOf(root: string, cwd: string | undefined): RoomPlace | null {
+  if (typeof cwd !== "string" || cwd === "") return null;
+  const rel = relative(root, cwd);
+  if (rel === "") return { dir: cwd, name: "workbench" };
+  const parts = rel.split(sep).filter((p) => p !== "");
+  if (parts[0] === "strategies" && parts[1] !== undefined) return { dir: cwd, name: parts[1] };
+  const last = cwd.split(/[\\/]/).filter((p) => p !== "").pop();
+  return { dir: cwd, name: last ?? cwd };
+}
+
 export interface RoomClock { now(): number; setTimeout(fn: () => void, ms: number): unknown; clearTimeout(handle: unknown): void }
 export interface RoomDeps {
   ctx: RoomContextLike;
   /** The harness home holding `face/channels.json`. */
   home: string;
-  /** Which channel a session's directory belongs to (panels.ts `channelFor`, with `dir`). */
-  channelFor(cwd: string | undefined): Promise<RoomChannel | null>;
+  /** The place a session's folder is ({@link placeOf} over the repository root); `null` for no cwd. */
+  placeFor(cwd: string | undefined): RoomPlace | null;
   /** `listBots(botsRoot, presets.list)` from bots.ts, narrowed. */
   listBots(): Promise<Pick<BotRow, "id" | "name" | "model" | "broken">[]>;
   caps?: Partial<RoomCaps>;
@@ -193,7 +216,7 @@ export interface Round {
 }
 export interface Room {
   id: string;
-  channel: RoomChannel;
+  place: RoomPlace;
   members: Map<string, Member>;
   ensuring: Map<string, Promise<Member>>;
   selections: Map<string, { selection: ModelSelectionLike; note?: string }>;
@@ -334,10 +357,10 @@ export class RoomEngine {
   onDispose(fn: () => void): void { this.disposers.push(fn); }
 
   /** The runtime for a room session; created on first sight. */
-  roomOf(agentId: string, channel: RoomChannel): Room {
+  roomOf(agentId: string, place: RoomPlace): Room {
     let room = this.rooms.get(agentId);
     if (room === undefined) {
-      room = { id: agentId, channel, members: new Map(), ensuring: new Map(), selections: new Map(), outbox: [], posted: new Set(), roundsThisSend: 0, turnsThisSend: 0 };
+      room = { id: agentId, place, members: new Map(), ensuring: new Map(), selections: new Map(), outbox: [], posted: new Set(), roundsThisSend: 0, turnsThisSend: 0 };
       this.rooms.set(agentId, room);
     }
     return room;
@@ -382,7 +405,7 @@ export class RoomEngine {
     try {
       fn();
     } catch (err) {
-      this.log(`could not ${what} in ${room.channel.name}: ${errText(err)}`);
+      this.log(`could not ${what} in ${room.place.name}: ${errText(err)}`);
     }
   }
 
@@ -408,7 +431,7 @@ export class RoomEngine {
     if (session === undefined) return;
     const unreadable = unreadableLog(session);
     if (unreadable !== undefined) {
-      this.log(`${unreadable}; ${room.outbox.length} message(s) stay in the outbox of ${room.channel.name}`);
+      this.log(`${unreadable}; ${room.outbox.length} message(s) stay in the outbox of ${room.place.name}`);
       return;
     }
     if (!isQuiet(session)) return;
@@ -500,7 +523,7 @@ export class RoomEngine {
     const headers = (await this.deps.ctx.sessionPersistence?.list() ?? []).map((s) => s.header);
     if (logged !== undefined) {
       if (headers.some((h) => h.id === logged)) return logged;
-      this.log(`${bot}'s member session ${logged} in ${room.channel.name} is gone from the session store; looking for a newer one`);
+      this.log(`${bot}'s member session ${logged} in ${room.place.name} is gone from the session store; looking for a newer one`);
     }
     const mine = headers
       .filter((h) => h.parentSession === room.id && h.agentPreset === bot && h.origin === undefined)
@@ -537,7 +560,7 @@ export class RoomEngine {
            * memory silently. The turn fails with the reason (the round-end text
            * carries it to Gravit) and the log line tells the operator what to do. */
           const reason = memberResumeFailure(bot.id, existing, err);
-          this.log(`${reason} (channel ${room.channel.name})`);
+          this.log(`${reason} (room in ${room.place.name})`);
           throw new Error(reason);
         }
       }
@@ -545,7 +568,7 @@ export class RoomEngine {
       const sessionId = `session-${randomUUID()}`;
       agent = (await this.deps.ctx.agents.create({
         sessionId,
-        meta: { cwd: room.channel.dir, parentSession: room.id, agentPreset: bot.id },
+        meta: { cwd: room.place.dir, parentSession: room.id, agentPreset: bot.id },
         agentOptions,
         setup: (agentCtx, a) => setup(agentCtx, a, true),
       })).agent;
@@ -553,8 +576,6 @@ export class RoomEngine {
        * announcement listeners appended, the member is prompted only read-only. */
       const effective = this.deps.ctx.permissionPresets.current(agent.session);
       if (effective !== "read-only") throw new Error(`member session ${sessionId} for ${bot.id} is "${effective}", not read-only; refusing to prompt it`);
-      const ws = await this.deps.ctx.workspaceRegistry.resolveByPath(room.channel.dir).catch(() => undefined);
-      await ws?.attachSession(sessionId).catch((err: unknown) => this.log(`could not attach ${sessionId} to channel ${room.channel.name}: ${errText(err)}`));
     }
     const member: Member = { bot: bot.id, name: bot.name, agent, queue: Promise.resolve() };
     room.members.set(bot.id, member);
@@ -581,7 +602,7 @@ export class RoomEngine {
 
   async runMemberTurn(room: Room, member: Member, roster: readonly RosterBot[], trigger: TurnTrigger, brief?: RoomBrief): Promise<MemberTurnResult> {
     const delta = this.deltaFor(room, roster, member);
-    const text = memberPrompt({ roomName: room.channel.name, roster, self: member.bot, delta: delta.text, trigger, ...(brief === undefined ? {} : { brief }) });
+    const text = memberPrompt({ roomName: room.place.name, roster, self: member.bot, delta: delta.text, trigger, ...(brief === undefined ? {} : { brief }) });
     const message = createUserMessage({
       content: [{ type: "text", text }],
       source: { kind: "room", form: "delta", room: room.id, bot: member.bot, messageIds: delta.messageIds, trigger, ...(brief === undefined ? {} : { brief }) },
@@ -670,13 +691,14 @@ export class RoomEngine {
 
   /* ---------- rounds (spec §4.3, §4.4, §4.6) ---------- */
 
-  /** The channel's bot roster, named: the file's ids with the display names dsh's roster reports. */
-  async rosterFor(channel: RoomChannel): Promise<RosterBot[]> {
-    const { rosters, corrupt } = await readRosters(this.deps.home);
-    if (corrupt) throw new Error(`the channel roster is unreadable; repair ${this.deps.home}/face/channels.json`);
-    if (!Object.hasOwn(rosters, channel.workspaceId)) throw new Error(`channel "${channel.name}" has no roster yet; it gets one the first time the channel list loads, and the operator checks bots in on the channel page`);
+  /** The one roster's bots, named: the file's ids with the display names dsh's roster reports.
+   * Fails CLOSED: a file the face does not understand, or none at all (after boot
+   * that means ensureRoster failed), throws naming `channels.json`. */
+  async rosterFor(): Promise<RosterBot[]> {
+    const { roster, corrupt } = await readRoster(this.deps.home);
+    if (roster === null) throw new Error(`the roster ${join(this.deps.home, "face", "channels.json")} ${corrupt ? "cannot be read" : "is missing"}, so no bot can be dispatched; repair channels.json in the harness home`);
     const bots = await this.deps.listBots();
-    return rosters[channel.workspaceId].bots.map((id) => {
+    return roster.bots.map((id) => {
       const row = bots.find((b) => b.id === id);
       return { id, name: row?.name ?? id, ...(row?.model === undefined ? {} : { model: row.model }), ...(row?.broken === undefined ? {} : { broken: row.broken }) };
     });
@@ -686,8 +708,8 @@ export class RoomEngine {
    * Start a round for Gravit and return at once (the tool result tells the model
    * to end its turn). Refuses on the round cap and while a round is unsettled.
    */
-  async dispatch(agentId: string, channel: RoomChannel, args: DispatchArgs, roster: readonly RosterBot[]): Promise<{ round: number; remainingRounds: number; notCalled: string[]; notes: string[] }> {
-    const room = this.roomOf(agentId, channel);
+  async dispatch(agentId: string, place: RoomPlace, args: DispatchArgs, roster: readonly RosterBot[]): Promise<{ round: number; remainingRounds: number; notCalled: string[]; notes: string[] }> {
+    const room = this.roomOf(agentId, place);
     if (room.active !== undefined && !room.active.superseded) {
       throw new Error(`round ${room.active.n} is still running (${room.active.turns.length} of its turns have ended); end your turn and dispatch again when you are woken`);
     }
@@ -705,7 +727,7 @@ export class RoomEngine {
       const note = this.noteFor(room, id);
       if (note !== undefined) notes.push(note);
     }
-    void this.runRound(room, round, args.to, roster, "dispatch", args.brief).catch((err: unknown) => this.log(`round ${round.n} in ${room.channel.name} failed: ${errText(err)}`));
+    void this.runRound(room, round, args.to, roster, "dispatch", args.brief).catch((err: unknown) => this.log(`round ${round.n} in ${room.place.name} failed: ${errText(err)}`));
     return {
       round: round.n,
       remainingRounds: this.caps.maxRounds - room.roundsThisSend,
@@ -813,19 +835,19 @@ export class RoomEngine {
       });
       this.roomAgent(room).followup(end as unknown as MessageLike);
     } catch (err) {
-      this.log(`round ${round.n} in ${room.channel.name} could not be delivered: ${errText(err)}; ${round.turns.length} turn(s) ran, ${room.outbox.length} message(s) stay in the outbox`);
+      this.log(`round ${round.n} in ${room.place.name} could not be delivered: ${errText(err)}; ${round.turns.length} turn(s) ran, ${room.outbox.length} message(s) stay in the outbox`);
     }
   }
 
   /* ---------- the operator's `@` (spec §4.4 rule 1) ---------- */
 
-  /** The channel a session belongs to, live or cold; `null` when it is in none. */
-  private async channelOf(sessionId: string): Promise<RoomChannel | null> {
+  /** The place a session is, live or cold, read from its header's cwd; `null` when the header has none. */
+  private async placeOfSession(sessionId: string): Promise<RoomPlace | null> {
     const live = this.deps.ctx.sessions.get(sessionId);
     let cwd = live?.header.cwd;
     /* `.header`: persistence lists snapshots since dsh 0.2 (see `findMemberSession`). */
     if (cwd === undefined) cwd = (await this.deps.ctx.sessionPersistence?.list() ?? []).find((s) => s.header.id === sessionId)?.header.cwd;
-    return this.deps.channelFor(cwd);
+    return this.deps.placeFor(cwd);
   }
 
   /** A cold room session becomes live through the host's OWN composition path:
@@ -855,26 +877,26 @@ export class RoomEngine {
    * member mid-turn takes it after that turn. Resets the caps like every send.
    */
   async say(sessionId: string, text: string): Promise<{ addressed: string[] }> {
-    const channel = await this.channelOf(sessionId);
-    if (channel === null) throw new HttpError(404, "this session is in no channel");
-    const roster = await this.rosterFor(channel).catch((err: unknown) => { throw new HttpError(409, errText(err)); });
+    const place = await this.placeOfSession(sessionId);
+    if (place === null) throw new HttpError(404, "this session has no folder");
+    const roster = await this.rosterFor().catch((err: unknown) => { throw new HttpError(409, errText(err)); });
     const addressed = resolveMentions(text, roster);
     if (addressed.length === 0) return { addressed: [] };
     await this.ensureLive(sessionId);
-    const room = this.roomOf(sessionId, channel);
+    const room = this.roomOf(sessionId, place);
     const message = createUserMessage({ content: [{ type: "text", text }], source: { kind: "user", mention: addressed } });
     this.post(room, message as unknown as MessageLike);
     this.onOperatorSend(room);
     const round: Round = { n: room.active?.n ?? 0, mode: "mention", superseded: false, capped: false, called: new Set(), continuations: [], continuationsRun: 0, turns: [] };
-    void this.runRound(room, round, addressed, roster, "mention").catch((err: unknown) => this.log(`@ turn in ${room.channel.name} failed: ${errText(err)}`));
+    void this.runRound(room, round, addressed, roster, "mention").catch((err: unknown) => this.log(`@ turn in ${room.place.name} failed: ${errText(err)}`));
     return { addressed };
   }
 
   /** What the client asks about a room: the roster, the members this engine drove, the caps left. Never resumes anything. */
   async describe(sessionId: string): Promise<{ roster: RosterBot[]; members: Record<string, { sessionId: string; name: string }>; caps: { roundsLeft: number; messagesLeft: number; maxRounds: number; maxBotMessages: number }; round?: { n: number; mode: string; superseded: boolean } }> {
-    const channel = await this.channelOf(sessionId);
-    if (channel === null) throw new HttpError(404, "this session is in no channel");
-    const roster = await this.rosterFor(channel).catch(() => [] as RosterBot[]);
+    const place = await this.placeOfSession(sessionId);
+    if (place === null) throw new HttpError(404, "this session has no folder");
+    const roster = await this.rosterFor().catch(() => [] as RosterBot[]);
     const room = this.rooms.get(sessionId);
     const members: Record<string, { sessionId: string; name: string }> = {};
     for (const [bot, member] of room?.members ?? []) members[bot] = { sessionId: member.agent.id, name: member.name };
@@ -934,7 +956,7 @@ export function memberResumeFailure(bot: string, sessionId: string, err: unknown
  * that enforces them, never from prose, because a wrong one here is invisible
  * to the type checker and to every test. */
 export const dispatchDescription = (caps: RoomCaps): string =>
-  "Ask the bots on this channel's roster for their views, each in its own voice. You are the organizer: choose whom (bot ids " +
+  "Ask the bots on the roster for their views, each in its own voice. You are the organizer: choose whom (bot ids " +
   "from the roster), the mode (parallel: everyone answers independently and sees no peer this round - use it first on a fresh " +
   "question; serial: each later bot sees the earlier answers). Prefer a structured brief with question, context, evidence requirements, " +
   "falsification and desired output. Also give a reason " +
@@ -958,14 +980,14 @@ function presetsOf(session: SessionLike, projections: RoomContextLike["sessionPr
   return out;
 }
 
-export function dispatchToolDefinition(engine: RoomEngine, deps: Pick<RoomDeps, "channelFor"> & { ctx?: Pick<RoomContextLike, "sessionProjections"> }): RoomToolDefinition {
+export function dispatchToolDefinition(engine: RoomEngine, deps: Pick<RoomDeps, "placeFor"> & { ctx?: Pick<RoomContextLike, "sessionProjections"> }): RoomToolDefinition {
   return {
     name: "dispatch",
     description: dispatchDescription(engine.caps),
     parameters: {
       type: "object",
       properties: {
-        to: { type: "array", items: { type: "string" }, description: "bot ids from this channel's roster, in speaking order for serial" },
+        to: { type: "array", items: { type: "string" }, description: "bot ids from the roster, in speaking order for serial" },
         mode: { type: "string", enum: ["parallel", "serial"] },
         brief: BRIEF_SCHEMA,
         reason: { type: "string", description: "why these bots, why this mode" },
@@ -990,12 +1012,14 @@ export function dispatchToolDefinition(engine: RoomEngine, deps: Pick<RoomDeps, 
        * EITHER naming a bot refuses - strictly narrower, never wider. The mask
        * already keeps `dispatch` out of a voice's roster; this is the second lock. */
       if (presetsOf(agent.session, deps.ctx?.sessionProjections).some((preset) => !isHostPreset(preset))) throw new Error("dispatch is Gravit's tool; a voice does not dispatch");
-      const channel = await deps.channelFor(agent.session.header.cwd);
-      if (channel === null) throw new Error("dispatch works in a channel session; this session is in no channel");
-      const roster = await engine.rosterFor(channel);
+      /* Any folder: the members are created in the caller's own. A session
+       * whose header carries no cwd has nowhere to put them. */
+      const place = deps.placeFor(agent.session.header.cwd);
+      if (place === null) throw new Error("dispatch needs a session with a folder; this session's header has no cwd");
+      const roster = await engine.rosterFor();
       const valid = validateDispatch(args, roster);
       if (!valid.ok) throw new Error(valid.message);
-      const started = await engine.dispatch(agent.id, channel, valid.value, roster);
+      const started = await engine.dispatch(agent.id, place, valid.value, roster);
       return {
         text: dispatchResultText(valid.value, roster, started.round, started.remainingRounds, started.notes),
         round: started.round,
