@@ -32,7 +32,7 @@ const SLACK_SECRET: SlackSecret = { appToken: slackTokens().app, botToken: slack
 describe("the seams for a second network", () => {
   it("the wire id takes Telegram's numbers and Slack's ts, nothing else", () => {
     for (const ok of ["telegram:41", "slack:1730812345.001200"]) expect(WIRE_ID.test(ok)).toBe(true);
-    for (const no of ["slack:41", "slack:D0123:1730812345.001200", "imessage:1", "imessage:p:0/3F2504E0-4F89-11D3-9A0C-0305E82C3301", "telegram:4.1", "41"]) expect(WIRE_ID.test(no)).toBe(false);
+    for (const no of ["slack:41", "slack:D0123:1730812345.001200", "imessage:", "imessage:a b", "telegram:4.1", "41"]) expect(WIRE_ID.test(no)).toBe(false);
   });
 
   it("routing knows slack; a network the account does not speak on is refused", () => {

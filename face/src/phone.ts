@@ -75,7 +75,7 @@ export const isPhoneNetwork = (x: unknown): x is string => typeof x === "string"
 /** A message's id on the wire: Telegram's message_id, Slack's `ts`, iMessage's chat GUID. The account's rule (account/src/portfolio/identity/kinds.ts
  * `WIRE_ID`), redeclared here byte for byte - the face does not import the account's package - and tied to it by
  * tests/phone-bridge.test.ts. */
-export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6}|imessage:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$/;
+export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6}|imessage:[^\s]{1,128})$/;
 
 /** A failure as one line: its message, and the code it or its cause carries when the message does not say it. */
 function reasonOf(err: unknown): string {

@@ -169,9 +169,9 @@ describe("iMessage as a network", () => {
   it("secretsOf an iMessage file is the secret and its Basic spelling", () => {
     expect(secretsOf(s)).toEqual([s.projectSecret, Buffer.from(`${s.projectId}:${s.projectSecret}`).toString("base64")]);
   });
-  it("WIRE_ID takes an iMessage GUID and refuses a part's id", () => {
-    expect(WIRE_ID.test("imessage:3F2504E0-4F89-11D3-9A0C-0305E82C3301")).toBe(true);
-    expect(WIRE_ID.test("imessage:p:0/3F2504E0-4F89-11D3-9A0C-0305E82C3301")).toBe(false);
+  it("WIRE_ID takes any iMessage GUID of 1 to 128 characters without white space", () => {
+    for (const ok of ["imessage:3F2504E0-4F89-11D3-9A0C-0305E82C3301", "imessage:p:0/3F2504E0-4F89-11D3-9A0C-0305E82C3301", `imessage:${"g".repeat(128)}`]) expect(WIRE_ID.test(ok)).toBe(true);
+    for (const no of ["imessage:", "imessage: ", "imessage:a b", "imessage:a\tb", `imessage:${"g".repeat(129)}`]) expect(WIRE_ID.test(no)).toBe(false);
   });
   it("the routing takes imessage, sorted before telegram", () => {
     expect(parseRouting("chat=imessage,telegram;alerts=imessage;brief=;cards=;fills=")).toEqual({ chat: ["imessage", "telegram"], alerts: ["imessage"], brief: [], cards: [], fills: [] });

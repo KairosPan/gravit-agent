@@ -675,9 +675,9 @@ test("the wire id is the account's rule: face/src/phone.ts and the account's kin
     return m[1];
   };
   assert.equal(rule(join(HERE, "../src/phone.ts")), rule(join(HERE, "../../account/src/portfolio/identity/kinds.ts")));
-  assert.equal(WIRE_ID.source, "^(?:telegram:\\d{1,16}|slack:\\d{9,12}\\.\\d{6}|imessage:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$");
-  for (const good of ["telegram:4821", "slack:1730812345.001200", "imessage:0A1B2C3D-0000-4000-8000-0123456789ab"]) assert.ok(WIRE_ID.test(good), good);
-  for (const bad of ["slack:4821", "slack:1730812345.0012", "slack:C0DM:1730812345.001200", "matrix:1", "telegram:1.000001", "imessage:42", "imessage:0A1B2C3D-0000-4000-8000-0123456789a"]) assert.ok(!WIRE_ID.test(bad), bad);
+  assert.equal(WIRE_ID.source, "^(?:telegram:\\d{1,16}|slack:\\d{9,12}\\.\\d{6}|imessage:[^\\s]{1,128})$");
+  for (const good of ["telegram:4821", "slack:1730812345.001200", "imessage:0A1B2C3D-0000-4000-8000-0123456789ab", "imessage:p:0/0A1B2C3D-0000-4000-8000-0123456789ab", `imessage:${"x".repeat(128)}`]) assert.ok(WIRE_ID.test(good), good);
+  for (const bad of ["slack:4821", "slack:1730812345.0012", "slack:C0DM:1730812345.001200", "matrix:1", "telegram:1.000001", "imessage:", "imessage:a b", "imessage:a\nb", `imessage:${"x".repeat(129)}`]) assert.ok(!WIRE_ID.test(bad), bad);
   /* an inbox message with an id of neither network is left out */
   const r = await rig("wire-id");
   try {

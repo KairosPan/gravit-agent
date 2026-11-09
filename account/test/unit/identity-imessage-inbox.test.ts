@@ -399,6 +399,32 @@ describe("the iMessage connector", () => {
     expect(ImessageConnector.resumeFrom(home)).toBeUndefined();
   });
 
+  it("a text whose GUID is blank, or whose wire id fails, is not stored: one line a minute, and the cursor moves past it", async () => {
+    await fake.push(msg({ sequence: 7, guid: "", from: PHONE, text: "one" }));
+    await fake.push(msg({ sequence: 8, guid: "  ", from: PHONE, text: "two" }));
+    await fake.push(msg({ sequence: 9, guid: "a b", from: PHONE, text: "three" }));
+    await fake.push(msg({ sequence: 10, guid: "g".repeat(129), from: PHONE, text: "four" }));
+    expect(inbox.after(0)).toEqual([]);
+    expect(ImessageConnector.resumeFrom(home)).toBe(10);
+    expect(fake.openStreams()).toBe(1);
+    expect(conn.status().pollFailing).toBeUndefined();
+    const said = () => lines.filter((l) => l.includes("no message id the face can read"));
+    expect(said()).toHaveLength(1);
+    expect(said()[0]).not.toContain("one");
+    clock.advance(60_000);
+    await fake.push(msg({ sequence: 11, guid: "", from: PHONE, text: "five" }));
+    expect(said()).toHaveLength(2);
+    // a good GUID after them is stored as ever
+    await fake.push(msg({ sequence: 12, guid: G1, from: PHONE, text: "six" }));
+    expect(inbox.after(0).map((m) => m.messageId)).toEqual([`imessage:${G1}`]);
+  });
+
+  it("a reply-to GUID the wire id refuses is left off the stored text", async () => {
+    await fake.push(msg({ sequence: 7, guid: G1, from: PHONE, text: "re", replyTo: "a b" }));
+    expect(inbox.after(0)).toHaveLength(1);
+    expect(inbox.after(0)[0]!.replyTo).toBeUndefined();
+  });
+
   it("dispose closes the stream and leaves no wait", async () => {
     await conn.dispose();
     expect(fake.openStreams()).toBe(0);

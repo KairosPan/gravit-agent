@@ -11,6 +11,8 @@
  *     commands, which the desk reads whatever the row says; else answered with the chat-off line and kept nowhere;
  *   - anything else from the operator in that 1:1 chat (a photo, a voice note) is answered "text only, please" and kept nowhere;
  *   - a 1:1 iMessage from anyone else, the operator's own email handle included: counted in Not you unless blocked, never answered;
+ *     A text whose GUID is blank, or whose `imessage:<GUID>` fails WIRE_ID (kinds.ts), is not stored — the face would drop it — and is said
+ *     in a line at most once a minute; a reply-to GUID that fails it is left off;
  *   - an SMS or an RCS message, from anyone, the operator's number included: dropped, said in a line at most once a minute;
  *   - a group, Gravit's own message, and every other event: dropped.
  * Only then does the cursor move past it. A text the inbox cannot store closes the stream there, the cursor before it, and the stream is
@@ -24,7 +26,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Connector, Transport } from "./identity.ts";
 import type { InboxRing } from "./inbox.ts";
-import { chatOffLine } from "./kinds.ts";
+import { chatOffLine, WIRE_ID } from "./kinds.ts";
 import { isGroupChat, PhotonError, type PhotonEvent, type PhotonLink, type PhotonMessage, type PhotonProject, type PhotonStream } from "./photon-link.ts";
 import { secretsOf, type ImessageSecret } from "./secret-file.ts";
 import { identityDir, senderRef, writeIdentityFile, type Binding, type Strangers } from "./store.ts";
@@ -140,6 +142,7 @@ export class ImessageConnector implements Connector {
   private watchTimer: unknown;
   private reopenTimer: unknown;
   private smsSaidAt = Number.NEGATIVE_INFINITY;
+  private badGuidSaidAt = Number.NEGATIVE_INFINITY;
   private readonly project: PhotonProject;
 
   constructor(private readonly d: ImessageConnectorDeps) {
@@ -350,9 +353,19 @@ export class ImessageConnector implements Connector {
       return true;
     }
     const messageId = `imessage:${m.guid}`;
+    // an id the face's desk would refuse (WIRE_ID) is never stored: it would be dropped there, its cursor moved past it unseen
+    if (typeof m.guid !== "string" || m.guid.trim() === "" || !WIRE_ID.test(messageId)) {
+      const at = this.d.clock.now();
+      if (at - this.badGuidSaidAt >= RECORD_EVERY_MS) {
+        this.badGuidSaidAt = at;
+        this.d.log("identity: an iMessage from the operator came with no message id the face can read: it is not stored, and the stream goes on past it");
+      }
+      return true;
+    }
     if (this.d.inbox.has(messageId, this.d.binding.botId)) return true;
+    const replyTo = m.replyTo ? `imessage:${m.replyTo}` : undefined;
     try {
-      this.d.inbox.append({ network: "imessage", messageId, ...(m.replyTo ? { replyTo: `imessage:${m.replyTo}` } : {}), text: m.text, at: this.stamp() }, this.d.binding.botId);
+      this.d.inbox.append({ network: "imessage", messageId, ...(replyTo !== undefined && WIRE_ID.test(replyTo) ? { replyTo } : {}), text: m.text, at: this.stamp() }, this.d.binding.botId);
     } catch (err) {
       this.d.log(`identity: the operator's iMessage could not be stored in the inbox (${codeOf(err)}); it is read again from Photon`);
       return false;

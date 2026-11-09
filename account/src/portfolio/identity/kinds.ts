@@ -19,8 +19,8 @@ export const NETWORKS: readonly Network[] = ["telegram", "imessage", "slack"];
 export const NETWORK_NAME: Readonly<Record<Network, string>> = { telegram: "Telegram", imessage: "iMessage", slack: "Slack" };
 
 /** a message's id on the wire, `<network>:<the network's own id>`: Telegram's message_id (digits), Slack's ts (seconds, a dot, six
- * digits), iMessage's message GUID (provisional until Photon's is seen). There is no channel in Slack's: Gravit has exactly one DM there. The one rule the account's send, its route and the face read */
-export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6}|imessage:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$/;
+ * digits), iMessage's message GUID — any 1 to 128 characters but white space, since Photon names no shape for it (the connector logs and skips one that fails, imessage.ts). There is no channel in Slack's: Gravit has exactly one DM there. The one rule the account's send, its route and the face read */
+export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6}|imessage:[^\s]{1,128})$/;
 
 /** a Slack token of any kind anywhere in a text (bot, user, app-level, refresh and the rest): taken out as `<token>` wherever the account
  * says or sends anything, on top of the redactor of its own tokens' exact spellings. Global: use it with replace, or with search */
