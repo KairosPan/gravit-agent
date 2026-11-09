@@ -236,6 +236,67 @@ describe("the iMessage connector", () => {
     expect(ImessageConnector.resumeFrom(home)).toBe(8);
   });
 
+  it("two failed appends in a row reopen at 5 s, then 10 s, failing in between", async () => {
+    await fake.push(msg({ sequence: 7, guid: G1, from: PHONE, text: "first" }));
+    rmSync(join(identityDir(home), "inbox.json"));
+    mkdirSync(join(identityDir(home), "inbox.json"));
+    await fake.push(msg({ sequence: 8, guid: G2, from: PHONE, text: "second" }));
+    expect(conn.status().pollFailing).toMatchObject({ reason: "the inbox could not store a message" });
+    clock.advance(4_999);
+    await flush();
+    expect(fake.openStreams()).toBe(0);
+    clock.advance(1);
+    await flush();
+    expect(fake.openStreams()).toBe(1);
+    expect(conn.status().pollFailing).toBeDefined();
+    await fake.push(msg({ sequence: 8, guid: G2, from: PHONE, text: "second" }));
+    expect(fake.openStreams()).toBe(0);
+    expect(conn.status().pollFailing).toBeDefined();
+    clock.advance(9_999);
+    await flush();
+    expect(fake.openStreams()).toBe(0);
+    clock.advance(1);
+    await flush();
+    expect(fake.openStreams()).toBe(1);
+    expect(fake.lastSince()).toBe(7);
+  });
+
+  it("with no cursor yet, a failed first append reopens from just before it, and the text is stored", async () => {
+    mkdirSync(join(identityDir(home), "inbox.json"), { recursive: true });
+    await fake.push(msg({ sequence: 40, guid: G1, from: PHONE, text: "first ever" }));
+    expect(fake.openStreams()).toBe(0);
+    rmSync(join(identityDir(home), "inbox.json"), { recursive: true });
+    clock.advance(5_000);
+    await flush();
+    expect(fake.lastSince()).toBe(39);
+    await fake.push(msg({ sequence: 40, guid: G1, from: PHONE, text: "first ever" }));
+    expect(inbox.after(0).map((m) => m.text)).toEqual(["first ever"]);
+    expect(ImessageConnector.resumeFrom(home)).toBe(40);
+    expect(conn.status().pollFailing).toBeUndefined();
+  });
+
+  it("a throw while handling (the blocked list) is read again like a failed append", async () => {
+    let throwing = true;
+    const c0 = conn;
+    await c0.dispose();
+    const link = fakePhotonLink({ project: PROJECT, users: [USER] });
+    const c = new ImessageConnector({ home, link, binding: BINDING, secret: SECRET, inbox, strangers, blocked: () => { if (throwing) throw new Error("blocked list unreadable"); return []; }, chatOn: () => true, reply: async () => {}, sequence: 5, clock, log: (l) => lines.push(l) });
+    connectors.push(c);
+    c.start();
+    await flush();
+    await expect(link.push(msg({ sequence: 6, from: "+14155550199", text: "hi" }))).resolves.toBeUndefined();
+    expect(lines.some((l) => /could not be handled/.test(l))).toBe(true);
+    expect(c.status().pollFailing).toBeDefined();
+    expect(ImessageConnector.resumeFrom(home)).toBeUndefined();
+    throwing = false;
+    clock.advance(5_000);
+    await flush();
+    expect(link.lastSince()).toBe(5);
+    await link.push(msg({ sequence: 6, from: "+14155550199", text: "hi" }));
+    expect(strangers.list()).toHaveLength(1);
+    expect(ImessageConnector.resumeFrom(home)).toBe(6);
+  });
+
   it("a silent stream turns failing and reopens", async () => {
     await fake.push(msg({ sequence: 7, guid: G1, from: PHONE, text: "status?" }));
     clock.advance(HEARTBEAT_STALE_MS - 1);

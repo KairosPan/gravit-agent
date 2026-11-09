@@ -236,15 +236,29 @@ export class ImessageConnector implements Connector {
 
   private async event(gen: number, e: PhotonEvent): Promise<void> {
     if (!this.live(gen)) return;
-    this.sign();
     const sequence = e.type === "message" ? e.message.sequence : e.sequence;
-    if (!whole(sequence) || (this.cursor !== undefined && sequence <= this.cursor)) return;
-    if (e.type === "message" && !(await this.handle(e.message))) {
-      // the text could not be stored: the cursor stays before it, and the stream is opened again from there
-      if (this.live(gen)) this.reopen(this.nextBackoff(), "a text of the operator's could not be stored");
+    if (!whole(sequence) || (this.cursor !== undefined && sequence <= this.cursor)) {
+      this.sign();
       return;
     }
+    let ok = true;
+    if (e.type === "message") {
+      try {
+        ok = await this.handle(e.message);
+      } catch (err) {
+        this.d.log(`identity: an iMessage event could not be handled (${codeOf(err)}); it is read again from Photon`);
+        ok = false;
+      }
+    }
     if (!this.live(gen)) return;
+    if (!ok) {
+      // not stored: the cursor stays before it — with no cursor yet, just before it — and the stream is opened again from there
+      this.cursor ??= sequence - 1;
+      this.pollFailing = { since: this.pollFailing?.since ?? this.stamp(), reason: "the inbox could not store a message" };
+      this.reopen(this.nextBackoff(), "a text of the operator's could not be stored");
+      return;
+    }
+    this.sign();
     this.advance(sequence);
   }
 
