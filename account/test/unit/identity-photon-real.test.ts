@@ -1,7 +1,7 @@
 /** THE REAL PHOTON LINK (identity/photon-real.ts): Photon's REST calls for the project, its users and the line token, and the
  * advanced-imessage gRPC client for the event stream and the send — run here against a fake fetch, a fake client and a held clock, never
  * the network. */
-import { IMessageError, RateLimitError, ValidationError } from "@photon-ai/advanced-imessage/grpc";
+import { ConnectionError, IMessageError, RateLimitError, ValidationError } from "@photon-ai/advanced-imessage/grpc";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PhotonError, type PhotonEvent, type PhotonLink, type PhotonStreamHandlers } from "../../src/portfolio/identity/photon-link.ts";
 import { realPhotonLink, type PhotonImClient } from "../../src/portfolio/identity/photon-real.ts";
@@ -136,6 +136,7 @@ describe("the real Photon link", () => {
   let route: (s: Seen) => Response | Promise<Response>;
   let clock: ReturnType<typeof heldClock>;
   let mints: number;
+  let mintsBy: Record<string, number>;
   let tokens: string[];
   let expiresIn: number;
   let lives: Push[];
@@ -156,9 +157,11 @@ describe("the real Photon link", () => {
       body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
     };
     seen.push(s);
-    if (s.method === "POST" && s.url === `${API}/projects/prj_1/imessage/tokens`) {
+    const minted = s.method === "POST" ? /^https:\/\/spectrum\.photon\.codes\/projects\/([^/]+)\/imessage\/tokens$/.exec(s.url) : null;
+    if (minted) {
       mints++;
-      const token = `line-token-${mints}`;
+      mintsBy[minted[1]!] = (mintsBy[minted[1]!] ?? 0) + 1;
+      const token = minted[1] === "prj_1" ? `line-token-${mints}` : `line-token-${minted[1]}-${mints}`;
       tokens.push(token);
       return ok({ type: "shared", token, expiresIn });
     }
@@ -226,6 +229,7 @@ describe("the real Photon link", () => {
     route = () => json(404, { succeed: false, error: "no route" });
     clock = heldClock();
     mints = 0;
+    mintsBy = {};
     tokens = [];
     expiresIn = 3600;
     lives = [];
@@ -331,6 +335,28 @@ describe("the real Photon link", () => {
       await expect(link.removeUser(p, "usr_1")).rejects.toMatchObject({ kind: "refused" });
     });
 
+    it("a Retry-After header becomes retryAfterMs", async () => {
+      route = () => new Response("{}", { status: 429, headers: { "retry-after": "7" } });
+      await expect(link.getUser(p, "usr_1")).rejects.toMatchObject({ kind: "retry", code: "429", retryAfterMs: 7000 });
+      route = () => json(503, {});
+      const e = await link.getUser(p, "usr_1").catch((x: unknown) => x);
+      expect((e as PhotonError).retryAfterMs).toBeUndefined();
+    });
+
+    it("removeUser treats a 404 as already removed", async () => {
+      route = () => json(404, { succeed: false });
+      await expect(link.removeUser(p, "usr_1")).resolves.toBeUndefined();
+    });
+
+    it("a 404 on any path but /projects/{id}/ is refused, not auth", async () => {
+      route = (s) => (s.url.endsWith("/imessage/") ? json(404, {}) : ok({ id: "prj_1" }));
+      await expect(link.checkProject(p)).rejects.toMatchObject({ kind: "refused", code: "404" });
+      route = () => json(404, {});
+      await expect(link.findUser(p, "+14155550100")).rejects.toMatchObject({ kind: "refused", code: "404" });
+      route = (s) => (s.method === "POST" ? json(404, {}) : ok({ available: true }));
+      await expect(link.addUser(p, "+14155550100")).rejects.toMatchObject({ kind: "refused", code: "404" });
+    });
+
     it("the message is fixed words and the status, never the response body", async () => {
       route = () => json(400, { succeed: false, error: "body-words-that-must-not-leak" });
       const e = await link.getUser(p, "usr_1").catch((x: unknown) => x);
@@ -433,6 +459,17 @@ describe("the real Photon link", () => {
       await expect(link.sendText(p, "+14155550100", "hi", "r1:0")).rejects.toMatchObject({ kind: "retry", code: "databaseError" });
       const e = await link.sendText(p, "+14155550100", "hi", "r1:0").catch((x: unknown) => x);
       expect(String((e as Error).message)).not.toContain("server said");
+    });
+
+    it("every RateLimitError and ConnectionError is retry, whatever its code", async () => {
+      send = async () => {
+        throw imError(RateLimitError, "messageNotFound");
+      };
+      await expect(link.sendText(p, "+14155550100", "hi", "r1:0")).rejects.toMatchObject({ kind: "retry", code: "messageNotFound" });
+      send = async () => {
+        throw imError(ConnectionError, "privateApiUnavailable", { retryable: false, retryAfter: 1500 });
+      };
+      await expect(link.sendText(p, "+14155550100", "hi", "r1:0")).rejects.toMatchObject({ kind: "retry", code: "privateApiUnavailable", retryAfterMs: 1500 });
     });
 
     it("an expired token is minted again on the next send", async () => {
@@ -568,6 +605,31 @@ describe("the real Photon link", () => {
       lives.at(-1)!.push(received(9));
       await vi.waitFor(() => expect(handled).toEqual([8, 9]));
       expect(started).toEqual([8, 9]);
+    });
+
+    it("two projects hold their own tokens: a send on B does not reopen A's stream, and each mints once", async () => {
+      const q = { projectId: "prj_2", secret: "other-secret" };
+      const a = handlers();
+      const b = handlers();
+      link.stream(p, undefined, a.h);
+      await vi.waitFor(() => expect(lives).toHaveLength(1));
+      link.stream(q, undefined, b.h);
+      await vi.waitFor(() => expect(lives).toHaveLength(2));
+      expect(await link.sendText(q, "+14155550100", "hi", "r1:0")).toEqual({ guid: "out-1" });
+      expect(await link.sendText(p, "+14155550100", "hi", "r1:1")).toEqual({ guid: "out-1" });
+      await new Promise((res) => setTimeout(res, 10));
+      expect(mintsBy).toEqual({ prj_1: 1, prj_2: 1 });
+      expect(lives).toHaveLength(2);
+      expect(lives.map((l) => l.closed)).toEqual([false, false]);
+      expect(clients.map((c) => [c.token, c.closed])).toEqual([
+        ["line-token-1", false],
+        ["line-token-prj_2-2", false],
+      ]);
+      expect(sends.map((s) => s.token)).toEqual(["line-token-prj_2-2", "line-token-1"]);
+      lives[0]!.push(received(1));
+      lives[1]!.push(received(2));
+      await vi.waitFor(() => expect([a.handled, b.handled]).toEqual([[1], [2]]));
+      expect([a.failures, b.failures]).toEqual([[], []]);
     });
 
     it("an auth error on the live stream fails with auth, and the link never reopens by itself", async () => {

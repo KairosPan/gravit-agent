@@ -6,7 +6,7 @@
  * A stream's catch-up runs while its live subscription is already buffering, so nothing between the two is lost, and each sequence is
  * delivered once. Telemetry is never on (photon-link.ts). The secret, the Basic string and the token appear in no
  * PhotonError message and no log line — each message is fixed words and a status or a code, never what Photon or a thrown error said. */
-import { createClient as createGrpcClient, IMessageError, ValidationError } from "@photon-ai/advanced-imessage/grpc";
+import { ConnectionError, createClient as createGrpcClient, IMessageError, RateLimitError, ValidationError } from "@photon-ai/advanced-imessage/grpc";
 import { dmChat, PHOTON_API, PHOTON_GRPC, PhotonError, type PhotonEvent, type PhotonLink, type PhotonProject, type PhotonStream, type PhotonStreamHandlers, type PhotonUser } from "./photon-link.ts";
 import { basicOf } from "./secret-file.ts";
 import { realClock, type IdentityClock } from "./telegram.ts";
@@ -85,7 +85,7 @@ function imError(e: unknown): PhotonError | "duplicate" {
   if (AUTH_CODES.has(code)) return new PhotonError("auth", code, `Photon refused the line token (${code})`);
   if (code === "duplicateMessage") return "duplicate";
   if (REFUSED_CODES.has(code)) return new PhotonError("refused", code, `Photon refused the message (${code})`);
-  if (e.retryable || RATE_CODES.has(code) || RETRY_CODES.has(code)) {
+  if (e instanceof RateLimitError || e instanceof ConnectionError || e.retryable || RATE_CODES.has(code) || RETRY_CODES.has(code)) {
     const after = typeof e.retryAfter === "number" && Number.isFinite(e.retryAfter) && e.retryAfter >= 0 ? e.retryAfter : undefined;
     return new PhotonError("retry", code, `Photon asks to try again later (${code})`, after);
   }
@@ -215,9 +215,9 @@ export function realPhotonLink(o: RealPhotonLinkOptions): PhotonLink {
     return { token: d.token, expiresIn: d.expiresIn };
   }
 
-  // ── the held token and client ──
-  let held: Held | undefined;
-  let minting: { key: string; done: Promise<Held> } | undefined;
+  // ── the held token and client, one per project ──
+  const held = new Map<string, Held>();
+  const minting = new Map<string, Promise<Held>>();
   const runs = new Set<Run>();
 
   const fresh = (h: Held, key: string): boolean => h.key === key && clock.now() < h.renewAt;
@@ -225,14 +225,15 @@ export function realPhotonLink(o: RealPhotonLinkOptions): PhotonLink {
   /** the held client for the project, minting a token when the held one is past 80% of its life */
   async function ensure(p: PhotonProject): Promise<Held> {
     const key = keyOf(p);
-    const now = held;
+    const now = held.get(key);
     if (now && fresh(now, key)) return now;
-    if (minting?.key === key) return minting.done;
+    const pending = minting.get(key);
+    if (pending) return pending;
     const done = (async () => {
       const t = await mint(p);
       const next: Held = { key, token: t.token, renewAt: clock.now() + t.expiresIn * 1000 * RENEW_SHARE, im: createClient({ address: grpcAddress, token: t.token, tls: true }) };
-      const old = held;
-      held = next;
+      const old = held.get(key);
+      held.set(key, next);
       log(`imessage: line token minted (renews in ${Math.round(t.expiresIn * RENEW_SHARE)} s)`);
       if (old) {
         for (const r of runs) if (r.on === old) r.move();
@@ -240,17 +241,17 @@ export function realPhotonLink(o: RealPhotonLinkOptions): PhotonLink {
       }
       return next;
     })();
-    minting = { key, done };
+    minting.set(key, done);
     try {
       return await done;
     } finally {
-      if (minting?.done === done) minting = undefined;
+      if (minting.get(key) === done) minting.delete(key);
     }
   }
 
   /** the held token is no longer good: the next call mints again */
   const stale = (h: Held): void => {
-    if (held === h) h.renewAt = -Infinity;
+    if (held.get(h.key) === h) h.renewAt = -Infinity;
   };
 
   class Run implements PhotonStream {
@@ -437,9 +438,9 @@ export function realPhotonLink(o: RealPhotonLinkOptions): PhotonLink {
 
     async dispose() {
       await Promise.all([...runs].map((r) => r.close()));
-      const h = held;
-      held = undefined;
-      if (h) await h.im.close().catch(() => {});
+      const all = [...held.values()];
+      held.clear();
+      await Promise.all(all.map((h) => h.im.close().catch(() => {})));
     },
   };
 }
