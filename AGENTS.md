@@ -5,6 +5,10 @@ The research agent, Gravit, does not: dsh hands it `GRAVIT.md` and nothing else.
 
 - Read `CLAUDE.md` first — the map, the commands, the gotchas. Depth: `DEVELOPMENT.md`
   (mechanism), `Gravit-Design.md` (intent), `face/README.md` (the face's contracts and drills).
+- `Gravit-Design.md`, `DEVELOPMENT.md`, `ROADMAP.md`, `Gravit-Docs-and-Prompt-Loops.html` and
+  `docs/superpowers/` are the operator's private documents: gitignored, present only in the
+  primary checkout (`git worktree list`'s first line), never in a worktree or a clone. Read and
+  edit them there; never `git add -f` them.
 - `GRAVIT.md` is a product file: every dsh agent in the tree reads it on its first request.
   Change it as you would change a prompt — deliberately, inside its byte budget, with
   `face/tests/gravit-md.test.ts` green.
