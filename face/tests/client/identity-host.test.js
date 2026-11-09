@@ -64,7 +64,7 @@ function rig({ tokenAnswer = { status: 200, body: { ok: true, pending: PENDING }
   const answers = { notMe: [] };
   const post = async (path, body) => {
     posts.push({ path, body });
-    if (path === TOKEN_PATH || path === TOKEN_PATHS.slack) return tokenAnswer;
+    if (path === TOKEN_PATH || path === TOKEN_PATHS.slack || path === TOKEN_PATHS.imessage) return tokenAnswer;
     if (path.endsWith('/not-me')) return answers.notMe.shift() ?? { status: 200, body: { ok: true, pending: PENDING } };
     return { status: 200, body: { ok: true } };
   };
@@ -536,4 +536,119 @@ test('the manifest\'s Copy writes it to the clipboard, and selects the text when
   assert.equal(selected, 2);
   assert.equal(await copyManifest('', { writeText: async t => { written.push(t); } }, () => {}), false, 'no manifest, nothing copied');
   assert.equal(written.length, 1);
+});
+
+// ── the iMessage plan: Connect iMessage through Photon ──
+
+// a made-up project secret, of no real secret's shape
+const SECRET = 'fake-photon-secret-for-tests-only-0123456789';
+const PROJECT = 'prj_1';
+const IM_PENDING = {
+  id: 'aaaabbbbccccddddaaaabbbbccccdddd', network: 'imessage', bot: { id: `${PROJECT}:+14155550123`, username: '+14155550123', name: 'iMessage' },
+  link: 'sms:+14155550123', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'waiting',
+};
+const IM_HEARD = { ...IM_PENDING, state: 'heard', sender: { id: '+14155550100', name: '+14155550100', handle: '+14155550100', masked: '…100', text: 'hi' } };
+const imRig = (over = {}) => rig({ tokenAnswer: { status: 200, body: { ok: true, pending: IM_PENDING } }, ...over });
+const imFields = (phone = '+1 (415) 555-0100') => [field(PROJECT), field(SECRET), field(phone)];
+
+test("iMessage's Next posts the five fields once to TOKEN_PATHS.imessage and clears the secret", async () => {
+  const r = imRig();
+  r.identity.openConnect('imessage');
+  assert.equal(r.store.get().identity.connect.network, 'imessage');
+  const [project, secretField, phone] = imFields();
+  await r.identity.next(project, secretField, phone);
+  const posted = r.posts.filter(p => p.path.endsWith('/token'));
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].path, '/data/account/identity/imessage/token');
+  assert.deepEqual(Object.keys(posted[0].body).sort(), ['keyHash', 'phone', 'projectId', 'projectSecret', 'salt']);
+  assert.equal(posted[0].body.projectId, PROJECT);
+  assert.equal(posted[0].body.projectSecret, SECRET);
+  assert.equal(posted[0].body.phone, '+14155550100', 'spaces, dashes and parentheses removed');
+  assert.equal(secretField.value, '');
+  assert.equal(project.value, PROJECT, 'the project ID is no secret: its field keeps it');
+  const c = r.store.get().identity.connect;
+  assert.equal(c.step, 2);
+  assert.deepEqual(c.fp, { salt: posted[0].body.salt, keyHash: posted[0].body.keyHash });
+  assert.ok(!JSON.stringify(r.store.get()).includes(SECRET), 'no secret in the store');
+  assert.ok(!renderConnectDrawer(r.store.get()).includes(SECRET), 'none drawn');
+  // a second Next does nothing: the drawer is past sheet 1
+  await r.identity.next(...imFields());
+  assert.equal(r.posts.filter(p => p.path.endsWith('/token')).length, 1);
+  // a refusal whose words carried the secret is never drawn with it
+  const r2 = imRig({ tokenAnswer: { status: 400, body: { ok: false, error: `bad ${SECRET}` } } });
+  r2.identity.openConnect('imessage');
+  await r2.identity.next(...imFields());
+  assert.ok(!JSON.stringify(r2.store.get()).includes(SECRET));
+  assert.equal(spoken(r2.store.get().identity.connect.error), 'The account refused the project.');
+  assert.equal(r2.store.get().identity.connect.step, 1);
+});
+
+test('the iMessage fingerprint is over projectId, NUL, secret', async () => {
+  const r = imRig();
+  r.identity.openConnect('imessage');
+  await r.identity.next(...imFields());
+  const body = r.posts.find(p => p.path === TOKEN_PATHS.imessage).body;
+  const fixed = n => new Uint8Array(n).fill(0xab);
+  const want = await fingerprintOf(webcrypto.subtle, `${PROJECT}\u0000${SECRET}`, fixed);
+  assert.equal(body.keyHash, sha256hex(body.salt, `${PROJECT}\u0000${SECRET}`));
+  assert.equal(want.keyHash, sha256hex('ab'.repeat(16), `${PROJECT}\u0000${SECRET}`));
+  assert.notEqual(body.keyHash, sha256hex(body.salt, `${PROJECT}${SECRET}`), 'the NUL is in the join');
+});
+
+test('a number without its country code is refused before anything is sent', async () => {
+  for (const [project, secret, phone] of [[PROJECT, SECRET, '415 555 0100'], [PROJECT, SECRET, '+0 415 555 0100'], [PROJECT, SECRET, '+1415'], [PROJECT, SECRET, ''], ['', SECRET, '+14155550100'], [PROJECT, '', '+14155550100']]) {
+    const r = imRig();
+    r.identity.openConnect('imessage');
+    const secretField = field(secret);
+    await r.identity.next(field(project), secretField, field(phone));
+    assert.equal(r.posts.length, 0, `${project}|${phone}`);
+    assert.equal(spoken(r.store.get().identity.connect.error), 'Fill in all three: the project ID, the project secret, and your number written +, the country code, then the number (+14155550100).');
+    assert.equal(r.store.get().identity.connect.step, 1);
+    assert.equal(secretField.value, '', 'the secret is cleared even so');
+  }
+});
+
+test('sheet 2 shows the number, the sms: link and the other-sender hint; sheet 3 the number heard and the text', async () => {
+  const strangerHeard = { masked: '…com', at: '2026-11-04T15:01:00.000Z' };
+  const r = imRig({ reads: [{ ok: true, pending: { ...IM_PENDING, strangerHeard } }, { ok: true, pending: IM_HEARD }] });
+  r.identity.openConnect('imessage');
+  await r.identity.next(...imFields());
+  await r.timers.advance(PENDING_POLL_MS);
+  const html = renderConnectDrawer(r.store.get());
+  assert.match(html, /<h2>Connect iMessage · 2 of 4 · Say hi<\/h2>/);
+  assert.match(html, /<a href="sms:\+14155550123" target="_blank" rel="noopener noreferrer">Text hi to \+14155550123<\/a>/);
+  assert.match(html, /sms:\+14155550123/);
+  assert.match(html, /<img class="identity-qr" src="data:image\/svg\+xml;base64,PHN2Zy8\+" alt="QR code for a message to \+14155550123"/);
+  assert.match(html, /…com/);
+  assert.match(html, /Settings › Messages › Send &amp; Receive/);
+  assert.doesNotMatch(renderConnectDrawer({ ...r.store.get(), identity: { ...r.store.get().identity, connect: { ...r.store.get().identity.connect, pending: IM_PENDING } } }), /another address/, 'no stranger heard, no hint');
+  // a link that is not an sms: to an E.164 number is no link and no QR
+  for (const link of ['sms:4155550123', 'sms:+14155550123?body=x', 'https://t.me/gravit_desk_bot']) {
+    const odd = { ...r.store.get(), identity: { ...r.store.get().identity, connect: { ...r.store.get().identity.connect, pending: { ...IM_PENDING, link } } } };
+    assert.doesNotMatch(renderConnectDrawer(odd), /<a |<img/, link);
+  }
+  await r.timers.advance(PENDING_POLL_MS);
+  const three = renderConnectDrawer(r.store.get());
+  assert.match(three, /<h2>Connect iMessage · 3 of 4 · Is this you\?<\/h2>/);
+  for (const line of ['Number: +14155550100', 'Message: hi']) assert.ok(three.includes(line), line);
+  assert.doesNotMatch(three, /Telegram|Slack|Name:/);
+});
+
+test('thisIsMe seeds speaksAs and talksOnlyWith without @ for iMessage', async () => {
+  const r = imRig({ read: ALL_TELEGRAM_READ, reads: [{ ok: true, pending: IM_HEARD }] });
+  r.identity.openConnect('imessage');
+  await r.identity.next(...imFields());
+  await r.timers.advance(PENDING_POLL_MS);
+  const { fp } = r.store.get().identity.connect;
+  r.identity.thisIsMe();
+  const seed = r.opened[0].seed;
+  assert.deepEqual(r.opened, [{
+    kind: 'connectNetwork',
+    seed: {
+      network: 'imessage', pending: IM_PENDING.id, botId: `${PROJECT}:+14155550123`, speaksAs: '+14155550123', operatorId: '+14155550100', talksOnlyWith: '+14155550100',
+      routing: 'chat=imessage,telegram;alerts=imessage,telegram;brief=imessage,telegram;cards=imessage,telegram;fills=imessage,telegram', keyHash: fp.keyHash, salt: fp.salt,
+    },
+  }]);
+  assert.equal(seed.speaksAs, '+14155550123'); assert.equal(seed.talksOnlyWith, '+14155550100');
+  assert.ok(!JSON.stringify(r.opened).includes(SECRET));
 });

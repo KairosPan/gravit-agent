@@ -330,6 +330,8 @@ export function everyState() {
     R.setLang(R.openSettings(open), 'zh'),
     ...focusedMarketStates(),
     ...providerMarketStates(),
+    // iMessage in Account › Identity (the iMessage plan), appended after the states above
+    ...imessageStates(identitySigning(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' }))),
   ];
 }
 
@@ -387,6 +389,28 @@ function slackStates(signing) {
     R.identityConnectSet(open, { step: 2, pending }),
     R.identityConnectSet(open, { step: 3, pending: heard }),
     R.sheetOpen(both, { kind: 'connectNetwork', seed, fields: [] }),
+  ];
+}
+
+// iMessage (the iMessage plan): connected with its Details open and a fresh gap; refused; and Connect iMessage's sheets 1 to 4 (1 with
+// its three fields, 2 with a stranger heard, 3 the number heard, 4 the owner sheet) and Disconnect iMessage with its note
+function imessageStates(signing) {
+  const net = { network: 'imessage', speaksAs: '+14155550123', talksOnlyWith: '+14155550100', since: '2026-11-04T14:00:00.000Z', fingerprint: 'ef90ab12', state: 'connected', polling: true };
+  const read = { ...signing.identity.data, networks: [...signing.identity.data.networks, { ...net, gapAt: new Date(NOW - 3_600_000).toISOString() }], routing: { ...signing.identity.data.routing, chat: ['imessage', 'telegram'] } };
+  const both = R.identityDetails(R.identityLoaded(signing, read), 'imessage');
+  const refused = R.identityLoaded(signing, { ...read, networks: [signing.identity.data.networks[0], { ...net, refusedAt: '2026-11-04T14:40:00.000Z' }] });
+  const pending = { id: 'aaaabbbbccccddddaaaabbbbccccdddd', network: 'imessage', bot: { id: 'prj_1:+14155550123', username: '+14155550123', name: 'iMessage' }, link: 'sms:+14155550123', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'waiting', strangerHeard: { masked: '…com', at: '2026-11-04T15:01:00.000Z' } };
+  const heard = { ...pending, state: 'heard', sender: { id: '+14155550100', name: '+14155550100', handle: '+14155550100', masked: '…100', text: 'hi' } };
+  const open = R.identityConnectOpen(signing, 'imessage');
+  const seed = { network: 'imessage', pending: pending.id, botId: 'prj_1:+14155550123', speaksAs: '+14155550123', operatorId: '+14155550100', talksOnlyWith: '+14155550100', routing: 'chat=imessage,telegram;alerts=imessage;brief=imessage;cards=imessage;fills=imessage', keyHash: `01234567${'a'.repeat(56)}`, salt: 'b'.repeat(32) };
+  return [
+    both,
+    refused,
+    R.identityConnectSet(open, { error: t('identity.connect.imessageShape') }),
+    R.identityConnectSet(open, { step: 2, pending }),
+    R.identityConnectSet(open, { step: 3, pending: heard }),
+    R.sheetOpen(signing, { kind: 'connectNetwork', seed, fields: [] }),
+    R.sheetOpen(both, { kind: 'disconnectNetwork', seed: { network: 'imessage' }, fields: [] }),
   ];
 }
 

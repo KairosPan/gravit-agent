@@ -186,7 +186,8 @@ export function renderSheet(state, now) {
   const idLines = identity ? identityLinesOf(s.kind, s.seed) : [];
   const above = idLines.length ? `<div class="sheet-quote">${idLines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</div>` : '';
   const idSteps = identity ? identityStepsOf(s.kind, s.seed) : [];
-  // Slack's sheet 4 adds one note under its steps: the phone's commands typed with ! there (plan B2 Task 7)
+  // Slack's sheet 4 adds one note under its steps: the phone's commands typed with ! there (plan B2 Task 7); Disconnect iMessage
+  // one that the Photon registration stays
   const idNote = identity ? identityNoteOf(s.kind, s.seed) : '';
   const steps = (idSteps.length ? `<ol class="sheet-steps">${idSteps.map(l => `<li>${esc(l)}</li>`).join('')}</ol>` : '') + (idNote ? `<p class="sheet-hint">${esc(idNote)}</p>` : '');
   const startAgain = s.kind === 'connectNetwork' && s.status === 'refused' ? `<div class="btn-row">${key('identityStartAgain', t('identity.sheet.again'))}</div>` : '';

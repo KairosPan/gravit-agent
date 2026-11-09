@@ -60,7 +60,7 @@ import { startComposerReads } from './host/composer.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
 import { startIdentity } from './host/identity.js';
-import { identityOf, routingOf, formatRouting } from './host/identity-view.js';
+import { identityOf, routingOf, formatRouting, SPOKEN } from './host/identity-view.js';
 import { renderConnectDrawer } from './render/identity.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
 import { startSellMany } from './host/sell-many.js';
@@ -1262,7 +1262,7 @@ export function boot(win, host = {}) {
           if (v.networks[network]?.state === 'connected') void sheet.open('disconnectNetwork', { network });
         } else {
           const draft = store.get().identity.draft;
-          const networks = ['telegram', 'slack'].filter(n => v.networks[n]?.state === 'connected');
+          const networks = SPOKEN.filter(n => v.networks[n]?.state === 'connected');
           void sheet.open('routing', { routing: draft ?? routingOf(data), quiet: v.quiet, saved: formatRouting(routingOf(data)), networks });
         }
         break;
@@ -1868,17 +1868,19 @@ export function boot(win, host = {}) {
     // Account › Identity (plan B1b): Retry reads it past the face's cache; Details opens or shuts the connection's line
     refreshIdentity: () => { void account.loadIdentity({ fresh: true }); },
     identityDetails: el => store.dispatch('identityDetails', el?.dataset?.network),
-    // Connect Telegram (plan B1b Task 2) and Install app… for Slack (plan B2 Task 7): the drawer's keys; Next hands the host the
-    // fields themselves, never their values
-    identityConnect: el => { if (signs()) identity.openConnect(el?.dataset?.network === 'slack' ? 'slack' : 'telegram'); },
+    // Connect Telegram (plan B1b Task 2), Install app… for Slack (plan B2 Task 7) and Connect iMessage (the iMessage plan): the
+    // drawer's keys; Next hands the host the fields themselves, never their values
+    identityConnect: el => { if (signs()) identity.openConnect(['slack', 'imessage'].includes(el?.dataset?.network) ? el.dataset.network : 'telegram'); },
     identityNext: () => {
-      if (store.get().identity?.connect?.network === 'slack') void identity.next(root.querySelector('#identity-app-token'), root.querySelector('#identity-bot-token'));
+      const net = store.get().identity?.connect?.network;
+      if (net === 'slack') void identity.next(root.querySelector('#identity-app-token'), root.querySelector('#identity-bot-token'));
+      else if (net === 'imessage') void identity.next(root.querySelector('#identity-photon-project'), root.querySelector('#identity-photon-secret'), root.querySelector('#identity-photon-phone'));
       else void identity.next(root.querySelector('#identity-token'));
     },
     identityPaste: el => {
       const read = win.navigator?.clipboard?.readText;
       if (typeof read !== 'function') return;
-      const id = ['identity-token', 'identity-app-token', 'identity-bot-token'].includes(el?.dataset?.field) ? el.dataset.field : 'identity-token';
+      const id = ['identity-token', 'identity-app-token', 'identity-bot-token', 'identity-photon-project', 'identity-photon-secret', 'identity-photon-phone'].includes(el?.dataset?.field) ? el.dataset.field : 'identity-token';
       read.call(win.navigator.clipboard).then(text => {
         const field = root.querySelector(`#${id}`);
         if (field && typeof text === 'string') field.value = text.trim();
@@ -1898,7 +1900,7 @@ export function boot(win, host = {}) {
     identityThisIsMe: () => { if (signs()) void identity.thisIsMe(); },
     identityStartAgain: () => {
       const open = store.get().sheet;
-      const network = open?.kind === 'connectNetwork' && open.seed?.network === 'slack' ? 'slack' : undefined;
+      const network = open?.kind === 'connectNetwork' && ['slack', 'imessage'].includes(open.seed?.network) ? open.seed.network : undefined;
       if (open?.kind === 'connectNetwork') sheet.close();
       identity.startAgain(network);
     },
@@ -2376,10 +2378,11 @@ export function boot(win, host = {}) {
       return;
     }
     const a = doc.activeElement;
-    // Enter in a connect sheet's token field is Next (Slack's app-level field moves on to the bot token's): the fields have no form
-    // (no login for the browser to offer to keep)
-    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && a?.id === 'identity-app-token') { ev.preventDefault(); root.querySelector('#identity-bot-token')?.focus?.(); return; }
-    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && (a?.id === 'identity-token' || a?.id === 'identity-bot-token')) { ev.preventDefault(); act.identityNext(); return; }
+    // Enter in a connect sheet's token field is Next (Slack's app-level field moves on to the bot token's, iMessage's project ID and
+    // secret on to the field after): the fields have no form (no login for the browser to offer to keep)
+    const onTo = { 'identity-app-token': '#identity-bot-token', 'identity-photon-project': '#identity-photon-secret', 'identity-photon-secret': '#identity-photon-phone' };
+    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && Object.hasOwn(onTo, a?.id ?? '')) { ev.preventDefault(); root.querySelector(onTo[a.id])?.focus?.(); return; }
+    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && ['identity-token', 'identity-bot-token', 'identity-photon-phone'].includes(a?.id)) { ev.preventDefault(); act.identityNext(); return; }
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && store.get().edit && a?.closest?.('.inline-edit') && a.tagName !== 'BUTTON') { ev.preventDefault(); commitEdit(); }
   });
 

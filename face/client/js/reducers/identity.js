@@ -1,8 +1,9 @@
 // face/client/js/reducers/identity.js — Account › Identity (plan B1b Task 1): the account's identity read as host/account.js lands
 // it, the operator's unsaved ticks on the grid (a draft routing, dropped once it is the account's again), and each network's Details
-// open or shut (`details`: false, or `{ telegram, slack }`).
-// `connect` is the connect drawer's (Task 2, sheets 1 to 3; sheet 4 is the owner sheet; Slack's since plan B2 Task 7): `{ network,
-// step, pending, fp, busy, error, silent, copied }` (silent: sheet 2's last read had no answer; copied: Slack's manifest was copied),
+// open or shut (`details`: false, or `{ telegram, imessage, slack }`).
+// `connect` is the connect drawer's (Task 2, sheets 1 to 3; sheet 4 is the owner sheet; Slack's since plan B2 Task 7, iMessage's since
+// the iMessage plan): `{ network, step, pending, fp, busy, error, silent, copied }` (silent: sheet 2's last read had no answer;
+// copied: Slack's manifest was copied),
 // null while none is open. It never holds a token: only the pending connection the account answered and the fingerprint (salt and
 // keyHash) made in the browser.
 import { isLine } from '../i18n/words.js';
@@ -14,7 +15,7 @@ const STEPS = new Set([1, 2, 3]);
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
 const OPEN = { step: 1, pending: null, fp: null, busy: false, error: null, silent: false, copied: false };
-const CONNECTS = new Set(['telegram', 'slack']);
+const CONNECTS = new Set(['telegram', 'imessage', 'slack']);
 // a patch of the connect drawer: its keys alone, each of its shape — whatever else rides on a patch never reaches the store; the
 // network is the drawer's from its opening and no patch changes it
 function connectPatch(p) {
