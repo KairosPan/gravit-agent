@@ -384,10 +384,15 @@ export function relaysOf(view: TaskView, events: readonly TimedEvent[]): RelayIt
   return items.sort((a, b) => a.at - b.at).map((x) => x.item);
 }
 
-/** The stall relay, `task-stall:<id>:<lastSeq>`, when the view is `stalled` - an open turn quiet for {@link STALL_MS},
- * or a turn cut by `aborted` or `interrupted`: one per stall, since any new event moves `lastSeq`. */
-export function stallOf(view: TaskView): RelayItem | undefined {
+/** The stall relay, `task-stall:<id>:<lastSeq>`, only for an OPEN turn quiet for {@link STALL_MS} (spec §5.3): one per
+ * stall, since any new event moves `lastSeq`. A turn cut by `aborted` or `interrupted` also reads as `stalled` in the
+ * view, but relays nothing - after a restart the recovery note is the only message. `events` is the log the view was
+ * read from, which tells the two apart.
+ */
+export function stallOf(view: TaskView, events: readonly TimedEvent[]): RelayItem | undefined {
   if (view.state !== "stalled") return undefined;
+  const s = scan(events);
+  if (s.lastStart <= s.lastEnd) return undefined;
   return {
     id: `task-stall:${view.id}:${view.lastSeq}`,
     task: view.id,

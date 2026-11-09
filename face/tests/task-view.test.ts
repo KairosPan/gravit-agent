@@ -69,7 +69,7 @@ test("an open turn is running; with no event for 20 minutes it is stalled, and s
   const running = view(log);
   assert.equal(running.state, "running");
   assert.equal(running.group, "running");
-  assert.equal(stallOf(running), undefined);
+  assert.equal(stallOf(running, log.events), undefined);
   assert.equal(view(log, log.t + STALL_MS - 1).state, "running");
 
   const stalled = view(log, log.t + STALL_MS);
@@ -78,7 +78,7 @@ test("an open turn is running; with no event for 20 minutes it is stalled, and s
   assert.equal(stalled.group, "you");
   assert.equal(stalled.lastSeq, log.events.length);
   assert.equal(stalled.lastEventAt, log.t);
-  const stall = stallOf(stalled);
+  const stall = stallOf(stalled, log.events);
   assert.ok(stall !== undefined);
   assert.equal(stall.id, `task-stall:${ID}:${log.events.length}`);
   assert.equal(stall.task, ID);
@@ -323,4 +323,18 @@ test("malformed or non-object arguments in logged task_report and ask_user_quest
   const relays = relaysOf(v, log.events);
   assert.ok(relays.every((r) => r.id.startsWith(`task-wait:${ID}:q`)));
   assert.equal(relays.length, bad.length);
+});
+
+test("stallOf relays only an open turn gone quiet; a turn cut by aborted or interrupted is stalled and relays nothing", () => {
+  for (const reason of [{ kind: "aborted", reason: { kind: "hook", reason: "shutdown" } }, { kind: "interrupted" }]) {
+    const log = new Log().brief().start(1).say(1, "half").end(1, reason);
+    for (const now of [log.t + 1_000, log.t + 3 * STALL_MS]) {
+      const v = view(log, now);
+      assert.equal(v.state, "stalled");
+      assert.equal(stallOf(v, log.events), undefined, JSON.stringify(reason));
+      assert.deepEqual(relaysOf(v, log.events), []);
+    }
+  }
+  const open = new Log().brief().start(1).say(1, "half");
+  assert.equal(stallOf(view(open, open.t + STALL_MS), open.events)?.id, `task-stall:${ID}:${open.events.length}`);
 });
