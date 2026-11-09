@@ -47,6 +47,6 @@ test("router.md fits 2,000 bytes and names its five tools and <REPO>", () => {
   assert.equal(ROUTER_MAX_BYTES, 2_000);
   const text = readRouter();
   assert.ok(Buffer.byteLength(text) <= 2_000, `${Buffer.byteLength(text)} bytes`);
-  for (const needle of ["task_start", "task_steer", "task_stop", "task_read", "task_list", "<REPO>", "[task · ...]"])
+  for (const needle of ["task_start", "task_steer", "task_stop", "task_read", "task_list", "<REPO>", "[task · ...]", "<<<task-data", "<<<end"])
     assert.ok(text.includes(needle), `names ${needle}`);
 });

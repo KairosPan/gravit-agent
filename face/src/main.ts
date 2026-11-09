@@ -33,6 +33,8 @@ import { registerSeatRoute } from "./seat.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
+import { installConversation, type ConversationCtxLike, type ConversationHandle } from "./conversation.ts";
+import { installTasks, routerEnabled, type TasksCtxLike, type TasksHandle } from "./tasks.ts";
 import { createPhoneClient, type PhoneClient } from "./phone.ts";
 import { announceCard } from "./card-notice.ts";
 import { marketQuotes } from "./market-quotes.ts";
@@ -110,6 +112,10 @@ let disposeData: (() => void) | undefined;
  * release the room engine, the data routes and the tree, so a disposer that
  * throws cannot cost the run its `shutdown` line. */
 let desk: DeskHandle | undefined;
+/** The conversation (src/conversation.ts) and its tasks (src/tasks.ts), unless `FACE_ROUTER=0`. Both exits dispose
+ * the tasks, then the conversation, before the desk. */
+let conversation: ConversationHandle | undefined;
+let tasks: TasksHandle | undefined;
 /** The Account proxy's own unwind (src/account-proxy.ts): its kept answers and every open stream's upstream. Run AFTER the
  * tree's dispose, once the web server has stopped and no browser can open another stream through it; idempotent. */
 let disposeProxy: (() => void) | undefined;
@@ -125,6 +131,8 @@ let disposeMarketProxy: (() => void) | undefined;
  * beats waiting on an unbounded teardown. */
 async function shutdown(code: number): Promise<void> {
   try {
+    await tasks?.dispose();
+    await conversation?.dispose();
     await desk?.dispose(code);
     disposeRoom?.();
     disposeData?.();
@@ -157,6 +165,8 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
  * under a 2 s bound, and exits 1 (:679-728). `release` unwinds what this entry
  * installed on the tree before the tree itself. */
 installFailLoud(BIN, process, async () => {
+  await tasks?.dispose();
+  await conversation?.dispose();
   await desk?.dispose(1);
   disposeRoom?.();
   disposeData?.();
@@ -456,6 +466,35 @@ desk = installDesk(booted.ctx.webServer, {
   watchRow: {},
 });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
+/* The conversation and its tasks (docs/superpowers/specs/2026-11-08-one-entry-router-design.md), unless
+ * `FACE_ROUTER=0`: Gravit's one router session on `gravit-router` in `$DSH_HOME/face/conversation/`, found again
+ * through the desk's ledger and supervised (src/conversation.ts), ensured here before any route can use it - a
+ * conversation the face cannot open or trust fails the start, as a refused composition does - then the tasks over its
+ * workers (src/tasks.ts): the five task tools, `task_report`, `GET /data/tasks`, the relays, the boot's recovery notes,
+ * the stalls. Its route is `FACE_ROUTER_MODEL`, read as `FACE_DESK_MODEL` is; the workers run on the same route. The
+ * root is this process's cwd, as the desk's is. */
+if (routerEnabled(process.env)) {
+  const routerRoute = await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_ROUTER_MODEL, console.log);
+  const routerInstall = (agentCtx: object, ref: Parameters<typeof installModelSelection>[1]) => installModelSelection(agentCtx as unknown as Context, ref);
+  conversation = installConversation({
+    ctx: booted.ctx as unknown as ConversationCtxLike,
+    home: dshHome,
+    route: routerRoute,
+    installModelSelection: routerInstall,
+  });
+  const opened = await conversation.ensure();
+  tasks = installTasks(booted.ctx.webServer, {
+    ctx: booted.ctx as unknown as TasksCtxLike,
+    root: process.cwd(),
+    route: routerRoute,
+    installModelSelection: routerInstall,
+    conversation,
+    isTrusted: isTrustedDataRequest,
+  });
+  console.log(`${BIN}: conversation: ${opened.sessionId} on ${routerRoute.provider}/${routerRoute.model}`);
+} else {
+  console.log(`${BIN}: conversation: off (FACE_ROUTER=0)`);
+}
 /* Every route is mounted: only now may the gateway admit a browser stream
  * (bootFace was told `deferReady`). It re-checks that the root is still
  * active and throws otherwise - into `installFailLoud` above, which releases

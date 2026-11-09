@@ -64,7 +64,14 @@ export class FakeAgent {
   cancelled: { cause: unknown; options: unknown }[] = [];
   private idleWaiters: (() => void)[] = [];
   private pendingFinish?: (reason: unknown) => void;
-  constructor(readonly tree: FakeTree, readonly session: FakeSession, readonly script?: (message: MessageLike, turn: number) => Script) {}
+  /** The tools registered on this agent's own layer (src/desk-tools.ts, src/task-tools.ts, src/task-worker.ts equip there). */
+  readonly tools: { name: string }[] = [];
+  /** The agent-scoped context the equippers reach: its tool layer, dsh's `inject`, and the agent itself, so a fake
+   * `composedPreset` can read the preset from it. */
+  readonly ctx: { tools: { register(definition: { name: string }): () => void }; inject(deps: unknown, callback: unknown): undefined; agent: FakeAgent };
+  constructor(readonly tree: FakeTree, readonly session: FakeSession, readonly script?: (message: MessageLike, turn: number) => Script) {
+    this.ctx = { tools: { register: (definition) => { this.tools.push(definition); return () => {}; } }, inject: () => undefined, agent: this };
+  }
   get id(): string { return this.session.id; }
   private emit(type: string, data: unknown): void { this.tree.emit(this.session, { type, seq: this.session.seq, data }); }
   private splice(target: "next-step" | "next-turn", message: MessageLike): void {
@@ -74,6 +81,11 @@ export class FakeAgent {
     list.push(message);
   }
   inject(message: MessageLike): void { this.splice("next-step", message); }
+  /** dsh's `steer`: the nearest step; an idle driver starts a turn. */
+  steer(message: MessageLike): void {
+    this.splice("next-step", message);
+    if (this.status === "idle" && this.script !== undefined) this.drive();
+  }
   followup(message: MessageLike): void {
     this.splice("next-turn", message);
     if (this.script !== undefined) this.drive();
@@ -260,7 +272,8 @@ export class FakeTree {
         if (refused !== undefined) throw refused;
         if (this.agents.has(opts.resumeSessionId)) throw new Error(`agent "${opts.resumeSessionId}" is already registered`);
         this.resumed.push(opts);
-        const session = new FakeSession(header.id, header);
+        /* a session this tree already holds keeps its log across the resume, as dsh reads it back from disk */
+        const session = this.sessions.get(header.id) ?? new FakeSession(header.id, header);
         session.tree = this;
         const agent = new FakeAgent(this, session, this.scripts.get(header.agentPreset ?? "") ?? (() => ({ kind: "answer", text: "(pass)" })));
         await opts.setup?.({ fakeAgentId: agent.id }, agent);

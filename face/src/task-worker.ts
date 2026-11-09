@@ -108,7 +108,9 @@ export interface WorkerDeps {
   log?: (line: string) => void;
 }
 
-function workerSetup(deps: WorkerDeps): MemberSetup {
+/** A worker's composition, for its creation and every resume (src/tasks.ts): the model selection on `deps.route`, then
+ * the `gravit` preset's mount. No permission is pinned. */
+export function workerSetup(deps: WorkerDeps): MemberSetup {
   const route = { provider: deps.route.provider, model: deps.route.model };
   const install = deps.installModelSelection ?? ((agentCtx, ref) => installDshModelSelection(agentCtx as unknown as Context, ref));
   return async (agentCtx) => {
