@@ -95,7 +95,7 @@ The project's design documents (the charter, the as-built reference, the roadmap
 
 ## License
 
-A license for this repository has not been chosen. A `LICENSE` file will be added when it is.
+Gravit is licensed under the Apache License 2.0 (`Apache-2.0`); the full text is in `LICENSE`. `NOTICE` names the parts that come from Linqi Zhe's repository, which carry the same license.
 
 ## 中文
 
