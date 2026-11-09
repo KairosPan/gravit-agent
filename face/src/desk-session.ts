@@ -354,11 +354,12 @@ export async function resolveDeskRoute(
  * (spike 6). */
 const WORKSPACE_WRITE = "workspace-write";
 
-/** dsh-agent's `CreateAgentOptions` as the desk fills it. No `parentAgent` and no `parentSession`: a
- * desk session is a runtime root that the face owns, and no room's member. */
+/** dsh-agent's `CreateAgentOptions` as the desk fills it. No `parentAgent`, and no `parentSession` for the desk: a
+ * desk session is a runtime root that the face owns, and no room's member. A task worker (src/task-worker.ts) names
+ * its conversation as `parentSession`, still with no `parentAgent`. */
 export interface CreateDeskAgentOptions {
   sessionId: string;
-  meta: { cwd: string; agentPreset: string };
+  meta: { cwd: string; agentPreset: string; parentSession?: string };
   agentOptions: { provider: string; model: string };
   setup: MemberSetup;
 }
