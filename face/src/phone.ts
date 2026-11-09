@@ -10,7 +10,7 @@
  *   lines), `urgent` (an alert of a rule marked `urgent: true` - it goes through quiet hours), `brief` (the pre-close
  *   brief's firing), `report` (every other firing, the standing orders' lines, a wake turn's answer), `card` (Gate 2's
  *   notices), `fill` (the account's own).
- * A message id is `<network>:<the network's own id>` - `telegram:4821`, `slack:1730812345.001200` ({@link WIRE_ID}).
+ * A message id is `<network>:<the network's own id>` - `telegram:4821`, `slack:1730812345.001200`, `imessage:<chat GUID>` ({@link WIRE_ID}).
  *
  * THE CLIENT ({@link createPhoneClient}) is the face's server side's alone - the browser never reaches these two
  * routes (src/account-proxy.ts proxies neither): `GET /api/account/identity/inbox?after=<n>&wait=<s>`, the operator's

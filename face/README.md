@@ -229,7 +229,9 @@ when the file is the owner's alone) for that line and nothing else, tried at eac
 run until the Bot API takes it — or, since plan B2, only when Telegram is not
 connected (no `telegram.json`), to the Slack DM with the bot token from
 `credentials/networks/slack.json`, by `chat.postMessage`: one line, on one
-network; `the account answers again (down since <time>)` goes through the account. The plist carries `FACE_ACCOUNT_URL`,
+network; iMessage has no such line, so a Gravit connected on iMessage alone gets no
+`the account has not answered` notice (its Photon stream is the account's, and the watchdog holds no
+Photon secret); `the account answers again (down since <time>)` goes through the account. The plist carries `FACE_ACCOUNT_URL`,
 `FACE_MARKET_URL`, `FACE_ACCOUNT_HOME` and `BUYER_HOME` when `install`'s shell
 sets them, so an account or a market on another port or home is watched there;
 otherwise the defaults (`127.0.0.1:4820`, `127.0.0.1:4821`, `~/.buyer-agent-demo`).
@@ -1771,15 +1773,18 @@ that takes writes:
   beat while `#/account/identity` is on screen, on Refresh and Retry and right after an Identity
   sheet is done (those `?fresh=1`, since a write does not clear the proxy's cache); it does not wait
   for the Account's own read. Three cards. **Gravit** — Telegram `Not connected` with **Connect…**
-  *(signs)*, Slack (since plan B2) `Not connected` with **Install app…** *(signs)*, or either
+  *(signs)*, Slack (since plan B2) `Not connected` with **Install app…** *(signs)*, iMessage (through
+  Photon) `Not connected` with **Connect…** *(signs)*, or any of them
   `Connected`, `Speaks as @<bot>`, `Talks only with @<you>`, the one problem line when there is
   one (blocked — Telegram's alone —, another program holding the bot's messages or the app's
-  connection to Slack, reads failing), **Details** (since when, the token's fingerprint, polling
-  or not) and **Disconnect…** *(signs)*; iMessage its name and a `Later` chip, no key. **What
+  connection to Slack, reads failing, and iMessage's own: the Photon line moved to another number,
+  Photon refusing to write to yours, messages Photon could no longer give back — that one for a
+  day), **Details** (since when, the token's fingerprint, polling
+  or not) and **Disconnect…** *(signs)*. **What
   reaches you where** — five rows (Chat with Gravit, Watch alerts, Pre-close brief, Cards waiting,
   Fills and reports) by Face · Telegram · iMessage · Slack: Face ticked and disabled in every row,
-  Telegram's and Slack's ticks each live only once that network is connected and only on a page
-  that signs, iMessage disabled;
+  each network's ticks live only once it is connected and only on a page
+  that signs;
   ticks that differ from the account's routing say `Not saved yet` with **Save…** *(signs)*, and a
   fresh read drops any tick for a network it does not show connected; **Quiet hours** `23:00–07:00
   ET` or `Off` with **Change…** *(signs)* — inside them alerts, the brief, reports, cards and fills
@@ -1832,6 +1837,24 @@ that takes writes:
   `<team>:<user>`, Slack ticked in all five rows, the two tokens' one fingerprint, and the note
   `On Slack, type the phone's commands with ! — !status, !pause 30m, !mute 30m, !new, !stop.`
   Disconnect… Slack deletes both tokens from the account.
+
+  **Connect…** (iMessage, through Photon's hosted relay; the iMessage plan) is four sheets and one
+  signature over the account's iMessage route, for a user who has made their own free Photon
+  project (the shared number pool only: a project Photon reports as dedicated is refused). **1 ·
+  Photon project** — three fields, the project ID, the project secret (a password field under the
+  same rules as Telegram's) and your number as `+`, the country code and the number; Next
+  fingerprints the project (`keyHash` over salt, the project ID, a NUL byte and the secret) and
+  posts all of it once to `identity/imessage/token`, where the account looks the project up and
+  registers your number in it (a registration Photon refused to write to is removed and made
+  again); **2 · Say hi** — a link and its QR that open a message to Gravit's pool number on your
+  iPhone: send `hi`; **3 · Is this you?** — the name, the number and the message; only a 1:1
+  iMessage from the number typed on sheet 1 is heard — SMS and RCS never are, and any other handle,
+  your own email included, is counted in Not you; **4 · What you sign** — `connectNetwork` with
+  `network: imessage`, iMessage ticked in all five rows and the project's fingerprint, never the
+  secret. The account keeps the project in `credentials/networks/imessage.json`, holds one
+  outbound stream to Photon and reads again from `identity/imessage.cursor` after a restart.
+  Disconnect… iMessage deletes the file and the cursor and leaves your Photon registration where it
+  is. The phone's commands are typed with `/` as on Telegram.
 - **The Statement** (a drawer, its lines read on opening it): the Account's lines newest first,
   each with who it was by, its status in the Account's word and its fee; **Export CSV** — a
   `statement.csv` built in the browser (`date,type,kind,description,amount,fee,status,by`; a text
@@ -1872,8 +1895,8 @@ piped stream and the POST rules); the public `/data/account/{explore,quotes,cand
 went to the market's half, and the five connected reads below took their place.
 
 Each route is `exact` — the table is the allow-list, and nothing else of the Account's surface is
-reachable through the face (forty-four routes since plan B2: twenty-five reads, the push
-channel's two, sixteen writes, the sign-in's callback):
+reachable through the face (forty-five routes since the iMessage plan: twenty-five reads, the push
+channel's two, seventeen writes, the sign-in's callback):
 
 | Route | What it reads at the Account | TTL | Abort | Query names |
 |---|---|---|---|---|
@@ -1918,6 +1941,7 @@ channel's two, sixteen writes, the sign-in's callback):
 | `POST /data/account/guard` | `POST /api/mode`: Guard, unsigned — the face always sends `{"mode":"guard"}` (the two parts) | — | 7 s | none; at most 256 bytes, then discarded |
 | `POST /data/account/identity/telegram/token` | `POST /api/account/identity/telegram/token`: the bot's token, once, beside the fingerprint the page made — Connect's first sheet (plan B1a) | — | 30 s | none; at most 1,024 bytes |
 | `POST /data/account/identity/slack/token` | `POST /api/account/identity/slack/token`: the Slack app's two tokens, once, beside their one fingerprint — Install app…'s first sheet (plan B2), forwarded unparsed and unlogged like Telegram's | — | 30 s | none; at most 1,024 bytes |
+| `POST /data/account/identity/imessage/token` | `POST /api/account/identity/imessage/token`: the Photon project's ID and secret and your number, once, beside their one fingerprint — iMessage's Connect… first sheet (the iMessage plan), forwarded unparsed and unlogged like the others | — | 30 s | none; at most 1,024 bytes |
 | `POST /data/account/identity/pending/not-me` | `POST /api/account/identity/pending/not-me`: the sender heard is not you (plan B1a) | — | 7 s | none; at most 256 bytes |
 | `POST /data/account/identity/pending/drop` | `POST /api/account/identity/pending/drop`: the sheet closed, the token forgotten (plan B1a) | — | 7 s | none; at most 256 bytes |
 | `GET /data/account/signin/callback` | `GET /api/account/signin/callback`: where a venue sends the browser back after its sign-in (the two parts) | — | 30 s | `state`, `code`, `error`, `error_description`, `error_uri`, `iss` |
@@ -6305,7 +6329,7 @@ code:
    rows and the token's fingerprint, never the token. Sign.
 2. **The tab.** PASS: Telegram `Connected`, `Speaks as @<your bot>`, `Talks only with @<you>`;
    Details shows since when, the fingerprint and `polling`; Slack `Not connected` with **Install
-   app…** (since plan B2: "The Slack phone drill" below); iMessage `Later`; the grid has Telegram ticked in every row; Not you is
+   app…** (since plan B2: "The Slack phone drill" below); iMessage `Not connected` (the iMessage drill below); the grid has Telegram ticked in every row; Not you is
    empty.
 3. **No tappable host.** Send yourself `evil·com` on Telegram — in Saved Messages, not to the bot,
    which would hand it to the desk — with the middle dot (U+00B7) as a card or fill notice writes
@@ -6379,7 +6403,7 @@ hard-reload the page. No `npm ci` is needed.
    `@<your username>`, your full Slack id and `hi`. Check that it is you, then read and sign sheet
    4.
 2. **The tab.** PASS: Slack `Connected`, `Speaks as @gravit`, `Talks only with @you`; Slack's
-   column is enabled and ticked; iMessage is `Later`.
+   column is enabled and ticked; iMessage is `Not connected`.
 3. **Status and chat.** In the DM send `!status`. PASS: a `phone: … slack polling …` line. Ask
    Gravit something. PASS: the answer arrives in the DM, top level (never in a thread).
 4. **Both networks.** With Telegram connected too, ask on Telegram. PASS: the answer comes on
@@ -6402,3 +6426,46 @@ hard-reload the page. No `npm ci` is needed.
 
 **Not yet run.** The automated half passes 2026-11-04; the browser, the workspace and Slack's
 clients are the operator's.
+
+## The iMessage phone drill (run after the iMessage plan lands, and after any change to `../account/src/portfolio/identity/{photon-link,photon-real,imessage-pending,imessage}.ts`, its iMessage cases elsewhere in that folder, src/phone.ts, src/phone-bridge.ts, src/account-proxy.ts or the Identity client modules)
+
+iMessage end to end through the account (`DEVELOPMENT.md` §3.9 "Identity"; charter D20): Account ›
+Identity › iMessage › **Connect…** registers your number in your own Photon project, the account
+holds the project and one outbound stream to Photon, the desk talks to you through the account's
+inbox and send, and Disconnect… ends it. Every step is the operator's: it needs a Photon account
+and an iPhone, and an agent never runs it.
+
+**The automated half, no Photon.** The account's `test/unit/imessage*`, `photon-*` and
+`identity-*` files run against a fake Photon link, and `cd account && npm run photon:check` is the
+live check of a real project from your own terminal, with `PHOTON_PROJECT_ID`,
+`PHOTON_PROJECT_SECRET` and `PHOTON_PHONE` in the environment; it prints neither the secret nor a
+line token.
+
+1. **Connect, four sheets.** Make a free Photon project (for Gravit alone). Account › Identity ›
+   iMessage › **Connect…**, fill the three fields, Next. PASS: the secret field is empty at once
+   and the browser offers to save nothing. Sheet 2: open the link on the iPhone, send `hi`. PASS:
+   sheet 3 shows your number and `hi`. **This is me**, then read sheet 4 and sign.
+2. **The tab.** PASS: iMessage `Connected`, `Talks only with` your number; iMessage's column in the
+   grid is enabled and ticked; `credentials/networks/imessage.json` exists (`ls`, never `cat`).
+3. **Text and answer.** Text `/status`, then ask Gravit something. PASS: the answers arrive on
+   iMessage, once each.
+4. **An alert on iMessage.** Tick iMessage for Watch alerts, Save…, and make a watch rule fire.
+   PASS: the alert arrives on iMessage.
+5. **The account restart.** Stop the account, text `are you there`, start the account again.
+   PASS: the desk answers it once (the stream catches up from `identity/imessage.cursor`).
+6. **A send cut by a restart.** Start a long answer, stop the account while it is going, start it
+   again. PASS: the part that was cut arrives once, never twice (iMessage sends are written to the
+   outbox before they go, each part under its own id).
+7. **The compose box.** With the host's account stopped, `docker compose up` and connect iMessage
+   from the boxed face. PASS: the same four sheets work and the answers come.
+8. **The watchdog.** With only iMessage connected, stop the account for ten minutes or more. PASS:
+   no account-is-down line arrives on iMessage: the watchdog phones Telegram or Slack alone.
+9. **Disconnect… iMessage** and sign. PASS: the number stops answering;
+   `credentials/networks/imessage.json` and `identity/imessage.cursor` are gone. Your Photon
+   registration stays; delete the project at Photon to retire it.
+
+**PASS is steps 1–9.** Record the date, the commit and the iPhone's iOS version in
+`DEVELOPMENT.md` §7.4's manual iMessage row.
+
+**Not yet run.** The automated half passes; the keyed drill (Photon, the iPhone, the compose box) is
+owed by the operator.

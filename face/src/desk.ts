@@ -684,7 +684,7 @@ export function installAsleepWatch(opts: AsleepWatchOptions): () => void {
 export const OFF_FILE = "OFF";
 
 /** What `OFF` holds: when the pause was set and by whom - the phone, by the network its `/pause` came through
- * (`telegram`, `slack`), the Desk panel or a terminal - and, for a timed pause, when it lifts; both times ISO-8601 UTC. */
+ * (`telegram`, `slack`, `imessage`), the Desk panel or a terminal - and, for a timed pause, when it lifts; both times ISO-8601 UTC. */
 export interface OffState {
   setAt: string;
   by: "telegram" | "slack" | "imessage" | "page" | "terminal";
@@ -696,7 +696,7 @@ export interface OffState {
 export const MUTE_FILE = "MUTE";
 
 /** What `MUTE` holds: when the mute was set and by whom - the phone, by the network its `/mute` came through
- * (`telegram`, `slack`), or, for a `MUTE` that says nothing a state can be read from, a terminal - and, for a timed
+ * (`telegram`, `slack`, `imessage`), or, for a `MUTE` that says nothing a state can be read from, a terminal - and, for a timed
  * mute, when it lifts; both times ISO-8601 UTC. */
 export interface MuteState {
   setAt: string;
