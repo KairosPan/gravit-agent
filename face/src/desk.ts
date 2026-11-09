@@ -33,7 +33,7 @@
  *
  * The writer appends one JSON object per line under the face's file lock, creates its files
  * `0600`, and rotates the file once it is over {@link LEDGER_ROTATE_BYTES}, the new file opening
- * with the old one's last `desk-session`, so the desk conversation is found again. It never throws
+ * with the old one's last `desk-session` and last `conversation`, so both are found again. It never throws
  * into the face: an append that fails is one `gravit-face:` line on stderr, and a face whose ledger
  * cannot be written still boots and serves. The reader takes the current file only, and skips and
  * counts every line that is not an event. A last line torn by a crash mid-append is the case that
@@ -161,7 +161,10 @@ export interface TurnUsage {
  * skipped as already in the session (src/desk-conversation.ts). A `desk-fetch` is one `web_fetch` a desk agent made that
  * reached dispatch (spec 2026-11-07 §5.6, charter A1 and D29): its session and the URL as the model asked it, cut at
  * src/desk-tools.ts `DESK_FETCH_URL_MAX` characters - written whatever the fetch then answered, so the operator sees
- * every page a desk turn opened (src/desk-tools.ts `installDeskGuard`'s fetch record). */
+ * every page a desk turn opened (src/desk-tools.ts `installDeskGuard`'s fetch record). A `conversation` names Gravit's one
+ * router conversation when the face opens one (src/conversation.ts, spec 2026-11-08 §5.10): `created` when the ledger
+ * named none, `new` when the one it named could not be had or was not the conversation; a face resumes the last
+ * ({@link lastConversation}). */
 export type DeskEvent =
   | { t: string; kind: "boot"; pid: number; version: string; deskEnabled: boolean }
   | { t: string; kind: "shutdown"; pid: number; code: number }
@@ -169,6 +172,7 @@ export type DeskEvent =
   | { t: string; kind: "off-set"; by: OffState["by"]; until?: string }
   | { t: string; kind: "off-cleared"; by: "terminal" | "expiry" }
   | { t: string; kind: "desk-session"; sessionId: string; reason: "created" | "new" }
+  | { t: string; kind: "conversation"; sessionId: string; reason: "created" | "new" }
   | {
     t: string; kind: "desk-turn"; sessionId: string; source: string; turn: number; outcome: "ended" | "timed-out" | "cancelled" | "failed";
     wallMs: number; usage?: TurnUsage; cancel?: string; error?: string;
@@ -196,6 +200,7 @@ const KINDS: Readonly<Record<DeskEvent["kind"], true>> = {
   "off-set": true,
   "off-cleared": true,
   "desk-session": true,
+  conversation: true,
   "desk-turn": true,
   "desk-refused": true,
   "standing-error": true,
@@ -404,8 +409,9 @@ async function holdsMatch(path: string, matches: (existing: unknown) => boolean)
 /**
  * Append one event to `$DSH_HOME/face/desk/events.jsonl`: {@link appendRecord} on
  * {@link EVENTS_FILE}, rotated under the event's `t` - the new file opening with the last
- * `desk-session` line of the old one, as it was written ({@link carryDeskSession}), so the desk
- * conversation a face resumes ({@link lastDeskSession}) is still the current file's. Never rejects;
+ * `desk-session` line and the last `conversation` line of the old one, as written ({@link carryDeskSession}), so the
+ * desk conversation and the conversation a face resumes ({@link lastDeskSession}, {@link lastConversation}) are still
+ * the current file's. Never rejects;
  * a failure is one `log` line.
  * @param home - the harness home.
  * @param event - the event, written as one JSON line.
@@ -437,7 +443,7 @@ export interface AppendChain {
  *
  * `append` never throws and its record's write never rejects: a failure is {@link appendRecord}'s one
  * `log` line (default `console.error`), and the next record is tried as though it had gone. On
- * {@link EVENTS_FILE} a rotation carries the last `desk-session`, as {@link appendEvent}'s does. A `file`
+ * {@link EVENTS_FILE} a rotation carries the last `desk-session` and `conversation`, as {@link appendEvent}'s does. A `file`
  * that is not a plain name is the caller's `TypeError`, thrown here, before anything is touched.
  * @param home - the harness home.
  * @param file - the file's name in {@link deskDir} - a name, not a path.
@@ -455,15 +461,21 @@ export function appendChain(home: string, file: string, opts: { log?: (line: str
   };
 }
 
-/** What a rotated ledger hands the new one: its last line that is a `desk-session` event, as it was
- * written, or nothing when it has none. Read once per rotation, from the end. */
+/** The kinds whose last line a rotation hands on: what a face finds its long-lived sessions by. */
+const CARRIED: ReadonlySet<string> = new Set(["desk-session", "conversation"]);
+
+/** What a rotated ledger hands the new one: its last line that is a `desk-session` event and its last that is a
+ * `conversation` event, each as it was written, in file order - either or both absent when it has none. Read once per
+ * rotation, from the end. */
 function carryDeskSession(rotated: string): string[] {
   const lines = rotated.split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
+  const found = new Map<string, number>();
+  for (let i = lines.length - 1; i >= 0 && found.size < CARRIED.size; i--) {
     const object = objectOf(lines[i]);
-    if (object !== undefined && isDeskEvent(object) && object.kind === "desk-session") return [lines[i]];
+    if (object === undefined || !isDeskEvent(object) || !CARRIED.has(object.kind) || found.has(object.kind)) continue;
+    found.set(object.kind, i);
   }
-  return [];
+  return [...found.values()].sort((a, b) => a - b).map((i) => lines[i]);
 }
 
 /** A file's lines: its text split at each newline, less the empty one after the newline that ends the
@@ -543,7 +555,7 @@ export async function readRecords<T>(
  * The current ledger's events, in file order, and how many lines were not events: {@link readRecords}
  * on {@link EVENTS_FILE}, a line being an event when it has a string `t` and a known `kind` ({@link isDeskEvent}).
  *
- * Reads `events.jsonl` only, never a rotated file - a rotation hands its last `desk-session` on
+ * Reads `events.jsonl` only, never a rotated file - a rotation hands its last `desk-session` and `conversation` on
  * ({@link appendEvent}), and the runs and turns before it stay behind. An absent ledger is
  * `{ events: [], skipped: 0 }`; any other read failure rejects, so an unreadable ledger never reads
  * as an empty one.
@@ -602,6 +614,19 @@ export function lastDeskSession(events: DeskEvent[]): string | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event.kind === "desk-session") return event.sessionId;
+  }
+  return undefined;
+}
+
+/**
+ * The conversation the ledger names last: the `sessionId` of its last `conversation` event, or `undefined` when it
+ * has none - the one a face that boots again resumes (src/conversation.ts `ensureConversation`).
+ * @param events - the ledger's events in file order, as {@link readEvents} returns them.
+ */
+export function lastConversation(events: readonly DeskEvent[]): string | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.kind === "conversation") return event.sessionId;
   }
   return undefined;
 }

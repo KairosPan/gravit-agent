@@ -114,9 +114,9 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
 
       const presets = ctx.get("agentPresets") as { defaultId: string; list(): Promise<{ id: string; broken?: string }[]> };
       const roster = await presets.list();
-      assert.deepEqual(roster.map((p) => p.id).sort(), ["cracked", "gravit", "gravit-desk", "kairos", "probe",
+      assert.deepEqual(roster.map((p) => p.id).sort(), ["cracked", "gravit", "gravit-desk", "gravit-router", "kairos", "probe",
         "role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst", "role-pdf-page-reader", "shipped", "trader"],
-        "listed - and never _template; gravit-desk is the desk's preset and role-<id> each shipped role's, which bootFace declares and none of which is a bot (botPresets.ids() above)");
+        "listed - and never _template; gravit-desk is the desk's preset, gravit-router the conversation's and role-<id> each shipped role's, which bootFace declares and none of which is a bot (botPresets.ids() above)");
       for (const id of ["role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst", "role-pdf-page-reader"]) assert.equal(roster.find((p) => p.id === id)?.broken, undefined, `${id} is listed whole`);
       assert.equal(roster.find((p) => p.id === "gravit-desk")?.broken, undefined, "the desk's preset is listed whole");
       assert.equal(presets.defaultId, "gravit");

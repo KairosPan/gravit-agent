@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
   ALERTS_FILE, ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FILINGS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, MUTE_FILE, MUTE_USAGE, OFF_FILE,
-  ALERT_DEADLINE_MS, WATCH_LEASE_FILE, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastDeskSession, noteBudgetSpent,
+  ALERT_DEADLINE_MS, WATCH_LEASE_FILE, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastConversation, lastDeskSession, noteBudgetSpent,
   muteReplyLine, parseDuration, phoneLine, readBudget, readEvents, readMuteState, readOffState, readRecords, registerDeskRoutes, runsOf, standingLines, watchLines, writeMute,
   writeOff,
   type BudgetState, type DeskEvent, type DeskStatus, type PhoneStatus, type TurnUsage,
@@ -121,6 +121,35 @@ test("a rotation carries the ledger's last desk-session into the new file, as wr
   await appendRecord(bare, "telegram.jsonl", { t: "2026-10-19T13:00:00.000Z", kind: "desk-session", sessionId: "session-x" });
   await appendRecord(bare, "telegram.jsonl", { t: "2026-10-19T14:00:00.000Z", kind: "sent" }, { rotateBytes: 10 });
   assert.deepEqual(readFileSync(join(deskDir(bare), "telegram.jsonl"), "utf8"), `${JSON.stringify({ t: "2026-10-19T14:00:00.000Z", kind: "sent" })}\n`);
+});
+
+/* The one conversation is found by its ledger line (spec 2026-11-08 §5.10): a rotation must hand it on beside the desk's. */
+test("readEvents keeps a conversation line; lastConversation finds the last; a rotation carries the last desk-session line and the last conversation line", async () => {
+  const h = await home();
+  const convA = { t: "2026-11-08T13:00:01.000Z", kind: "conversation", sessionId: "session-conv-a", reason: "created" } as const;
+  const desk = { t: "2026-11-08T13:00:02.000Z", kind: "desk-session", sessionId: "session-desk", reason: "created" } as const;
+  const convB = { t: "2026-11-08T13:00:03.000Z", kind: "conversation", sessionId: "session-conv-b", reason: "new" } as const;
+  const deskOld = { t: "2026-11-08T12:00:00.000Z", kind: "desk-session", sessionId: "session-desk-old", reason: "created" } as const;
+  for (const event of [deskOld, boot("2026-11-08T13:00:00.000Z", 11), convA, desk, convB] as DeskEvent[]) await appendEvent(h, event);
+  const read = await readEvents(h);
+  assert.equal(read.skipped, 0);
+  assert.deepEqual(read.events.filter((e) => e.kind === "conversation"), [convA, convB]);
+  assert.equal(lastConversation(read.events), "session-conv-b");
+  assert.equal(lastConversation([boot("2026-11-08T13:00:00.000Z", 11)]), undefined);
+  assert.equal(lastDeskSession(read.events), "session-desk", "a conversation line is no desk session");
+  const asleep: DeskEvent = { t: "2026-11-09T14:00:00.000Z", kind: "asleep", from: "2026-11-09T13:00:00.000Z", to: "2026-11-09T14:00:00.000Z", gapMs: 3_600_000 };
+  await appendEvent(h, asleep, { rotateBytes: 10 });
+  assert.deepEqual((await readEvents(h)).events, [desk, convB, asleep], "both carried lines, in file order, then the event that rotated it");
+  /* in the other file order the conversation line comes first */
+  const h2 = await home();
+  for (const event of [convA, desk] as DeskEvent[]) await appendEvent(h2, event);
+  await appendEvent(h2, asleep, { rotateBytes: 10 });
+  assert.deepEqual((await readEvents(h2)).events, [convA, desk, asleep]);
+  /* a ledger with only a conversation line carries that line alone */
+  const h3 = await home();
+  await appendEvent(h3, convA);
+  await appendEvent(h3, asleep, { rotateBytes: 10 });
+  assert.deepEqual((await readEvents(h3)).events, [convA, asleep]);
 });
 
 test("an unwritable ledger logs and does not throw", async () => {
