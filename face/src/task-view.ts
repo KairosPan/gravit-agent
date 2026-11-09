@@ -140,6 +140,8 @@ function scan(events: readonly EventLike[]): Scan {
   const openTurns = new Map<number, Turn>();
   const asks = new Map<string, Gate>();
   const approvals = new Map<string, Gate>();
+  /* task_report calls waiting for their result: a report counts once its result is logged and is no error */
+  const calls = new Map<string, Report>();
   events.forEach((event, at) => {
     const data = dataOf(event);
     switch (event.type) {
@@ -167,6 +169,9 @@ function scan(events: readonly EventLike[]): Scan {
           s.turns.push(turn);
         }
         openTurns.delete(data.turn);
+        /* a gate is pending only while the turn that asked it is open */
+        asks.clear();
+        approvals.clear();
         turn.end = at;
         turn.reason = data.reason;
         s.lastEnd = at;
@@ -177,15 +182,22 @@ function scan(events: readonly EventLike[]): Scan {
         if (callId === undefined) break;
         if (data.name === "task_report") {
           const report = reportOf(data.arguments);
-          if (report !== undefined) s.reports.push({ at, callId, ...report });
+          if (report !== undefined) calls.set(callId, { at, callId, ...report });
         } else if (data.name === "ask_user_question") {
           asks.set(callId, { at, id: callId, kind: "question", tool: "ask_user_question", detail: questionsOf(data.arguments) });
         }
         break;
       }
       case "tool/result": {
-        const callId = str((data.message as Data | undefined)?.toolCallId);
-        if (callId !== undefined) asks.delete(callId);
+        const message = data.message !== null && typeof data.message === "object" ? data.message as Data : undefined;
+        const callId = str(message?.toolCallId);
+        if (callId === undefined) break;
+        asks.delete(callId);
+        const report = calls.get(callId);
+        if (report !== undefined) {
+          calls.delete(callId);
+          if (message?.isError !== true) s.reports.push(report);
+        }
         break;
       }
       case "approval/asked": {
@@ -201,6 +213,7 @@ function scan(events: readonly EventLike[]): Scan {
       }
     }
   });
+  s.reports.sort((a, b) => a.at - b.at);
   s.gates = [...asks.values(), ...approvals.values()].sort((a, b) => a.at - b.at);
   return s;
 }
@@ -214,7 +227,8 @@ function errorLine(reason: unknown): string {
   return code !== undefined && code !== "" ? code : "error";
 }
 
-const isError = (reason: unknown): boolean => (reason as { kind?: unknown } | undefined)?.kind === "error";
+/** The kind a turn ended with, `turn/end`'s `reason.kind`, or `unknown`. */
+const kindOf = (reason: unknown): string => str((reason as { kind?: unknown } | null | undefined)?.kind) ?? "unknown";
 
 /** The last report since `turn` started that is not `progress`. */
 function settledBy(s: Scan, turn: Turn, until = Number.POSITIVE_INFINITY): Report | undefined {
@@ -223,10 +237,18 @@ function settledBy(s: Scan, turn: Turn, until = Number.POSITIVE_INFINITY): Repor
   return found;
 }
 
-/** What an ended turn with no settling report says: `failed` with its error, else `ready` with its last words. */
-function turnOutcome(events: readonly EventLike[], turn: Turn): { status: "ready" | "failed"; text: string } {
-  if (isError(turn.reason)) return { status: "failed", text: cut(errorLine(turn.reason), TASK_TEXT_MAX) };
-  return { status: "ready", text: cut(finalTextOf(events, turn.turn), TASK_TEXT_MAX) };
+/** What an ended turn with no settling report means, by its end kind - the one table the view and the relays read:
+ * `error` → `failed` with its error line; `blocked` and `max-tokens` → `blocked`; `aborted` and `interrupted` → the
+ * task is `stalled` (cut, not finished) and relays nothing; `completed`, `forked` and any other kind → `done`, relayed
+ * `ready`. A text is the turn's last words, or `the turn ended (<kind>) with no closing words` when it has none. */
+function turnOutcome(events: readonly EventLike[], turn: Turn): { state: TaskState; relay?: { status: "ready" | "blocked" | "failed"; text: string } } {
+  const kind = kindOf(turn.reason);
+  if (kind === "aborted" || kind === "interrupted") return { state: "stalled" };
+  if (kind === "error") return { state: "failed", relay: { status: "failed", text: cut(errorLine(turn.reason), TASK_TEXT_MAX) } };
+  const words = finalTextOf(events, turn.turn);
+  const text = cut(words === "" ? `the turn ended (${kind}) with no closing words` : words, TASK_TEXT_MAX);
+  if (kind === "blocked" || kind === "max-tokens") return { state: "blocked", relay: { status: "blocked", text } };
+  return { state: "done", relay: { status: "ready", text } };
 }
 
 function strategyOf(root: string, cwd: string | undefined): string | undefined {
@@ -272,8 +294,9 @@ const GROUP: Record<TaskState, TaskGroup> = {
  * message after the last `turn/start`, or with none; `waiting` - an approval asked and not decided, or an
  * `ask_user_question` call with no result (`waitingFor` names the first); an open turn - `stalled` when its last event
  * is {@link STALL_MS} or more before `now`, else `running`; after the last `turn/end` - the last non-`progress` report
- * since that turn started (`ready` → `done`, `blocked`, `failed`), and with none `failed` when the turn ended in
- * `error`, else `done` with the turn's last words; no turn yet - `running`.
+ * since that turn started (`ready` → `done`, `blocked`, `failed`), and with none the turn's end kind ({@link
+ * turnOutcome}); no turn yet - `running`. A gate is pending only while the turn that asked it is open, and a report
+ * counts once its result is logged and is no error.
  * @param input - `id`, the worker's session id; `header`, its creation time and folder; `events`, its log in order;
  *   `root`, the repository root its strategy is read against; `now`, the clock the stall is judged by.
  */
@@ -306,8 +329,9 @@ export function taskViewOf(input: { id: string; header: { createdAt: number; cwd
       state = report.status === "ready" ? "done" : report.status === "blocked" ? "blocked" : "failed";
       result = { status: report.status as "ready" | "blocked" | "failed", text: cut(report.text, TASK_TEXT_MAX) };
     } else {
-      result = turnOutcome(events, lastTurn);
-      state = result.status === "failed" ? "failed" : "done";
+      const outcome = turnOutcome(events, lastTurn);
+      state = outcome.state;
+      result = outcome.relay;
     }
   } else {
     state = "running";
@@ -334,8 +358,8 @@ export function taskViewOf(input: { id: string; header: { createdAt: number; cwd
 /**
  * What the task has to tell the conversation, in log order, each under a fixed id so a second read of the same log
  * gives the same items: each non-`progress` report (`task-report:<id>:<callId>`); each ended turn with no such report
- * since it started (`task-report:<id>:turn-<n>`: `failed` with the error when it ended in `error`, else `ready` with
- * its last words); each gate still pending (`task-wait:<id>:<approval id or callId>`, `waiting`, the tool and the
+ * since it started (`task-report:<id>:turn-<n>`, by its end kind, {@link turnOutcome}; a turn cut by `aborted` or
+ * `interrupted` relays nothing); each gate still pending (`task-wait:<id>:<approval id or callId>`, `waiting`, the tool and the
  * question or reason). Every text is cut at {@link TASK_TEXT_MAX}.
  */
 export function relaysOf(view: TaskView, events: readonly TimedEvent[]): RelayItem[] {
@@ -349,8 +373,9 @@ export function relaysOf(view: TaskView, events: readonly TimedEvent[]): RelayIt
   }
   for (const turn of s.turns) {
     if (turn.end === undefined || settledBy(s, turn, turn.end) !== undefined) continue;
-    const outcome = turnOutcome(events, turn);
-    items.push({ at: turn.end, item: item(`task-report:${view.id}:turn-${turn.turn}`, outcome.status, outcome.text) });
+    const relay = turnOutcome(events, turn).relay;
+    if (relay === undefined) continue;
+    items.push({ at: turn.end, item: item(`task-report:${view.id}:turn-${turn.turn}`, relay.status, relay.text) });
   }
   for (const gate of s.gates) {
     const text = gate.detail === "" ? gate.tool : `${gate.tool}: ${gate.detail}`;
@@ -359,8 +384,8 @@ export function relaysOf(view: TaskView, events: readonly TimedEvent[]): RelayIt
   return items.sort((a, b) => a.at - b.at).map((x) => x.item);
 }
 
-/** The stall relay, `task-stall:<id>:<lastSeq>`, when the view is `stalled`: one per stall, since any new event moves
- * `lastSeq`. */
+/** The stall relay, `task-stall:<id>:<lastSeq>`, when the view is `stalled` - an open turn quiet for {@link STALL_MS},
+ * or a turn cut by `aborted` or `interrupted`: one per stall, since any new event moves `lastSeq`. */
 export function stallOf(view: TaskView): RelayItem | undefined {
   if (view.state !== "stalled") return undefined;
   return {
@@ -368,6 +393,6 @@ export function stallOf(view: TaskView): RelayItem | undefined {
     task: view.id,
     title: view.title,
     status: "stalled",
-    text: cut(`no session event since ${new Date(view.lastEventAt).toISOString()}; the turn is still open`, TASK_TEXT_MAX),
+    text: cut(`no progress since ${new Date(view.lastEventAt).toISOString()}`, TASK_TEXT_MAX),
   };
 }

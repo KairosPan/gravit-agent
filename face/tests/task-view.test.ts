@@ -238,3 +238,89 @@ test("steps keep the last ten progress lines; usage sums every turn; strategy an
   // no turn that can be accounted: no usage
   assert.equal(view(new Log().brief().start(1).say(1, "x").end(1)).usage, undefined);
 });
+
+test("an ended turn with no settling report reads its end reason: done, blocked, failed, or stalled with no relay", () => {
+  const rows: [object, string, string | undefined][] = [
+    [{ kind: "completed" }, "done", "ready"],
+    [{ kind: "forked" }, "done", "ready"],
+    [{ kind: "something-new" }, "done", "ready"],
+    [{ kind: "blocked" }, "blocked", "blocked"],
+    [{ kind: "max-tokens" }, "blocked", "blocked"],
+    [{ kind: "error", error: { message: "boom" } }, "failed", "failed"],
+    [{ kind: "aborted", reason: { kind: "user" } }, "stalled", undefined],
+    [{ kind: "interrupted" }, "stalled", undefined],
+  ];
+  for (const [reason, state, relay] of rows) {
+    const log = new Log().brief().start(1).say(1, "last words").end(1, reason);
+    const v = view(log);
+    const label = JSON.stringify(reason);
+    assert.equal(v.state, state, label);
+    assert.equal(v.group, state === "done" ? "done" : "you", label);
+    const relays = relaysOf(v, log.events);
+    if (relay === undefined) {
+      assert.deepEqual(relays, [], label);
+      assert.equal(v.result, undefined, label);
+    } else {
+      assert.deepEqual(relays.map((r) => [r.id, r.status]), [[`task-report:${ID}:turn-1`, relay]], label);
+      assert.equal(v.result?.status, relay, label);
+      assert.equal(relays[0]!.text, relay === "failed" ? "boom" : "last words", label);
+    }
+  }
+  // a stopped marker still wins over an aborted end
+  const stopped = new Log().brief().start(1).end(1, { kind: "aborted", reason: { kind: "user" } }).user("stopped", { kind: "task", form: "stopped" });
+  assert.equal(view(stopped).state, "stopped");
+});
+
+test("a gate is pending only while the turn that asked it is open", () => {
+  const log = new Log().brief().start(1)
+    .push("approval/asked", { id: "ap-1", toolName: "mcp__account__portfolio_place_order", reason: "buy" })
+    .call(1, "c-ask", "ask_user_question", { questions: [{ id: "q", question: "Which?" }] })
+    .end(1);
+  const v = view(log);
+  assert.notEqual(v.state, "waiting");
+  assert.equal(v.waitingFor, undefined);
+  assert.ok(relaysOf(v, log.events).every((r) => !r.id.startsWith("task-wait:")));
+});
+
+test("a turn with no closing words says so with its end kind", () => {
+  const log = new Log().brief().start(1).say(1, "let me check").call(1, "c1", "bash", { cmd: "ls" }).result(1, "c1").end(1);
+  const v = view(log);
+  assert.equal(v.result?.text, "the turn ended (completed) with no closing words");
+  assert.equal(relaysOf(v, log.events)[0]!.text, "the turn ended (completed) with no closing words");
+  const capped = new Log().brief().start(1).end(1, { kind: "max-tokens" });
+  assert.equal(relaysOf(view(capped), capped.events)[0]!.text, "the turn ended (max-tokens) with no closing words");
+});
+
+test("a task_report counts only once its result exists and is not an error", () => {
+  const log = new Log().brief().start(1)
+    .call(1, "c-err", "task_report", { status: "ready", text: "refused one" }).result(1, "c-err", 1, true)
+    .call(1, "c-prog", "task_report", { status: "progress", text: "no result yet" })
+    .call(1, "c-wait", "task_report", { status: "blocked", text: "no result yet" });
+  const open = view(log);
+  assert.equal(open.state, "running");
+  assert.deepEqual(open.steps, []);
+  assert.deepEqual(relaysOf(open, log.events), []);
+  log.result(1, "c-prog").say(1, "words").end(1);
+  const ended = view(log);
+  assert.deepEqual(ended.steps, ["no result yet"]);
+  assert.equal(ended.state, "done", "neither the refused nor the unanswered report settles the turn");
+  assert.deepEqual(relaysOf(ended, log.events).map((r) => r.id), [`task-report:${ID}:turn-1`]);
+});
+
+test("malformed or non-object arguments in logged task_report and ask_user_question calls never throw", () => {
+  const log = new Log().brief().start(1);
+  const bad = ["{not json", "null", "42", "\"ready\"", "[1,2]", "{\"status\":\"ready\"}", "{\"questions\":\"x\"}", "{\"questions\":[null,7,{\"question\":3}]}"];
+  bad.forEach((raw, i) => {
+    log.push("tool/call", { turn: 1, step: 1, callId: `r${i}`, name: "task_report", arguments: raw }).result(1, `r${i}`);
+    log.push("tool/call", { turn: 1, step: 1, callId: `q${i}`, name: "ask_user_question", arguments: raw });
+  });
+  log.push("tool/call", { turn: 1, step: 1, callId: "obj", name: "task_report", arguments: { status: "ready" } });
+  log.push("tool/call", { turn: 1, step: 1, name: "task_report", arguments: "{}" });
+  log.push("tool/result", { turn: 1, step: 1, message: null });
+  log.push("approval/asked", null);
+  const v = view(log);
+  assert.equal(v.state, "waiting");
+  const relays = relaysOf(v, log.events);
+  assert.ok(relays.every((r) => r.id.startsWith(`task-wait:${ID}:q`)));
+  assert.equal(relays.length, bad.length);
+});
