@@ -1941,7 +1941,7 @@ channel's two, eighteen writes, the sign-in's callback):
 | `GET /data/account/connected/book` | a connected line's order book (plan A2) | 2 s | 7 s | `venue`, `symbol`, `depth` |
 | `GET /data/account/connected/trades` | a connected line's latest trades (plan A2) | 2 s | 7 s | `venue`, `symbol`, `limit` |
 | `GET /data/account/identity` | `GET /api/account/identity`: Account › Identity — the networks connected, the routing, quiet hours and Not you; never a token or a numeric id (plan B1a); the Identity tab's read (plan B1b) | 2 s | 7 s | `fresh` |
-| `GET /data/account/identity/pending` | `GET /api/account/identity/pending`: a Connect sheet's pending connection (plan B1a): sheet 2 reads it every 1.5 s, always `fresh=1`; once heard it carries the sender's numeric `id`, which sheet 4 signs (plan B1b) | 1 s | 7 s | `id`, `fresh` |
+| `GET /data/account/identity/pending` | `GET /api/account/identity/pending`: a Connect sheet's pending connection (plan B1a): sheet 2 reads it every 1.5 s, always `fresh=1`; once heard it carries the sender's numeric `id`, which **This is me** on sheet 3 sends to `/data/account/act` to connect (plan B1b) | 1 s | 7 s | `id`, `fresh` |
 | `POST /data/account/pair` | `POST /api/account/pair`: this page's public key, its label and the code (stage 2); a new browser's `ask`, which makes the account print a code of its own for it, and its `code` | — | 7 s | none; at most 4,096 bytes |
 | `POST /data/account/prepare` | `POST /api/account/prepare`: a draft prepared, unsigned (stage 2) | — | 30 s | none; at most 16,384 bytes |
 | `POST /data/account/exchange` | `POST /api/exchange`: the signed envelope (stage 2) | — | 30 s | none; at most 65,536 bytes |
@@ -5854,9 +5854,9 @@ being per origin and per profile.
 3. **A watch.** On Markets, star a crypto row you are not watching: one press, no sheet. Expect
    the star on in this browser and on the same row in the other face browser after its next read
    (the Account's watch list, which Gravit's seat reads too); star it off and it leaves both.
-4. **A paper account.** Account › Venues › **Open a paper account**: a name, $10,000. The sheet
-   prepares and shows **What you sign** (`connectVenue`, `live:paper`, the venue id, the dollars,
-   the nonce); sign. The paper venue appears under Venues with its `Paper` chip.
+4. **A paper account.** Account › Venues › **Open a paper account**: a name, $10,000. The sheet's
+   **Open the account** applies at once (`connectVenue`, `live:paper`, through `/data/account/act`):
+   no What you sign, no signature. The paper venue appears under Venues with its `Paper` chip.
 5. **A paper order.** Trade → Crypto → a coin the paper venue trades → Where: the paper line
    (`Paper`) → Buy, `10` dollars, Market. Expect the Account's quote, the countdown `Your signature
    is good for 9:5x more.`, What you sign (the seventeen fields and the nonce); change the amount
