@@ -2,14 +2,15 @@
  *
  * Every message the account sends names its kind. A kind belongs to one routing row (the rows the Identity tab shows, in this order:
  * Chat with Gravit, Watch alerts, Pre-close brief, Cards waiting, Fills and reports), and the owner ticks, row by row, which connected
- * networks it goes to. The watchdog's notice is in no row: it goes to every connected network, because it says the rest is down.
+ * networks it goes to. The watchdog's notice is in no row: it goes to every connected network, because it says the rest is down; so does the
+ * account's notice of a browser let in by a code (`device`), because it says someone may have taken the account.
  *
  * The owner signs the routing as one string — the rows in that order, `row=net,net` joined by `;`, the networks sorted, a row with none
  * written `row=` — so the dialog shows exactly what is written: `chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram`.
  *
  * Quiet hours are a window on New York's wall clock, `from` to `to` (`to` not included; `from` after `to` crosses midnight). Inside it the
  * proactive kinds are held — an alert, a brief, a report, a card, a fill — and a held message is not sent later. A reply (`chat`), an
- * urgent alert and the watchdog's notice always go. */
+ * urgent alert, the watchdog's notice and a device's always go. */
 
 /** the networks the account can speak on, in the order the Identity tab shows them */
 export type Network = "imessage" | "slack" | "telegram";
@@ -29,8 +30,8 @@ export const SLACK_TOKEN_ANYWHERE = /\bx(?:ox[abposre]|app)-[A-Za-z0-9-]{10,}/g;
 /** what the operator is answered when they write while the Chat with Gravit row does not tick the network they wrote on */
 export const chatOffLine = (network: Network): string => `Chat with Gravit is off on ${NETWORK_NAME[network]}: Account › Identity turns it on.`;
 
-export type PhoneKind = "chat" | "alert" | "urgent" | "brief" | "report" | "card" | "fill" | "watchdog";
-export const PHONE_KINDS: readonly PhoneKind[] = ["chat", "alert", "urgent", "brief", "report", "card", "fill", "watchdog"];
+export type PhoneKind = "chat" | "alert" | "urgent" | "brief" | "report" | "card" | "fill" | "watchdog" | "device";
+export const PHONE_KINDS: readonly PhoneKind[] = ["chat", "alert", "urgent", "brief", "report", "card", "fill", "watchdog", "device"];
 
 export type RouteRow = "chat" | "alerts" | "brief" | "cards" | "fills";
 export const ROUTE_ROWS: readonly RouteRow[] = ["chat", "alerts", "brief", "cards", "fills"];
@@ -46,9 +47,10 @@ const ROW_OF: Readonly<Record<PhoneKind, RouteRow | "always">> = {
   fill: "fills",
   report: "fills",
   watchdog: "always",
+  device: "always",
 };
 
-/** the row a kind is routed by, or "always" for the watchdog's notice, which goes to every connected network */
+/** the row a kind is routed by, or "always" for the watchdog's notice and a device's, which go to every connected network */
 export const rowOf = (kind: PhoneKind): RouteRow | "always" => ROW_OF[kind];
 
 /** a routing with every row empty: nothing goes anywhere until the owner ticks a row */
@@ -102,7 +104,7 @@ function newYorkMinute(at: number): number {
 }
 
 /** the kinds quiet hours never hold */
-const ALWAYS_GOES: ReadonlySet<PhoneKind> = new Set<PhoneKind>(["chat", "urgent", "watchdog"]);
+const ALWAYS_GOES: ReadonlySet<PhoneKind> = new Set<PhoneKind>(["chat", "urgent", "watchdog", "device"]);
 
 /** Do quiet hours hold a message of this kind back at this time? `quiet` null is off; so is a window whose two ends are not times of day
  * or are the same. A window with `from` after `to` crosses midnight; `to` is not part of it. */

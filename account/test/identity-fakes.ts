@@ -24,6 +24,8 @@ export interface FakeBotApi {
   calls: Array<{ method: string; body: Record<string, unknown> }>;
   /** from now on, `method` is answered with `status` and `body` (as Telegram's JSON) instead of its own answer; status 0 restores it */
   answer(method: string, status: number, body: object): void;
+  /** from now on, `method` is never answered (the request is held open until the fake closes); false answers it again */
+  hang(method: string, on?: boolean): void;
   close(): Promise<void>;
 }
 
@@ -33,6 +35,7 @@ export async function fakeBotApi(o: { token?: string; me?: FakeBotApi["me"] } = 
   const updates: Array<{ update_id: number } & Record<string, unknown>> = [];
   const waiting = new Set<() => void>();
   const overrides = new Map<string, { status: number; body: object }>();
+  const hung = new Set<string>();
   const sent: FakeBotApi["sent"] = [];
   const calls: FakeBotApi["calls"] = [];
   let nextMessageId = 1000;
@@ -66,6 +69,7 @@ export async function fakeBotApi(o: { token?: string; me?: FakeBotApi["me"] } = 
     if (decodeURIComponent(m[1]!) !== token) return reply(res, 401, { ok: false, error_code: 401, description: "Unauthorized" });
     const method = m[2]!;
     calls.push({ method, body });
+    if (hung.has(method)) return;
     const override = overrides.get(method);
     if (override) return reply(res, override.status, override.body);
     if (method === "getMe") return reply(res, 200, { ok: true, result: { ...me, is_bot: true } });
@@ -118,6 +122,10 @@ export async function fakeBotApi(o: { token?: string; me?: FakeBotApi["me"] } = 
       if (status === 0) overrides.delete(method);
       else overrides.set(method, { status, body });
       if (method === "getUpdates") wakeAll();
+    },
+    hang(method, on = true) {
+      if (on) hung.add(method);
+      else hung.delete(method);
     },
     async close() {
       closed = true;

@@ -1,6 +1,9 @@
 /** THE ACCOUNT'S OWN NOTICES — what the account itself tells the operator's phone, with no desk turn: a fill (kind `fill`, as each one is
- * told to the pages: service.ts paperSaid and toldFill) and a Guard card raised (kind `card`, as the ledger takes its row). Plain text, one
- * line, no button and no link: a card is answered in Gravit (Account › Cards), never from the phone, and nothing sent links to the face. */
+ * told to the pages: service.ts paperSaid and toldFill), a Guard card raised (kind `card`, as the ledger takes its row), a browser let in
+ * by a code (kind `device`, as the ledger takes its row) and a network's last line before it is disconnected (sent through that network
+ * alone, identity.ts disconnect). Plain text, one line, no button and no link: a card is answered in Gravit (Account › Cards), never from the
+ * phone, and nothing sent links to the face. */
+import { NETWORK_NAME, type Network } from "./kinds.ts";
 import type { LedgerRow } from "../../agent/ledger.ts";
 
 export interface FillFields {
@@ -56,4 +59,27 @@ export function cardNotice(row: LedgerRow): string | undefined {
   const reason = typeof row.reason === "string" ? oneLine(noLinks(row.reason)) : "";
   if (reason === "") return undefined;
   return `Your call · ${reason} — waiting in Gravit`;
+}
+
+/** `A browser was let in to sign for the account with a code (<label> · <kid8>). …` for a device admitted by the code its terminal printed
+ * (an `account_pair` row marked `admitted`, signed `device:<kid>`); undefined for every other row, a device asking and the first owner's
+ * own among them. The label is the browser's own words, so nothing in it links */
+export function deviceNotice(row: LedgerRow): string | undefined {
+  if (!row || row.kind !== "action" || row.tool !== "account_pair") return undefined;
+  const n = row.native as { label?: unknown; admitted?: unknown } | undefined;
+  if (n?.admitted !== true || typeof row.signer !== "string" || !row.signer.startsWith("device:")) return undefined;
+  const kid8 = row.signer.slice("device:".length, "device:".length + 8);
+  if (kid8 === "") return undefined;
+  const label = typeof n.label === "string" ? oneLine(noLinks(n.label)) : "";
+  return `A browser was let in to sign for the account with a code (${label === "" ? "device" : label} · ${noLinks(kid8)}). Not you? Remove it under Settings › Devices.`;
+}
+
+const NEW_YORK_CLOCK = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+/** `Gravit's <Network> was disconnected from the account at <h:mm> ET. …` — the last line a network is sent before its token goes, its time
+ * on New York's clock */
+export function disconnectNotice(network: Network, at: number): string {
+  const p = Object.fromEntries(NEW_YORK_CLOCK.formatToParts(new Date(at)).map((x) => [x.type, x.value]));
+  const clock = `${Number(p.hour) % 24}:${p.minute}`;
+  return `Gravit's ${NETWORK_NAME[network]} was disconnected from the account at ${clock} ET. Not you? Connect it again under Account › Identity.`;
 }

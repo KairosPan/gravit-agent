@@ -14,7 +14,7 @@ import { keyHashOf, newSalt } from "../../src/portfolio/account/brain-keys.ts";
 import { signOwner, simKey, type OwnerAction } from "../../src/portfolio/account/sign.ts";
 import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import { quietHolds } from "../../src/portfolio/identity/kinds.ts";
-import { cardNotice, fillNotice, noLinks } from "../../src/portfolio/identity/notices.ts";
+import { cardNotice, deviceNotice, fillNotice, noLinks } from "../../src/portfolio/identity/notices.ts";
 import { Outbox } from "../../src/portfolio/identity/outbox.ts";
 import type { PendingView } from "../../src/portfolio/identity/pending.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
@@ -163,7 +163,8 @@ describe("the send route, through the account", () => {
     expect(isRefusal(off)).toBe(false);
     for (const kind of ["chat", "alert", "watchdog"]) expect(await send({ kind, text: "anyone?" })).toEqual({ ok: true, held: "nothing connected" });
     expect(await send({ kind: "chat", text: "anyone?", network: "telegram", replyTo: "telegram:41" })).toEqual({ ok: true, held: "nothing connected" });
-    expect(bot.sent).toHaveLength(1);
+    // the brief, and the disconnect's own last line on the network it took away
+    expect(bot.sent.map((s) => s.text)).toEqual(["the brief", "Gravit's Telegram was disconnected from the account at 12:00 ET. Not you? Connect it again under Account › Identity."]);
   });
 
   it("quiet hours hold proactive kinds, never a reply, an urgent alert or a watchdog notice", async () => {
@@ -348,6 +349,21 @@ describe("the send route, through the account", () => {
     expect(bot.sent.filter((s) => s.text.startsWith("Filled · "))).toHaveLength(1);
   });
 
+  it("a device let in by code is told on every connected network, in quiet hours and with every routing tick off", async () => {
+    await routing("chat=;alerts=;brief=;cards=;fills=");
+    // 23:30 in New York: inside the default 23:00–07:00
+    clock = Date.parse("2026-11-05T04:30:00Z");
+    const ledger = (svc as unknown as { ledger: Ledger }).ledger;
+    const jwk = { kty: "EC", crv: "P-256", x: "x", y: "y" };
+    // a device asking, and the first owner's own row, are not told: only one let in by a code
+    ledger.append({ kind: "action", venue: "*", tool: "account_pair", signer: "device:Qw3rTy9Zk_LmNoPq", reason: "a device asked to sign", native: { jwk, label: "Chrome on Mac", pending: true } });
+    ledger.append({ kind: "action", venue: "*", tool: "account_pair", signer: "device:Zz9Yy8Xx7Ww6Vv5U", reason: "the first device", native: { jwk, label: "first", code: true } });
+    ledger.append({ kind: "action", venue: "*", tool: "account_pair", signer: "device:Qw3rTy9Zk_LmNoPq", reason: "a device was let in with the code its terminal printed (Chrome on Mac)", native: { jwk, label: "Chrome on Mac", code: true, admitted: true } });
+    await until(() => bot.sent.length >= 1);
+    await pause(200);
+    expect(bot.sent).toEqual([{ chat_id: OPERATOR.id, text: "A browser was let in to sign for the account with a code (Chrome on Mac · Qw3rTy9Z). Not you? Remove it under Settings › Devices." }]);
+  });
+
   it("a Guard card raised in the ledger reaches the phone as a notice, and an answered one does not", async () => {
     const ledger = (svc as unknown as { ledger: Ledger }).ledger;
     ledger.append({ kind: "card", venue: "*", intentId: "ap-1", outcome: "pending", reason: "Buy 10 NVDA · limit 183.00 · Paper · Alpaca" });
@@ -383,6 +399,19 @@ describe("the account's own notices", () => {
     expect(fillNotice({ side: "buy", qty: 10, symbol: "NVDA", price: "183.00", venueName: "Alpaca", paper: true })).toBe("Filled · Buy 10 NVDA at 183.00 · Paper · Alpaca");
     expect(fillNotice({ side: "sell", qty: "0.5", symbol: "ETH/USD", price: 2451.3333, venueName: "Kraken" })).toBe("Filled · Sell 0.5 ETH/USD at 2451.3333 · Kraken");
     expect(fillNotice({ side: "buy", qty: 3, symbol: "AAPL", venueName: "Alpaca", paper: true })).toBe("Filled · Buy 3 AAPL · Paper · Alpaca");
+  });
+
+  it("a device let in by code is a notice with no button and no link; every other row is none", () => {
+    const row = (native: Record<string, unknown>, signer = "device:AbCdEfGh12345678") => ({ kind: "action", venue: "*", tool: "account_pair", signer, native: { jwk: {}, ...native } }) as unknown as LedgerRow;
+    expect(deviceNotice(row({ label: "Chrome on Mac", code: true, admitted: true }))).toBe("A browser was let in to sign for the account with a code (Chrome on Mac · AbCdEfGh). Not you? Remove it under Settings › Devices.");
+    // a label is the browser's own words: nothing in it links
+    expect(deviceNotice(row({ label: "evil.example https://x.example/a", code: true, admitted: true }))).toBe("A browser was let in to sign for the account with a code (evil·example <link> · AbCdEfGh). Not you? Remove it under Settings › Devices.");
+    expect(deviceNotice(row({ label: "", code: true, admitted: true }))).toBe("A browser was let in to sign for the account with a code (device · AbCdEfGh). Not you? Remove it under Settings › Devices.");
+    expect(deviceNotice(row({ label: "x", pending: true }))).toBeUndefined();
+    expect(deviceNotice(row({ label: "x", code: true }))).toBeUndefined();
+    expect(deviceNotice(row({ label: "x", code: true, admitted: true }, "0xabc"))).toBeUndefined();
+    expect(deviceNotice({ kind: "card", outcome: "pending", reason: "x" } as LedgerRow)).toBeUndefined();
+    expect(deviceNotice(null as unknown as LedgerRow)).toBeUndefined();
   });
 
   it("a Guard card raised is a notice with no button and no link", () => {

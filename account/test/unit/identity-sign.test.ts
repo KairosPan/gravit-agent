@@ -111,11 +111,14 @@ describe("connect, disconnect, routing and block, signed at the door", () => {
   let srv: PortfolioServerHandle;
 
   const boot = async () => {
-    svc = await PortfolioService.create({ home, venues: "frontline", real: true, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined }, publicMarkets: [], liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] }, desk: { brain: [scriptedBrain(() => null)], tickMs: 0, env: {} }, identity: { apiBase: bot.url, pollTimeoutS: 1 } });
+    svc = await PortfolioService.create({ home, venues: "frontline", real: true, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined }, publicMarkets: [], liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] }, desk: { brain: [scriptedBrain(() => null)], tickMs: 0, env: {} }, identity: { apiBase: bot.url, pollTimeoutS: 1, now: () => clockAt ?? Date.now() } });
     await svc.restoring;
     srv = await startPortfolioServer({ port: 0, service: svc, snapshotMs: 0 });
   };
+  /** the identity's clock, when a test sets it (the real one otherwise) */
+  let clockAt: number | undefined;
   beforeEach(async () => {
+    clockAt = undefined;
     bot = await fakeBotApi();
     home = mkdtempSync(join(tmpdir(), "identity-sign-"));
     await boot();
@@ -263,6 +266,41 @@ describe("connect, disconnect, routing and block, signed at the door", () => {
     const again = await own(connectOf(await heardPending()));
     expect(isRefusal(again)).toBe(false);
   });
+
+  it("disconnect sends its last line through that network before the token goes", async () => {
+    await connect();
+    // quiet hours hold nothing of it, and no routing tick decides it
+    const quiet = await own({ type: "setRouting", routing: NONE, quietFrom: "16:00", quietTo: "17:00" });
+    expect(isRefusal(quiet)).toBe(false);
+    const tokenFile = join(home, "credentials", "networks", "telegram.json");
+    expect(existsSync(tokenFile)).toBe(true);
+    const fileThen: boolean[] = [];
+    const push = bot.sent.push.bind(bot.sent);
+    bot.sent.push = (...items) => {
+      fileThen.push(existsSync(tokenFile));
+      return push(...items);
+    };
+    // 16:40 in New York (EST, UTC−5, in November)
+    clockAt = Date.parse("2026-11-04T21:40:00Z");
+    const r = await own({ type: "disconnectNetwork", network: "telegram" });
+    expect(isRefusal(r)).toBe(false);
+    expect(bot.sent.map((x) => x.text)).toEqual(["Gravit's Telegram was disconnected from the account at 16:40 ET. Not you? Connect it again under Account › Identity."]);
+    expect(bot.sent[0]!.chat_id).toBe(555000123);
+    expect(fileThen).toEqual([true]);
+    expect(existsSync(tokenFile)).toBe(false);
+  });
+
+  it("a disconnect whose network does not answer still completes within 6 s", async () => {
+    await connect();
+    bot.hang("sendMessage");
+    const t0 = Date.now();
+    const r = await own({ type: "disconnectNetwork", network: "telegram" });
+    expect(Date.now() - t0).toBeLessThan(6_000);
+    expect(isRefusal(r)).toBe(false);
+    expect(readNetworkSecret(home, "telegram")).toBeUndefined();
+    expect(loadIdentity(home).bindings).toEqual([]);
+    expect(said.join("\n")).toMatch(/identity: Telegram's last line before its disconnect was not sent/);
+  }, 10_000);
 
   it("setRouting saves rows and quiet hours; refuses a network not connected, a bad time, equal times", async () => {
     const unbound = await own({ type: "setRouting", routing: ALL_TELEGRAM, quietFrom: "22:00", quietTo: "06:30" });

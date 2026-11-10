@@ -13,7 +13,9 @@
  *                      written to <home>/credentials/networks/<network>.json (secret-file.ts), then the binding and the routing signed to
  *                      the state, then the connector started at the offset after the message heard. A refusal leaves the pending
  *                      connection where it was, so the owner can still sign the right one.
- *   disconnectNetwork  the binding and the network's routing ticks gone from the state first, then the connector stopped and the token
+ *   disconnectNetwork  one last line sent through that network alone (notices.ts disconnectNotice: straight to its transport, past the
+ *                      outbox, the routing and quiet hours, waited on at most DISCONNECT_LINE_MS), so the phone it held is always told;
+ *                      then the binding and the network's routing ticks gone from the state, then the connector stopped and the token
  *                      file removed — so a state that cannot be written leaves everything as it was, the poller still running.
  *   setRouting         the routing string (kinds.ts parseRouting) and quiet hours; both times "" turns quiet hours off, stored as null
  *                      (the store reads an empty pair as the 23:00–07:00 default, so an empty pair would turn them on after a restart).
@@ -34,7 +36,7 @@
  * dropped with one line — a 403 makes Telegram's status read `blocked` until a line goes, and tokens a network no longer takes its
  * pollFailing; an iMessage row whose line Photon moved (movedAt) is dropped, never sent. A network disconnected takes its queued messages with it: whoever connects next never
  * receives them. The account's own notices (notices.ts) go the same way: `onFill` for each fill the pages are told of, `onLedgerRow` for
- * each Guard card raised.
+ * each Guard card raised and each browser let in by a code (`device`, which goes to every connected network, as the watchdog's).
  *
  * `problem` is what the door and /api/account/prepare both refuse, in IDENTITY_WORDS' fixed words, never repeating what was sent. The token
  * is in no answer, no summary, no log line and no ledger row: the summary of a connect names the token by its fingerprint only. Every line the
@@ -51,7 +53,7 @@ import { no } from "../refuse.ts";
 import type { LedgerRow } from "../../agent/ledger.ts";
 import { formatRouting, isClock, NETWORK_NAME, NETWORKS, parseRouting, PHONE_KINDS, quietHolds, rowOf, SLACK_TOKEN_ANYWHERE, WIRE_ID, type Network, type PhoneKind, type Routing } from "./kinds.ts";
 import { redactorOf, splitMessage } from "./bot-api.ts";
-import { cardNotice, fillNotice, type FillFields } from "./notices.ts";
+import { cardNotice, deviceNotice, disconnectNotice, fillNotice, type FillFields } from "./notices.ts";
 import { IMESSAGE_CURSOR_FILE, ImessageConnector, ImessageTransport } from "./imessage.ts";
 import { lateLine, Outbox, OUTBOX_MAX, OUTBOX_MAX_AGE_MS, type OutboxEntry } from "./outbox.ts";
 import { InboxRing, type InboxMessage } from "./inbox.ts";
@@ -68,6 +70,9 @@ import { OFFSET_FILE, realClock, TelegramConnector, TelegramTransport, type Iden
 export type IdentityAction = Extract<OwnerAction, { type: "connectNetwork" | "disconnectNetwork" | "setRouting" | "blockSender" }>;
 export const IDENTITY_TYPES: ReadonlySet<string> = new Set(["connectNetwork", "disconnectNetwork", "setRouting", "blockSender"]);
 export const isIdentityAction = (a: { type: string }): a is IdentityAction => IDENTITY_TYPES.has(a.type);
+
+/** how long a disconnect waits for its last line to go through the network it takes away before it goes on all the same */
+export const DISCONNECT_LINE_MS = 5_000;
 
 /** the line Photon refused to write to, kept in the home's identity directory: a connect registers the number again past it */
 export const IMESSAGE_REFUSED_FILE = "imessage.refused";
@@ -356,13 +361,16 @@ export class Identity {
     }
   }
 
-  /** every row the ledger takes (service.ts toldRow): a Guard card raised is sent as `card`. Never throws */
+  /** every row the ledger takes (service.ts toldRow): a Guard card raised is sent as `card`, a browser let in by a code as `device`.
+   * Never throws */
   onLedgerRow(row: LedgerRow): void {
     try {
-      const text = cardNotice(row);
-      if (text !== undefined) this.notify("card", text);
+      const card = cardNotice(row);
+      if (card !== undefined) this.notify("card", card);
+      const device = deviceNotice(row);
+      if (device !== undefined) this.notify("device", device);
     } catch (err) {
-      this.log(`identity: a card notice could not be made (${codeOf(err)})`);
+      this.log(`identity: a notice could not be made of a ledger row (${codeOf(err)})`);
     }
   }
 
@@ -761,6 +769,8 @@ export class Identity {
 
   private async disconnect(a: Extract<IdentityAction, { type: "disconnectNetwork" }>): Promise<Outcome> {
     const network = a.network as Network;
+    // the phone this binding held is told before anything goes: once the state is saved no send reaches it, and its queue is dropped
+    await this.lastLine(network);
     const s = this.state;
     const routing = { ...s.routing };
     for (const row of Object.keys(routing) as Array<keyof Routing>) routing[row] = routing[row].filter((x) => x !== network);
@@ -774,6 +784,30 @@ export class Identity {
     const left = [this.removeSecret(network), network === "imessage" ? this.removeCursor() : undefined].filter((x): x is string => x !== undefined);
     if (left.length > 0) return refusal(`${NETWORK_NAME[network]} is disconnected and its poller stopped, but ${left.join("; and ")}`);
     return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} disconnected: its token removed from the account` };
+  }
+
+  /** A network's last line before its disconnect (notices.ts disconnectNotice), straight to its transport — not through the outbox, whose
+   * rows for it the disconnect drops, nor the routing or quiet hours: the phone it held is always told. Waited on at most
+   * DISCONNECT_LINE_MS; a failure or the wait running out is one line, and the disconnect goes on. Never throws */
+  private async lastLine(network: Network): Promise<void> {
+    const transport = this.transports.get(network);
+    if (!transport || this.disposed) return;
+    let timer: unknown;
+    try {
+      const text = this.clean(disconnectNotice(network, this.now()));
+      const sent = transport.send(text, undefined, `${rowId()}:0`);
+      const waited = new Promise<"late">((resolve) => {
+        timer = setTimeout(() => resolve("late"), DISCONNECT_LINE_MS);
+      });
+      // a send that fails after the wait ran out has nothing left to say
+      sent.catch(() => undefined);
+      const r = await Promise.race([sent, waited]);
+      if (r === "late") this.log(`identity: ${NETWORK_NAME[network]}'s last line before its disconnect was not sent: it did not answer in ${DISCONNECT_LINE_MS / 1000} s`);
+    } catch (err) {
+      this.log(`identity: ${NETWORK_NAME[network]}'s last line before its disconnect was not sent (${this.redactLine(err instanceof Error ? err.message : String(err))})`);
+    } finally {
+      clearTimeout(timer as ReturnType<typeof setTimeout>);
+    }
   }
 
   /** the network's queued messages dropped, with one line when there were any */

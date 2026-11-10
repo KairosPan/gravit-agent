@@ -166,6 +166,25 @@ describe("iMessage connected through the signed door", () => {
     expect(fake.calls).not.toContain("dispose");
   });
 
+  it("iMessage: disconnect sends the last line through Photon before imessage.json goes", async () => {
+    await connect();
+    await until(() => fake.openStreams() === 1);
+    const secretFile = join(home, "credentials/networks/imessage.json");
+    const fileThen: boolean[] = [];
+    const push = fake.sent.push.bind(fake.sent);
+    fake.sent.push = (...items) => {
+      fileThen.push(existsSync(secretFile));
+      return push(...items);
+    };
+    const r = await own({ type: "disconnectNetwork", network: "imessage" });
+    expect(isRefusal(r)).toBe(false);
+    expect(fake.sent).toHaveLength(1);
+    expect(fake.sent[0]).toMatchObject({ to: phone, clientMessageId: expect.stringMatching(/^[0-9a-f]{16}:0$/) });
+    expect(fake.sent[0]!.text).toMatch(/^Gravit's iMessage was disconnected from the account at \d{1,2}:\d\d ET\. Not you\? Connect it again under Account › Identity\.$/);
+    expect(fileThen).toEqual([true]);
+    expect(existsSync(secretFile)).toBe(false);
+  });
+
   it("a cursor that cannot be removed is said in the disconnect's answer, after the binding and the token are gone", async () => {
     await connect();
     await until(() => fake.openStreams() === 1);
