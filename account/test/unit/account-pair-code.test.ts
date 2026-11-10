@@ -128,6 +128,28 @@ describe("pairing a browser by the code its terminal prints", () => {
     }
   });
 
+  it("a code never undercuts an account that needs more than one signature: neither asked for nor typed", async () => {
+    const x = await run(fresh(), 0);
+    first(x);
+    said();
+    const code = ask(x);
+    // the account now needs two signatures: Let it sign, co-signed by both, is the only way in
+    const tablet = simKey("device:pair-code-threshold");
+    expect(x.engine.pairDevice(tablet.jwk, "Tablet")).toMatchObject({ role: "pending" });
+    const users = [`device:${browser.kid}`, `device:${tablet.kid}`].sort();
+    ok(await x.own({ type: "convertToMultiSigUser", signers: JSON.stringify({ authorizedUsers: users, threshold: 2 }) }, browser));
+    expect(x.engine.state.threshold).toBe(2);
+    const NEEDS = "this account needs more than one signature: a browser that signs lets this one in under Settings › Devices";
+    const spy = vi.spyOn(x.engine.host as Required<Host>, "askedCode");
+    const phone = simKey("device:pair-code-phone");
+    expect(refusal(x.engine.pairDevice(phone.jwk, "Phone", undefined, true)).message).toBe(NEEDS);
+    expect(spy).not.toHaveBeenCalled();
+    // the code minted before the threshold rose is no way in either
+    expect(refusal(x.engine.pairDevice(laptop.jwk, "Laptop", code)).message).toBe(NEEDS);
+    expect(await owner(x, `device:${laptop.kid}`)).toBeUndefined();
+    expect(await owner(x, `device:${phone.kid}`)).toBeUndefined();
+  });
+
   it("a label with a line break or a link reaches the terminal and the owners cleaned", async () => {
     const x = await run(fresh(), 0);
     first(x);

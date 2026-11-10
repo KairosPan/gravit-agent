@@ -546,7 +546,9 @@ export class AccountEngine {
       return { ok: true, kid, role: "owner" };
     }
     // the code it asked for: the right one lets it in as Let it sign does (owners from its waiting entry, the threshold unchanged)
-    if (code !== undefined && code !== "") return this.admitByCode(kid, code);
+    // a code is one signature's worth: it never lets a device in past an account that needs more than one (Let it sign, co-signed, does)
+    const several = () => no("E_ACCOUNT_THRESHOLD", { message: "this account needs more than one signature: a browser that signs lets this one in under Settings › Devices", detail: { threshold: this.state.threshold } });
+    if (code !== undefined && code !== "") return this.state.threshold > 1 ? several() : this.admitByCode(kid, code);
     if (!this.state.pendingDevices.some((d) => d.kid === kid)) {
       // a waiting device is only asking; an owner's signature makes it a signer (convertToMultiSigUser). At most ten wait at a time
       if (this.state.pendingDevices.length >= MAX_PENDING_DEVICES) return no("E_ACCOUNT_OWNER_SURFACE", { message: `${MAX_PENDING_DEVICES} devices are waiting already: the owner lets one in from a device that signs, or the server is restarted` });
@@ -557,6 +559,7 @@ export class AccountEngine {
       this.host.log({ kind: "action", venue: "*", tool: "account_pair", signer: id, reason: `a device asked to sign for the account (${name}); it waits until an owner lets it in`, native: { jwk: key, label: name, pending: true } });
     }
     if (!ask) return { ok: true, kid, role: "pending" };
+    if (this.state.threshold > 1) return several();
     // asking again while its code lives prints nothing new: one live code per waiting device, bound to its key
     const now = this.nowMs();
     for (const [k, c] of this.deviceCodes) if (now > c.until || !this.state.pendingDevices.some((d) => d.kid === k)) this.deviceCodes.delete(k);
@@ -569,7 +572,8 @@ export class AccountEngine {
   }
 
   /** a waiting browser types the code the terminal printed for it: wrong tries are counted against that code alone, and the right one, once,
-   * makes it a signer and is gone. Its row is marked admitted by code: a restart lets it in again (restore.ts), the phone is told */
+   * makes it a signer and is gone. Its row is marked admitted by code: a restart lets it in again (restore.ts), and it is the row Task 3's phone
+   * notice reads */
   private admitByCode(kid: string, code: string): { ok: true; kid: string; role: "owner" } | Refusal {
     const none = () => no("E_ACCOUNT_OWNER_SURFACE", { message: "no code is live for this browser: press Get a code" });
     const live = this.deviceCodes.get(kid);

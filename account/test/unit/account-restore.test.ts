@@ -157,6 +157,11 @@ describe("the account after a restart", () => {
     const tablet = simKey("device:restore-tablet");
     const key = { kty: "EC" as const, crv: "P-256" as const, x: tablet.jwk.x, y: tablet.jwk.y };
     const admitted = { kind: "action" as const, venue: "*", tool: "account_pair", signer: `device:${tablet.kid}`, reason: "a device was let in with the code its terminal printed (Tablet)", native: { jwk: key, label: "Tablet\nhttps://evil.example", code: true, admitted: true } };
+    // a first owner's row whose label carries a line break and a link (an older account's, or one written by hand) comes back cleaned
+    const dirty = fresh();
+    await run(dirty, 0);
+    new Ledger(join(dirty, "portfolio", ledgers(dirty)[0]!), () => new Date(START + 30_000).toISOString()).append({ kind: "action", venue: "*", tool: "account_pair", signer: `device:${browser.kid}`, reason: "the first device", native: { jwk: { kty: "EC", crv: "P-256", x: browser.jwk.x, y: browser.jwk.y }, label: "Desk\nhttps://evil.example", code: true } });
+    expect((await run(dirty, HOUR)).engine.state.owners.map((o) => [o.label, o.via])).toEqual([["Desk <link>", "first"]]);
     // no device signed then: an admission row does not make the first one
     const bare = fresh();
     await run(bare, 0);

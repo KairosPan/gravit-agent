@@ -244,7 +244,7 @@ export async function rebuild(rows: readonly LedgerRow[], base: AccountState, op
         continue;
       }
       if (s.owners.length === 0 && n && isJwk(n.jwk) && row.signer === `device:${kidOf(n.jwk)}`) {
-        s = { ...s, owners: [{ id: row.signer, kind: "device", label: typeof n.label === "string" ? n.label : "this browser", jwk: { kty: "EC", crv: "P-256", x: n.jwk.x, y: n.jwk.y }, addedAt: row.ts, via: "first" }] };
+        s = { ...s, owners: [{ id: row.signer, kind: "device", label: cleanLabel(n.label), jwk: { kty: "EC", crv: "P-256", x: n.jwk.x, y: n.jwk.y }, addedAt: row.ts, via: "first" }] };
       }
       continue;
     }
