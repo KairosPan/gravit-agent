@@ -532,7 +532,7 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
   lacks(draw(signing(state({ tab: 'cards', page: { ...page, cards: [{ ...card, hash: '' }] } }))), 'data-kind="approveCard"');
 
   // a page that does not sign: none of these keys, and the device line says why
-  for (const [role, line] of [['pending', 'Waiting to be let in'], ['none', 'This browser cannot sign for the account'], ['needs-code', 'Pair with the code'], ['signed-out', 'Signed out'], ['unknown', '']]) {
+  for (const [role, line] of [['pending', 'This browser does not sign for the account'], ['none', 'This browser cannot sign for the account'], ['needs-code', 'Pair with the code'], ['signed-out', 'Signed out'], ['unknown', '']]) {
     for (const tab of ['agents', 'cards']) {
       const out = draw(R.ownerStanding(state({ tab, seat: seatView(), page: knocks }), { role, kid: KID }));
       for (const k of ['data-action="openSheet"', 'data-action="askRevoke"', 'data-action="grant"', 'Let in…', 'Give a limit…', 'End limit', 'Revoke…', 'Approve', 'Reject', 'Decline']) lacks(out, k, `${role} ${tab}: ${k}`);

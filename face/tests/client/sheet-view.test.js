@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { SHEET_KINDS, UNSIGNED_KINDS, fieldsOf, refieldsOf, draftOf, titleOf, goWord, grantOf, grantsAsk, limitSeedOf, letDeviceSeedOf, paperSeedOf, signOutSeedOf, signOutLineOf, guardFirstOf, connectCheckOf } from '../../client/js/host/sheet-view.js';
+import { SHEET_KINDS, UNSIGNED_KINDS, fieldsOf, refieldsOf, draftOf, titleOf, goWord, grantOf, grantsAsk, limitSeedOf, letDeviceSeedOf, removeDeviceSeedOf, removeDeviceLineOf, paperSeedOf, signOutSeedOf, signOutLineOf, guardFirstOf, connectCheckOf } from '../../client/js/host/sheet-view.js';
 import { moveSeedOf } from '../../client/js/host/sheet-money.js';
 import { venuesOf, connectOptionsOf } from '../../client/js/host/account-view.js';
 import { moveSourcesOf } from '../../client/js/host/money-view.js';
@@ -21,14 +21,14 @@ const AGENT = '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6';
 
 test('SHEET_KINDS: every kind with a title and its go word', () => {
   assert.deepEqual(SHEET_KINDS, ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
-    'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'reopen', 'close', 'amend', 'leverage', 'beast', 'cap', 'session', 'leverageCap', 'move', 'earn', 'subWallet']);
+    'approveCard', 'declineAsk', 'letDevice', 'signOut', 'removeDevice', 'order', 'reopen', 'close', 'amend', 'leverage', 'beast', 'cap', 'session', 'leverageCap', 'move', 'earn', 'subWallet']);
   // Account › Identity's acts are no sheet since sign-only-money: unsigned, host/identity.js's
   for (const k of ['connectNetwork', 'disconnectNetwork', 'routing', 'block']) assert.ok(!SHEET_KINDS.includes(k), k);
   // opening a paper account takes no signature (sign-only-money §4.4); top-up, reset and disconnect stay signed
   assert.deepEqual(UNSIGNED_KINDS, ['paper']);
   assert.ok(UNSIGNED_KINDS.every(k => SHEET_KINDS.includes(k)));
   assert.deepEqual(SHEET_KINDS.map(k => goWord(k)), ['Let it in', 'Give the limit', 'End the limit', 'Revoke', 'Connect', 'Open the account',
-    'Top up', 'Start over', 'Disconnect', 'Approve', 'Decline', 'Let it sign', 'Sign out', 'Sign and place', 'Sign and reopen', 'Sign and close', 'Sign and change', 'Sign leverage',
+    'Top up', 'Start over', 'Disconnect', 'Approve', 'Decline', 'Let it sign', 'Sign out', 'Remove', 'Sign and place', 'Sign and reopen', 'Sign and close', 'Sign and change', 'Sign leverage',
     'Sign Beast', 'Sign the cap', 'Renew for 30 days', 'Sign leverage', 'Sign and move', 'Sign and put in', 'Make it']);
   assert.equal(goWord('approveCard', { decision: 'reject' }), 'Reject');
   assert.equal(goWord('approveCard', { decision: 'approve' }), 'Approve');
@@ -444,6 +444,38 @@ test('letDevice: the signers JSON, the owners and the new device sorted without 
   // the list replaces the owners: with none to keep it would drop every device that signs, so it is never drafted
   assert.equal(draftOf('letDevice', [], { owners: [], kid: '0123456789abcdef' }, NOW), 'No owner device to sign with');
   assert.equal(draftOf('letDevice', [], { kid: '0123456789abcdef' }, NOW), 'No owner device to sign with');
+});
+
+test('removeDevice: the signers without that device, sorted, threshold 1', () => {
+  const page = fx('account');
+  page.signers.owners.push({ id: 'device:ffff000011112222', kind: 'device', label: 'Laptop' }, { id: 'device:0123456789abcdef', kind: 'device' });
+  // this page's own device signs whether or not the page names it yet: it is kept
+  const seed = removeDeviceSeedOf(page, { role: 'signs', kid: 'ded8a5bf01a7a593' }, 'device:ffff000011112222');
+  assert.deepEqual(seed, {
+    owners: ['device:a5048199a8081854', 'device:ffff000011112222', 'device:0123456789abcdef', 'device:ded8a5bf01a7a593'],
+    id: 'device:ffff000011112222', label: 'Laptop',
+  });
+  assert.deepEqual(fieldsOf('removeDevice', seed), []);
+  const draft = draftOf('removeDevice', [], seed, NOW);
+  assert.deepEqual(Object.keys(draft), ['type', 'signers']);
+  assert.equal(draft.type, 'convertToMultiSigUser');
+  assert.equal(draft.signers, '{"authorizedUsers":["device:0123456789abcdef","device:a5048199a8081854","device:ded8a5bf01a7a593"],"threshold":1}');
+  // repeats once; a seed of ids or records alike
+  const again = draftOf('removeDevice', [], { owners: ['device:b', { id: 'device:a' }, 'device:b', 'device:c'], id: 'device:c' }, NOW);
+  assert.deepEqual(JSON.parse(again.signers), { authorizedUsers: ['device:a', 'device:b'], threshold: 1 });
+  // no device named, or nothing left to sign: never drafted
+  assert.equal(draftOf('removeDevice', [], { owners: ['device:a'] }, NOW), 'No device to remove');
+  assert.equal(draftOf('removeDevice', [], { owners: ['device:a'], id: 'device:a' }, NOW), 'No owner device to sign with');
+  assert.equal(draftOf('removeDevice', [], {}, NOW), 'No device to remove');
+  // an owner with no label is named by its id; the title and the go key
+  assert.equal(removeDeviceSeedOf(page, { kid: '' }, 'device:0123456789abcdef').label, 'device:0123456789abcdef');
+  assert.equal(titleOf('removeDevice', seed), 'Remove Laptop');
+  assert.equal(titleOf('removeDevice', {}), 'Remove a device');
+  assert.equal(goWord('removeDevice', seed), 'Remove');
+  // the line under it: who stops signing
+  assert.equal(removeDeviceLineOf({ kind: 'removeDevice', seed }), 'Laptop · device:ffff000011112222 stops signing for the account');
+  assert.equal(removeDeviceLineOf({ kind: 'signOut', seed }), '');
+  assert.equal(removeDeviceLineOf({ kind: 'removeDevice', seed: {} }), '');
 });
 
 // plan 2 Task 13 fix round M3: the two seeds the wiring built, here beside limitSeedOf

@@ -66,7 +66,7 @@ import { identityOf, routingOf, SPOKEN } from './host/identity-view.js';
 import { renderConnectDrawer } from './render/identity.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
 import { startSellMany } from './host/sell-many.js';
-import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, UNSIGNED_KINDS, signOutSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
+import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, removeDeviceSeedOf, paperSeedOf, UNSIGNED_KINDS, signOutSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
 import { startSearch } from './host/search.js';
 import { tradeableOf } from './host/trade-view.js';
@@ -1916,7 +1916,9 @@ export function boot(win, host = {}) {
       go({ screen: 'messages', id: null });
       putWords(asset.name && asset.name !== asset.symbol ? t('markets.lookAt.named', { symbol: asset.symbol, name: asset.name }) : t('markets.lookAt.symbol', { symbol: asset.symbol }));
     },
-    // the owner device: the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out and Let it sign
+    // the owner device: Get a code, the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out, Let
+    // it sign and Remove
+    askCode: () => { void owner.askCode(); },
     pairDevice: () => { void owner.ready(doc.getElementById('pair-code')?.value?.trim() || undefined); },
     signIn: () => { void owner.signIn(); },
     signOut: () => { if (signs()) void sheet.open('signOut', signOutSeedOf(store.get().account.data, store.get().owner)); },
@@ -1924,6 +1926,11 @@ export function boot(win, host = {}) {
       if (!signs()) return;
       const s = store.get();
       void sheet.open('letDevice', letDeviceSeedOf(s.account.data, s.owner, el.dataset.kid));
+    },
+    removeDevice: el => {
+      if (!signs()) return;
+      const s = store.get();
+      void sheet.open('removeDevice', removeDeviceSeedOf(s.account.data, s.owner, el.dataset.id));
     },
     // the owner's keys on Account: each its sheet; Revoke… and Disconnect… ask in place first; Grant the sheet that grants the ask
     openSheet: el => openSheetFrom(el),

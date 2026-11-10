@@ -8,7 +8,8 @@
 import { refieldsOf } from '../host/sheet-view.js';
 import { said, isLine } from '../i18n/words.js';
 
-const ROLES = new Set(['unknown', 'signs', 'pending', 'needs-code', 'signed-out', 'none']);
+// `asked`: a waiting browser that pressed Get a code — the Account printed a code for it in its terminal (sign-only-money §4.5)
+const ROLES = new Set(['unknown', 'signs', 'pending', 'asked', 'needs-code', 'signed-out', 'none']);
 const own = (s, patch) => {
   const next = { ...s.owner, ...patch };
   return Object.keys(patch).every(k => next[k] === s.owner[k]) ? s : { ...s, owner: next };

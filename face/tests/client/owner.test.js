@@ -8,7 +8,8 @@ import { readFileSync } from 'node:fs';
 import { renderDeviceLine, renderDevices, renderSheet } from '../../client/js/render/owner.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { fieldsOf, keyfileAskOf } from '../../client/js/host/sheet-view.js';
+import { fieldsOf, keyfileAskOf, removeDeviceSeedOf } from '../../client/js/host/sheet-view.js';
+import { etClock } from '../../client/js/render/identity.js';
 import { connectOptionsOf } from '../../client/js/host/account-view.js';
 import { esc } from '../../client/js/html.js';
 import { askedOf } from '../../client/js/host/sheet.js';
@@ -45,13 +46,22 @@ const CARD = { card: 'card-0001', hash: '0xdf578d9e3045cac33e2dd0b4d7c595b227713
 const GO = /<button type="button" class="btn-primary" data-action="sheetSubmit"( disabled)?>([^<]*)<\/button>/;
 const goKey = html => { const m = html.match(GO); assert.ok(m, 'the go key is drawn'); return { on: !m[1], word: m[2] }; };
 
-test('the device line: the six standings, each its line and its one key', () => {
+test('the device line: the seven standings, each its line and its one key', () => {
   const signs = renderDeviceLine(standing('signs', KID));
   assert.equal(signs, '<p class="acct-note">This page signs for the account</p>');
-  assert.equal(renderDeviceLine(standing('pending', KID)), '<p class="acct-note">Waiting to be let in — a browser that signs lets it in, under Settings › Devices</p>');
   assert.equal(renderDeviceLine(standing('none')), '<p class="acct-note">This browser cannot sign for the account</p>');
   assert.equal(renderDeviceLine(standing('unknown')), '', 'not known yet: nothing');
-  // the pair box, only for a page that needs the code
+  // a browser that does not sign: its one key, Get a code
+  const pending = renderDeviceLine(standing('pending', KID));
+  assert.equal(pending, '<p class="acct-note">This browser does not sign for the account</p>' +
+    '<div class="btn-row"><button type="button" class="btn-sm" data-action="askCode">Get a code</button></div>');
+  // asked: the code box, the line naming this browser by its kid's first eight
+  const asked = renderDeviceLine(standing('asked', KID));
+  has(asked, '<p class="acct-note">Type the code the Account printed in its terminal for this browser (a5048199)</p>');
+  has(asked, '<form class="pair-box" data-action="pairDevice" autocomplete="off"><input id="pair-code" class="input small" type="text" autocomplete="off" aria-label="Pairing code">' +
+    '<button type="button" class="btn-sm" data-action="pairDevice">Pair</button></form>');
+  lacks(asked, 'data-action="askCode"');
+  // the pair box, for a page that needs the code
   const pair = renderDeviceLine(standing('needs-code'));
   has(pair, '<p class="acct-note">Pair with the code the Account printed in its terminal</p>');
   has(pair, '<form class="pair-box" data-action="pairDevice" autocomplete="off"><input id="pair-code" class="input small" type="text" autocomplete="off" aria-label="Pairing code">' +
@@ -62,17 +72,19 @@ test('the device line: the six standings, each its line and its one key', () => 
   has(out, '<p class="acct-note">Signed out</p>');
   has(out, '<button type="button" class="btn-sm" data-action="signIn">Sign in</button>');
   lacks(out, 'pair-code');
-  for (const html of [signs, renderDeviceLine(standing('pending', KID)), renderDeviceLine(standing('none'))]) {
+  for (const html of [signs, pending, renderDeviceLine(standing('none'))]) {
     lacks(html, 'pair-code');
     lacks(html, 'data-action="signIn"');
   }
+  for (const html of [signs, asked, pair, out]) lacks(html, 'data-action="askCode"');
   // the Account's refusal to the device rides the same one line; a pairing in the air holds the key
   const refused = R.ownerBusy(R.ownerRefusal(standing('needs-code'), 'the pairing code is <b>wrong</b>'), true);
   const html = renderDeviceLine(refused);
   has(html, '<p class="acct-note">Pair with the code the Account printed in its terminal · the pairing code is &lt;b&gt;wrong&lt;/b&gt;</p>');
   has(html, 'data-action="pairDevice" disabled>Pair</button>');
   assert.equal(html.match(/class="acct-note"/g).length, 1, 'one muted line');
-  clean(html + pair + out + signs);
+  has(renderDeviceLine(R.ownerBusy(standing('pending', KID), true)), 'data-action="askCode" disabled>Get a code</button>', 'held while a pairing is in the air');
+  clean(html + pair + out + signs + pending + asked);
 });
 
 test('Devices: the owners with this page marked, the devices waiting with Let it sign, Sign out — only for a page that signs', () => {
@@ -82,7 +94,8 @@ test('Devices: the owners with this page marked, the devices waiting with Let it
   const signs = renderDevices(standing('signs', KID, page));
   has(signs, '<div class="dsec"><div class="dsec-label">Devices</div>');
   has(signs, `<div class="dsec-line">Stand-in seed key · device:${KID} · this page</div>`);
-  has(signs, '<div class="dsec-line">Laptop &lt;b&gt;two&lt;/b&gt; · device:0f0f0f0f0f0f0f0f</div>');
+  has(signs, '<div class="venue"><span>Laptop &lt;b&gt;two&lt;/b&gt; · device:0f0f0f0f0f0f0f0f</span>' +
+    '<button type="button" class="btn-sm" data-action="removeDevice" data-id="device:0f0f0f0f0f0f0f0f">Remove</button></div>');
   has(signs, `<div class="venue"><span>0123456789abcdef · since ${fmtDate(Date.parse('2026-10-22T07:40:00.000Z'))}</span>` +
     '<button type="button" class="btn-sm" data-action="letDevice" data-kid="0123456789abcdef">Let it sign</button></div>');
   has(signs, '<button type="button" class="btn-sm" data-action="signOut">Sign out</button>');
@@ -91,10 +104,12 @@ test('Devices: the owners with this page marked, the devices waiting with Let it
   // a page waiting to be let in sees the same rows and no key
   const waiting = renderDevices(standing('pending', '0123456789abcdef', page));
   has(waiting, `<div class="dsec-line">Stand-in seed key · device:${KID}</div>`);
+  has(waiting, '<div class="dsec-line">Laptop &lt;b&gt;two&lt;/b&gt; · device:0f0f0f0f0f0f0f0f</div>');
   has(waiting, '0123456789abcdef · since ');
-  for (const html of [waiting, renderDevices(standing('none', '', page)), renderDevices(standing('signed-out', KID, page))]) {
+  for (const html of [waiting, renderDevices(standing('none', '', page)), renderDevices(standing('signed-out', KID, page)), renderDevices(standing('asked', '0123456789abcdef', page))]) {
     lacks(html, 'data-action="letDevice"');
     lacks(html, 'data-action="signOut"');
+    lacks(html, 'data-action="removeDevice"');
   }
   lacks(waiting, 'this page', 'a page waiting is not an owner yet');
   // signed out, the page's key is still the owner's: marked, without a key
@@ -106,9 +121,50 @@ test('Devices: the owners with this page marked, the devices waiting with Let it
   const html = renderDevices(standing('signs', KID, bare));
   has(html, `<div class="dsec-line">device:${KID} · this page</div>`);
   has(html, '<span>fedcba9876543210</span>');
+  lacks(html, 'data-action="removeDevice"', 'this page alone: nothing to remove');
   clean(html);
   // no page read: no Devices
   assert.equal(renderDevices(R.ownerStanding(emptyState(), { role: 'signs', kid: KID })), '');
+});
+
+test('Devices: Remove for every other device, only on a page that signs; how and when each came in', () => {
+  const page = fx('account');
+  const FIRST = '2026-11-01T14:05:00.000Z', LET = '2026-11-02T15:30:00.000Z', CODE = '2026-11-09T21:10:00.000Z';
+  page.signers.owners = [
+    { id: `device:${KID}`, kind: 'device', label: 'Gravit face', via: 'first', addedAt: FIRST },
+    { id: 'device:0f0f0f0f0f0f0f0f', kind: 'device', label: 'Laptop', via: 'letIn', by: `device:${KID}`, addedAt: LET },
+    { id: 'device:1234123412341234', kind: 'device', label: 'Phone', via: 'code', addedAt: CODE },
+    // let in by a device that is gone: its id stands for it
+    { id: 'device:5555555555555555', kind: 'device', label: 'Tablet', via: 'letIn', by: 'device:dead0000dead0000', addedAt: LET },
+  ];
+  // the date as Devices draws it, the time as New York's clock reads it
+  const when = at => `${fmtDate(Date.parse(at))} ${etClock(at)}`;
+  const html = renderDevices(standing('signs', KID, page));
+  has(html, `<div class="dsec-line">Gravit face · device:${KID} · this page · first device · ${when(FIRST)}</div>`);
+  has(html, `<div class="venue"><span>Laptop · device:0f0f0f0f0f0f0f0f · let in from Gravit face · ${when(LET)}</span>` +
+    '<button type="button" class="btn-sm" data-action="removeDevice" data-id="device:0f0f0f0f0f0f0f0f">Remove</button></div>');
+  has(html, `<div class="venue"><span>Phone · device:1234123412341234 · let in with a code · ${when(CODE)}</span>` +
+    '<button type="button" class="btn-sm" data-action="removeDevice" data-id="device:1234123412341234">Remove</button></div>');
+  has(html, `<span>Tablet · device:5555555555555555 · let in from device:dead0000dead0000 · ${when(LET)}</span>`);
+  assert.equal(html.match(/data-action="removeDevice"/g).length, 3, 'every device but this page');
+  assert.equal(etClock(CODE), '16:10', 'New York, not UTC');
+  clean(html);
+  // a page that does not sign reads how each came in, with no Remove
+  const other = renderDevices(standing('pending', 'feedfacefeedface', page));
+  has(other, `<div class="dsec-line">Phone · device:1234123412341234 · let in with a code · ${when(CODE)}</div>`);
+  lacks(other, 'data-action="removeDevice"');
+});
+
+test('the removeDevice sheet: its title, the line naming who stops signing, Remove as its go key', () => {
+  const page = fx('account');
+  page.signers.owners.push({ id: 'device:0f0f0f0f0f0f0f0f', kind: 'device', label: 'Laptop' });
+  const signs = standing('signs', KID, page);
+  const seed = removeDeviceSeedOf(page, signs.owner, 'device:0f0f0f0f0f0f0f0f');
+  const html = renderSheet(opened('removeDevice', seed, signs), NOW);
+  assert.match(html, /^<aside class="drawer sheet" aria-label="Remove Laptop"><div class="drawer-head"><h2>Remove Laptop<\/h2>/);
+  has(html, '<p class="sheet-hint">Laptop · device:0f0f0f0f0f0f0f0f stops signing for the account</p>');
+  assert.deepEqual(goKey(html), { on: false, word: 'Remove' });
+  clean(html);
 });
 
 test('a Let in sheet draws its fields by type and no live go key before a preparation', () => {

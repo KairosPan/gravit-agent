@@ -13,7 +13,10 @@ import { postAct } from './act.js';
 
 const PAIR = '/data/account/pair', PREPARE = '/data/account/prepare', EXCHANGE = '/data/account/exchange';
 // the Account's pair roles under the face's names
-const ROLE_OF = new Map([['owner', 'signs'], ['pending', 'pending'], ['needs-code', 'needs-code']]);
+const ROLE_OF = new Map([['owner', 'signs'], ['pending', 'pending'], ['asked', 'asked'], ['needs-code', 'needs-code']]);
+// the Account's refusal of a code that names Get a code as the answer (none live — a restart voids them — or too many wrong
+// tries): the code box is no use any more, the page is back to waiting with its key
+const ASK_AGAIN = /\bGet a code\b/;
 const noAnswer = () => said('account.noAnswer');
 // owner.notSigning: the line for a page asked to sign that does not sign (owner.js signOut)
 const notSigning = () => said('owner.notSigning');
@@ -54,7 +57,7 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
     if (!closed && was !== busyCount > 0) store.dispatch('ownerBusy', busyCount > 0);
   }
 
-  async function pairNow(code) {
+  async function pairNow(code, ask = false) {
     if (closed || signingOut) return;
     const mine = generation;
     const current = () => !closed && mine === generation;
@@ -75,11 +78,19 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
         return;
       }
       if (!current()) return;
-      const r = await post(PAIR, { jwk, label, ...(code ? { code } : {}) });
+      const r = await post(PAIR, { jwk, label, ...(code ? { code } : {}), ...(ask ? { ask: true } : {}) });
       if (!current()) return;
-      const role = r.status === 200 && r.body?.ok !== false ? ROLE_OF.get(r.body?.role) : undefined;
-      if (!role) { say(whyOf(r)); return; }
+      let role = r.status === 200 && r.body?.ok !== false ? ROLE_OF.get(r.body?.role) : undefined;
+      if (!role) {
+        const why = whyOf(r);
+        // a code the Account has no live one for: Get a code again
+        if (code && store.get().owner.role === 'asked' && store.get().owner.kid === kid && ASK_AGAIN.test(why)) stand('pending', kid);
+        say(why);
+        return;
+      }
       if (r.body.kid !== kid) { stand('none', ''); say(anotherKey()); return; }
+      // a plain knock answers `pending` for a browser whose code is still live: the box it asked for stays
+      if (role === 'pending' && !ask && store.get().owner.role === 'asked' && store.get().owner.kid === kid) role = 'asked';
       stand(role, kid);
       say(null);
     } finally {
@@ -88,10 +99,10 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
   }
 
   // one pairing at a time: `join` lets a plain ask share the one in the air; otherwise it runs after it, whatever it did
-  function request(code, join) {
+  function request(code, join, ask = false) {
     if (closed) return Promise.resolve();
     if (join && flight) return flight;
-    const run = (flight ?? Promise.resolve()).catch(() => {}).then(() => pairNow(code));
+    const run = (flight ?? Promise.resolve()).catch(() => {}).then(() => pairNow(code, ask));
     flight = run;
     const done = () => { if (flight === run) flight = null; };
     run.then(done, done);
@@ -101,6 +112,11 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
   /** Pair this page's key (made and kept when there is none); a code clears the sign-out flag. Signed out and no code: the
    *  role is `signed-out` and nothing is made or sent. A refusal is the Account's words, the role as it was. */
   const ready = code => request(code, !code);
+
+  /** Get a code (sign-only-money §4.5): a waiting browser asks the Account to print a code for it in its terminal — the pair
+   *  route with `ask`, never a code. Answered `asked`, the page shows the code box; a refusal is the Account's words, the role
+   *  as it was. Signed out: nothing is sent. */
+  const askCode = () => request(undefined, false, true);
 
   /** The standing off a page the face recognises: this key among the owners signs, among the pending devices waits; in
    *  neither after it signed or waited, the service restarted and it pairs again — never while a sign-out is in the air. A
@@ -112,8 +128,13 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
       const owners = Array.isArray(page.signers.owners) ? page.signers.owners : [];
       const waiting = Array.isArray(page.signers.pendingDevices) ? page.signers.pendingDevices : [];
       if (owners.some(o => o?.id === `device:${kid}`)) stand('signs', kid);
-      else if (waiting.some(d => d?.kid === kid)) stand('pending', kid);
-      else if ((role === 'signs' || role === 'pending') && !signingOut) return ready();
+      // still waiting: a browser that asked keeps its code box (the page does not say whether its code is live)
+      else if (waiting.some(d => d?.kid === kid)) stand(role === 'asked' ? 'asked' : 'pending', kid);
+      else if ((role === 'signs' || role === 'pending' || role === 'asked') && !signingOut) {
+        // not waiting any more: no code it asked for can be live, so the box goes with it
+        if (role === 'asked') stand('pending', kid);
+        return ready();
+      }
       return Promise.resolve();
     }
     if (role === 'unknown' && !asked && !flag.get()) {
@@ -209,5 +230,5 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
     closed = true;
   }
 
-  return { ready, standing, prepare, submit, act, unsigned, signOut, signIn, close };
+  return { ready, askCode, standing, prepare, submit, act, unsigned, signOut, signIn, close };
 }

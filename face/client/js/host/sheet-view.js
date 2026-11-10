@@ -30,7 +30,7 @@ const str = v => (typeof v === 'string' ? v : '');
  *  `leverageCap` are the Rules tab's: host/sheet-rules.js's. `move` and `earn` are the Money tab's: host/sheet-money.js's (plan 4b Tasks 2-3). Account › Identity's acts are no sheet
  *  since sign-only-money: unsigned, host/identity.js's. */
 export const SHEET_KINDS = ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
-  'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'reopen', ...MARKET_KINDS, ...RULES_KINDS, ...MONEY_KINDS];
+  'approveCard', 'declineAsk', 'letDevice', 'signOut', 'removeDevice', 'order', 'reopen', ...MARKET_KINDS, ...RULES_KINDS, ...MONEY_KINDS];
 /** The kinds that take no signature (sign-only-money §4.4, §5.3): their draft goes to the account's unsigned door as it stands —
  *  nothing prepared, no What you sign (host/sheet.js). Opening a paper account alone; top-up, reset and disconnect stay signed. */
 export const UNSIGNED_KINDS = ['paper'];
@@ -54,6 +54,7 @@ function goOf(kind) {
     case 'declineAsk': return t('sheet.go.decline');
     case 'letDevice': return t('sheet.go.letDevice');
     case 'signOut': return t('sheet.go.signOut');
+    case 'removeDevice': return t('sheet.go.removeDevice');
     case 'order': return t('sheet.go.order');
     case 'reopen': return t('sheet.go.reopen');
     default: return '';
@@ -93,6 +94,7 @@ export function titleOf(kind, seed, fields) {
     case 'declineAsk': return t('sheet.title.declineAsk');
     case 'letDevice': return str(s.kid) ? t('sheet.title.letDevice', { kid: s.kid }) : t('sheet.title.letDeviceAny');
     case 'signOut': return t('sheet.title.signOut');
+    case 'removeDevice': return str(s.label) ? t('sheet.title.removeDevice', { label: s.label }) : t('sheet.title.removeDeviceAny');
     case 'order': return t('sheet.title.order');
     case 'reopen': return place ? t('sheet.title.reopen', { place }) : t('sheet.title.reopenAny');
     default: return '';
@@ -478,6 +480,15 @@ export function draftOf(kind, fields, seed, now) {
     case 'signOut':
       if (!str(s.kid)) return t('sheet.missing.notSigning');
       return { type: 'signOut', device: `device:${s.kid}` };
+    // Remove (sign-only-money §5.5): the signers the Account keeps, every owner but that device — the same instruction Let it
+    // sign signs, which REPLACES the owners
+    case 'removeDevice': {
+      if (!str(s.id)) return t('sheet.missing.noDevice');
+      const owners = (Array.isArray(s.owners) ? s.owners : []).map(o => (isRecord(o) ? str(o.id) : str(o))).filter(Boolean);
+      const authorizedUsers = [...new Set(owners)].filter(o => o !== s.id).sort();
+      if (authorizedUsers.length === 0) return t('sheet.missing.noOwner');
+      return { type: 'convertToMultiSigUser', signers: JSON.stringify({ authorizedUsers, threshold: 1 }) };
+    }
     // the liveOrder draft from the Trade ticket (host/trade-view.js): no clock — its deadline is the Account's prepare's
     case 'order': return tradeDraftOf(fields, s.ticket);
     // a venue closed to agents opened to them again: widening what they may do is signed (portfolio.js pfAgentsSwitch)
@@ -486,6 +497,21 @@ export function draftOf(kind, fields, seed, now) {
       return { type: 'setPolicy', change: 'restore', value: s.venue };
     default: return t('sheet.nothingToSign');
   }
+}
+
+/** Remove's seed (sign-only-money §5.5): the owners the new list starts from — the page's and this page's own device, as Let it
+ *  sign's — the device to leave out by its id, and its label (its id when it has none). */
+export function removeDeviceSeedOf(page, owner, id) {
+  const { owners } = letDeviceSeedOf(page, owner, '');
+  const target = str(id);
+  const row = pageOk(page) ? records(page.signers.owners).find(o => o.id === target) : undefined;
+  return { owners, id: target, label: str(row?.label) || target };
+}
+
+/** The line under Remove's box: who stops signing, `label · id`. Another sheet, or none named: ''. */
+export function removeDeviceLineOf(sheet) {
+  if (!isRecord(sheet) || sheet.kind !== 'removeDevice' || !str(sheet.seed?.id)) return '';
+  return t('sheet.removeDevice.line', { label: str(sheet.seed.label) || sheet.seed.id, id: sheet.seed.id });
 }
 
 // ── Settings › Devices' sign-out (plan 4b Task 6, agents-mount.js signOutAsk) ──

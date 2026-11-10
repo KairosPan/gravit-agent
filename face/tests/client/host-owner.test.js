@@ -15,6 +15,8 @@ import { spoken } from './helpers/spoken.js';
 
 const subtle = globalThis.crypto.subtle;
 const CODE = 'K7QX-M2PA';
+// the code the door prints for one waiting browser that asked (sign-only-money §5.4)
+const DEVICE_CODE = 'R3TW-9HXN';
 const NONCE = 1761100000000;
 const NO_ANSWER = { status: 0, body: { ok: false, error: 'The account did not answer. Try again.' } };
 const NOT_SIGNING = { status: 0, body: { ok: false, error: 'This browser does not sign for the account.' } };
@@ -56,7 +58,7 @@ const inputOf = prepared => {
 /** owners and pending devices by kid → their JWK; `seedOwner` stands for a device already signing (the stand-in's seed key) */
 function door({ seedOwner = false } = {}) {
   const d = {
-    log: [], owners: new Map(), pending: new Map(), watch: [], canned: {}, gates: {},
+    log: [], owners: new Map(), pending: new Map(), codes: new Map(), watch: [], canned: {}, gates: {},
     /** answer the next call to `path` with `answer` instead of the rules */
     once(path, answer) { (d.canned[path] ??= []).push(answer); },
     /** hold every call to `path` (logged, unanswered) until the returned release is called; the answer is the door's then */
@@ -68,7 +70,7 @@ function door({ seedOwner = false } = {}) {
     calls: path => d.log.filter(e => e.path === path),
   };
   if (seedOwner) d.owners.set('a5048199a8081854', null);
-  function pair({ jwk, code }) {
+  function pair({ jwk, code, ask }) {
     const kid = kidOfJwk(jwk);
     if (d.owners.has(kid)) return { status: 200, body: { ok: true, kid, role: 'owner' } };
     if (d.owners.size === 0) {
@@ -77,8 +79,19 @@ function door({ seedOwner = false } = {}) {
       d.owners.set(kid, jwk);
       return { status: 200, body: { ok: true, kid, role: 'owner' } };
     }
+    // a code it asked for (sign-only-money §5.4): checked as this browser's own; none live, a wrong one, the right one lets it in
+    if (code) {
+      if (!d.codes.has(kid) || !d.pending.has(kid)) return refusal(400, 'E_ACCOUNT_OWNER_SURFACE', 'no code is live for this browser: press Get a code');
+      if (plain(code) !== plain(d.codes.get(kid))) return refusal(400, 'E_ACCOUNT_OWNER_SURFACE', 'that is not the code printed for this browser (4 tries left)');
+      d.codes.delete(kid);
+      d.pending.delete(kid);
+      d.owners.set(kid, jwk);
+      return { status: 200, body: { ok: true, kid, role: 'owner' } };
+    }
     d.pending.set(kid, jwk);
-    return { status: 200, body: { ok: true, kid, role: 'pending' } };
+    if (!ask) return { status: 200, body: { ok: true, kid, role: 'pending' } };
+    if (!d.codes.has(kid)) d.codes.set(kid, DEVICE_CODE);
+    return { status: 200, body: { ok: true, kid, role: 'asked' } };
   }
   function prepare({ draft }) {
     if (!draft || !OWNER_FIELDS[draft.type]) return refusal(409, 'E_ACCOUNT_BAD_ACTION', 'not an instruction this account knows');
@@ -190,6 +203,64 @@ test("the standing follows the page's signers", async () => {
   await r.owner.standing({ ok: true, venues: [] });
   await r.owner.standing(null);
   assert.equal(r.door.calls('/data/account/pair').length, 2);
+});
+
+test('Get a code posts ask, the page shows the box with its kid, the code makes it sign', async () => {
+  const r = rig({ d: door({ seedOwner: true }) });
+  const seed = ownerRow('a5048199a8081854');
+  await r.owner.standing(pageWith([seed]));
+  const { kid } = r.o();
+  assert.equal(r.o().role, 'pending', 'an owner exists: this browser does not sign');
+  await r.owner.askCode();
+  const asked = r.door.calls('/data/account/pair').at(-1).body;
+  assert.deepEqual(Object.keys(asked).sort(), ['ask', 'jwk', 'label'], 'ask, and no code');
+  assert.equal(asked.ask, true);
+  assert.deepEqual(r.o(), { role: 'asked', kid, refusal: null, busy: false });
+  // the page still lists it waiting: asked stays asked, nothing more is posted
+  const before = r.door.calls('/data/account/pair').length;
+  await r.owner.standing(pageWith([seed], [{ kid, at: '2026-11-09T21:00:00.000Z' }]));
+  assert.equal(r.o().role, 'asked');
+  // a plain knock while asked (Pair with the box empty) keeps the box
+  await r.owner.ready();
+  assert.equal(r.o().role, 'asked');
+  assert.equal(r.door.calls('/data/account/pair').length, before + 1);
+  // a wrong code is the Account's sentence, the box stays
+  await r.owner.ready('ZZZZ-ZZZZ');
+  assert.deepEqual([r.o().role, r.o().refusal], ['asked', 'that is not the code printed for this browser (4 tries left)']);
+  // the right one, any case and spacing: it signs
+  await r.owner.ready(' r3tw-9hxn ');
+  assert.equal(r.door.calls('/data/account/pair').at(-1).body.code, ' r3tw-9hxn ');
+  assert.deepEqual(r.o(), { role: 'signs', kid, refusal: null, busy: false });
+});
+
+test("Get a code again after a restart's refusal", async () => {
+  const r = rig({ d: door({ seedOwner: true }) });
+  await r.owner.standing(pageWith([ownerRow('a5048199a8081854')]));
+  await r.owner.askCode();
+  assert.equal(r.o().role, 'asked');
+  // the account restarted: its codes are gone, the browser still waits
+  r.door.codes.clear();
+  await r.owner.ready(DEVICE_CODE);
+  assert.deepEqual([r.o().role, r.o().refusal], ['pending', 'no code is live for this browser: press Get a code'], 'the line is Get a code again');
+  // too many wrong codes says the same
+  await r.owner.askCode();
+  assert.deepEqual([r.o().role, r.o().refusal], ['asked', null]);
+  r.door.once('/data/account/pair', { status: 400, body: { ok: false, refusal: { code: 'E_ACCOUNT_OWNER_SURFACE', message: 'too many wrong codes: press Get a code for a new one' } } });
+  await r.owner.ready('ZZZZ-ZZZZ');
+  assert.equal(r.o().role, 'pending');
+  // a refusal to the ask itself leaves the line as it was, with the Account's words
+  r.door.once('/data/account/pair', { status: 409, body: { ok: false, refusal: { code: 'E_ACCOUNT_THRESHOLD', message: 'this account needs more than one signature: a browser that signs lets this one in under Settings › Devices' } } });
+  await r.owner.askCode();
+  assert.deepEqual([r.o().role, r.o().refusal], ['pending', 'this account needs more than one signature: a browser that signs lets this one in under Settings › Devices']);
+  // asked again, then the page loses it altogether (a restart that forgot the waiting browser): it knocks again, waiting
+  await r.owner.askCode();
+  r.door.pending.clear();
+  await r.owner.standing(pageWith([ownerRow('a5048199a8081854')]));
+  assert.equal(r.o().role, 'pending');
+  // signed out, Get a code sends nothing
+  const s = rig({ d: door({ seedOwner: true }), flag: memoryFlag(true) });
+  await s.owner.askCode();
+  assert.equal(s.door.calls('/data/account/pair').length, 0);
 });
 
 test('an envelope the door verifies', async () => {

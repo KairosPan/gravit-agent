@@ -8,12 +8,16 @@ import { t, said } from '../i18n/words.js';
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 const str = v => (typeof v === 'string' ? v : '');
+// how a signer came in, as the page read (`signers.owners[].via`) names it
+const VIA = new Set(['first', 'letIn', 'code']);
 
-/** The device line under the Account head's chips, and its one key: `pair` (the code box) or `signIn`. `unknown` says nothing. */
+/** The device line under the Account head's chips, and its one key: `askCode` (Get a code), `pair` (the code box) or `signIn`.
+ *  `asked` names this browser by its kid's first eight, as the Account's terminal line does. `unknown` says nothing. */
 export function standingWords(owner) {
   switch (owner?.role) {
     case 'signs': return { line: t('owner.standing.signs'), key: null };
-    case 'pending': return { line: t('owner.standing.pending'), key: null };
+    case 'pending': return { line: t('owner.standing.pending'), key: 'askCode' };
+    case 'asked': return { line: t('owner.standing.asked', { kid: str(owner.kid).slice(0, 8) }), key: 'pair' };
     case 'needs-code': return { line: t('owner.standing.needsCode'), key: 'pair' };
     case 'signed-out': return { line: t('owner.standing.signedOut'), key: 'signIn' };
     case 'none': return { line: t('owner.standing.none'), key: null };
@@ -21,13 +25,18 @@ export function standingWords(owner) {
   }
 }
 
-/** Settings › Devices from the page's `signers`: the owners (this page's own `device:<kid>` marked `here`) and the devices
- *  waiting to be let in (`pendingDevices`, the page's read carries no label). Anything but the page is no devices. */
+/** Settings › Devices from the page's `signers`: the owners in the page's order (this page's own `device:<kid>` marked `here`;
+ *  `came`: how — `first`, `letIn` or `code`, '' for a way not known —, when, and by which device, as the Account read them off
+ *  its ledger) and the devices waiting to be let in (`pendingDevices`, the page's read carries no label). Anything but the
+ *  page is no devices. */
 export function devicesOf(page, owner) {
   if (!pageOk(page)) return { owners: [], pending: [] };
   const mine = typeof owner?.kid === 'string' && owner.kid ? `device:${owner.kid}` : null;
   return {
-    owners: records(page.signers.owners).map(o => ({ id: str(o.id), label: str(o.label), kind: str(o.kind), here: mine !== null && o.id === mine })),
+    owners: records(page.signers.owners).map(o => ({
+      id: str(o.id), label: str(o.label), kind: str(o.kind), here: mine !== null && o.id === mine,
+      came: { how: VIA.has(o.via) ? o.via : '', at: str(o.addedAt), by: str(o.by) },
+    })),
     pending: records(page.signers.pendingDevices).map(d => ({ kid: str(d.kid), at: str(d.at) })),
   };
 }

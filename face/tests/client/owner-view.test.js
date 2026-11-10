@@ -14,9 +14,12 @@ const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.
 const owner = (role, kid = '') => ({ role, kid, refusal: null, busy: false });
 const refusal = (status, code, message) => ({ status, body: { ok: false, refusal: { ok: false, code, layer: 'door', message } } });
 
-test('standingWords: the six standings, each its line and its key', () => {
+test('standingWords: the seven standings, each its line and its key', () => {
   assert.deepEqual(standingWords(owner('signs', 'a5048199a8081854')), { line: 'This page signs for the account', key: null });
-  assert.deepEqual(standingWords(owner('pending', 'a5048199a8081854')), { line: 'Waiting to be let in — a browser that signs lets it in, under Settings › Devices', key: null });
+  // a browser that does not sign has one key: Get a code
+  assert.deepEqual(standingWords(owner('pending', 'a5048199a8081854')), { line: 'This browser does not sign for the account', key: 'askCode' });
+  // asked: the code box, the line naming this browser by its kid's first eight
+  assert.deepEqual(standingWords(owner('asked', 'a5048199a8081854')), { line: 'Type the code the Account printed in its terminal for this browser (a5048199)', key: 'pair' });
   assert.deepEqual(standingWords(owner('needs-code')), { line: 'Pair with the code the Account printed in its terminal', key: 'pair' });
   assert.deepEqual(standingWords(owner('signed-out')), { line: 'Signed out', key: 'signIn' });
   assert.deepEqual(standingWords(owner('none')), { line: 'This browser cannot sign for the account', key: null });
@@ -24,20 +27,41 @@ test('standingWords: the six standings, each its line and its key', () => {
   assert.deepEqual(standingWords(null), { line: '', key: null });
 });
 
+const NONE = { how: '', at: '', by: '' };
 test('devicesOf: the owners with this page marked, and the devices waiting', () => {
   const page = fx('account');
   assert.deepEqual(devicesOf(page, owner('signs', 'a5048199a8081854')), {
-    owners: [{ id: 'device:a5048199a8081854', label: 'Stand-in seed key', kind: 'device', here: true }],
+    owners: [{ id: 'device:a5048199a8081854', label: 'Stand-in seed key', kind: 'device', here: true, came: NONE }],
     pending: [],
   });
   page.signers.pendingDevices = [{ kid: '0123456789abcdef', at: '2026-10-22T07:40:00.000Z' }];
   assert.deepEqual(devicesOf(page, owner('pending', '0123456789abcdef')), {
-    owners: [{ id: 'device:a5048199a8081854', label: 'Stand-in seed key', kind: 'device', here: false }],
+    owners: [{ id: 'device:a5048199a8081854', label: 'Stand-in seed key', kind: 'device', here: false, came: NONE }],
     pending: [{ kid: '0123456789abcdef', at: '2026-10-22T07:40:00.000Z' }],
   });
   // a page with no kid marks nothing; a body that is not the page is no devices
   assert.equal(devicesOf(page, owner('unknown')).owners[0].here, false);
   assert.deepEqual(devicesOf({ ok: false }, owner('signs', 'a5048199a8081854')), { owners: [], pending: [] });
+});
+
+test('devicesOf: how and when each signer came in', () => {
+  const page = fx('account');
+  page.signers.owners = [
+    { id: 'device:a5048199a8081854', kind: 'device', label: 'Gravit face', via: 'first', addedAt: '2026-11-01T14:05:00.000Z' },
+    { id: 'device:0f0f0f0f0f0f0f0f', kind: 'device', label: 'Laptop', via: 'letIn', by: 'device:a5048199a8081854', addedAt: '2026-11-02T15:30:00.000Z' },
+    { id: 'device:1234123412341234', kind: 'device', label: 'Phone', via: 'code', addedAt: '2026-11-09T21:10:00.000Z' },
+    // a way the client does not know, a by that is not a string: nothing made up
+    { id: 'device:9999999999999999', kind: 'device', label: 'Odd', via: 'magic', by: 7, addedAt: 12 },
+  ];
+  const { owners } = devicesOf(page, owner('signs', 'a5048199a8081854'));
+  assert.deepEqual(owners.map(o => o.came), [
+    { how: 'first', at: '2026-11-01T14:05:00.000Z', by: '' },
+    { how: 'letIn', at: '2026-11-02T15:30:00.000Z', by: 'device:a5048199a8081854' },
+    { how: 'code', at: '2026-11-09T21:10:00.000Z', by: '' },
+    { how: '', at: '', by: '' },
+  ]);
+  // the page's order, never sorted: a code-admitted owner is appended
+  assert.deepEqual(owners.map(o => o.id), page.signers.owners.map(o => o.id));
 });
 
 test('whatYouSignLines: every shown field as name: value, in the order the Account shows them', () => {

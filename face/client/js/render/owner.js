@@ -7,7 +7,8 @@ import { esc, attrs, cls } from '../html.js';
 import { fmtDate } from '../time.js';
 import { pageOk } from '../host/account-view.js';
 import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../host/owner-view.js';
-import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf, signOutLineOf, draftOf } from '../host/sheet-view.js';
+import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf, signOutLineOf, removeDeviceLineOf, draftOf } from '../host/sheet-view.js';
+import { etClock } from './identity.js';
 import { askedOf } from '../host/sheet.js';
 import { moveHintsOf, moveSaysOf, routesWordsOf, earnHintsOf, earnSaysOf } from '../host/sheet-money.js';
 import { seg } from './controls.js';
@@ -19,7 +20,8 @@ const key = (action, word, data = {}) => `<button${attrs({ type: 'button', class
 // ── the device line ──
 
 /** The device line under the Account head's chips: the standing's one muted line (the Account's refusal to the device on it),
- *  and its key — the pair box for a page that needs the code, Sign in for a page signed out. A standing not known: nothing.
+ *  and its key — Get a code for a browser that does not sign, the pair box for a page that needs the code or asked for one,
+ *  Sign in for a page signed out. A standing not known: nothing.
  *  The pair box is a form, so Enter in its one box submits it (`pairDevice` on the form's submit) as Pair does on a click. */
 export function renderDeviceLine(state) {
   const owner = state.owner;
@@ -32,19 +34,47 @@ export function renderDeviceLine(state) {
       `${key('pairDevice', t('owner.pair'), { disabled: busy })}</form>`;
   }
   if (w.key === 'signIn') return `${line}<div class="btn-row">${key('signIn', t('owner.signIn'), { disabled: busy })}</div>`;
+  if (w.key === 'askCode') return `${line}<div class="btn-row">${key('askCode', t('owner.askCode'), { disabled: busy })}</div>`;
   return line;
 }
 
 // ── Settings › Devices ──
 
-/** Settings › Devices from the page's signers: each owner `label · id`, this page's own marked `this page`; each device waiting
- *  `kid · since <date>`, with Let it sign — and Sign out — only for a page that signs. No page read: nothing. */
+// when a signer came in: the date as Devices draws it, the time as New York's clock reads it
+function whenOf(at) {
+  const ms = Date.parse(at);
+  return Number.isNaN(ms) ? '' : t('time.dayClock', { day: fmtDate(ms), clock: etClock(at) });
+}
+
+// how a signer came in, in words: the first device, let in from another (by its label, its id when it is gone), with a code;
+// a way not known says nothing
+function cameWords(came, owners) {
+  if (!came?.how) return '';
+  const when = whenOf(came.at);
+  switch (came.how) {
+    case 'first': return t('owner.devices.first', { when });
+    case 'letIn': {
+      const by = owners.find(o => o.id === came.by);
+      return t('owner.devices.letIn', { who: by?.label || came.by, when });
+    }
+    case 'code': return t('owner.devices.code', { when });
+    default: return '';
+  }
+}
+
+/** Settings › Devices from the page's signers: each owner `label · id`, this page's own marked `this page`, then how and when it
+ *  came in; each device waiting `kid · since <date>`. On a page that signs: Remove on every owner but this page, Let it sign on
+ *  each device waiting, and Sign out. No page read: nothing. */
 export function renderDevices(state) {
   if (!pageOk(state.account?.data)) return '';
   const owner = state.owner;
   const signs = owner?.role === 'signs';
   const d = devicesOf(state.account.data, owner);
-  const owners = d.owners.map(o => `<div class="dsec-line">${esc([o.label, o.id, o.here ? t('owner.devices.thisPage') : ''].filter(Boolean).join(' · '))}</div>`).join(''); // words-order: a device's facts under the visual separator
+  const owners = d.owners.map(o => {
+    const words = [o.label, o.id, o.here ? t('owner.devices.thisPage') : '', cameWords(o.came, d.owners)].filter(Boolean).join(' · '); // words-order: a device's facts under the visual separator
+    if (!signs || o.here || !o.id) return `<div class="dsec-line">${esc(words)}</div>`;
+    return `<div class="venue"><span>${esc(words)}</span>${key('removeDevice', t('owner.devices.remove'), { 'data-id': o.id })}</div>`;
+  }).join('');
   const pending = d.pending.map(p => {
     const at = Date.parse(p.at);
     const words = [p.kid, Number.isNaN(at) ? '' : t('owner.devices.since', { date: fmtDate(at) })].filter(Boolean).join(' · '); // words-order: a device's facts under the visual separator
@@ -173,7 +203,7 @@ export function renderSheet(state, now) {
   // a move's lines under its fields (the cap on each move, where it would go that is not served here), and a bridge's routes
   // under the quote, beside the preparation they were read for (plan 4b Task 2)
   // a sign-out's line under its box: who keeps signing once this page no longer does (plan 4b Task 6)
-  const hints = [...moveHintsOf(s), ...earnHintsOf(s), signOutLineOf(s)].filter(Boolean).map(h => `<p class="sheet-hint">${esc(h)}</p>`).join('');
+  const hints = [...moveHintsOf(s), ...earnHintsOf(s), signOutLineOf(s), removeDeviceLineOf(s)].filter(Boolean).map(h => `<p class="sheet-hint">${esc(h)}</p>`).join('');
   const r = routesWordsOf(s, state.account?.routes);
   // the page's words under a move's quote (where it goes, Can't be undone.), only beside the preparation that is the form's
   // and an earn's (what it is worth, its yield and lock, where it lands taken out: plan 4b Task 3)

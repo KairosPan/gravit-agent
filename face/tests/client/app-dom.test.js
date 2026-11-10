@@ -1956,6 +1956,7 @@ function ownerDoor({ role = 'owner', requests = [], exchange = () => ({ ok: true
     if (path === '/data/account/pair') {
       door.kid = await kidOf(globalThis.crypto.subtle, body.jwk);
       if (body.code) door.role = 'owner';
+      else if (body.ask) door.role = 'asked';
       return { status: 200, body: { ok: true, kid: door.kid, role: door.role } };
     }
     if (path === '/data/account/prepare') return { status: 200, body: preparationOf(body.draft) };
@@ -1966,6 +1967,8 @@ function ownerDoor({ role = 'owner', requests = [], exchange = () => ({ ok: true
   door.page = () => {
     const p = { ...fx('account'), requests };
     if (door.kid && door.role === 'owner') p.signers = { ...p.signers, owners: [...p.signers.owners, { id: `device:${door.kid}`, kind: 'device', label: 'Gravit face' }] };
+    // a browser that knocked or asked waits, listed by its kid
+    if (door.kid && (door.role === 'pending' || door.role === 'asked')) p.signers = { ...p.signers, pendingDevices: [{ kid: door.kid, at: '2026-11-09T21:00:00.000Z' }] };
     return p;
   };
   door.sent = path => door.posts.filter(([p]) => p === path).map(([, b]) => b);
@@ -2006,6 +2009,31 @@ test("the pair box's code reaches the door: a page that needs the code pairs wit
   f.click({ tagName: 'BUTTON', dataset: { action: 'pairDevice' } });
   await until(signs(store), 'the page to sign');
   assert.equal(door.sent('/data/account/pair').at(-1).code, '4F7Q-2KDA');
+  store.timers.clear();
+});
+
+test('Get a code: a browser that does not sign asks, the box names it by its kid, the code typed makes it sign', async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const box = f.withId('pair-code', { tagName: 'INPUT' });
+  const door = ownerDoor({ role: 'pending' });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(() => store.get().owner.role === 'pending', 'the page to wait');
+  assert.match(f.html(), /This browser does not sign for the account<\/p><div class="btn-row"><button type="button" class="btn-sm" data-action="askCode">Get a code<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askCode' } });
+  await until(() => store.get().owner.role === 'asked', 'the page to have asked');
+  assert.deepEqual(door.sent('/data/account/pair').at(-1).ask, true);
+  assert.equal(door.sent('/data/account/pair').at(-1).code, undefined, 'no code with the ask');
+  assert.ok(f.html().includes(`for this browser (${door.kid.slice(0, 8)})</p><form class="pair-box"`));
+  // a page read while it waits keeps the box
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await settle();
+  assert.equal(store.get().owner.role, 'asked');
+  box.value = ' abcd-efgh ';
+  f.click({ tagName: 'BUTTON', dataset: { action: 'pairDevice' } });
+  await until(signs(store), 'the page to sign');
+  assert.equal(door.sent('/data/account/pair').at(-1).code, 'abcd-efgh');
   store.timers.clear();
 });
 
@@ -2216,6 +2244,29 @@ test("Settings' Let it sign seeds the owners and the waiting key; Sign out, sign
   await settle();
   assert.equal(door.sent('/data/account/pair').length, pairs, 'signed out: no page pairs it again');
   assert.equal(store.get().owner.role, 'signed-out');
+  store.timers.clear();
+});
+
+test("Settings' Remove opens the sheet on that device and prepares the signers without it; a page that does not sign opens nothing", async () => {
+  const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSettings' } });
+  assert.match(f.html(), /data-action="removeDevice" data-id="device:a5048199a8081854">Remove<\/button>/, 'Remove on the other device');
+  assert.doesNotMatch(f.html(), new RegExp(`data-action="removeDevice" data-id="device:${door.kid}"`), 'none on this page');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'removeDevice', id: 'device:a5048199a8081854' } });
+  assert.deepEqual([store.get().sheet.kind, store.get().sheet.seed], ['removeDevice', { owners: ['device:a5048199a8081854', `device:${door.kid}`], id: 'device:a5048199a8081854', label: 'Stand-in seed key' }]);
+  await until(() => store.get().sheet.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'convertToMultiSigUser', signers: JSON.stringify({ authorizedUsers: [`device:${door.kid}`], threshold: 1 }) });
+  assert.match(f.html(), /Stand-in seed key · device:a5048199a8081854 stops signing for the account/);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  // a page that does not sign: Remove opens nothing
+  store.dispatch('ownerStanding', { role: 'pending', kid: door.kid });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'removeDevice', id: 'device:a5048199a8081854' } });
+  assert.equal(store.get().sheet, null);
   store.timers.clear();
 });
 
@@ -2737,7 +2788,7 @@ test('on a page that does not sign a pick opens the ticket alone; a perpetual op
   f.click({ tagName: 'BUTTON', dataset: { action: 'pickMarket', id: 'coin:BTC', venue: 'ex' } });
   assert.deepEqual(store.get().trade.ticket, { id: 'coin:BTC', side: 'buy', venue: 'ex', outcome: 0 });
   assert.equal(store.get().sheet, null, 'no sheet on a page that does not sign');
-  assert.match(f.html(), /Waiting to be let in/, "the ticket's panel says why");
+  assert.match(f.html(), /This browser does not sign for the account/, "the ticket's panel says why");
   f.click({ tagName: 'BUTTON', dataset: { action: 'pickMarket', id: 'perp:BTC' } });
   assert.equal(store.get().trade.ticket.id, 'coin:BTC', 'a perpetual picked changes nothing');
   // let in: the next page names this device, it signs, and the ticket gets its order sheet at its venue

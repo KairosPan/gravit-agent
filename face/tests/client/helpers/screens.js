@@ -34,7 +34,7 @@ import { editorHtml, dropOverlay, lightboxHtml } from '../../../client/js/compos
 import { DEFAULT_LIMITS } from '../../../client/js/composer/files.js';
 import { slashItems, atItems } from '../../../client/js/composer/menus.js';
 import { sessionUri } from '../../../client/js/composer/draft.js';
-import { SHEET_KINDS, letDeviceSeedOf, paperSeedOf, signOutSeedOf } from '../../../client/js/host/sheet-view.js';
+import { SHEET_KINDS, letDeviceSeedOf, removeDeviceSeedOf, paperSeedOf, signOutSeedOf } from '../../../client/js/host/sheet-view.js';
 import { closeSeedOf, amendSeedOf, leverageSeedOf } from '../../../client/js/host/sheet-market.js';
 import { moveSeedOf, earnSeedOf, subWalletSeedOf } from '../../../client/js/host/sheet-money.js';
 import { positionsOf, openOrdersOf } from '../../../client/js/host/account-view.js';
@@ -384,6 +384,26 @@ export function everyState() {
     // sign-only-money Task 5: Identity on a page that does not sign — This is me refused on Slack's sheet 3, quiet hours' clocks open
     // with the account's refusal under them, Block's refusal in Not you
     ...unsignedIdentityStates(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' })),
+    // sign-only-money Task 7: a browser that does not sign with Get a code, then asked with the code box; Settings › Devices with
+    // how each signer came in and Remove; the removeDevice sheet
+    ...deviceStates(accountRead()),
+  ];
+}
+
+// Get a code and Settings › Devices (sign-only-money Task 7)
+function deviceStates(read) {
+  const KID = 'a5048199a8081854';
+  const page = { ...read.account.data, signers: { ...read.account.data.signers, owners: [
+    { id: `device:${KID}`, kind: 'device', label: 'Gravit face', via: 'first', addedAt: '2026-11-01T14:05:00.000Z' },
+    { id: 'device:0f0f0f0f0f0f0f0f', kind: 'device', label: 'Laptop', via: 'letIn', by: `device:${KID}`, addedAt: '2026-11-02T15:30:00.000Z' },
+    { id: 'device:1234123412341234', kind: 'device', label: 'Phone', via: 'code', addedAt: '2026-11-09T21:10:00.000Z' },
+  ], pendingDevices: [{ kid: 'fedcba9876543210', at: '2026-11-09T21:00:00.000Z' }] } };
+  const signs = R.ownerStanding(R.accountLoaded(read, { data: page, at: NOW }), { role: 'signs', kid: KID });
+  const seed = removeDeviceSeedOf(page, signs.owner, 'device:1234123412341234');
+  return [
+    R.ownerStanding(read, { role: 'pending', kid: 'fedcba9876543210' }), R.ownerStanding(read, { role: 'asked', kid: 'fedcba9876543210' }),
+    R.openSettings(signs),
+    R.sheetOpen(signs, { kind: 'removeDevice', seed, fields: fieldsOf('removeDevice', seed) }),
   ];
 }
 
