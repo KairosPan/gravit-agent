@@ -80,6 +80,26 @@ function statusError(status: number, k: CallKind, retryAfter: string | null): Ph
   return new PhotonError("refused", code, `Photon refused the call (HTTP ${status})`);
 }
 
+/** Photon's machine code for a refused call — a snake_case word under its JSON's `code` or `error.code` — or "" (never other words) */
+const CODE_WORD = /^[a-z][a-z0-9_]{2,40}$/;
+const codeMemo = new WeakMap<Response, Promise<string>>();
+function codeOf(res: Response): Promise<string> {
+  let p = codeMemo.get(res);
+  if (!p) {
+    p = res.text().then((text) => {
+      try {
+        const j = JSON.parse(text.slice(0, 2048)) as unknown;
+        const c = isRecord(j) ? (typeof j.code === "string" ? j.code : isRecord(j.error) && typeof j.error.code === "string" ? j.error.code : "") : "";
+        return CODE_WORD.test(c) ? c : "";
+      } catch {
+        return "";
+      }
+    }, () => "");
+    codeMemo.set(res, p);
+  }
+  return p;
+}
+
 /** an advanced-imessage error as the seam's: "duplicate" for a send Photon already has */
 function imError(e: unknown): PhotonError | "duplicate" {
   if (e instanceof PhotonError) return e;
@@ -197,9 +217,14 @@ export function realPhotonLink(o: RealPhotonLinkOptions): PhotonLink {
       throw new PhotonError("retry", "network", "Photon could not be reached");
     }
     if (!res.ok) {
-      void res.body?.cancel().catch(() => {});
-      if (res.status === 404 && k.missingOk) return MISSING;
-      throw statusError(res.status, k, res.headers.get("retry-after"));
+      if (res.status === 404 && k.missingOk) {
+        void res.body?.cancel().catch(() => {});
+        return MISSING;
+      }
+      const e = statusError(res.status, k, res.headers.get("retry-after"));
+      // only Photon's machine code (snake_case) and which call, kept beside the message for the account's log: never the body's words
+      (e as PhotonError & { photonCode?: string }).photonCode = `${method} ${path.includes("/availability") ? "availability" : path.split("/").filter(Boolean).at(-1)}${(await codeOf(res)) ? ` ${await codeOf(res)}` : ""}`;
+      throw e;
     }
     let answer: unknown;
     try {
@@ -410,7 +435,8 @@ export function realPhotonLink(o: RealPhotonLinkOptions): PhotonLink {
     },
 
     async addUser(p, phone, signal) {
-      const a = await rest(p, "GET", `${projectPath(p)}/imessage/shared/availability`, { addUser: true }, undefined, signal);
+      // Photon's availability is per phone number: `phoneNumber` is a required query parameter (its OpenAPI; without it, 422)
+      const a = await rest(p, "GET", `${projectPath(p)}/imessage/shared/availability?phoneNumber=${encodeURIComponent(phone)}`, { addUser: true }, undefined, signal);
       if (!isRecord(a) || typeof a.available !== "boolean") throw answerError();
       if (!a.available) throw new PhotonError("noNumber", "noNumber", "Photon has no free shared number");
       return userOf(await rest(p, "POST", `${projectPath(p)}/users/`, { addUser: true }, { type: "shared", phoneNumber: phone }, signal));

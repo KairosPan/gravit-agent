@@ -291,7 +291,7 @@ describe("the real Photon link", () => {
     it("addUser posts the shared registration and answers the assigned line; no free number is noNumber", async () => {
       let available = true;
       route = (s) => {
-        if (s.url === `${API}/projects/prj_1/imessage/shared/availability`) return ok({ available });
+        if (s.url === `${API}/projects/prj_1/imessage/shared/availability?phoneNumber=%2B14155550100`) return ok({ available });
         if (s.url === `${API}/projects/prj_1/users/` && s.method === "POST") return ok(user("usr_1", "+14155550100", "+14155550123"));
         return json(404, {});
       };

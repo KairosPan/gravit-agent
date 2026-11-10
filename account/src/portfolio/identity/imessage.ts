@@ -293,6 +293,7 @@ export class ImessageConnector implements Connector {
     if (!this.live(gen)) return;
     const sequence = e.type === "message" ? e.message.sequence : e.sequence;
     if (!whole(sequence) || (this.cursor !== undefined && sequence <= this.cursor)) {
+      if (e.type === "message" && !e.message.fromMe) this.passedOver(`an iMessage event at ${whole(sequence) ? sequence : "no sequence"} was at or before the cursor ${this.cursor ?? "none"}`);
       this.sign();
       return;
     }
@@ -339,7 +340,10 @@ export class ImessageConnector implements Connector {
       }
       return true;
     }
-    if (isGroupChat(m.chatGuid)) return true;
+    if (isGroupChat(m.chatGuid)) {
+      this.passedOver("an iMessage in a group chat reached Gravit's line");
+      return true;
+    }
     if (m.from !== this.d.secret.phone) {
       this.stranger(m.from);
       return true;
@@ -371,6 +375,15 @@ export class ImessageConnector implements Connector {
       return false;
     }
     return true;
+  }
+
+  /** a message the connector passes over without a word, said once a minute at most (no text, no handle) */
+  private passedOverAt = -Infinity;
+  private passedOver(what: string): void {
+    const at = this.d.clock.now();
+    if (at - this.passedOverAt < RECORD_EVERY_MS) return;
+    this.passedOverAt = at;
+    this.d.log(`identity: ${what}: passed over`);
   }
 
   /** a stranger counted — unless the owner blocked them; never answered. A store that cannot write is one line (no handle) */

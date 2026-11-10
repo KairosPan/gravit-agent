@@ -140,7 +140,10 @@ export class ImessagePendingSource implements PendingSource {
     if (err instanceof PhotonError) {
       if (err.kind === "auth") return refused(IDENTITY_WORDS.refusedByPhoton);
       if (projectCheck && err.kind === "refused" && err.code === "dedicated") return refused(IDENTITY_WORDS.photonDedicated);
-      if (err.kind === "limit") return refused(IDENTITY_WORDS.photonUserLimit);
+      if (err.kind === "limit") {
+        if (!signal.aborted) this.o.log(`identity: Photon would not add the user (HTTP ${err.code}, ${(err as PhotonError & { photonCode?: string }).photonCode ?? "no code"})`);
+        return refused(IDENTITY_WORDS.photonUserLimit);
+      }
       if (err.kind === "noNumber") return refused(IDENTITY_WORDS.photonNoNumber);
     }
     const reason = err instanceof PhotonError ? `${err.kind}: ${err.message}` : err instanceof Error ? err.name : "error";
