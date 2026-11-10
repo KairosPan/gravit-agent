@@ -32,7 +32,7 @@ import { postVia, startOwner } from '../../client/js/host/owner.js';
 import { startSheet } from '../../client/js/host/sheet.js';
 import { earnSaidOf, moveSaysOf } from '../../client/js/host/sheet-money.js';
 import { marketDraftOf } from '../../client/js/host/sheet-market.js';
-import { identityLinesOf } from '../../client/js/host/sheet-identity.js';
+import { identityActionOf } from '../../client/js/host/sheet-identity.js';
 import { startDesk } from '../../client/js/host/desk.js';
 import { accountDown, marketDown } from '../../client/js/host/explore-join.js';
 import { accountDownWord } from '../../client/js/host/markets.js';
@@ -354,7 +354,7 @@ test("the owner sheets' lines as the sheet holds them: a sign-out's Guard, what 
   follows(earnSaidOf({ result: { earn: { kind: 'supply', amount: '5', asset: 'U', productName: 'P', status: '<queued>' } } }), 'Putting in 5 U · P: <queued>');
   const move = { kind: 'move', prepared: { action: { kind: 'withdraw', from: 'a', to: 'b', toAddress: '0x1' } }, seed: { sources: [{ id: 'a', dests: [{ id: 'b', name: "<B&C's>" }] }] } };
   assert.deepEqual(moveSaysOf(move), ["<B&C's>'s deposit address, checked again before sending.", "Can't be undone."]);
-  assert.deepEqual(identityLinesOf('block', { masked: "<x&y's>" }), ["Messages from <x&y's> are dropped and no longer counted."]);
+  assert.equal(identityActionOf('block', { masked: "<x&y's>" }), 'No sender to block here');
 });
 
 test("the owner device's lines as the store holds them: a refusal, what was said, the countdown, no answer", async () => {

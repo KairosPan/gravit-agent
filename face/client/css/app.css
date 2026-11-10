@@ -753,6 +753,7 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .sheet-steps .btn-row { margin-top: 6px; }
 .sheet-link { text-decoration: none; }
 .identity-manifest { margin: 0; max-height: 220px; overflow: auto; white-space: pre; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-2); font: calc(11px * var(--fm))/1.5 var(--font-mono); color: var(--text); user-select: all; }
+.identity-quiet { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .identity-qr { align-self: center; width: 180px; height: 180px; border-radius: var(--radius-s); image-rendering: pixelated; }
 /* Sell many's drawer (plan 4b Task 3): the picks, each with how much to sell, and the legs with their answers */
 .sm-list, .sm-legs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }

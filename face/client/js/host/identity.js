@@ -1,7 +1,8 @@
 // face/client/js/host/identity.js — Account › Identity's Connect Telegram (plan B1b Task 2, spec §5.2–§5.3) and Install app… for
-// Slack (plan B2 Task 7) and Connect iMessage through Photon (the iMessage plan): sheets 1 to 3 as the Identity drawer, over the
-// account's pending connection (plan B1a's routes, through the face's proxy), and sheet 4 handed to the owner sheet engine as the
-// `connectNetwork` kind.
+// Slack (plan B2 Task 7) and Connect iMessage through Photon (the iMessage plan): three sheets as the Identity drawer, over the
+// account's pending connection (plan B1a's routes, through the face's proxy); and, since sign-only-money (§4.1-§4.3, §5.3), every
+// Identity act unsigned through the account's door (host/act.js): This is me connects, Disconnect… and Block after their one-step
+// confirm (app.js), the grid's and quiet hours' Save at once — from any page, signing or not.
 //
 //   Sheet 1, Bot token (Telegram), App tokens (Slack) or Photon project (iMessage): Next reads the token, Slack's app-level and bot
 //     tokens, or iMessage's project ID, project secret and number, from their fields, clears the secret ones, makes the fingerprint in
@@ -11,12 +12,15 @@
 //   Sheet 2, Say hi: the pending connection read every PENDING_POLL_MS until the bot hears a private message, never past the
 //     connection's time (its expiresAt; one that cannot be read, PENDING_WAIT_MS from when sheet 2 began); a read with no answer says
 //     the account is not answering and reads again.
-//   Sheet 3, Is this you?: Not me counts that sender a stranger and waits again; This is me closes the drawer (keeping the pending
-//     connection) and opens sheet 4, seeded from the pending connection, the fingerprint and the routing a fresh connection sends.
+//   Sheet 3, Is this you?: Not me counts that sender a stranger and waits again; This is me posts connectNetwork (the pending
+//     connection, the fingerprint and the routing a fresh connection sends) and, taken, closes the drawer and reads Identity again;
+//     refused, sheet 3 stays with the account's words and Start again.
 //
-// Closing the drawer, Back from sheet 2, Start again, and the owner sheet's Cancel on sheet 4 drop the pending connection at once; a
-// page that reloads holds none (the store keeps no connection) and the account's ten minutes cover a tab that died.
-import { routeRows, routingOf, formatRouting } from './identity-view.js';
+// Closing the drawer, Back from sheet 2 and Start again drop the pending connection at once; a page that reloads holds none (the
+// store keeps no connection) and the account's ten minutes cover a tab that died.
+import { routeRows, routingOf, formatRouting, identityOf } from './identity-view.js';
+import { identityActionOf } from './sheet-identity.js';
+import { postAct } from './act.js';
 import { refusedAt, whyOf } from './owner-view.js';
 import { said } from '../i18n/words.js';
 
@@ -115,11 +119,12 @@ export async function copyManifest(text, clipboard, select) {
   }
 }
 
-export function startIdentity({ store, getJson, post, subtle, schedule, cancelTimer, now = Date.now, openSheet, loadIdentity = null, random = randomOf }) {
+export function startIdentity({ store, getJson, post, subtle, schedule, cancelTimer, now = Date.now, loadIdentity = null, random = randomOf }) {
   let gen = 0;           // the drawer's generation: an answer for a drawer since closed, or moved on, lands nowhere
   let pollTimer = null;
   let sending = false;   // a token on its way: a second Next does nothing
   let waitFrom = 0;      // when sheet 2 began waiting for this connection (the account's ten minutes run from about then)
+  const acting = new Set(); // the tab's acts in the air, by where they were pressed: a second press there does nothing
 
   const connect = () => store.get().identity?.connect ?? null;
   const set = patch => store.dispatch('identityConnectSet', patch);
@@ -132,14 +137,6 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     const ms = Date.parse(str(p?.expiresAt));
     return Number.isFinite(ms) ? ms <= now() : now() - waitFrom >= PENDING_WAIT_MS;
   };
-
-  // sheet 4's Cancel (any close of the owner sheet before it signs) drops the pending connection it was opened for
-  let lastSheet = store.get().sheet ?? null;
-  store.subscribe((s, type) => {
-    const was = lastSheet;
-    lastSheet = s.sheet ?? null;
-    if (type === 'sheetClose' && was?.kind === 'connectNetwork' && was.status !== 'done' && was.status !== 'signing') void drop(was.seed?.pending);
-  });
 
   /** The Identity read (host/account.js loadIdentity when given); `fresh` past the face's cache. */
   function load(fresh = false) {
@@ -266,10 +263,12 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     armPoll();
   }
 
-  /** Sheet 3's This is me: the drawer closed without dropping, and sheet 4, the owner sheet, opened over the pending connection. */
-  function thisIsMe() {
+  /** Sheet 3's This is me: connectNetwork posted unsigned, from the pending connection, the fingerprint and the routing a fresh
+   *  connection sends. Taken: the drawer closed (nothing to drop: the account keeps it) and Identity read again past the cache.
+   *  Refused: sheet 3 stays with the account's words and Start again. */
+  async function thisIsMe() {
     const c = connect();
-    if (!c || c.step !== 3 || !c.pending?.sender || !c.fp) return;
+    if (!c || c.step !== 3 || !c.pending?.sender || !c.fp || c.busy) return;
     const p = c.pending;
     if (!p.sender.id || !p.bot.id || !p.bot.username) { set({ error: CONNECT_WORDS.noSender() }); return; }
     const network = c.network === 'slack' || c.network === 'imessage' ? c.network : 'telegram';
@@ -280,10 +279,17 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
       talksOnlyWith: imessage ? p.sender.handle : p.sender.handle || p.sender.masked, routing: connectRoutingOf(store.get().identity?.data, network),
       keyHash: c.fp.keyHash, salt: c.fp.salt,
     };
-    gen += 1;
+    const action = identityActionOf('connectNetwork', seed);
+    if (typeof action === 'string') { set({ error: action }); return; }
+    const mine = gen;
     stopPoll();
+    set({ busy: true, error: null });
+    const r = await postAct(post, action);
+    if (mine !== gen || !connect()) return;
+    if (!r.ok) { set({ busy: false, error: r.said }); return; }
+    gen += 1;
     store.dispatch('identityConnectClose');
-    return openSheet('connectNetwork', seed);
+    return load(true);
   }
 
   /** Back: from sheet 2 the pending connection is dropped and sheet 1 shows again; from sheet 3, sheet 2 waits again. */
@@ -311,8 +317,8 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     store.dispatch('identityConnectClose');
   }
 
-  /** Start again (an expired or gone connection, on sheets 2 to 4): the drawer at sheet 1 for the same network, anything pending
-   *  dropped. `network` names it when no drawer is open (sheet 4's, from its seed). */
+  /** Start again (an expired, gone or refused connection, on sheets 2 and 3): the drawer at sheet 1 for the same network, anything
+   *  pending dropped. `network` names it when no drawer is open. */
   function startAgain(network) {
     const net = connect()?.network ?? network ?? 'telegram';
     if (connect()) close();
@@ -329,5 +335,43 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     if (ok && d && d.network === 'slack' && d.step === 1) set({ copied: true });
   }
 
-  return { load, openConnect, next, notMe, thisIsMe, back, close, startAgain, copy };
+  // ── the tab's acts (sign-only-money §4.3): each posted unsigned; taken, Identity read again past the cache; refused or unsendable,
+  // the words said where it was pressed (`at`: networks, grid, quiet or strangers) ──
+
+  const say = (at, words) => store.dispatch('identitySaid', words ? { at, words } : null);
+  async function act(at, action, done = null) {
+    if (acting.has(at)) return false;
+    if (typeof action === 'string') { say(at, action); return false; }
+    acting.add(at);
+    say(at, null);
+    try {
+      const r = await postAct(post, action);
+      if (!r.ok) { say(at, r.said); return false; }
+      done?.();
+      await load(true);
+      return true;
+    } finally {
+      acting.delete(at);
+    }
+  }
+
+  /** Disconnect… (after its confirm): disconnectNetwork for `network`. */
+  const disconnect = network => act('networks', identityActionOf('disconnectNetwork', { network }));
+
+  /** Block (after its confirm): blockSender for the stranger by its reference and masked id. */
+  const block = (network, sender, masked) => act('strangers', identityActionOf('block', { network, sender, masked }));
+
+  /** The grid's Save (`at` grid) or quiet hours' (`at` quiet): setRouting with `routing` (a grid or the account's string) and quiet
+   *  hours from `quietFrom` to `quietTo`, both '' for Off; checked against the account's read first — times that are no clocks, the
+   *  same at both ends, or nothing changed are said, never sent. Taken from quiet hours, their editor closes. */
+  function saveRouting(routing, quietFrom, quietTo, at = 'grid') {
+    const data = store.get().identity?.data;
+    const from = typeof quietFrom === 'string' ? quietFrom.trim() : '';
+    const to = typeof quietTo === 'string' ? quietTo.trim() : '';
+    const seed = { routing, quiet: identityOf(data).quiet ?? null, saved: formatRouting(routingOf(data)) };
+    const action = identityActionOf('routing', seed, { quietFrom: from, quietTo: to, quietOff: from === '' && to === '' });
+    return act(at, action, at === 'quiet' ? () => store.dispatch('identityQuietEdit', false) : null);
+  }
+
+  return { load, openConnect, next, notMe, thisIsMe, back, close, startAgain, copy, disconnect, block, saveRouting };
 }

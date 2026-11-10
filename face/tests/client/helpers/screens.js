@@ -162,8 +162,8 @@ function identityStates(base) {
     R.identityTick(R.identityDetails(signing), { row: 'brief', network: 'telegram', on: true }),
     R.identityLoaded(base, { ok: true, networks: [], routing: {}, quiet: null, strangers: [] }),
     R.identityFailed(base, 'The account did not answer.'),
-    // Connect Telegram (Task 2): sheets 1 to 3 in the drawer (2 with its QR and a conflict, 3 refused with Start again), and sheet 4
-    // the owner sheet, refused
+    // Connect Telegram (Task 2): sheets 1 to 3 in the drawer (2 with its QR and a conflict, 3 refused with Start again), and (where
+    // sheet 4, the owner sheet, stood until sign-only-money) the Identity tab after This is me connected
     ...connectStates(signing),
   ];
 }
@@ -172,12 +172,11 @@ function connectStates(signing) {
   const pending = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' }, link: 'https://t.me/gravit_desk_bot', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'conflict' };
   const heard = { ...pending, state: 'heard', sender: { id: '555000123', name: 'Pan', handle: '@pan', masked: '…123', text: '/start' } };
   const open = R.identityConnectOpen(signing);
-  const seed = { pending: pending.id, botId: '777', speaksAs: '@gravit_desk_bot', operatorId: '555000123', talksOnlyWith: '@pan', routing: 'chat=telegram;alerts=telegram;brief=telegram;cards=telegram;fills=telegram', keyHash: 'a'.repeat(64), salt: 'b'.repeat(32) };
   return [
     R.identityConnectSet(open, { busy: true, error: t('identity.connect.empty') }),
     R.identityConnectSet(open, { step: 2, pending }),
     R.identityConnectSet(open, { step: 3, pending: heard, error: 'This connection is gone: it expired or was closed. Start again.' }),
-    R.sheetRefused(R.sheetOpen(signing, { kind: 'connectNetwork', seed, fields: [] }), { message: 'This connection is gone: it expired or was closed. Start again.' }),
+    R.identityConnectClose(R.identityConnectSet(open, { step: 3, pending: heard })),
   ];
 }
 
@@ -382,6 +381,21 @@ export function everyState() {
     ...imessageStates(identitySigning(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' }))),
     // plan 4 of one entry, Task 5: Available to Gravit on, off and unreadable, and a bot task's line on the rail
     ...rosterStates(base),
+    // sign-only-money Task 5: Identity on a page that does not sign — This is me refused on Slack's sheet 3, quiet hours' clocks open
+    // with the account's refusal under them, Block's refusal in Not you
+    ...unsignedIdentityStates(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' })),
+  ];
+}
+
+// Identity with no signature (sign-only-money Task 5): the read of identitySigning on a page that does not sign
+function unsignedIdentityStates(base) {
+  const read = identitySigning(base).identity.data;
+  const page = R.ownerStanding(R.identityLoaded(base, read), { role: 'needs-code', kid: '' });
+  const pending = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'heard', sender: { id: 'T0FAKE001:U0OPER7QK', name: 'Pan', handle: '@pan', userId: 'U0OPER7QK', masked: '…7QK', text: 'hi' } };
+  return [
+    R.identityConnectSet(R.identityConnectOpen(page, 'slack'), { step: 3, pending, error: 'This connection is gone: it expired or was closed. Start again.' }),
+    R.identitySaid(R.identityQuietEdit(page, true), { at: 'quiet', words: 'Quiet hours start and end at different times' }),
+    R.identitySaid(page, { at: 'strangers', words: 'That sender is blocked already' }),
   ];
 }
 
@@ -580,13 +594,13 @@ function slackStates(signing) {
   const pending = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'conflict' };
   const heard = { ...pending, state: 'heard', sender: { id: 'T0FAKE001:U0OPER7QK', name: 'Pan', handle: '@pan', userId: 'U0OPER7QK', masked: '…7QK', text: 'hi' } };
   const open = R.identityConnectOpen(both, 'slack');
-  const seed = { network: 'slack', pending: pending.id, botId: 'T0FAKE001:U0BOT0001', speaksAs: '@gravit', operatorId: 'T0FAKE001:U0OPER7QK', talksOnlyWith: '@pan', routing: 'chat=slack;alerts=slack;brief=slack;cards=slack;fills=slack', keyHash: 'a'.repeat(64), salt: 'b'.repeat(32) };
   return [
     both,
     R.identityConnectSet(open, { copied: true }),
     R.identityConnectSet(open, { step: 2, pending }),
     R.identityConnectSet(open, { step: 3, pending: heard }),
-    R.sheetOpen(both, { kind: 'connectNetwork', seed, fields: [] }),
+    // (where sheet 4 stood until sign-only-money) the Identity tab after This is me connected Slack
+    R.identityConnectClose(R.identityConnectSet(open, { step: 3, pending: heard })),
   ];
 }
 
@@ -600,15 +614,16 @@ function imessageStates(signing) {
   const pending = { id: 'aaaabbbbccccddddaaaabbbbccccdddd', network: 'imessage', bot: { id: 'prj_1:+14155550123', username: '+14155550123', name: 'iMessage' }, link: 'sms:+14155550123', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'waiting', strangerHeard: { masked: '…com', at: '2026-11-04T15:01:00.000Z' } };
   const heard = { ...pending, state: 'heard', sender: { id: '+14155550100', name: '+14155550100', handle: '+14155550100', masked: '…100', text: 'hi' } };
   const open = R.identityConnectOpen(signing, 'imessage');
-  const seed = { network: 'imessage', pending: pending.id, botId: 'prj_1:+14155550123', speaksAs: '+14155550123', operatorId: '+14155550100', talksOnlyWith: '+14155550100', routing: 'chat=imessage,telegram;alerts=imessage;brief=imessage;cards=imessage;fills=imessage', keyHash: `01234567${'a'.repeat(56)}`, salt: 'b'.repeat(32) };
   return [
     both,
     refused,
     R.identityConnectSet(open, { error: t('identity.connect.imessageShape') }),
     R.identityConnectSet(open, { step: 2, pending }),
     R.identityConnectSet(open, { step: 3, pending: heard }),
-    R.sheetOpen(signing, { kind: 'connectNetwork', seed, fields: [] }),
-    R.sheetOpen(both, { kind: 'disconnectNetwork', seed: { network: 'imessage' }, fields: [] }),
+    // (where sheet 4 and the Disconnect iMessage sheet stood until sign-only-money) the Identity tab after This is me connected
+    // iMessage, and Disconnect… asking in its place
+    both,
+    R.askConfirm(both, { action: 'identityDisconnect', network: 'imessage' }),
   ];
 }
 
@@ -658,11 +673,17 @@ function laterStates() {
     close: closeSeedOf(position) ?? {}, amend: order, leverage: leverageSeedOf(position, page) ?? {},
     beast: {}, cap: { capUsd: 250 }, session: {}, leverageCap: {},
     move: moveSeedOf(page, { from: 'ex' }), earn: earnSeedOf(earnBody(), earnPage()), subWallet: subWalletSeedOf(page),
-    disconnectNetwork: { network: 'telegram' }, block: { network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789' },
-    routing: { routing: { chat: ['telegram'], alerts: [], brief: [], cards: [], fills: [] }, quiet: { from: '23:00', to: '07:00' }, saved: 'chat=telegram;alerts=;brief=;cards=;fills=' },
   };
   const kinds = [...SHEET_KINDS.filter(k => Object.hasOwn(seeds, k)), ...Object.keys(seeds).filter(k => !SHEET_KINDS.includes(k))];
-  const sheets = kinds.map(kind => R.sheetOpen(signs, { kind, seed: seeds[kind], fields: fieldsOf(kind, seeds[kind]) }));
+  // Identity's three kinds stood last until sign-only-money, which made them no sheet: their places draw what replaced each —
+  // Disconnect… asking in place, the grid after its Save, Block asking in place
+  const id = identitySigning(R.nav(signs, { screen: 'account', tab: 'identity' }));
+  const saved = R.identityLoaded(id, { ...id.identity.data, routing: { ...id.identity.data.routing, brief: ['telegram'] } });
+  const sheets = [
+    ...kinds.map(kind => R.sheetOpen(signs, { kind, seed: seeds[kind], fields: fieldsOf(kind, seeds[kind]) })),
+    R.askConfirm(id, { action: 'identityDisconnect', network: 'telegram' }), saved,
+    R.askConfirm(id, { action: 'identityBlock', network: 'telegram', sender: '0123456789ab', masked: '…789' }),
+  ];
   // a move prepared, its lines under the quote
   const move = sheets[kinds.indexOf('move')];
   const prepared = R.sheetPrepared(move, { prepared: { ok: true, action: { type: 'liveMove', kind: 'transfer', from: 'ex', to: 'agent-claude-code', toAddress: '0xcd' }, shown: [{ name: 'Move', value: '10 USDC' }] }, at: NOW, asked: askedOf(move.sheet), deadline: NOW + 125_000 });

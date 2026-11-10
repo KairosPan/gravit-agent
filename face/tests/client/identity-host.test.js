@@ -8,11 +8,10 @@ import { createHash, webcrypto } from 'node:crypto';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startSheet } from '../../client/js/host/sheet.js';
+import { ACT, postAct } from '../../client/js/host/act.js';
 import { startIdentity, fingerprintOf, copyManifest, PENDING_POLL_MS, TOKEN_PATHS } from '../../client/js/host/identity.js';
 const TOKEN_PATH = TOKEN_PATHS.telegram;
 import { renderConnectDrawer } from '../../client/js/render/identity.js';
-import { renderSheet } from '../../client/js/render/owner.js';
 import { spoken } from './helpers/spoken.js';
 
 const TOKEN = '7000000001:AAFakeTokenForTestsOnly_abcdefghijklmn';
@@ -52,34 +51,36 @@ function fakeTimers(clock) {
 
 // the door the host posts through ({status, body}, as host/owner.js postVia answers) and the reads it makes
 const EMPTY_READ = { ok: true, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] }, quiet: null, strangers: [] };
-function rig({ tokenAnswer = { status: 200, body: { ok: true, pending: PENDING } }, reads = [], read = EMPTY_READ } = {}) {
+function rig({ tokenAnswer = { status: 200, body: { ok: true, pending: PENDING } }, reads = [], read = EMPTY_READ, actAnswer = { status: 200, body: { ok: true } }, role = 'signs' } = {}) {
   const clock = { t: START };
   const timers = fakeTimers(clock);
   const store = createStore({ initial: emptyState(START), reducers });
-  store.dispatch('ownerStanding', { role: 'signs', kid: 'a5048199a8081854' });
+  store.dispatch('ownerStanding', { role, kid: 'a5048199a8081854' });
   store.dispatch('identityLoaded', read);
   const posts = [];
   const gets = [];
-  const opened = [];
   const answers = { notMe: [] };
   const post = async (path, body) => {
     posts.push({ path, body });
+    if (path === ACT) return typeof actAnswer === 'function' ? actAnswer(body) : actAnswer;
     if (path === TOKEN_PATH || path === TOKEN_PATHS.slack || path === TOKEN_PATHS.imessage) return tokenAnswer;
     if (path.endsWith('/not-me')) return answers.notMe.shift() ?? { status: 200, body: { ok: true, pending: PENDING } };
     return { status: 200, body: { ok: true } };
   };
   const getJson = async path => {
     gets.push(path);
+    // Identity's own read, again after an act: the read the rig began with
+    if (/^\/data\/account\/identity(\?|$)/.test(path)) return read;
     const r = reads.length ? reads.shift() : { ok: true, pending: PENDING };
     if (r instanceof Error) throw r;
     return r;
   };
   const identity = startIdentity({
     store, getJson, post, subtle: webcrypto.subtle, schedule: timers.schedule, cancelTimer: timers.cancelTimer, now: () => clock.t,
-    openSheet: (kind, seed) => { opened.push({ kind, seed }); },
   });
-  return { clock, timers, store, posts, gets, opened, answers, identity };
+  return { clock, timers, store, posts, gets, answers, identity };
 }
+const acts = posts => posts.filter(p => p.path === ACT).map(p => p.body.action);
 const field = (value = TOKEN) => ({ value });
 const drops = posts => posts.filter(p => p.path === '/data/account/identity/pending/drop');
 
@@ -173,7 +174,7 @@ test('sheet 2: Say hi with the t.me link, the QR as an img, the expiry, and its 
   assert.ok(r.gets[0].startsWith(`/data/account/identity/pending?id=${PENDING.id}`), r.gets[0]);
   assert.match(r.gets[0], /[?&]fresh=1\b/);
   const html = renderConnectDrawer(r.store.get());
-  assert.match(html, /Connect Telegram · 2 of 4 · Say hi/);
+  assert.match(html, /Connect Telegram · 2 of 3 · Say hi/);
   assert.match(html, /<a href="https:\/\/t\.me\/gravit_desk_bot" target="_blank" rel="noopener noreferrer">t\.me\/gravit_desk_bot<\/a>/);
   assert.match(html, /<img class="identity-qr" src="data:image\/svg\+xml;base64,PHN2Zy8\+" alt="QR code for t\.me\/gravit_desk_bot"/);
   assert.match(html, /This connection waits until 10:10 ET; after that, start again\./);
@@ -220,7 +221,7 @@ test('sheet 3: Is this you? with name, handle, masked id and message; Not me pos
   await r.identity.next(field());
   await r.timers.advance(PENDING_POLL_MS);
   const html = renderConnectDrawer(r.store.get());
-  assert.match(html, /Connect Telegram · 3 of 4 · Is this you\?/);
+  assert.match(html, /Connect Telegram · 3 of 3 · Is this you\?/);
   for (const line of ['Name: Pan', 'Handle: @pan', 'Telegram id: …123', 'Message: /start']) assert.ok(html.includes(line), line);
   assert.ok(!html.includes('555000123'), 'the full id is never drawn');
   for (const k of ['identityBack', 'identityClose', 'identityNotMe', 'identityThisIsMe']) assert.match(html, new RegExp(`data-action="${k}"`), k);
@@ -244,29 +245,134 @@ test('sheet 3: Is this you? with name, handle, masked id and message; Not me pos
   assert.equal(r.timers.pending.size, 0);
 });
 
-test('This is me opens sheet 4, the owner sheet, seeded from the pending and the routing', async () => {
+test('This is me connects: connectNetwork goes to /data/account/act, the drawer closes, Identity reloads', async () => {
   const r = rig({ reads: [{ ok: true, pending: HEARD }] });
   r.identity.openConnect();
   await r.identity.next(field());
   await r.timers.advance(PENDING_POLL_MS);
   const { fp } = r.store.get().identity.connect;
-  r.identity.thisIsMe();
-  assert.equal(r.opened.length, 1);
-  assert.deepEqual(r.opened[0], {
-    kind: 'connectNetwork',
-    seed: { network: 'telegram', pending: PENDING.id, botId: '777', speaksAs: '@gravit_desk_bot', operatorId: '555000123', talksOnlyWith: '@pan', routing: ALL_TELEGRAM, keyHash: fp.keyHash, salt: fp.salt },
-  });
-  // the drawer closed without dropping: the sheet and the drawer never show at once
+  const before = r.gets.length;
+  await r.identity.thisIsMe();
+  await settle();
+  assert.deepEqual(acts(r.posts), [{
+    type: 'connectNetwork', network: 'telegram', pending: PENDING.id, botId: '777', speaksAs: '@gravit_desk_bot', operatorId: '555000123', talksOnlyWith: '@pan', routing: ALL_TELEGRAM, keyHash: fp.keyHash, salt: fp.salt,
+  }]);
+  // no sheet opened, the drawer closed without dropping (the account keeps the connection), Identity read again past the cache
+  assert.equal(r.store.get().sheet ?? null, null);
   assert.equal(r.store.get().identity.connect, null);
   assert.equal(drops(r.posts).length, 0);
-  assert.ok(!JSON.stringify(r.opened).includes(TOKEN));
+  assert.ok(r.gets.slice(before).includes('/data/account/identity?fresh=1'));
+  assert.equal(r.timers.pending.size, 0, 'no poll left');
+  assert.ok(!JSON.stringify(r.posts.filter(p => p.path === ACT)).includes(TOKEN));
   // a sender with no handle is talked with by their masked id
   const r2 = rig({ reads: [{ ok: true, pending: { ...HEARD, sender: { ...HEARD.sender, handle: '' } } }] });
   r2.identity.openConnect();
   await r2.identity.next(field());
   await r2.timers.advance(PENDING_POLL_MS);
-  r2.identity.thisIsMe();
-  assert.equal(r2.opened[0].seed.talksOnlyWith, '…123');
+  await r2.identity.thisIsMe();
+  assert.equal(acts(r2.posts)[0].talksOnlyWith, '…123');
+});
+
+test('This is me connects on a page that does not sign too', async () => {
+  const r = rig({ role: 'none', reads: [{ ok: true, pending: HEARD }] });
+  r.identity.openConnect();
+  await r.identity.next(field());
+  await r.timers.advance(PENDING_POLL_MS);
+  await r.identity.thisIsMe();
+  assert.equal(acts(r.posts).length, 1);
+  assert.equal(r.store.get().identity.connect, null);
+});
+
+test("This is me refused: sheet 3 stays with the account's words and Start again", async () => {
+  const actAnswer = { status: 409, body: { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_BAD_ACTION', layer: 'account', message: NO_PENDING } } };
+  const r = rig({ reads: [{ ok: true, pending: HEARD }], actAnswer });
+  r.identity.openConnect();
+  await r.identity.next(field());
+  await r.timers.advance(PENDING_POLL_MS);
+  const gets = r.gets.length;
+  await r.identity.thisIsMe();
+  const c = r.store.get().identity.connect;
+  assert.equal(c.step, 3);
+  assert.equal(c.busy, false);
+  assert.equal(c.error, NO_PENDING);
+  assert.equal(r.gets.length, gets, 'nothing read again');
+  assert.equal(r.timers.pending.size, 0, 'sheet 3 does not poll');
+  const html = renderConnectDrawer(r.store.get());
+  assert.ok(html.includes(NO_PENDING), "the account's words");
+  assert.match(html, /data-action="identityStartAgain">Start again</);
+  // Start again: the pending connection dropped, sheet 1 again
+  r.identity.startAgain();
+  assert.equal(r.store.get().identity.connect.step, 1);
+  assert.deepEqual(drops(r.posts).map(p => p.body), [{ id: PENDING.id }]);
+  // a door that does not answer says so on sheet 3 too
+  const r2 = rig({ reads: [{ ok: true, pending: HEARD }], actAnswer: () => { throw new Error('down'); } });
+  r2.identity.openConnect();
+  await r2.identity.next(field());
+  await r2.timers.advance(PENDING_POLL_MS);
+  await r2.identity.thisIsMe();
+  assert.match(renderConnectDrawer(r2.store.get()), /The account did not answer\. Try again\./);
+});
+
+test('This is me twice posts connectNetwork once', async () => {
+  let release;
+  const held = new Promise(res => { release = res; });
+  const r = rig({ reads: [{ ok: true, pending: HEARD }], actAnswer: () => held });
+  r.identity.openConnect();
+  await r.identity.next(field());
+  await r.timers.advance(PENDING_POLL_MS);
+  const going = r.identity.thisIsMe();
+  await settle();
+  assert.equal(r.store.get().identity.connect.busy, true);
+  await r.identity.thisIsMe();
+  release({ status: 200, body: { ok: true } });
+  await going;
+  assert.equal(acts(r.posts).length, 1);
+});
+
+test('postAct: the action under ACT; taken is ok with the body, refused or unanswered the words', async () => {
+  const seen = [];
+  assert.deepEqual(await postAct(async (path, body) => { seen.push({ path, body }); return { status: 200, body: { ok: true, kind: 'result' } }; }, { type: 'blockSender' }), { ok: true, body: { ok: true, kind: 'result' } });
+  assert.deepEqual(seen, [{ path: '/data/account/act', body: { action: { type: 'blockSender' } } }]);
+  assert.deepEqual(await postAct(async () => ({ status: 409, body: { ok: false, refusal: { message: 'signed acts go through the owner door' } } }), {}), { ok: false, said: 'signed acts go through the owner door' });
+  const none = await postAct(async () => { throw new Error('x'); }, {});
+  assert.equal(none.ok, false);
+  assert.equal(spoken(none.said), 'The account did not answer. Try again.');
+  assert.equal(spoken((await postAct(async () => ({ status: 500, body: {} }), {})).said), 'Refused');
+});
+
+test('disconnect, block and saveRouting post their actions unsigned and read Identity again; a refusal is said where pressed', async () => {
+  const read = { ...ALL_TELEGRAM_READ, quiet: { from: '23:00', to: '07:00', zone: 'America/New_York' } };
+  const r = rig({ role: 'none', read });
+  assert.equal(await r.identity.disconnect('telegram'), true);
+  assert.equal(await r.identity.block('telegram', '0123456789ab', '…789'), true);
+  assert.equal(await r.identity.saveRouting({ chat: ['telegram'], alerts: [], brief: ['telegram'], cards: [], fills: [] }, '23:00', '07:00'), true);
+  assert.deepEqual(acts(r.posts), [
+    { type: 'disconnectNetwork', network: 'telegram' },
+    { type: 'blockSender', network: 'telegram', sender: '0123456789ab', masked: '…789' },
+    { type: 'setRouting', routing: 'chat=telegram;alerts=;brief=telegram;cards=;fills=', quietFrom: '23:00', quietTo: '07:00' },
+  ]);
+  assert.equal(r.gets.filter(g => g === '/data/account/identity?fresh=1').length, 3);
+  // quiet hours' Save: off is both ends empty; taken, the editor closes
+  r.store.dispatch('identityQuietEdit', true);
+  assert.equal(await r.identity.saveRouting(read.routing, '', '', 'quiet'), true);
+  assert.deepEqual(acts(r.posts).at(-1), { type: 'setRouting', routing: ALL_TELEGRAM, quietFrom: '', quietTo: '' });
+  assert.equal(r.store.get().identity.quietEdit, false);
+  // what cannot be sent is said and never posted: the same as now, one clock missing, both ends equal
+  const n = acts(r.posts).length;
+  assert.equal(await r.identity.saveRouting(read.routing, '23:00', '07:00'), false);
+  assert.deepEqual(r.store.get().identity.said, { at: 'grid', words: 'That is how it is now' });
+  assert.equal(await r.identity.saveRouting(read.routing, '23:00', '', 'quiet'), false);
+  assert.deepEqual(r.store.get().identity.said, { at: 'quiet', words: 'Pick when quiet hours start and end, or tick Off' });
+  assert.equal(await r.identity.saveRouting(read.routing, '06:00', '06:00', 'quiet'), false);
+  assert.equal(r.store.get().identity.said.words, 'Quiet hours start and end at different times');
+  assert.equal(await r.identity.disconnect('fax'), false);
+  assert.equal(acts(r.posts).length, n);
+  // the account's refusal, where it was pressed; a taken act clears it
+  const r2 = rig({ read, actAnswer: { status: 409, body: { ok: false, refusal: { message: 'Telegram is not connected' } } } });
+  assert.equal(await r2.identity.disconnect('telegram'), false);
+  assert.deepEqual(r2.store.get().identity.said, { at: 'networks', words: 'Telegram is not connected' });
+  assert.equal(await r2.identity.block('telegram', 'ab', '…b'), false);
+  assert.deepEqual(r2.store.get().identity.said, { at: 'strangers', words: 'Telegram is not connected' });
 });
 
 test('closing any of sheets 1 to 3 drops the pending connection', async () => {
@@ -306,48 +412,6 @@ test('closing any of sheets 1 to 3 drops the pending connection', async () => {
   assert.equal(r4.store.get().identity.connect, null);
   assert.deepEqual(drops(r4.posts).map(p => p.body), [{ id: PENDING.id }]);
   assert.equal(r4.timers.pending.size, 0);
-  // sheet 4: the owner sheet's Cancel drops it too, a done sheet does not
-  const r5 = rig();
-  r5.store.dispatch('sheetOpen', { kind: 'connectNetwork', seed: { pending: PENDING.id }, fields: [] });
-  r5.store.dispatch('sheetClose');
-  assert.deepEqual(drops(r5.posts).map(p => p.body), [{ id: PENDING.id }]);
-  r5.store.dispatch('sheetOpen', { kind: 'connectNetwork', seed: { pending: 'feedfacefeedfacefeedfacefeedface' }, fields: [] });
-  r5.store.dispatch('sheetDone', { said: 'Telegram connected' });
-  r5.store.dispatch('sheetClose');
-  assert.equal(drops(r5.posts).length, 1);
-});
-
-test("an expired pending at Sign shows the account's words and Start again", async () => {
-  const r = rig({ reads: [{ ok: true, pending: HEARD }] });
-  // the owner sheet engine over a door whose sign answers the account's refusal: the pending connection is gone
-  const prepared = draft => ({ status: 200, body: { ok: true, action: { ...draft, nonce: START }, shown: Object.entries(draft).map(([name, value]) => ({ name, value: String(value) })), quote: null } });
-  const owner = { prepare: async draft => prepared(draft), submit: async () => ({ status: 409, body: { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_BAD_ACTION', layer: 'account', message: NO_PENDING } } }) };
-  const after = [];
-  const sheet = startSheet({ store: r.store, owner, schedule: r.timers.schedule, cancelTimer: r.timers.cancelTimer, now: () => r.clock.t, afterAction: k => after.push(k) });
-  const identity = startIdentity({
-    store: r.store, getJson: async () => ({ ok: true, pending: HEARD }), post: async (path, body) => { r.posts.push({ path, body }); return { status: 200, body: { ok: true, pending: PENDING } }; },
-    subtle: webcrypto.subtle, schedule: r.timers.schedule, cancelTimer: r.timers.cancelTimer, now: () => r.clock.t, openSheet: (k, seed) => sheet.open(k, seed),
-  });
-  identity.openConnect();
-  await identity.next(field());
-  await r.timers.advance(PENDING_POLL_MS);
-  await identity.thisIsMe();
-  await settle();
-  assert.equal(r.store.get().sheet.kind, 'connectNetwork');
-  assert.equal(r.store.get().sheet.status, 'ready');
-  await sheet.submit();
-  const s = r.store.get();
-  assert.equal(s.sheet.status, 'refused');
-  const html = renderSheet(s, r.clock.t);
-  assert.ok(html.includes(NO_PENDING), 'the account\'s words');
-  assert.match(html, /data-action="identityStartAgain">Start again</);
-  assert.deepEqual(after, [], 'nothing taken');
-  // Start again: the sheet closed (its pending dropped), sheet 1 again
-  sheet.close();
-  identity.startAgain();
-  assert.equal(r.store.get().sheet, null);
-  assert.equal(r.store.get().identity.connect.step, 1);
-  assert.ok(drops(r.posts).some(p => p.body.id === PENDING.id));
 });
 
 // ── carried into Task 3: sheet 2 cannot poll forever, and a silent account is said ──
@@ -482,7 +546,7 @@ test('sheet 2: Say hi with the app_redirect link, its QR, the workspace and the 
   await r.timers.advance(PENDING_POLL_MS);
   assert.ok(r.gets[0].startsWith(`/data/account/identity/pending?id=${SLACK_PENDING.id}`));
   const two = renderConnectDrawer(r.store.get());
-  assert.match(two, /<h2>Connect Slack · 2 of 4 · Say hi<\/h2>/);
+  assert.match(two, /<h2>Connect Slack · 2 of 3 · Say hi<\/h2>/);
   assert.match(two, /<a href="https:\/\/slack\.com\/app_redirect\?app=A0FAKE0001&amp;team=T0FAKE001" target="_blank" rel="noopener noreferrer">Open Gravit in Fake Co<\/a>/);
   assert.match(two, /<img class="identity-qr" src="data:image\/svg\+xml;base64,PHN2Zy8\+" alt="QR code for Gravit&#39;s app in Fake Co"/);
   assert.match(two, /Workspace: Fake Co/);
@@ -496,7 +560,7 @@ test('sheet 2: Say hi with the app_redirect link, its QR, the workspace and the 
   assert.match(renderConnectDrawer(odd({ state: 'conflict' })), /Another program holds this app&#39;s connection to Slack: stop it, and this sheet goes on\./);
   await r.timers.advance(PENDING_POLL_MS);
   const three = renderConnectDrawer(r.store.get());
-  assert.match(three, /<h2>Connect Slack · 3 of 4 · Is this you\?<\/h2>/);
+  assert.match(three, /<h2>Connect Slack · 3 of 3 · Is this you\?<\/h2>/);
   for (const line of ['Name: Pan', 'Handle: @pan', 'Slack id: U0OPER7QK', 'Message: hi']) assert.ok(three.includes(line), line);
   assert.ok(!three.includes('Telegram'), 'no Telegram words on Slack\'s sheet');
   r.answers.notMe.push({ status: 200, body: { ok: true, pending: SLACK_PENDING } });
@@ -506,22 +570,19 @@ test('sheet 2: Say hi with the app_redirect link, its QR, the workspace and the 
   assert.equal(r.store.get().identity.connect.network, 'slack');
 });
 
-test('This is me opens sheet 4 seeded for Slack, with Slack ticked in all five rows on top of the routing now', async () => {
+test('This is me connects Slack, with Slack ticked in all five rows on top of the routing now', async () => {
   const r = slackRig({ read: ALL_TELEGRAM_READ, reads: [{ ok: true, pending: SLACK_HEARD }] });
   r.identity.openConnect('slack');
   await r.identity.next(field(APP), field(BOT));
   await r.timers.advance(PENDING_POLL_MS);
   const { fp } = r.store.get().identity.connect;
-  r.identity.thisIsMe();
-  assert.deepEqual(r.opened, [{
-    kind: 'connectNetwork',
-    seed: {
-      network: 'slack', pending: SLACK_PENDING.id, botId: 'T0FAKE001:U0BOT0001', speaksAs: '@gravit', operatorId: 'T0FAKE001:U0OPER7QK', talksOnlyWith: '@pan',
-      routing: 'chat=slack,telegram;alerts=slack,telegram;brief=slack,telegram;cards=slack,telegram;fills=slack,telegram', keyHash: fp.keyHash, salt: fp.salt,
-    },
+  await r.identity.thisIsMe();
+  assert.deepEqual(acts(r.posts), [{
+    type: 'connectNetwork', network: 'slack', pending: SLACK_PENDING.id, botId: 'T0FAKE001:U0BOT0001', speaksAs: '@gravit', operatorId: 'T0FAKE001:U0OPER7QK', talksOnlyWith: '@pan',
+    routing: 'chat=slack,telegram;alerts=slack,telegram;brief=slack,telegram;cards=slack,telegram;fills=slack,telegram', keyHash: fp.keyHash, salt: fp.salt,
   }]);
   assert.equal(r.store.get().identity.connect, null);
-  assert.ok(!JSON.stringify(r.opened).includes(BOT));
+  assert.ok(!JSON.stringify(acts(r.posts)).includes(BOT));
 });
 
 test('the manifest\'s Copy writes it to the clipboard, and selects the text when the clipboard is refused', async () => {
@@ -615,7 +676,7 @@ test('sheet 2 shows the number, the sms: link and the other-sender hint; sheet 3
   await r.identity.next(...imFields());
   await r.timers.advance(PENDING_POLL_MS);
   const html = renderConnectDrawer(r.store.get());
-  assert.match(html, /<h2>Connect iMessage · 2 of 4 · Say hi<\/h2>/);
+  assert.match(html, /<h2>Connect iMessage · 2 of 3 · Say hi<\/h2>/);
   assert.match(html, /<a href="sms:\+14155550123" target="_blank" rel="noopener noreferrer">Text hi to \+14155550123<\/a>/);
   assert.match(html, /sms:\+14155550123/);
   assert.match(html, /<img class="identity-qr" src="data:image\/svg\+xml;base64,PHN2Zy8\+" alt="QR code for a message to \+14155550123"/);
@@ -629,26 +690,21 @@ test('sheet 2 shows the number, the sms: link and the other-sender hint; sheet 3
   }
   await r.timers.advance(PENDING_POLL_MS);
   const three = renderConnectDrawer(r.store.get());
-  assert.match(three, /<h2>Connect iMessage · 3 of 4 · Is this you\?<\/h2>/);
+  assert.match(three, /<h2>Connect iMessage · 3 of 3 · Is this you\?<\/h2>/);
   for (const line of ['Number: +14155550100', 'Message: hi']) assert.ok(three.includes(line), line);
   assert.doesNotMatch(three, /Telegram|Slack|Name:/);
 });
 
-test('thisIsMe seeds speaksAs and talksOnlyWith without @ for iMessage', async () => {
+test('thisIsMe sends speaksAs and talksOnlyWith without @ for iMessage', async () => {
   const r = imRig({ read: ALL_TELEGRAM_READ, reads: [{ ok: true, pending: IM_HEARD }] });
   r.identity.openConnect('imessage');
   await r.identity.next(...imFields());
   await r.timers.advance(PENDING_POLL_MS);
   const { fp } = r.store.get().identity.connect;
-  r.identity.thisIsMe();
-  const seed = r.opened[0].seed;
-  assert.deepEqual(r.opened, [{
-    kind: 'connectNetwork',
-    seed: {
-      network: 'imessage', pending: IM_PENDING.id, botId: `${PROJECT}:+14155550123`, speaksAs: '+14155550123', operatorId: '+14155550100', talksOnlyWith: '+14155550100',
-      routing: 'chat=imessage,telegram;alerts=imessage,telegram;brief=imessage,telegram;cards=imessage,telegram;fills=imessage,telegram', keyHash: fp.keyHash, salt: fp.salt,
-    },
+  await r.identity.thisIsMe();
+  assert.deepEqual(acts(r.posts), [{
+    type: 'connectNetwork', network: 'imessage', pending: IM_PENDING.id, botId: `${PROJECT}:+14155550123`, speaksAs: '+14155550123', operatorId: '+14155550100', talksOnlyWith: '+14155550100',
+    routing: 'chat=imessage,telegram;alerts=imessage,telegram;brief=imessage,telegram;cards=imessage,telegram;fills=imessage,telegram', keyHash: fp.keyHash, salt: fp.salt,
   }]);
-  assert.equal(seed.speaksAs, '+14155550123'); assert.equal(seed.talksOnlyWith, '+14155550100');
-  assert.ok(!JSON.stringify(r.opened).includes(SECRET));
+  assert.ok(!JSON.stringify(acts(r.posts)).includes(SECRET));
 });

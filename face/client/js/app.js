@@ -62,7 +62,7 @@ import { startComposerReads } from './host/composer.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
 import { startIdentity } from './host/identity.js';
-import { identityOf, routingOf, formatRouting, SPOKEN } from './host/identity-view.js';
+import { identityOf, routingOf, SPOKEN } from './host/identity-view.js';
 import { renderConnectDrawer } from './render/identity.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
 import { startSellMany } from './host/sell-many.js';
@@ -323,8 +323,6 @@ export function boot(win, host = {}) {
   // past the face's cache, a market page's asset sheet (plan 4a Task 4), and the seat's standing after one about an agent's key
   // or limit; a done sheet then closes itself (the order sheet's words stay on the ticket)
   const SEAT_KINDS = new Set(['letIn', 'limit', 'endLimit', 'revoke']);
-  // Account › Identity's signed sheets (plan B1b Tasks 2 and 3); its disconnect is disconnectNetwork, never the Venues' disconnect
-  const IDENTITY_SHEET_KINDS = new Set(['connectNetwork', 'disconnectNetwork', 'routing', 'block']);
   function afterAction(kind, body) {
     // what the Account built for the operator's own wallet (a move out of a wallet, a DEX order) goes to that wallet at once:
     // it shows the transaction and sends it, and its hash is reported (the retired page's money.js done, trade.js placeOrder)
@@ -343,8 +341,6 @@ export function boot(win, host = {}) {
     if (kind === 'beast') store.dispatch('guardClear');
     // a venue reopened to agents: its Close to agents line goes with the state it spoke of
     if (kind === 'reopen') { const v = store.get().sheet?.seed?.venue; if (typeof v === 'string') store.dispatch('closingClear', v); }
-    // an identity sheet done (plan B1b): Identity read again past the face's cache, which a write does not clear
-    if (IDENTITY_SHEET_KINDS.has(kind)) void account.loadIdentity({ fresh: true });
     const s = store.get().sheet;
     if (kind !== 'order' && s?.kind === kind && s.status === 'done') sheet.close();
   }
@@ -454,11 +450,11 @@ export function boot(win, host = {}) {
   // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
   // sale's send handed to sendFromWallet, which reads the Account again once the wallet answers; the Account read again once a
   // run ends
-  // Account › Identity's Connect Telegram (plan B1b Task 2): sheets 1 to 3 its own drawer, sheet 4 the owner sheet's connectNetwork;
-  // the token read from sheet 1's field at Next and posted once through the owner door, never kept
+  // Account › Identity (plan B1b; unsigned since sign-only-money): Connect's three sheets its own drawer, This is me and the tab's
+  // acts posted through the account's unsigned door; the token read from sheet 1's field at Next and posted once, never kept
   const identity = startIdentity({
     store, getJson, post: ownerPost, subtle: win.crypto?.subtle ?? null, schedule, cancelTimer, now,
-    openSheet: (kind, seed) => sheet.open(kind, seed), loadIdentity: o => account.loadIdentity(o),
+    loadIdentity: o => account.loadIdentity(o),
     random: n => win.crypto.getRandomValues(new Uint8Array(n)),
   });
   const sellMany = startSellMany({ store, getJson, owner, sendOrder: o => sendFromWallet(walletSend.order(o)), afterAction, now });
@@ -1108,6 +1104,9 @@ export function boot(win, host = {}) {
     // Revoke… and Disconnect…, asked twice: then their sheet, on a page that signs
     if (c.action === 'revoke' && signs()) void sheet.open('revoke', { name: c.name, address: c.address });
     if (c.action === 'disconnect' && signs()) void sheet.open('disconnect', { venue: c.venue, name: c.name });
+    // Identity's Disconnect… and Block, asked once: then posted unsigned, from any page
+    if (c.action === 'identityDisconnect') void identity.disconnect(c.network);
+    if (c.action === 'identityBlock') void identity.block(c.network, c.sender, c.masked);
   }
 
   // the Markets search: the query moves with each keystroke (setMarketsQuery), its reads once the box has been quiet for
@@ -1228,24 +1227,6 @@ export function boot(win, host = {}) {
         else if (d.kind === 'leverageCap' && r.leverage) void sheet.open('leverageCap', { max: r.leverage.max });
         break;
       }
-      // Account › Identity's (plan B1b Task 3), each seeded from the identity read as it stands: Disconnect… a network connected;
-      // What reaches you where (Save… and Change…) the grid's unsaved ticks or the account's routing, the account's own string beside
-      // them, and its quiet hours; Block a stranger by the reference and masked id its key carries
-      case 'disconnectNetwork': case 'routing': {
-        const data = store.get().identity?.data;
-        const v = identityOf(data);
-        if (!v.ok) break;
-        if (d.kind === 'disconnectNetwork') {
-          const network = d.network || 'telegram';
-          if (v.networks[network]?.state === 'connected') void sheet.open('disconnectNetwork', { network });
-        } else {
-          const draft = store.get().identity.draft;
-          const networks = SPOKEN.filter(n => v.networks[n]?.state === 'connected');
-          void sheet.open('routing', { routing: draft ?? routingOf(data), quiet: v.quiet, saved: formatRouting(routingOf(data)), networks });
-        }
-        break;
-      }
-      case 'block': void sheet.open('block', { network: d.network ?? '', sender: d.sender ?? '', masked: d.masked ?? '' }); break;
       default: break;
     }
   }
@@ -1824,7 +1805,7 @@ export function boot(win, host = {}) {
     identityDetails: el => store.dispatch('identityDetails', el?.dataset?.network),
     // Connect Telegram (plan B1b Task 2), Install app… for Slack (plan B2 Task 7) and Connect iMessage (the iMessage plan): the
     // drawer's keys; Next hands the host the fields themselves, never their values
-    identityConnect: el => { if (signs()) identity.openConnect(['slack', 'imessage'].includes(el?.dataset?.network) ? el.dataset.network : 'telegram'); },
+    identityConnect: el => { identity.openConnect(['slack', 'imessage'].includes(el?.dataset?.network) ? el.dataset.network : 'telegram'); },
     identityNext: () => {
       const net = store.get().identity?.connect?.network;
       if (net === 'slack') void identity.next(root.querySelector('#identity-app-token'), root.querySelector('#identity-bot-token'));
@@ -1851,12 +1832,29 @@ export function boot(win, host = {}) {
     identityClose: () => identity.close(),
     identityBack: () => identity.back(),
     identityNotMe: () => { void identity.notMe(); },
-    identityThisIsMe: () => { if (signs()) void identity.thisIsMe(); },
-    identityStartAgain: () => {
-      const open = store.get().sheet;
-      const network = open?.kind === 'connectNetwork' && ['slack', 'imessage'].includes(open.seed?.network) ? open.seed.network : undefined;
-      if (open?.kind === 'connectNetwork') sheet.close();
-      identity.startAgain(network);
+    identityThisIsMe: () => { void identity.thisIsMe(); },
+    identityStartAgain: () => identity.startAgain(),
+    // Identity's tab (sign-only-money): Disconnect… and Block ask once in place (confirmYes posts them); the grid's Save and quiet
+    // hours' (Change… opens their clocks in place) apply at once — on any page
+    askIdentityDisconnect: el => { if (SPOKEN.includes(el?.dataset?.network)) store.dispatch('askConfirm', { action: 'identityDisconnect', network: el.dataset.network }); },
+    askIdentityBlock: el => {
+      const d = el?.dataset ?? {};
+      if (SPOKEN.includes(d.network) && d.sender) store.dispatch('askConfirm', { action: 'identityBlock', network: d.network, sender: d.sender, masked: d.masked ?? '' });
+    },
+    identitySave: () => {
+      const s = store.get().identity;
+      const q = identityOf(s?.data).quiet;
+      void identity.saveRouting(s?.draft ?? routingOf(s?.data), q ? q.from : '', q ? q.to : '');
+    },
+    identityQuietEdit: () => store.dispatch('identityQuietEdit', true),
+    identityQuietCancel: () => store.dispatch('identityQuietEdit', false),
+    identityQuietSave: () => {
+      // the editor's own fields, read at the press; one missing (the editor not drawn) sends nothing, never Off by accident
+      const [from, to, offBox] = ['#identity-quiet-from', '#identity-quiet-to', '#identity-quiet-off'].map(sel => root.querySelector(sel));
+      if (!from || !to || !offBox) return;
+      const off = offBox.checked === true;
+      const value = el => (off || typeof el.value !== 'string' ? '' : el.value);
+      void identity.saveRouting(routingOf(store.get().identity?.data), value(from), value(to), 'quiet');
     },
     setHistoryRange: el => { void account.loadHistory(el.dataset.value); },
     openVenueDetails: el => store.dispatch('openVenueDetails', el.dataset.id),
@@ -2118,8 +2116,8 @@ export function boot(win, host = {}) {
     if (el.type === 'checkbox' && el.dataset?.action === 'sellManyPick') sellMany.toggle(el.value);
     // the files picked, then the input emptied, so the same file can be picked again
     if (el.id === 'attach-input') { const files = Array.from(el.files ?? []); el.value = ''; addFiles(files); }
-    // a tick on Identity's grid: the draft routing, on a page that signs (the reducer checks again)
-    if (el.type === 'checkbox' && el.dataset?.action === 'identityTick' && signs()) {
+    // a tick on Identity's grid: the draft routing, on any page
+    if (el.type === 'checkbox' && el.dataset?.action === 'identityTick') {
       store.dispatch('identityTick', { row: el.dataset.row, network: el.dataset.network, on: el.checked === true });
     }
   });

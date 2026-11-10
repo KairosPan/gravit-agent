@@ -10,7 +10,6 @@ import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../hos
 import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf, signOutLineOf, draftOf } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
 import { moveHintsOf, moveSaysOf, routesWordsOf, earnHintsOf, earnSaysOf } from '../host/sheet-money.js';
-import { IDENTITY_KINDS, identityLinesOf, identityStepsOf, identityNoteOf } from '../host/sheet-identity.js';
 import { seg } from './controls.js';
 import { t, th, rawHtml, sayOf, wordsEpoch } from '../i18n/words.js';
 
@@ -71,7 +70,7 @@ function field(f) {
     // a value the sheet holds for the draft, never typed (a sign-in's state): nothing drawn
     case 'hidden':
       return '';
-    // a clock of the day, HH:MM (Identity's quiet hours)
+    // a clock of the day, HH:MM
     case 'time':
       return `<label class="field"><span class="field-label">${label}</span><input${attrs({
         class: 'input', type: 'time', name: f.name, value: typeof f.value === 'string' ? f.value : '', 'data-action': 'sheetField',
@@ -180,21 +179,10 @@ export function renderSheet(state, now) {
   // and an earn's (what it is worth, its yield and lock, where it lands taken out: plan 4b Task 3)
   const says = s.status === 'ready' || s.status === 'signing' ? [...moveSaysOf(s), ...earnSaysOf(s)].map(l => `<p class="sheet-hint">${esc(l)}</p>`).join('') : '';
   const routes = r ? `<p class="sheet-hint sheet-routes">${r.chosen ? `<b>${esc(r.lead)}</b>` : esc(r.lead)}${r.others ? `<br>${esc(r.others)}` : ''}</p>` : '';
-  // an Identity sheet's lines above its fields (what the account will hold to) and its numbered steps above its keys (plan B1b
-  // Task 2); Connect Telegram's sheet 4, refused (its pending connection expired or gone), offers Start again, which reopens sheet 1
-  const identity = IDENTITY_KINDS.includes(s.kind);
-  const idLines = identity ? identityLinesOf(s.kind, s.seed) : [];
-  const above = idLines.length ? `<div class="sheet-quote">${idLines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</div>` : '';
-  const idSteps = identity ? identityStepsOf(s.kind, s.seed) : [];
-  // Slack's sheet 4 adds one note under its steps: the phone's commands typed with ! there (plan B2 Task 7); Disconnect iMessage
-  // one that the Photon registration stays
-  const idNote = identity ? identityNoteOf(s.kind, s.seed) : '';
-  const steps = (idSteps.length ? `<ol class="sheet-steps">${idSteps.map(l => `<li>${esc(l)}</li>`).join('')}</ol>` : '') + (idNote ? `<p class="sheet-hint">${esc(idNote)}</p>` : '');
-  const startAgain = s.kind === 'connectNetwork' && s.status === 'refused' ? `<div class="btn-row">${key('identityStartAgain', t('identity.sheet.again'))}</div>` : '';
   const keys = `<div class="btn-row">${key('sheetClose', t('common.cancel'))}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed, s.fields))}</button></div>`;
   // a granting sheet's line under its title: the ask in the Account's words (plan 4b Task 6)
   const askedWords = sayOf(s.seed?.askedWords);
   const asked = askedWords ? `<p class="sheet-hint">${esc(askedWords)}</p>` : '';
   return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="sheetClose" aria-label="${th('common.close')}">×</button></div>` +
-    `<div class="drawer-body">${asked}${above}${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${kept}${startAgain}${steps}${keys}</div></aside>`;
+    `<div class="drawer-body">${asked}${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${kept}${keys}</div></aside>`;
 }

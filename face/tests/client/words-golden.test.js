@@ -66,8 +66,8 @@ test('the corpus covers the screens', async () => {
   holds("the watchlist's refusal", 'Couldn&#39;t save the watchlist');
   holds("a Run the host could not send", 'Couldn&#39;t send');
   holds("app.js's line for an unanswered question", 'Answer every question first');
-  for (const kind of ['close', 'amend', 'leverage', 'beast', 'cap', 'session', 'leverageCap', 'move', 'earn', 'subWallet', 'disconnectNetwork', 'routing', 'block',
-    'revoke', 'endLimit', 'paper', 'topUp', 'resetPaper', 'disconnect', 'declineAsk', 'letDevice', 'signOut', 'reopen', 'letIn', 'limit', 'approveCard', 'connect', 'order', 'connectNetwork']) {
+  for (const kind of ['close', 'amend', 'leverage', 'beast', 'cap', 'session', 'leverageCap', 'move', 'earn', 'subWallet',
+    'revoke', 'endLimit', 'paper', 'topUp', 'resetPaper', 'disconnect', 'declineAsk', 'letDevice', 'signOut', 'reopen', 'letIn', 'limit', 'approveCard', 'connect', 'order']) {
     assert.ok(sheetKinds.has(kind), `the corpus opens a ${kind} sheet`);
   }
 });

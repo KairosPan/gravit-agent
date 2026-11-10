@@ -6783,22 +6783,40 @@ test('Identity reads the account on entering the tab and with each beat while it
   store.timers.clear();
 });
 
-test("Identity's grid ticks change the draft only on a page that signs, and Save… appears while it differs", async () => {
-  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
-  const door = ownerDoor();
-  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': IDENTITY_READ } });
-  const store = bootOwner(f, h, door);
+// a page that does not sign, its unsigned door recorded (sign-only-money): every other owner post unanswered, so it never pairs
+function actRig(read = IDENTITY_READ, actAnswer = { status: 200, body: { ok: true } }, f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() })) {
+  const acts = [];
+  const ownerPost = async (path, body) => {
+    if (path === '/data/account/act') { acts.push(body.action); return typeof actAnswer === 'function' ? actAnswer(body.action) : actAnswer; }
+    return { status: 503, body: { ok: false, error: 'not here' } };
+  };
+  let now = read;
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account/identity': () => now } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost });
+  return { f, h, store, acts, setRead: r => { now = r; } };
+}
+const tickOn = (f, on, network = 'telegram', row = 'brief') => f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', checked: on, dataset: { action: 'identityTick', row, network } } });
+
+test("the grid's Save posts setRouting unsigned; ticks change the draft on any page", async () => {
+  const { f, h, store, acts } = actRig();
   await h.ready();
-  await until(signs(store), 'the page to sign');
   await settle();
-  assert.doesNotMatch(f.html(), />Save…</);
-  const tick = on => f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', checked: on, dataset: { action: 'identityTick', row: 'brief', network: 'telegram' } } });
-  tick(true);
+  assert.notEqual(store.get().owner?.role, 'signs');
+  assert.doesNotMatch(f.html(), /data-action="identitySave"/);
+  tickOn(f, true);
   assert.deepEqual(store.get().identity.draft.brief, ['telegram']);
-  assert.match(f.html(), /data-action="openSheet" data-kind="routing"[^>]*>Save…</);
-  tick(false);
+  assert.match(f.html(), /Not saved yet: Save applies it\./);
+  assert.match(f.html(), /data-action="identitySave"[^>]*>Save</);
+  tickOn(f, false);
   assert.equal(store.get().identity.draft, null);
-  assert.doesNotMatch(f.html(), />Save…</);
+  assert.doesNotMatch(f.html(), /data-action="identitySave"/);
+  tickOn(f, true);
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identitySave' } });
+  await settle();
+  assert.deepEqual(acts, [{ type: 'setRouting', routing: 'chat=telegram;alerts=telegram;brief=telegram;cards=telegram;fills=telegram', quietFrom: '23:00', quietTo: '07:00' }]);
+  assert.ok(h.reads.includes('/data/account/identity?fresh=1'), 'Identity read past the cache');
+  assert.equal(store.get().sheet ?? null, null, 'no sheet');
   store.timers.clear();
 });
 
@@ -6847,7 +6865,7 @@ test('Connect… opens sheet 1 on a page that signs; Next posts the field\'s tok
   await settle();
   assert.match(f.html(), /data-action="identityConnect" data-network="telegram">Connect…</);
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'telegram' } });
-  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Connect Telegram · 1 of 4 · Bot token">/);
+  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Connect Telegram · 1 of 3 · Bot token">/);
   assert.match(f.html(), /<input id="identity-token" class="input" type="password" autocomplete="off" spellcheck="false"/);
   field.value = ` ${TOKEN} `;
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityNext' } });
@@ -6859,7 +6877,7 @@ test('Connect… opens sheet 1 on a page that signs; Next posts the field\'s tok
   assert.equal(field.value, '', 'the field cleared');
   assert.ok(!JSON.stringify(store.get()).includes(TOKEN), 'no token in the store');
   assert.ok(!f.html().includes(TOKEN), 'none on the page');
-  assert.match(f.html(), /Connect Telegram · 2 of 4 · Say hi/);
+  assert.match(f.html(), /Connect Telegram · 2 of 3 · Say hi/);
   // Escape: the drawer closed, its pending connection dropped at once
   f.fire('doc', 'keydown', { key: 'Escape' });
   assert.equal(store.get().identity.connect, null);
@@ -6898,7 +6916,7 @@ test('Install app… opens Slack\'s sheet 1; Next posts both fields once and cle
   await settle();
   assert.match(f.html(), /data-action="identityConnect" data-network="slack">Install app…</);
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'slack' } });
-  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Connect Slack · 1 of 4 · App tokens">/);
+  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Connect Slack · 1 of 3 · App tokens">/);
   assert.match(f.html(), /display_information/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityCopyManifest' } });
   await settle();
@@ -6918,7 +6936,7 @@ test('Install app… opens Slack\'s sheet 1; Next posts both fields once and cle
   assert.equal(bot.value, '');
   assert.ok(!JSON.stringify(store.get()).includes(BOT) && !JSON.stringify(store.get()).includes(APP), 'no token in the store');
   assert.ok(!f.html().includes(BOT) && !f.html().includes(APP), 'none on the page');
-  assert.match(f.html(), /Connect Slack · 2 of 4 · Say hi/);
+  assert.match(f.html(), /Connect Slack · 2 of 3 · Say hi/);
   f.fire('doc', 'keydown', { key: 'Escape' });
   assert.equal(store.get().identity.connect, null);
   store.timers.clear();
@@ -6951,7 +6969,7 @@ test('Connect iMessage opens its sheet 1; Next posts the three fields once, clea
   assert.match(f.html(), /data-action="identityConnect" data-network="imessage">Connect…</);
   assert.doesNotMatch(f.html(), /Later/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'imessage' } });
-  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Connect iMessage · 1 of 4 · Photon project">/);
+  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Connect iMessage · 1 of 3 · Photon project">/);
   // Enter in the project ID moves on to the secret, and from the secret on to the number, posting nothing
   project.value = 'prj_1';
   f.doc.activeElement = project;
@@ -6972,82 +6990,116 @@ test('Connect iMessage opens its sheet 1; Next posts the three fields once, clea
   assert.equal(secret.value, '');
   assert.ok(!JSON.stringify(store.get()).includes(SECRET), 'no secret in the store');
   assert.ok(!f.html().includes(SECRET), 'none on the page');
-  assert.match(f.html(), /Connect iMessage · 2 of 4 · Say hi/);
+  assert.match(f.html(), /Connect iMessage · 2 of 3 · Say hi/);
   assert.match(f.html(), /href="sms:\+14155550123"/);
   f.fire('doc', 'keydown', { key: 'Escape' });
   assert.equal(store.get().identity.connect, null);
   store.timers.clear();
 });
 
-test('a page that does not sign opens no Connect Telegram', async () => {
-  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
-  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account/identity': { ok: true, networks: [], routing: {}, quiet: null, strangers: [] } } });
-  const store = bootAccount(f, h);
+test('a page that does not sign opens Connect Telegram, its titles counting three sheets', async () => {
+  const { f, h, store } = actRig({ ok: true, networks: [], routing: {}, quiet: null, strangers: [] });
   await h.ready();
   await settle();
+  assert.match(f.html(), /data-action="identityConnect" data-network="telegram">Connect…</);
+  assert.doesNotMatch(f.html(), /Only a browser that signs/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'telegram' } });
-  assert.equal(store.get().identity.connect, null);
-  assert.doesNotMatch(f.html(), /Connect Telegram ·/);
+  assert.equal(store.get().identity.connect.step, 1);
+  assert.match(f.html(), /aria-label="Connect Telegram · 1 of 3 · Bot token"/);
   store.timers.clear();
 });
 
-// ── Account › Identity's signed sheets (plan B1b Task 3): Disconnect, What reaches you where, Block ──
+// ── Account › Identity's acts (sign-only-money): Disconnect… and Block ask once, then post unsigned; Save applies at once ──
 
-test('a done identity sheet reads Identity again past the face\'s cache', async () => {
+test('Disconnect… asks once, then posts disconnectNetwork unsigned', async () => {
+  const { f, h, store, acts, setRead } = actRig();
+  await h.ready();
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askIdentityDisconnect', network: 'telegram' } });
+  assert.deepEqual(store.get().confirm, { action: 'identityDisconnect', network: 'telegram' });
+  assert.match(f.html(), /Disconnect Telegram\? Gravit stops talking with you there, and its token is deleted\./);
+  assert.deepEqual(acts, [], 'nothing posted on the ask');
+  // No: nothing posted
+  f.click({ tagName: 'BUTTON', dataset: { action: 'cancelConfirm' } });
+  assert.equal(store.get().confirm, null);
+  assert.deepEqual(acts, []);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askIdentityDisconnect', network: 'telegram' } });
+  setRead({ ...IDENTITY_READ, networks: [] });
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  await settle();
+  assert.deepEqual(acts, [{ type: 'disconnectNetwork', network: 'telegram' }]);
+  assert.equal(store.get().sheet ?? null, null, 'no sheet, no What you sign');
+  assert.ok(h.reads.includes('/data/account/identity?fresh=1'));
+  assert.match(f.html(), /data-action="identityConnect" data-network="telegram">Connect…</);
+  // a network the face does not know asks nothing
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askIdentityDisconnect', network: 'fax' } });
+  assert.equal(store.get().confirm, null);
+  store.timers.clear();
+});
+
+test('Block asks once, then posts blockSender unsigned; a refusal is said in Not you', async () => {
   const READ = { ...IDENTITY_READ, strangers: [{ network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789', count: 3, last: '2026-11-04T14:00:00.000Z' }] };
-  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
-  const door = ownerDoor();
-  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': READ } });
-  const store = bootOwner(f, h, door);
+  let refuse = false;
+  const { f, h, store, acts } = actRig(READ, () => (refuse ? { status: 409, body: { ok: false, refusal: { message: 'That sender is blocked already' } } } : { status: 200, body: { ok: true } }));
   await h.ready();
-  await until(signs(store), 'the page to sign');
   await settle();
-  async function signed(open, kind) {
-    open();
-    assert.equal(store.get().sheet?.kind, kind);
-    await until(() => store.get().sheet?.status === 'ready', `${kind} prepared`);
-    h.reads.length = 0;
-    f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
-    await until(() => store.get().sheet === null, `${kind} done and closed`);
-    await settle();
-    assert.ok(h.reads.includes('/data/account/identity?fresh=1'), `${kind}: Identity read past the cache`);
-    return door.sent('/data/account/exchange').at(-1).action;
-  }
-  // Disconnect…: the identity's own kind, the network the key names
-  assert.match(f.html(), /data-action="openSheet" data-kind="disconnectNetwork" data-network="telegram"[^>]*>Disconnect…</);
-  const off = await signed(() => f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'disconnectNetwork', network: 'telegram' } }), 'disconnectNetwork');
-  assert.equal(off.type, 'disconnectNetwork');
-  assert.equal(off.network, 'telegram');
-  // Block: the stranger the key names
-  const block = await signed(() => f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'block', network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789' } }), 'block');
-  assert.deepEqual([block.type, block.network, block.sender, block.masked], ['blockSender', 'telegram', '0a1b2c3d4e5f', '…789']);
-  // Save…: the grid's unsaved ticks as the account's string, the quiet hours as they are
-  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', checked: true, dataset: { action: 'identityTick', row: 'brief', network: 'telegram' } } });
-  const saved = await signed(() => f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'routing' } }), 'routing');
-  assert.deepEqual([saved.type, saved.routing, saved.quietFrom, saved.quietTo], ['setRouting', 'chat=telegram;alerts=telegram;brief=telegram;cards=telegram;fills=telegram', '23:00', '07:00']);
+  const ask = () => f.click({ tagName: 'BUTTON', dataset: { action: 'askIdentityBlock', network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789' } });
+  ask();
+  assert.match(f.html(), /Block …789\? It never reaches Gravit\./);
+  assert.match(f.html(), /data-action="confirmYes">Yes, block</);
+  assert.deepEqual(acts, []);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  await settle();
+  assert.deepEqual(acts, [{ type: 'blockSender', network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789' }]);
+  refuse = true;
+  ask();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  await settle();
+  assert.equal(acts.length, 2);
+  assert.match(f.html(), /That sender is blocked already/);
+  assert.equal(store.get().identity.said.at, 'strangers');
   store.timers.clear();
 });
 
-test('Change… on quiet hours: Off sends both ends empty; an unchanged sheet says so and signs nothing', async () => {
-  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
-  const door = ownerDoor();
-  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': IDENTITY_READ } });
-  const store = bootOwner(f, h, door);
+test('Change… on quiet hours: their clocks in place; Off sends both ends empty; unchanged is said and posts nothing', async () => {
+  const win = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  // the editor's fields, there only while it is drawn, each as rendered
+  const from = win.withSelector('#identity-quiet-from', { tagName: 'INPUT', type: 'time', id: 'identity-quiet-from', rendered: '23:00', presentIf: /id="identity-quiet-from"/ });
+  win.withSelector('#identity-quiet-to', { tagName: 'INPUT', type: 'time', id: 'identity-quiet-to', rendered: '07:00', presentIf: /id="identity-quiet-to"/ });
+  const off = win.withSelector('#identity-quiet-off', { tagName: 'INPUT', type: 'checkbox', id: 'identity-quiet-off', presentIf: /id="identity-quiet-off"/ });
+  const { f, h, store, acts } = actRig(IDENTITY_READ, undefined, win);
   await h.ready();
-  await until(signs(store), 'the page to sign');
   await settle();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'routing' } });
-  assert.equal(store.get().sheet.kind, 'routing');
+  // Save with no editor drawn sends nothing
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietSave' } });
   await settle();
-  assert.equal(store.get().sheet.status, 'incomplete');
+  assert.deepEqual(acts, []);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietEdit' } });
+  assert.equal(store.get().identity.quietEdit, true);
+  assert.match(f.html(), /id="identity-quiet-from"/);
+  // unchanged: said under quiet hours, nothing posted
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietSave' } });
+  await settle();
+  assert.deepEqual(acts, []);
   assert.match(f.html(), /That is how it is now/);
-  assert.match(f.html(), /type="time" name="quietFrom" value="23:00"/);
-  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'quietOff', checked: true, value: 'true', dataset: { action: 'sheetField' } } });
-  await until(() => store.get().sheet?.status === 'ready', 'quiet hours off prepared');
-  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
-  await until(() => store.get().sheet === null, 'done');
-  const a = door.sent('/data/account/exchange').at(-1).action;
-  assert.deepEqual([a.type, a.routing, a.quietFrom, a.quietTo], ['setRouting', 'chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram', '', '']);
+  // a new start: sent with the account's routing
+  from.value = '22:00';
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietSave' } });
+  await settle();
+  assert.deepEqual(acts.at(-1), { type: 'setRouting', routing: 'chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram', quietFrom: '22:00', quietTo: '07:00' });
+  assert.equal(store.get().identity.quietEdit, false, 'taken: the editor shuts');
+  // Off: both ends empty
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietEdit' } });
+  off.checked = true;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietSave' } });
+  await settle();
+  assert.deepEqual(acts.at(-1), { type: 'setRouting', routing: 'chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram', quietFrom: '', quietTo: '' });
+  // Cancel shuts it, nothing sent
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietEdit' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietCancel' } });
+  assert.equal(store.get().identity.quietEdit, false);
+  assert.equal(acts.length, 2);
   store.timers.clear();
 });
 
@@ -7082,31 +7134,20 @@ test('Enter in the bot token field is Next: the token posted once, with no form 
   store.timers.clear();
 });
 
-test('a draft tick for a network a fresh read shows not connected is dropped: after Disconnect, Change… prepares and no Save… is offered', async () => {
-  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
-  const door = ownerDoor();
-  let gone = false;
+test('a draft tick for a network a fresh read shows not connected is dropped: after Disconnect, no Save is offered', async () => {
   const AFTER = { ...IDENTITY_READ, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] } };
-  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': () => (gone ? AFTER : IDENTITY_READ) } });
-  const store = bootOwner(f, h, door);
+  const { f, h, store, acts, setRead } = actRig();
   await h.ready();
-  await until(signs(store), 'the page to sign');
   await settle();
-  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', checked: true, dataset: { action: 'identityTick', row: 'brief', network: 'telegram' } } });
-  assert.match(f.html(), />Save…</);
-  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'disconnectNetwork', network: 'telegram' } });
-  await until(() => store.get().sheet?.status === 'ready', 'disconnect prepared');
-  gone = true;
-  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
-  await until(() => store.get().sheet === null, 'disconnect done');
+  tickOn(f, true);
+  assert.match(f.html(), /data-action="identitySave"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askIdentityDisconnect', network: 'telegram' } });
+  setRead(AFTER);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
   await until(() => store.get().identity.data?.networks?.length === 0, 'the fresh read');
+  assert.equal(acts.length, 1);
   assert.equal(store.get().identity.draft, null, 'the stale tick dropped');
-  assert.doesNotMatch(f.html(), />Save…</);
-  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'routing' } });
-  assert.equal(store.get().sheet.seed.routing.brief.length, 0, 'seeded from the account, not the stale tick');
-  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'quietOff', checked: true, value: 'true', dataset: { action: 'sheetField' } } });
-  await until(() => store.get().sheet?.status === 'ready', 'quiet hours off prepared');
-  assert.equal(door.posts.filter(([p]) => p === '/data/account/prepare').at(-1)[1].draft.routing, 'chat=;alerts=;brief=;cards=;fills=');
+  assert.doesNotMatch(f.html(), /data-action="identitySave"/);
   store.timers.clear();
 });
 

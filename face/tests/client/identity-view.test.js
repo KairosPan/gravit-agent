@@ -1,6 +1,6 @@
 // Account › Identity (plan B1b Task 1): the account's GET /api/account/identity read through the face's proxy, drawn as three cards —
 // Gravit (the networks: Telegram, iMessage and Slack, each connected or not), What reaches you where (the five routing rows and
-// quiet hours) and Not you (the strangers, each with Block) — with the owner's keys only on a page that signs.
+// quiet hours) and Not you (the strangers, each with Block) — every key on any page since sign-only-money: none is signed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { identityOf, formatRouting, routingOf, tickRouting, routeRows, NETWORKS } from '../../client/js/host/identity-view.js';
@@ -94,7 +94,7 @@ test('routingOf and tickRouting: every row, only networks the account speaks on;
 test('a connected Telegram row: Connected, Speaks as, Talks only with, Details and Disconnect…', () => {
   const html = renderIdentityTab(signing(CONNECTED), NOW);
   for (const w of ['Telegram', 'Connected', 'Speaks as', '@gravit_desk_bot', 'Talks only with', '@pan', 'Details', 'Disconnect…']) assert.match(html, re(w));
-  assert.match(html, /<button[^>]*data-action="openSheet" data-kind="disconnectNetwork" data-network="telegram"[^>]*>Disconnect…<\/button>/);
+  assert.match(html, /<button[^>]*data-action="askIdentityDisconnect" data-network="telegram"[^>]*>Disconnect…<\/button>/);
   assert.match(html, /<button[^>]*data-action="identityDetails"[^>]*>Details<\/button>/);
   // Details shut: no since line; open: Since <date> · token <fingerprint> · polling
   assert.doesNotMatch(html, /token ab12cd34/);
@@ -156,17 +156,18 @@ test('the grid: five rows, Face ticked and disabled, Telegram enabled only once 
   // nothing connected: Telegram's column disabled too
   const off = boxOf(renderIdentityTab(signing(NOT_CONNECTED), NOW), 'What reaches you where');
   for (const r of off.match(/<tr><td>[\s\S]*?<\/tr>/g)) assert.match(r.match(/<input[^>]*>/g)[1], /disabled aria-disabled="true"/);
-  // a tick: the draft differs, Save… opens the routing sheet; ticked back, no Save…
+  // a tick: the draft differs, Save applies it; ticked back, no Save
   const s = signing(CONNECTED);
-  assert.ok(!keyed(renderIdentityTab(s, NOW), 'Save…'), 'no Save… while nothing changed');
+  assert.ok(!keyed(renderIdentityTab(s, NOW), 'Save'), 'no Save while nothing changed');
   const ticked = R.identityTick(s, { row: 'brief', network: 'telegram', on: true });
   assert.deepEqual(ticked.identity.draft.brief, ['telegram']);
   const html = renderIdentityTab(ticked, NOW);
-  assert.match(html, /<button[^>]*data-action="openSheet" data-kind="routing"[^>]*>Save…<\/button>/);
+  assert.match(html, /<button[^>]*data-action="identitySave"[^>]*>Save<\/button>/);
+  assert.match(html, /Not saved yet: Save applies it\./);
   assert.match(boxOf(html, 'What reaches you where').match(/<tr><td>Pre-close brief[\s\S]*?<\/tr>/)[0].match(/<input[^>]*>/g)[1], /checked/);
   const back = R.identityTick(ticked, { row: 'brief', network: 'telegram', on: false });
   assert.equal(back.identity.draft, null);
-  assert.ok(!keyed(renderIdentityTab(back, NOW), 'Save…'));
+  assert.ok(!keyed(renderIdentityTab(back, NOW), 'Save'));
   // a tick on a network not connected, or one the tab does not route, changes nothing
   assert.equal(R.identityTick(signing(NOT_CONNECTED), { row: 'chat', network: 'telegram', on: true }).identity.draft, null);
   assert.equal(R.identityTick(s, { row: 'chat', network: 'slack', on: true }).identity.draft, null);
@@ -179,7 +180,24 @@ test('quiet hours read 23:00–07:00 ET with Change…; none reads Off', () => {
   const html = boxOf(renderIdentityTab(signing(CONNECTED), NOW), 'What reaches you where');
   assert.match(html, /Quiet hours/);
   assert.match(html, /23:00–07:00 ET/);
-  assert.match(html, /<button[^>]*data-action="openSheet" data-kind="routing"[^>]*>Change…<\/button>/);
+  assert.match(html, /<button[^>]*data-action="identityQuietEdit"[^>]*>Change…<\/button>/);
+  assert.doesNotMatch(html, /identity-quiet-from/, 'the clocks only once Change… is pressed');
+  // Change…: two clocks seeded from the account's, Off unticked, Cancel and Save in place of Change…
+  const editing = boxOf(renderIdentityTab(R.identityQuietEdit(signing(CONNECTED), true), NOW), 'What reaches you where');
+  assert.match(editing, /<input id="identity-quiet-from" class="input" type="time" value="23:00">/);
+  assert.match(editing, /<input id="identity-quiet-to" class="input" type="time" value="07:00">/);
+  assert.match(editing, /<input id="identity-quiet-off" type="checkbox">Off: no quiet hours/);
+  assert.match(editing, /data-action="identityQuietCancel"[^>]*>Cancel</);
+  assert.match(editing, /data-action="identityQuietSave"[^>]*>Save</);
+  assert.ok(!keyed(editing, 'Change…'));
+  // a refusal said under quiet hours, gone when the editor shuts
+  const said = R.identitySaid(R.identityQuietEdit(signing(CONNECTED), true), { at: 'quiet', words: 'Quiet hours start and end at different times' });
+  assert.match(renderIdentityTab(said, NOW), /Quiet hours start and end at different times/);
+  assert.equal(R.identityQuietEdit(said, false).identity.said, null);
+  // quiet hours off: Off ticked, the clocks empty
+  const offEdit = renderIdentityTab(R.identityQuietEdit(signing({ ...CONNECTED, quiet: null }), true), NOW);
+  assert.match(offEdit, /<input id="identity-quiet-off" type="checkbox" checked>/);
+  assert.match(offEdit, /<input id="identity-quiet-from" class="input" type="time" value="">/);
   const off = boxOf(renderIdentityTab(signing({ ...CONNECTED, quiet: null }), NOW), 'What reaches you where');
   assert.match(off, /Quiet hours[\s\S]*Off/);
   assert.doesNotMatch(off, /ET</);
@@ -193,7 +211,7 @@ test('Not you lists network, masked id, count and last time, each with Block', (
   assert.match(box, /<div class="cardbox-title">Not you · 2<\/div>/);
   assert.match(box, re(`Telegram · …789 · 3 messages · last ${fmtClock(Date.parse(STRANGER.last))}`));
   assert.match(box, re(`Telegram · …012 · 1 message · last ${fmtDate(Date.parse('2026-11-02T10:00:00.000Z'))} ${fmtClock(Date.parse('2026-11-02T10:00:00.000Z'))}`));
-  assert.match(box, /<button[^>]*data-action="openSheet" data-kind="block" data-network="telegram" data-sender="0123456789ab" data-masked="…789"[^>]*>Block<\/button>/);
+  assert.match(box, /<button[^>]*data-action="askIdentityBlock" data-network="telegram" data-sender="0123456789ab" data-masked="…789"[^>]*>Block<\/button>/);
   assert.equal((box.match(/>Block<\/button>/g) ?? []).length, 2);
   // nobody: the count 0 and one line
   const none = boxOf(renderIdentityTab(signing(CONNECTED), NOW), 'Not you');
@@ -201,28 +219,44 @@ test('Not you lists network, masked id, count and last time, each with Block', (
   assert.match(none, /Nobody else has written to Gravit\./);
 });
 
-test('a page that does not sign draws no owner button on Identity', () => {
-  for (const body of [CONNECTED_WITH_STRANGER, NOT_CONNECTED]) {
-    const html = renderIdentityTab(readOnly(body), NOW);
-    for (const w of ['Connect…', 'Disconnect…', 'Save…', 'Change…', 'Block']) assert.doesNotMatch(html, new RegExp(`data-action[^>]*>${esc(w)}`));
-    assert.doesNotMatch(html, />Connect…<|>Install app…</, 'neither network\'s');
-    assert.match(html, /Only a browser that signs changes these\./);
-    // the ticks read, and change nothing
-    for (const box of html.match(/<input[^>]*>/g)) assert.match(box, /disabled aria-disabled="true"/);
+test('a page that does not sign — pending, asked or signed-out — draws Connect…, Disconnect…, the grid and Block', () => {
+  const standing = (body, role) => R.ownerStanding(shown(body), { role, kid: '' });
+  for (const role of ['pending', 'needs-code', 'signed-out', 'none']) {
+    const html = renderIdentityTab(standing(CONNECTED_WITH_STRANGER, role), NOW);
+    assert.ok(keyed(html, 'Disconnect…'), `${role}: Disconnect…`);
+    assert.ok(keyed(html, 'Block'), `${role}: Block`);
+    assert.ok(keyed(html, 'Change…'), `${role}: Change…`);
+    assert.ok(keyed(html, 'Install app…'), `${role}: Install app…`);
+    assert.doesNotMatch(html, /Only a browser that signs/);
+    // Telegram's column ticks, Face's stays the face's
+    const rows = boxOf(html, 'What reaches you where').match(/<tr><td>[\s\S]*?<\/tr>/g);
+    for (const r of rows) assert.doesNotMatch(r.match(/<input[^>]*>/g)[1], /disabled/);
+    const none = renderIdentityTab(standing(NOT_CONNECTED, role), NOW);
+    assert.match(none, /data-action="identityConnect" data-network="telegram">Connect…</);
+    assert.match(none, /data-action="identityConnect" data-network="imessage">Connect…</);
   }
-  const html = renderIdentityTab(readOnly(CONNECTED_WITH_STRANGER), NOW);
-  for (const w of ['Connected', '@gravit_desk_bot', '@pan', '23:00–07:00 ET', '…789']) assert.match(html, re(w));
-  assert.ok(keyed(html, 'Details'), 'Details is a read');
-  // a draft from before the page stopped signing draws no Save…
-  const s = R.ownerStanding(R.identityTick(signing(CONNECTED), { row: 'brief', network: 'telegram', on: true }), { role: 'needs-code', kid: '' });
-  assert.ok(!/>Save…</.test(renderIdentityTab(s, NOW)));
-  // and its ticks are the account's, not the unsaved draft's
-  const briefTick = boxOf(renderIdentityTab(s, NOW), 'What reaches you where').match(/<tr><td>Pre-close brief[\s\S]*?<\/tr>/)[0].match(/<input[^>]*>/g)[1];
-  assert.doesNotMatch(briefTick, /checked/);
-  // a tick on a page that does not sign changes no draft
-  assert.equal(R.identityTick(readOnly(CONNECTED), { row: 'brief', network: 'telegram', on: true }).identity.draft, null);
-  // a page that signs has no such line
-  assert.doesNotMatch(renderIdentityTab(signing(CONNECTED), NOW), /Only a browser that signs/);
+  // a tick on such a page is a draft, and Save is drawn
+  const ticked = R.identityTick(readOnly(CONNECTED), { row: 'brief', network: 'telegram', on: true });
+  assert.deepEqual(ticked.identity.draft.brief, ['telegram']);
+  assert.match(renderIdentityTab(ticked, NOW), /data-action="identitySave"[^>]*>Save</);
+});
+
+test('Disconnect… and Block ask once in their place, saying what goes', () => {
+  const asked = R.askConfirm(readOnly(CONNECTED_WITH_STRANGER), { action: 'identityDisconnect', network: 'telegram' });
+  const gravit = boxOf(renderIdentityTab(asked, NOW), 'Gravit');
+  assert.match(gravit, /Disconnect Telegram\? Gravit stops talking with you there, and its token is deleted\./);
+  assert.match(gravit, /<span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, disconnect<\/button><button type="button" class="btn-sm" data-action="cancelConfirm">No<\/button><\/span>/);
+  assert.doesNotMatch(gravit, />Disconnect…</);
+  const block = R.askConfirm(readOnly(CONNECTED_WITH_STRANGER), { action: 'identityBlock', network: 'telegram', sender: '0123456789ab', masked: '…789' });
+  const notYou = boxOf(renderIdentityTab(block, NOW), 'Not you');
+  assert.match(notYou, /Block …789\? It never reaches Gravit\./);
+  assert.match(notYou, /data-action="confirmYes">Yes, block</);
+  assert.doesNotMatch(notYou, />Block</);
+  // a refusal is said in the card where it was pressed
+  const said = R.identitySaid(readOnly(CONNECTED_WITH_STRANGER), { at: 'networks', words: 'Telegram is not connected' });
+  assert.match(boxOf(renderIdentityTab(said, NOW), 'Gravit'), /Telegram is not connected/);
+  assert.equal(R.identitySaid(said, { at: 'elsewhere', words: 'x' }), said, 'an unknown place is none');
+  assert.equal(R.identitySaid(said, null).identity.said, null);
 });
 
 test('the account not answering: the tab says so and draws no connection', () => {
@@ -286,7 +320,7 @@ test('Slack not connected: Not connected and Install app…; connected: Connecte
   const gravit = boxOf(renderIdentityTab(signing(BOTH), NOW), 'Gravit');
   const sl = gravit.match(/<div class="venue"[^>]*data-network="slack"[\s\S]*?<\/div>/)?.[0] ?? '';
   for (const w of ['Slack', 'Connected', 'Speaks as @gravit', 'Talks only with @pan', 'Details', 'Disconnect…']) assert.match(sl, re(w), w);
-  assert.match(sl, /<button[^>]*data-action="openSheet" data-kind="disconnectNetwork" data-network="slack"[^>]*>Disconnect…<\/button>/);
+  assert.match(sl, /<button[^>]*data-action="askIdentityDisconnect" data-network="slack"[^>]*>Disconnect…<\/button>/);
   assert.match(sl, /<button[^>]*data-action="identityDetails"[^>]*data-network="slack"[^>]*>Details<\/button>/);
   assert.doesNotMatch(sl, /Install app…|Soon/);
   // Details is the row's own: Slack's opens Slack's line, not Telegram's
@@ -301,10 +335,10 @@ test('Slack not connected: Not connected and Install app…; connected: Connecte
   assert.equal(net({ conflictAt: '2026-11-04T14:30:00.000Z' }), "Another program holds this app's connection to Slack (since 09:30): stop it, or Gravit hears nothing.");
   assert.equal(net({ pollFailing: { since: '2026-11-04T14:30:00.000Z', reason: 'invalid_auth' } }), 'Not hearing Slack since 09:30: invalid_auth.');
   assert.equal(net({ blocked: true }), undefined, 'blocking is Telegram\'s');
-  // a page that does not sign: the row reads, no key
+  // a page that does not sign: the row reads, with its key
   const ro = boxOf(renderIdentityTab(readOnly(SLACK_ONLY), NOW), 'Gravit');
   assert.match(ro, /Speaks as @gravit/);
-  assert.doesNotMatch(ro, /Disconnect…|Install app…/);
+  assert.match(ro, /data-network="slack"[^>]*>Disconnect…/);
 });
 
 test('the grid enables Slack\'s column once Slack is connected; iMessage stays disabled', () => {
@@ -327,7 +361,7 @@ test('the grid enables Slack\'s column once Slack is connected; iMessage stays d
   // a tick on Slack's column: the draft, sorted with Telegram's
   const ticked = R.identityTick(signing(BOTH), { row: 'brief', network: 'slack', on: true });
   assert.deepEqual(ticked.identity.draft.brief, ['slack']);
-  assert.match(renderIdentityTab(ticked, NOW), />Save…</);
+  assert.match(renderIdentityTab(ticked, NOW), />Save</);
   // not connected: its column disabled and a tick changes nothing
   assert.equal(R.identityTick(signing(CONNECTED), { row: 'chat', network: 'slack', on: true }).identity.draft, null);
   // a read that drops Slack drops its ticks from a draft
@@ -357,7 +391,7 @@ test('a connected iMessage is a row of its own and its column is enabled', () =>
   const im = gravit.match(/<div class="venue"[^>]*data-network="imessage"[\s\S]*?<\/div>/)?.[0] ?? '';
   for (const w of ['iMessage', 'Connected', 'Speaks as +14155550123', 'Talks only with +14155550100', 'via Photon', 'Details', 'Disconnect…']) assert.match(im, re(w), w);
   assert.doesNotMatch(im, /@\+|Connect…<|Later/);
-  assert.match(im, /<button[^>]*data-action="openSheet" data-kind="disconnectNetwork" data-network="imessage"[^>]*>Disconnect…<\/button>/);
+  assert.match(im, /<button[^>]*data-action="askIdentityDisconnect" data-network="imessage"[^>]*>Disconnect…<\/button>/);
   // Details: since, the project secret's fingerprint, polling
   assert.match(renderIdentityTab(R.identityDetails(signing(readWith({})), 'imessage'), NOW), re(`Since ${fmtDate(Date.parse('2026-11-04T14:00:00.000Z'))} · secret ef90ab12 · polling`));
   // its column: enabled, ticked where the routing says, a tick a draft
@@ -372,10 +406,10 @@ test('a connected iMessage is a row of its own and its column is enabled', () =>
   const ticked = R.identityTick(signing(readWith({})), { row: 'brief', network: 'imessage', on: true });
   assert.deepEqual(ticked.identity.draft.brief, ['imessage']);
   assert.equal(R.identityTick(signing(CONNECTED), { row: 'chat', network: 'imessage', on: true }).identity.draft, null, 'not connected: no tick');
-  // a page that does not sign reads the row, no key
+  // a page that does not sign reads the row, with its key
   const ro = boxOf(renderIdentityTab(readOnly(readWith({})), NOW), 'Gravit');
   assert.match(ro, /Speaks as \+14155550123/);
-  assert.doesNotMatch(ro, /Disconnect…/);
+  assert.match(ro, /data-network="imessage"[^>]*>Disconnect…/);
 });
 
 test('an unconnected iMessage offers Connect…, never Later', () => {
@@ -383,7 +417,7 @@ test('an unconnected iMessage offers Connect…, never Later', () => {
   const html = renderIdentityTab(signing(readWith()), NOW);
   assert.match(html, /data-action="identityConnect" data-network="imessage">Connect…</);
   assert.doesNotMatch(html, /Later/);
-  assert.doesNotMatch(renderIdentityTab(readOnly(readWith()), NOW), /data-network="imessage">Connect…/, 'no key on a page that does not sign');
+  assert.match(renderIdentityTab(readOnly(readWith()), NOW), /data-network="imessage">Connect…/, 'on a page that does not sign too');
 });
 
 test("movedAt, refusedAt and a fresh gapAt are the row's problem; an old gapAt is not", () => {
