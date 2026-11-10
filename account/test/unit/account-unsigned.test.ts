@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -108,6 +108,41 @@ describe("the unsigned door", () => {
     expect(b.ex.host.adapter("paper-x")).toBeDefined();
     expect(b.svc.restored?.venues).toEqual([expect.objectContaining({ venue: "paper-x", ok: true })]);
     expect(b.svc.restored?.skipped).toEqual(["liveOrder of 2026-11-09T15:01:00.000Z: an unsigned row of a signed act: not brought back"]);
+  });
+
+  it("a restart skips an unsigned paper row on an id a connection holds, and ignores a local Identity row", async () => {
+    const a = await boot();
+    // the owner signed paper-s open; then a local row opening paper-s again, and a local Identity row, written into the ledger by hand
+    expect((await a.own({ type: "connectVenue", venue: "paper-s", connector: "live:paper", label: "signed", credentialRef: "" })).ok).toBe(true);
+    const tamper = new Ledger(a.svc.ledgerPath(), () => new Date(START + 60_000).toISOString());
+    tamper.append({ kind: "action", venue: "paper-s", tool: "connectVenue", signer: UNSIGNED_SIGNER, outcome: "ok", reason: "by hand", native: { unsigned: { ...paper("paper-s"), label: "unsigned" } } });
+    tamper.append({ kind: "action", venue: "*", tool: "connectNetwork", signer: UNSIGNED_SIGNER, outcome: "ok", reason: "connectNetwork", native: { unsigned: { type: "connectNetwork", network: "telegram" } } });
+    const b = await boot({ home: a.home, at: 3_600_000 });
+    // the signed connection stands as it was signed: one venue, its own label
+    expect(b.svc.restored?.venues).toEqual([expect.objectContaining({ venue: "paper-s", ok: true })]);
+    expect(b.ex.host.adapter("paper-s")?.account.name).toBe("signed · paper");
+    // the held id is said; the Identity row is neither replayed nor said
+    expect(b.svc.restored?.skipped).toEqual(["connectVenue of 2026-11-09T15:01:00.000Z: an unsigned paper account on paper-s, which a connection holds: not brought back"]);
+    expect(b.ex.host.adapter("telegram")).toBeUndefined();
+  });
+
+  it("an unsigned paper opening on an id of the wrong shape is refused before any path is built from it, and its row keeps no caller words", async () => {
+    const { ex, rows, home } = await boot();
+    // a kept book planted where a path built from '../x' or 'paper-/../../x' would land: read, it would answer with its own refusal
+    expect((await ex.act(paper("paper-z"))).ok).toBe(true);
+    const planted = join(home, "x");
+    mkdirSync(planted, { recursive: true });
+    const book = JSON.parse(readFileSync(paperBookPath(home, "paper-z"), "utf8")) as Record<string, unknown>;
+    writeFileSync(join(planted, "book.json"), JSON.stringify({ ...book, cashUsd: 5_000 }));
+    expect(paperBookPath(home, "../x")).toBe(join(planted, "book.json"));
+    const shape = "a venue's id is lower-case letters, digits and dashes";
+    for (const id of ["../x", "paper-/../../x", join(home, "x"), "/etc", `paper-${"a".repeat(40)}`, "Paper-X", ""]) {
+      const r = await ex.act(paper(id));
+      expect(messageOf(r), id).toBe(shape);
+      expect(isRefusal(r) && r.venue, id).toBeFalsy();
+      expect(rows().at(-1), id).toMatchObject({ kind: "account-refusal", venue: "*", tool: "connectVenue", reason: shape, signer: UNSIGNED_SIGNER });
+    }
+    expect(ex.host.adapter("x")).toBeUndefined();
   });
 
   it("identity acts pass the unsigned door to the identity host", async () => {

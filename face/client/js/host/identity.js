@@ -285,7 +285,8 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     stopPoll();
     set({ busy: true, error: null });
     const r = await postAct(post, action);
-    if (mine !== gen || !connect()) return;
+    // the drawer gone meanwhile: a connect the account took still bound the phone, so Identity is read again to show it
+    if (mine !== gen || !connect()) return r.ok ? load(true) : undefined;
     if (!r.ok) { set({ busy: false, error: r.said }); return; }
     gen += 1;
     store.dispatch('identityConnectClose');
@@ -307,10 +308,11 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     }
   }
 
-  /** Cancel or ×: the drawer closed and its pending connection dropped at once. */
+  /** Cancel or ×: the drawer closed and its pending connection dropped at once — never while This is me is in the air (sheet 3
+   *  busy), which the account may take after the drawer would have gone. */
   function close() {
     const c = connect();
-    if (!c) return;
+    if (!c || (c.step === 3 && c.busy)) return;
     gen += 1;
     stopPoll();
     void drop(c.pending?.id);

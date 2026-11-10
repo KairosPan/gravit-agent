@@ -230,11 +230,13 @@ export async function rebuild(rows: readonly LedgerRow[], base: AccountState, op
         continue;
       }
       // a device let in with the code its terminal printed (exchange.ts admitByCode): a signer again, as it came in — only while the account
-      // had a signer then (no code is minted before the first device), and never past the most signers an account has
+      // had a signer then (no code is minted before the first device), never past the most signers an account has, nor past a threshold above 1
       if (n?.admitted === true) {
         if (!isJwk(n.jwk) || row.signer !== `device:${kidOf(n.jwk)}`) skipped.push(`a device let in with a code of ${row.ts}: its key does not match the device the row names`);
         else if (s.owners.length === 0) skipped.push(`a device let in with a code of ${row.ts}: no device signed for the account then: not brought back`);
         else if (s.owners.length >= MAX_SIGNERS) skipped.push(`a device let in with a code of ${row.ts}: the account had ${MAX_SIGNERS} signers then: not brought back`);
+        // a code is one signature's worth, as at the live door (exchange.ts pairDevice): never past an account that needed more than one
+        else if (s.threshold > 1) skipped.push(`a device let in with a code of ${row.ts}: the account needed more than one signature then: not brought back`);
         else if (!isOwner(s, row.signer)) s = { ...s, owners: [...s.owners, { id: row.signer, kind: "device", label: typeof n.label === "string" ? cleanLabel(n.label) : "device", jwk: { kty: "EC", crv: "P-256", x: n.jwk.x, y: n.jwk.y }, addedAt: row.ts, via: "code" }] };
         continue;
       }

@@ -83,8 +83,10 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
       let role = r.status === 200 && r.body?.ok !== false ? ROLE_OF.get(r.body?.role) : undefined;
       if (!role) {
         const why = whyOf(r);
-        // a code the Account has no live one for: Get a code again
-        if (code && store.get().owner.role === 'asked' && store.get().owner.kid === kid && ASK_AGAIN.test(why)) stand('pending', kid);
+        // a code the Account has no live one for: Get a code again — from the box it asked for, or from the first pairing's box
+        // when another browser paired first (the account has an owner now, and this browser no code)
+        const box = store.get().owner.role === 'asked' || store.get().owner.role === 'needs-code';
+        if (code && box && store.get().owner.kid === kid && ASK_AGAIN.test(why)) stand('pending', kid);
         say(why);
         return;
       }
@@ -135,6 +137,9 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
         if (role === 'asked') stand('pending', kid);
         return ready();
       }
+      // at the first pairing's box while another browser became the owner: the code is not this page's any more, it knocks
+      // again and waits, with Get a code
+      else if (role === 'needs-code' && owners.length > 0 && !signingOut) return ready();
       return Promise.resolve();
     }
     if (role === 'unknown' && !asked && !flag.get()) {

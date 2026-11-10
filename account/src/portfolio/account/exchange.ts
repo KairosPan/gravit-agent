@@ -65,7 +65,7 @@ import { heldUsd, inFlightUsd, launch, newPayment, settleDue, type Advance, type
 import { actionHash, BRAIN_KEY_TTL_MS, PAPER_TTL_MS, PAPER_TYPES, SIGN_OUT_TTL_MS, isAgentAction, isDeviceSig, isJwk, isOwnerAction, kidOf, malformed, MEMORY_TYPES, micro, MONEY_TTL_MS, MONEY_TYPES, NonceBook, ownEnvelope, ownerTypedData, shownFields, signerOf, type Action, type AgentAction, type AnySig, type Envelope, type Hex, type Jwk, type OwnerAction, type SendAsset } from "./sign.ts";
 import { deskBrainKeyProblem, fingerprintOf, setBrainKeyProblem } from "./brain-keys.ts";
 import { identitySignedProblem, isIdentityAction, type IdentityAction } from "../identity/identity.ts";
-import { UNSIGNED_SIGNER, unsignedProblem } from "./unsigned.ts";
+import { UNSIGNED_SIGNER, unsignedProblem, VENUE_ID_SHAPE, VENUE_ID_WORDS } from "./unsigned.ts";
 import { cleanLabel, DEVICE_CODE_MS, DEVICE_CODE_TRIES, pairingCode } from "./pairing.ts";
 import { LiveMoves, type LiveMoney } from "./live-moves.ts";
 import { LiveOrders, type CloseQuote, type LiveOrder, type OrderQuote } from "./live-orders.ts";
@@ -645,6 +645,9 @@ export class AccountEngine {
       return r;
     }
     if (action.type !== "connectVenue") return refuse(`"${tool}" is signed: only a browser that signs for the account takes it`);
+    // the id's shape first: nothing below (the kept-book rule reads a path built from it) sees an id that is not one, and the refusal row
+    // keeps none of its words
+    if (!VENUE_ID_SHAPE.test(action.venue)) return refuse(VENUE_ID_WORDS);
     // a paper account opened: a venue id in use (connected, or waiting for its network) is not taken — a kept book that no connection has
     // open is in neither, and is continued
     const inUse = this.host.venueInUse ? this.host.venueInUse(action.venue) : this.host.adapter(action.venue) !== undefined;

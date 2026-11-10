@@ -178,6 +178,23 @@ describe("the account after a restart", () => {
     expect(c.engine.state.owners.map((o) => [o.id, o.label, o.via])).toEqual([[`device:${browser.kid}`, "Desk", "first"], [`device:${tablet.kid}`, "Tablet <link>", "code"]]);
   });
 
+  it("a device let in with a code is not brought back past an account that needed more than one signature then", async () => {
+    const tablet = simKey("device:restore-tablet-2");
+    const second = simKey("owner-two");
+    const key = { kty: "EC" as const, crv: "P-256" as const, x: tablet.jwk.x, y: tablet.jwk.y };
+    const home = fresh();
+    const a = await run(home, 0, { seedOwner: true });
+    // the owner raised the account to two signatures of two
+    ok(await a.own({ type: "convertToMultiSigUser", signers: JSON.stringify({ authorizedUsers: [owner.address, second.address].sort(), threshold: 2 }) }));
+    expect(a.engine.state.threshold).toBe(2);
+    // a code admission written after it (by hand: the live door refuses a code past a threshold above 1)
+    new Ledger(join(home, "portfolio", ledgers(home)[0]!), () => new Date(START + 60_000).toISOString()).append({ kind: "action", venue: "*", tool: "account_pair", signer: `device:${tablet.kid}`, reason: "a device was let in with the code its terminal printed (Tablet)", native: { jwk: key, label: "Tablet", code: true, admitted: true } });
+    const b = await run(home, HOUR, { seedOwner: true });
+    expect(b.engine.state.threshold).toBe(2);
+    expect(b.engine.state.owners.some((o) => o.id === `device:${tablet.kid}`)).toBe(false);
+    expect((b.svc.restored as { skipped: string[] }).skipped).toEqual(["a device let in with a code of 2026-10-05T14:01:00.000Z: the account needed more than one signature then: not brought back"]);
+  });
+
   it("a ledger whose hash chain breaks is read up to the break, and nothing after it comes back", async () => {
     const home = fresh();
     const a = await run(home, 0, { seedOwner: true });

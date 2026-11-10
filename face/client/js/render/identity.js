@@ -282,7 +282,7 @@ function sheetThree(c) {
   const bang = net === 'slack' ? `<p class="sheet-hint">${esc(t('identity.sheet.slackNote'))}</p>` : '';
   return {
     body: `${lineBox(rows)}${bang}`,
-    keys: [button(t('identity.sheet.back'), { 'data-action': 'identityBack', disabled: c.busy === true }), button(t('common.cancel'), { 'data-action': 'identityClose' }),
+    keys: [button(t('identity.sheet.back'), { 'data-action': 'identityBack', disabled: c.busy === true }), button(t('common.cancel'), { 'data-action': 'identityClose', disabled: c.busy === true }),
       button(t('identity.sheet.notMe'), { 'data-action': 'identityNotMe', disabled: c.busy === true }), primary(t('identity.sheet.isMe'), { 'data-action': 'identityThisIsMe', disabled: c.busy === true })],
   };
 }
@@ -298,6 +298,8 @@ export function renderConnectDrawer(state) {
   const sheet = c.step === 1 ? one() : c.step === 2 ? sheetTwo(c) : sheetThree(c);
   const error = sayOf(c.error) ? note(sayOf(c.error)) : '';
   const again = error && c.step > 1 ? `<div class="btn-row">${button(t('identity.sheet.again'), { 'data-action': 'identityStartAgain' })}</div>` : '';
-  return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="identityClose" aria-label="${th('common.close')}">×</button></div>` +
+  // × is held while This is me is in the air, as Cancel is: the account may bind the phone after the drawer would have gone
+  const held = c.step === 3 && c.busy === true ? ' disabled' : '';
+  return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="identityClose" aria-label="${th('common.close')}"${held}>×</button></div>` +
     `<div class="drawer-body">${sheet.body}${error}${again}${sheet.stepsShown ? '' : stepsList(connectSteps(c.step, net))}<div class="btn-row">${sheet.keys.join('')}</div></div></aside>`;
 }

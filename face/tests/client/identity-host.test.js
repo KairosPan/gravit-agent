@@ -329,6 +329,61 @@ test('This is me twice posts connectNetwork once', async () => {
   assert.equal(acts(r.posts).length, 1);
 });
 
+test('This is me in the air: Cancel and × are held, closing does nothing; a connect taken after the drawer went still reads Identity again', async () => {
+  let release;
+  const held = new Promise(res => { release = res; });
+  const r = rig({ reads: [{ ok: true, pending: HEARD }], actAnswer: () => held });
+  r.identity.openConnect();
+  await r.identity.next(field());
+  await r.timers.advance(PENDING_POLL_MS);
+  const going = r.identity.thisIsMe();
+  await settle();
+  const html = renderConnectDrawer(r.store.get());
+  assert.match(html, /data-action="identityClose" disabled>Cancel</, 'Cancel held');
+  assert.match(html, /class="close-key" data-action="identityClose"[^>]* disabled>×</, '× held');
+  // Cancel, × or Escape while it is in the air: nothing closes, nothing is dropped
+  r.identity.close();
+  assert.equal(r.store.get().identity.connect?.step, 3);
+  assert.equal(drops(r.posts).length, 0);
+  const before = r.gets.length;
+  release({ status: 200, body: { ok: true } });
+  await going;
+  await settle();
+  assert.equal(r.store.get().identity.connect, null);
+  assert.ok(r.gets.slice(before).includes('/data/account/identity?fresh=1'));
+
+  // the drawer gone some other way meanwhile (another connect opened over it): the account bound the phone, so Identity is read again
+  let release2;
+  const held2 = new Promise(res => { release2 = res; });
+  const s = rig({ reads: [{ ok: true, pending: HEARD }], actAnswer: () => held2 });
+  s.identity.openConnect();
+  await s.identity.next(field());
+  await s.timers.advance(PENDING_POLL_MS);
+  const going2 = s.identity.thisIsMe();
+  await settle();
+  s.store.dispatch('identityConnectClose');
+  const before2 = s.gets.length;
+  release2({ status: 200, body: { ok: true } });
+  await going2;
+  await settle();
+  assert.ok(s.gets.slice(before2).includes('/data/account/identity?fresh=1'), 'a stale connect that was taken reads Identity again');
+  // and a stale one refused reads nothing
+  let release3;
+  const held3 = new Promise(res => { release3 = res; });
+  const u = rig({ reads: [{ ok: true, pending: HEARD }], actAnswer: () => held3 });
+  u.identity.openConnect();
+  await u.identity.next(field());
+  await u.timers.advance(PENDING_POLL_MS);
+  const going3 = u.identity.thisIsMe();
+  await settle();
+  u.store.dispatch('identityConnectClose');
+  const before3 = u.gets.length;
+  release3({ status: 409, body: { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_BAD_ACTION', layer: 'account', message: NO_PENDING } } });
+  await going3;
+  await settle();
+  assert.equal(u.gets.length, before3);
+});
+
 test('postAct: the action under ACT; taken is ok with the body, refused or unanswered the words', async () => {
   const seen = [];
   assert.deepEqual(await postAct(async (path, body) => { seen.push({ path, body }); return { status: 200, body: { ok: true, kind: 'result' } }; }, { type: 'blockSender' }), { ok: true, body: { ok: true, kind: 'result' } });

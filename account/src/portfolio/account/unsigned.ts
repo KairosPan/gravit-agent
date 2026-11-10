@@ -17,6 +17,11 @@ export const UNSIGNED_TYPES: ReadonlySet<string> = new Set(["connectNetwork", "d
 /** the one connector an unsigned connectVenue may name */
 export const UNSIGNED_CONNECTOR = "live:paper";
 
+/** a venue id's shape, as the signed connection's (service.ts plugLive): checked at the unsigned door before anything — a path to a paper book
+ * among them — is built from it */
+export const VENUE_ID_SHAPE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+export const VENUE_ID_WORDS = "a venue's id is lower-case letters, digits and dashes";
+
 /** the fixed sentence for an act the unsigned door does not take */
 export const signedOnly = (type: string): string => `"${type}" is signed: only a browser that signs for the account takes it`;
 

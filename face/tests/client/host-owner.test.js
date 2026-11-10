@@ -263,6 +263,63 @@ test("Get a code again after a restart's refusal", async () => {
   assert.equal(s.door.calls('/data/account/pair').length, 0);
 });
 
+test('two browsers at the code box: the one that pairs second is not left at a box with no Get a code', async () => {
+  // one account with no owner, two browsers at its door (the built-in browser and Chrome, sign-only-money's own drill)
+  const d = door();
+  const a = rig({ d });
+  const b = rig({ d });
+  await a.owner.ready();
+  await b.owner.ready();
+  assert.equal(b.o().role, 'needs-code');
+  const kidB = b.o().kid;
+  // A pairs first with the printed code
+  await a.owner.ready(CODE);
+  assert.equal(a.o().role, 'signs');
+  // B types that same code: the account has an owner now and no code live for B — the page waits, with Get a code
+  await b.owner.ready(CODE);
+  assert.deepEqual([b.o().role, b.o().kid, b.o().refusal], ['pending', kidB, 'no code is live for this browser: press Get a code']);
+  await b.owner.askCode();
+  assert.equal(b.o().role, 'asked');
+  await b.owner.ready(DEVICE_CODE);
+  assert.equal(b.o().role, 'signs');
+
+  // the same without B typing: B's next read shows an owner, and B knocks again — it waits, with Get a code
+  const e = door();
+  const p = rig({ d: e });
+  const q = rig({ d: e });
+  await p.owner.ready();
+  await q.owner.ready();
+  await p.owner.ready(CODE);
+  const before = e.calls('/data/account/pair').length;
+  await q.owner.standing(pageWith([ownerRow(p.o().kid)]));
+  assert.equal(e.calls('/data/account/pair').length, before + 1, 'one plain knock');
+  assert.deepEqual([q.o().role, q.o().refusal], ['pending', null]);
+  // a read with no owner yet leaves the box as it is, and knocks nothing
+  const s = rig({ d: door() });
+  await s.owner.ready();
+  await s.owner.standing(pageWith([]));
+  assert.deepEqual([s.o().role, s.door.calls('/data/account/pair').length], ['needs-code', 1]);
+});
+
+test("the account's three code refusals, as the client matches them: two are Get a code again, a wrong code is not", async () => {
+  // the sentences the account writes (account/src/portfolio/account/exchange.ts admitByCode): reworded there, this fails
+  const source = readFileSync(new URL('../../../account/src/portfolio/account/exchange.ts', import.meta.url), 'utf8');
+  const NONE = 'no code is live for this browser: press Get a code';
+  const MANY = 'too many wrong codes: press Get a code for a new one';
+  const WRONG = 'that is not the code printed for this browser (';
+  for (const s of [NONE, MANY, WRONG]) assert.ok(source.includes(s), `the account still says: ${s}`);
+  const answer = message => ({ status: 400, body: { ok: false, refusal: { code: 'E_ACCOUNT_OWNER_SURFACE', message } } });
+  for (const [message, role] of [[NONE, 'pending'], [MANY, 'pending'], [`${WRONG}4 tries left)`, 'asked']]) {
+    const r = rig({ d: door({ seedOwner: true }) });
+    await r.owner.standing(pageWith([ownerRow('a5048199a8081854')]));
+    await r.owner.askCode();
+    assert.equal(r.o().role, 'asked');
+    r.door.once('/data/account/pair', answer(message));
+    await r.owner.ready('ZZZZ-ZZZZ');
+    assert.deepEqual([r.o().role, r.o().refusal], [role, message], message);
+  }
+});
+
 test('an envelope the door verifies', async () => {
   const r = await signing();
   const answer = await r.owner.act(WATCH);
