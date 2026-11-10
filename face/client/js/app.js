@@ -1,5 +1,6 @@
 // face/client/js/app.js — the client's boot on the face (spec 2026-10-19 §5): the store, the host layer, the renderers,
 // and the page's own bookkeeping (what was typed, where the thread stood, who had focus) across every render.
+import { regionOfLocale } from './host/regions.js';
 import { createStore } from './store.js';
 import { chordOf } from './keys.js';
 import { reducers } from './reducers/index.js';
@@ -1806,7 +1807,12 @@ export function boot(win, host = {}) {
     identityDetails: el => store.dispatch('identityDetails', el?.dataset?.network),
     // Connect Telegram (plan B1b Task 2), Install app… for Slack (plan B2 Task 7) and Connect iMessage (the iMessage plan): the
     // drawer's keys; Next hands the host the fields themselves, never their values
-    identityConnect: el => { identity.openConnect(['slack', 'imessage'].includes(el?.dataset?.network) ? el.dataset.network : 'telegram'); },
+    identityConnect: el => {
+      const net = ['slack', 'imessage'].includes(el?.dataset?.network) ? el.dataset.network : 'telegram';
+      identity.openConnect(net);
+      // iMessage's region list starts on the browser's own region
+      if (net === 'imessage') store.dispatch('identityConnectSet', { region: regionOfLocale(globalThis.navigator?.language) });
+    },
     identityNext: () => {
       const net = store.get().identity?.connect?.network;
       if (net === 'slack') void identity.next(root.querySelector('#identity-app-token'), root.querySelector('#identity-bot-token'));
@@ -2127,6 +2133,8 @@ export function boot(win, host = {}) {
     if (el.id === 'attach-input') { const files = Array.from(el.files ?? []); el.value = ''; addFiles(files); }
     // a tick on Identity's grid: the draft routing, on any page
     if (el.dataset?.action === 'identityQuietField') quietField(el);
+    // iMessage's region, held in the drawer's state so a redraw keeps it
+    if (el.dataset?.action === 'identityRegion') store.dispatch('identityConnectSet', { region: el.value });
     if (el.type === 'checkbox' && el.dataset?.action === 'identityTick') {
       store.dispatch('identityTick', { row: el.dataset.row, network: el.dataset.network, on: el.checked === true });
     }

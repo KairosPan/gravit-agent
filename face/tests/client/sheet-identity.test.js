@@ -289,7 +289,7 @@ test("iMessage's steps lists, word for word", () => {
   assert.deepEqual(connectSteps(1, 'imessage'), [
     'Make a free Photon account and create a project used only for Gravit.',
     "In the project's Settings, copy the project ID and the project secret.",
-    'Paste them below, with your own mobile number starting with + and its country code.',
+    'Paste them below, then pick your country or region and type your mobile number.',
   ]);
   assert.deepEqual(connectSteps(2, 'imessage'), [
     "On your iPhone, open the link or scan the code with the camera: a new message opens, addressed to Gravit's number. Send hi.",
@@ -309,8 +309,15 @@ test('sheet 1: Connect iMessage · 1 of 3 · Photon project — one line on Phot
   assert.match(html, /<a class="btn-sm sheet-link" href="https:\/\/app\.photon\.codes" target="_blank" rel="noopener noreferrer">Open Photon ↗<\/a>/);
   assert.match(html, /<input id="identity-photon-project" class="input" type="text" autocomplete="off"/);
   assert.match(html, /<input id="identity-photon-secret" class="input" type="password" autocomplete="off"/);
-  assert.match(html, /<input id="identity-photon-phone" class="input" type="tel" autocomplete="off"/);
-  for (const label of ['Project ID', 'Project secret', 'Your mobile number, with its country code']) assert.ok(html.includes(`>${label}</label>`), label);
+  assert.match(html, /<input id="identity-photon-phone" class="input" type="tel" inputmode="tel" autocomplete="off"/);
+  for (const label of ['Project ID', 'Project secret', 'Your mobile number']) assert.ok(html.includes(`>${label}</label>`), label);
+  // the region list before the number, on the default region, each option its name and calling code
+  const select = html.indexOf('<select id="identity-photon-region"');
+  assert.ok(select > 0 && select < html.indexOf('id="identity-photon-phone"'));
+  assert.match(html, /aria-label="Country or region"/);
+  assert.match(html, /<option value="US" selected>United States \+1<\/option>/);
+  assert.match(html, /<option value="CN">China \+86<\/option>/);
+  assert.match(renderConnectDrawer({ ...imAt(), identity: { ...imAt().identity, connect: { ...imAt().identity.connect, region: 'CN' } } }), /<option value="CN" selected>/);
   assert.ok(html.includes('Kept in: Account · :4820'));
   assert.ok(decode(html).includes("Never in: Gravit's box · ~/.dsh"));
   assert.doesNotMatch(html, /<form/);

@@ -34,8 +34,7 @@ export const TOKEN_PATHS = {
 };
 /** A number as the account takes it on iMessage's sheet 1: E.164, a + then the country code and the number (photon-link.ts E164). */
 export const E164 = /^\+[1-9]\d{6,14}$/;
-/** A typed number as sheet 1 sends it: its spaces, dashes and parentheses gone. */
-export const phoneOf = typed => (typeof typed === 'string' ? typed.replace(/[\s()-]/g, '') : '');
+import { phoneFrom, DEFAULT_REGION } from './regions.js';
 const PENDING_PATH = '/data/account/identity/pending';
 const NOT_ME_PATH = '/data/account/identity/pending/not-me';
 const DROP_PATH = '/data/account/identity/pending/drop';
@@ -197,7 +196,7 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
    *  Photon project (iMessage: `first` the project ID, `second` the project secret, `third` the operator's number) read from their
    *  fields, the token and secret fields cleared at once, fingerprinted here, posted once. A Slack field left empty posts nothing and
    *  says which; an iMessage field left empty, or a number that is not +, a country code and the number, posts nothing either. */
-  async function next(first, second, third) {
+  async function next(first, second, third, region) {
     const c = connect();
     if (!c || c.step !== 1 || c.busy || sending) return;
     const slack = c.network === 'slack';
@@ -206,7 +205,7 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     const keep = input => (typeof input?.value === 'string' ? input.value.trim() : '');
     let token = imessage ? keep(first) : take(first);
     let bot = slack || imessage ? take(second) : '';
-    const phone = imessage ? phoneOf(keep(third)) : '';
+    const phone = imessage ? phoneFrom(region ?? c.region ?? DEFAULT_REGION, keep(third)) : '';
     const missing = slack ? !token || !bot : imessage ? !token || !bot || !E164.test(phone) : !token;
     if (missing) {
       const empty = imessage ? CONNECT_WORDS.imessageShape : !slack ? CONNECT_WORDS.empty : !token && !bot ? CONNECT_WORDS.slackNone : !token ? CONNECT_WORDS.slackNoApp : CONNECT_WORDS.slackNoBot;

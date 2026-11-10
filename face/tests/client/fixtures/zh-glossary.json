@@ -135,6 +135,7 @@
     {"en":"Loading…","zh":"加载中…","note":"the loading word"}
   ],
   "keep": [
+    "zh-CN",
     "Gravit",
     "Hyperliquid",
     "HIP-3",

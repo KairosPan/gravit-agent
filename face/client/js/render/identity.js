@@ -18,6 +18,7 @@ import { chip } from './thread.js';
 import { confirmPair } from './controls.js';
 import { identityOf, NETWORKS, routingOf, sameRouting } from '../host/identity-view.js';
 import { HOST_NAME } from '../wire/speaker.js';
+import { regionOptions, isRegion, DEFAULT_REGION } from '../host/regions.js';
 import { t, th, tn, sayOf } from '../i18n/words.js';
 
 const str = v => (typeof v === 'string' ? v : '');
@@ -219,12 +220,26 @@ function slackSheetOne(c, manifest) {
 
 // iMessage's sheet 1: one line on Photon, then its guide on top (the first step carrying the button to Photon's console), the project
 // ID, the secret (a password field) and the operator's number, and where the secret is kept and where it never goes
+// iMessage's number: the country or region picked from a list, then the number as it is dialled there, side by side under one label
+function phoneField(c) {
+  const region = isRegion(c.region) ? c.region : DEFAULT_REGION;
+  const label = t('identity.token.phoneLabel');
+  const options = regionOptions(t('identity.token.regionLang'))
+    .map(o => `<option${attrs({ value: o.iso, selected: o.iso === region })}>${esc(`${o.name} +${o.dial}`)}</option>`).join('');
+  return `<div class="field"><label class="field-label" for="identity-photon-phone">${esc(label)}</label>` +
+    `<span class="phone-row"><select${attrs({ id: 'identity-photon-region', class: 'input', 'data-action': 'identityRegion', 'aria-label': t('identity.token.regionLabel'), disabled: c.busy === true })}>${options}</select>` +
+    `<input${attrs({
+      id: 'identity-photon-phone', class: 'input', type: 'tel', inputmode: 'tel', autocomplete: 'off', spellcheck: 'false', 'aria-label': label,
+      'data-lpignore': 'true', 'data-1p-ignore': 'true', 'data-form-type': 'other', disabled: c.busy === true,
+    })}></span></div>`;
+}
+
 function imessageSheetOne(c) {
   const [first, ...rest] = connectSteps(1, 'imessage');
   const open = `<a${attrs({ class: 'btn-sm sheet-link', href: PHOTON_URL, target: '_blank', rel: 'noopener noreferrer' })}>${esc(t('identity.photon.open'))} ↗</a>`;
   const guide = `<ol class="sheet-steps"><li>${esc(first)}<div class="btn-row">${open}</div></li>${rest.map(r => `<li>${esc(r)}</li>`).join('')}</ol>`;
   const fields = tokenField('identity-photon-project', t('identity.token.projectLabel'), c, 'text') + tokenField('identity-photon-secret', t('identity.token.secretLabel'), c) +
-    tokenField('identity-photon-phone', t('identity.token.phoneLabel'), c, 'tel');
+    phoneField(c);
   return { body: `${note(t('identity.photon.signup', { name: HOST_NAME }))}${guide}${fields}${lineBox(kept())}`, keys: sheetOneKeys(c), stepsShown: true };
 }
 

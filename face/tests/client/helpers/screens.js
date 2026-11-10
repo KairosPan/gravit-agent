@@ -1,5 +1,6 @@
 // The screen corpus: every state css.test.js draws, named, so a test can hold each screen to its bytes (words-golden.test.js)
 // or to its classes (css.test.js). Paths below resolve from tests/client/helpers/.
+import { regionOptions } from '../../../client/js/host/regions.js';
 import { readFileSync } from 'node:fs';
 import { renderRail } from '../../../client/js/render/rail.js';
 import { renderSide } from '../../../client/js/render/side.js';
@@ -916,5 +917,7 @@ export function corpusStrings() {
   for (const st of everyState()) walk(st, null, [], false);
   walk(composerBuild().inputs, null, [], false);
   walk(MODULES, null, [], 'values'); // every value, its keys not
+  // iMessage's region list: each region's name as the browser gives it (Intl.DisplayNames), content as a venue's name is
+  for (const lang of ['en', 'zh-CN']) for (const o of regionOptions(lang)) out.push({ text: o.name, key: null });
   return out;
 }

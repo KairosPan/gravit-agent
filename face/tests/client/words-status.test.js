@@ -308,7 +308,7 @@ test("Connect Telegram's lines, and a connected network's trouble, each in its w
   follows(sr.get().identity.connect.error, 'This browser cannot fingerprint the token on this page: open the face at its 127.0.0.1 address.');
   follows(Object.values(CONNECT_WORDS).map(f => f()), ['Paste the token from BotFather first.', 'This browser cannot fingerprint the token on this page: open the face at its 127.0.0.1 address.',
     'The account refused the token.', 'The account refused the tokens.', 'Paste the app-level token (xapp-…) first.', 'Paste the bot token (xoxb-…) first.', 'Paste both tokens first.',
-    'The account refused the project.', 'Fill in all three: the project ID, the project secret, and your number written +, the country code, then the number (+14155550100).',
+    'The account refused the project.', 'Fill in all three: the project ID, the project secret, and your mobile number, after picking its country or region.',
     'This connection waited ten minutes and expired: nothing was kept. Start again.', 'The account did not say who wrote: start again.']);
   const problem = n => identityOf({ ok: true, networks: [{ network: 'telegram', state: 'connected', ...n }] }).networks.telegram.problem;
   assert.deepEqual(problem({ pollFailing: {} }), 'Not hearing Telegram.');

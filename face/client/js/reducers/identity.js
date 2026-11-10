@@ -6,6 +6,7 @@
 // null while none is open. It never holds a token: only the pending connection the account answered and the fingerprint (salt and
 // keyHash) made in the browser. `said` is what an unsigned act refused or could not send, where it was pressed
 // (`{ at, words }`: networks, grid, quiet or strangers), null when nothing is; `quietEdit` quiet hours' editor open.
+import { isRegion } from '../host/regions.js';
 import { isLine } from '../i18n/words.js';
 import { connectedNetworks, routingOf, sameRouting, tickRouting } from '../host/identity-view.js';
 
@@ -30,6 +31,7 @@ function connectPatch(p) {
   if (p.fp === null) out.fp = null;
   else if (isRecord(p.fp) && HEX32.test(p.fp.salt) && HEX64.test(p.fp.keyHash)) out.fp = { salt: p.fp.salt, keyHash: p.fp.keyHash };
   if (typeof p.busy === 'boolean') out.busy = p.busy;
+  if (isRegion(p.region)) out.region = p.region;
   if (typeof p.silent === 'boolean') out.silent = p.silent;
   if (typeof p.copied === 'boolean') out.copied = p.copied;
   if (p.error === null || isLine(p.error, { empty: true })) out.error = p.error;

@@ -709,6 +709,10 @@ button.link:disabled { color: var(--dim); cursor: default; }
 @container (min-width: 900px) { .mk-pg-cols { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; } }
 .plug-name { margin: 0; font-size: calc(28px * var(--fs)); font-weight: 800; letter-spacing: -0.01em; }
 .field { display: flex; flex-direction: column; gap: 6px; }
+/* iMessage's number: the region list, then the number as dialled there */
+.phone-row { display: flex; gap: 8px; }
+.phone-row select { flex: 0 1 auto; max-width: 55%; }
+.phone-row input { flex: 1 1 auto; min-width: 0; }
 .field-label { font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--dim); }
 .input, .textarea { width: 100%; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface); font-size: calc(14px * var(--fs)); outline: none; }
 .input { height: 40px; }

@@ -711,14 +711,14 @@ test('the iMessage fingerprint is over projectId, NUL, secret', async () => {
   assert.notEqual(body.keyHash, sha256hex(body.salt, `${PROJECT}${SECRET}`), 'the NUL is in the join');
 });
 
-test('a number without its country code is refused before anything is sent', async () => {
-  for (const [project, secret, phone] of [[PROJECT, SECRET, '415 555 0100'], [PROJECT, SECRET, '+0 415 555 0100'], [PROJECT, SECRET, '+1415'], [PROJECT, SECRET, ''], ['', SECRET, '+14155550100'], [PROJECT, '', '+14155550100']]) {
+test('a number that cannot be made whole is refused before anything is sent', async () => {
+  for (const [project, secret, phone] of [[PROJECT, SECRET, 'call me'], [PROJECT, SECRET, '+0 415 555 0100'], [PROJECT, SECRET, '+1415'], [PROJECT, SECRET, ''], ['', SECRET, '+14155550100'], [PROJECT, '', '+14155550100']]) {
     const r = imRig();
     r.identity.openConnect('imessage');
     const secretField = field(secret);
     await r.identity.next(field(project), secretField, field(phone));
     assert.equal(r.posts.length, 0, `${project}|${phone}`);
-    assert.equal(spoken(r.store.get().identity.connect.error), 'Fill in all three: the project ID, the project secret, and your number written +, the country code, then the number (+14155550100).');
+    assert.equal(spoken(r.store.get().identity.connect.error), 'Fill in all three: the project ID, the project secret, and your mobile number, after picking its country or region.');
     assert.equal(r.store.get().identity.connect.step, 1);
     assert.equal(secretField.value, '', 'the secret is cleared even so');
   }
@@ -762,4 +762,15 @@ test('thisIsMe sends speaksAs and talksOnlyWith without @ for iMessage', async (
     routing: 'chat=imessage,telegram;alerts=imessage,telegram;brief=imessage,telegram;cards=imessage,telegram;fills=imessage,telegram', keyHash: fp.keyHash, salt: fp.salt,
   }]);
   assert.ok(!JSON.stringify(acts(r.posts)).includes(SECRET));
+});
+
+test("the number is the region's calling code and the number as dialled there; a typed + stands as it is", async () => {
+  for (const [region, typed, want] of [['US', '415 555 0100', '+14155550100'], ['CN', '138 0013 8000', '+8613800138000'], ['GB', '07700 900123', '+447700900123'],
+    ['IT', '06 1234 5678', '+390612345678'], ['CN', '+1 415 555 0100', '+14155550100'], [undefined, '(415) 555-0100', '+14155550100']]) {
+    const r = imRig();
+    r.identity.openConnect('imessage');
+    if (region) r.store.dispatch('identityConnectSet', { region });
+    await r.identity.next(field(PROJECT), field(SECRET), field(typed));
+    assert.equal(r.posts.find(p => p.path === TOKEN_PATHS.imessage)?.body.phone, want, `${region} ${typed}`);
+  }
 });
