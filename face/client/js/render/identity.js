@@ -13,7 +13,7 @@
 // ending with its numbered steps above its keys; This is me connects there.
 import { esc, attrs } from '../html.js';
 import { icon } from '../icons.js';
-import { fmtClock, fmtDate, sameDay } from '../time.js';
+import { fmtClock, fmtDate, sameDay, etClock } from '../time.js';
 import { chip } from './thread.js';
 import { confirmPair } from './controls.js';
 import { identityOf, NETWORKS, routingOf, sameRouting } from '../host/identity-view.js';
@@ -185,15 +185,6 @@ const conflictWords = net => (net === 'slack' ? t('identity.sheet.slackConflict'
 const silentWords = () => t('identity.sheet.silent');
 const noManifest = () => t('identity.manifest.none');
 const kept = () => [t('identity.token.keptIn'), t('identity.token.neverIn', { name: HOST_NAME })];
-
-/** A time as New York's clock reads it, h:mm (24-hour). */
-export function etClock(at) {
-  const ms = Date.parse(at);
-  if (Number.isNaN(ms)) return '';
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hourCycle: 'h23' })
-    .formatToParts(new Date(ms)).map(p => [p.type, p.value]));
-  return `${Number(parts.hour) % 24}:${parts.minute}`;
-}
 
 const stepsList = steps => `<ol class="sheet-steps">${steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>`;
 const lineBox = rows => `<div class="sheet-quote">${rows.map(r => `<div class="dsec-line">${esc(r)}</div>`).join('')}</div>`;

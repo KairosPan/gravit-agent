@@ -9,7 +9,7 @@ import { renderDeviceLine, renderDevices, renderSheet } from '../../client/js/re
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { fieldsOf, keyfileAskOf, removeDeviceSeedOf } from '../../client/js/host/sheet-view.js';
-import { etClock } from '../../client/js/render/identity.js';
+import { etClock, etDate } from '../../client/js/time.js';
 import { connectOptionsOf } from '../../client/js/host/account-view.js';
 import { esc } from '../../client/js/html.js';
 import { askedOf } from '../../client/js/host/sheet.js';
@@ -137,8 +137,8 @@ test('Devices: Remove for every other device, only on a page that signs; how and
     // let in by a device that is gone: its id stands for it
     { id: 'device:5555555555555555', kind: 'device', label: 'Tablet', via: 'letIn', by: 'device:dead0000dead0000', addedAt: LET },
   ];
-  // the date as Devices draws it, the time as New York's clock reads it
-  const when = at => `${fmtDate(Date.parse(at))} ${etClock(at)}`;
+  // the date and the time as New York's clock reads them
+  const when = at => `${etDate(at)} ${etClock(at)}`;
   const html = renderDevices(standing('signs', KID, page));
   has(html, `<div class="dsec-line">Gravit face · device:${KID} · this page · first device · ${when(FIRST)}</div>`);
   has(html, `<div class="venue"><span>Laptop · device:0f0f0f0f0f0f0f0f · let in from Gravit face · ${when(LET)}</span>` +
@@ -153,6 +153,24 @@ test('Devices: Remove for every other device, only on a page that signs; how and
   const other = renderDevices(standing('pending', 'feedfacefeedface', page));
   has(other, `<div class="dsec-line">Phone · device:1234123412341234 · let in with a code · ${when(CODE)}</div>`);
   lacks(other, 'data-action="removeDevice"');
+});
+
+test("Devices: when a signer came in is New York's date and time, whatever the browser's zone", () => {
+  const page = fx('account');
+  page.signers.owners = [
+    { id: `device:${KID}`, kind: 'device', label: 'Gravit face', via: 'first', addedAt: '2026-11-01T14:05:00.000Z' },
+    // 21:10 UTC: 16:10 in New York on the 9th, 05:10 on the 10th in a UTC+8 browser
+    { id: 'device:1234123412341234', kind: 'device', label: 'Phone', via: 'code', addedAt: '2026-11-09T21:10:00.000Z' },
+  ];
+  const was = process.env.TZ;
+  process.env.TZ = 'Asia/Shanghai';
+  try {
+    assert.equal(new Date('2026-11-09T21:10:00.000Z').getDate(), 10, 'the browser reads the 10th');
+    has(renderDevices(standing('signs', KID, page)), '<span>Phone · device:1234123412341234 · let in with a code · Nov 9 16:10</span>');
+  } finally {
+    if (was === undefined) delete process.env.TZ; else process.env.TZ = was;
+  }
+  assert.equal(etDate('nonsense'), '');
 });
 
 test('the removeDevice sheet: its title, the line naming who stops signing, Remove as its go key', () => {

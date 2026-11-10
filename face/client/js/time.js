@@ -41,6 +41,26 @@ export function fmtDate(ts) {
   return t('time.date', { month: MONTHS()[d.getMonth()], day: d.getDate() });
 }
 
+// New York's wall clock for an instant (the face's clock: the operator works New York hours), its parts by name
+const etParts = (ms, opts) => Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', ...opts })
+  .formatToParts(new Date(ms)).map(p => [p.type, p.value]));
+
+/** A time as New York's clock reads it, h:mm (24-hour). Not a time: ''. */
+export function etClock(at) {
+  const ms = Date.parse(at);
+  if (Number.isNaN(ms)) return '';
+  const parts = etParts(ms, { hour: 'numeric', minute: '2-digit', hourCycle: 'h23' });
+  return `${Number(parts.hour) % 24}:${parts.minute}`;
+}
+
+/** A date as New York's calendar reads it, in fmtDate's words (`Nov 9`), whatever the browser's zone. Not a time: ''. */
+export function etDate(at) {
+  const ms = Date.parse(at);
+  if (Number.isNaN(ms)) return '';
+  const parts = etParts(ms, { month: 'numeric', day: 'numeric' });
+  return t('time.date', { month: MONTHS()[Number(parts.month) - 1], day: Number(parts.day) });
+}
+
 // a call's length as m:ss
 export function fmtDuration(ms) {
   const secs = Math.max(0, Math.floor(ms / 1000));

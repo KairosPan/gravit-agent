@@ -4,11 +4,10 @@
 // fields by type, the quote box, What you sign verbatim, the signature's minutes, what the Account said, Cancel and the go key.
 // Every word is a view's (host/owner-view.js, host/sheet-view.js) or the Account's; this module draws them.
 import { esc, attrs, cls } from '../html.js';
-import { fmtDate } from '../time.js';
+import { fmtDate, etClock, etDate } from '../time.js';
 import { pageOk } from '../host/account-view.js';
 import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../host/owner-view.js';
 import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf, signOutLineOf, removeDeviceLineOf, draftOf } from '../host/sheet-view.js';
-import { etClock } from './identity.js';
 import { askedOf } from '../host/sheet.js';
 import { moveHintsOf, moveSaysOf, routesWordsOf, earnHintsOf, earnSaysOf } from '../host/sheet-money.js';
 import { seg } from './controls.js';
@@ -40,10 +39,10 @@ export function renderDeviceLine(state) {
 
 // ── Settings › Devices ──
 
-// when a signer came in: the date as Devices draws it, the time as New York's clock reads it
+// when a signer came in: the date and the time as New York's clock reads them, whatever the browser's zone
 function whenOf(at) {
-  const ms = Date.parse(at);
-  return Number.isNaN(ms) ? '' : t('time.dayClock', { day: fmtDate(ms), clock: etClock(at) });
+  const day = etDate(at);
+  return day ? t('time.dayClock', { day, clock: etClock(at) }) : '';
 }
 
 // how a signer came in, in words: the first device, let in from another (by its label, its id when it is gone), with a code;
