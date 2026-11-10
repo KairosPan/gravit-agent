@@ -124,7 +124,7 @@ export function renderIdentityTab(state, now) {
 export function connectSteps(step, net = 'telegram') {
   const name = HOST_NAME;
   if (net === 'imessage') {
-    if (step === 1) return [t('identity.imessageSteps.signup'), t('identity.imessageSteps.project'), t('identity.imessageSteps.copy'), t('identity.imessageSteps.paste', { name })];
+    if (step === 1) return [t('identity.imessageSteps.signup', { name }), t('identity.imessageSteps.project'), t('identity.imessageSteps.copy')];
     if (step === 2) return [t('identity.imessageSteps.text', { name }), t('identity.imessageSteps.wait', { name })];
     if (step === 3) return [t('identity.imessageSteps.isMe', { name }), t('identity.imessageSteps.notMe', { name })];
     return [];
@@ -156,7 +156,6 @@ const APP_REDIRECT = /^https:\/\/slack\.com\/app_redirect\?app=[A-Z0-9]{1,32}&te
 const SMS = /^sms:(\+[1-9]\d{6,14})$/;
 // Photon's console, where a project is made (sheet 1's link)
 const PHOTON_URL = 'https://app.photon.codes'; // en-kept: Photon's address
-const PHOTON_SHOWN = 'app.photon.codes'; // en-kept: Photon's address as the link reads
 const conflictWords = net => (net === 'slack' ? t('identity.sheet.slackConflict') : t('identity.sheet.conflict'));
 const silentWords = () => t('identity.sheet.silent');
 const noManifest = () => t('identity.manifest.none');
@@ -202,14 +201,15 @@ function slackSheetOne(c, manifest) {
   return { body: `${shown}${fields}${lineBox(kept())}`, keys: sheetOneKeys(c) };
 }
 
-// iMessage's sheet 1: what Photon is, with a link to its console; the project ID, the secret (a password field) and the operator's
-// number; a Photon project for Gravit alone; what Next does; where the secret is kept and where it never goes
+// iMessage's sheet 1: one line on Photon, then its guide on top (the first step carrying the button to Photon's console), the project
+// ID, the secret (a password field) and the operator's number, and where the secret is kept and where it never goes
 function imessageSheetOne(c) {
-  const name = HOST_NAME;
-  const photon = `${note(t('identity.photon.signup', { name }))}<p><a${attrs({ href: PHOTON_URL, target: '_blank', rel: 'noopener noreferrer' })}>${esc(PHOTON_SHOWN)}</a></p>`;
+  const [first, ...rest] = connectSteps(1, 'imessage');
+  const open = `<a${attrs({ class: 'btn-sm sheet-link', href: PHOTON_URL, target: '_blank', rel: 'noopener noreferrer' })}>${esc(t('identity.photon.open'))} ↗</a>`;
+  const guide = `<ol class="sheet-steps"><li>${esc(first)}<div class="btn-row">${open}</div></li>${rest.map(r => `<li>${esc(r)}</li>`).join('')}</ol>`;
   const fields = tokenField('identity-photon-project', t('identity.token.projectLabel'), c, 'text') + tokenField('identity-photon-secret', t('identity.token.secretLabel'), c) +
     tokenField('identity-photon-phone', t('identity.token.phoneLabel'), c, 'tel');
-  return { body: `${photon}${fields}${note(t('identity.photon.alone', { name }))}${note(t('identity.photon.replaces', { name }))}${lineBox(kept())}`, keys: sheetOneKeys(c) };
+  return { body: `${note(t('identity.photon.signup', { name: HOST_NAME }))}${guide}${fields}${lineBox(kept())}`, keys: sheetOneKeys(c), stepsShown: true };
 }
 
 // the bot's page at its network, drawn only when it is the shape that network's link has: the href, the anchor's words and the QR's alt
@@ -281,5 +281,5 @@ export function renderConnectDrawer(state) {
   const error = sayOf(c.error) ? note(sayOf(c.error)) : '';
   const again = error && c.step > 1 ? `<div class="btn-row">${button(t('identity.sheet.again'), { 'data-action': 'identityStartAgain' })}</div>` : '';
   return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="identityClose" aria-label="${th('common.close')}">×</button></div>` +
-    `<div class="drawer-body">${sheet.body}${error}${again}${stepsList(connectSteps(c.step, net))}<div class="btn-row">${sheet.keys.join('')}</div></div></aside>`;
+    `<div class="drawer-body">${sheet.body}${error}${again}${sheet.stepsShown ? '' : stepsList(connectSteps(c.step, net))}<div class="btn-row">${sheet.keys.join('')}</div></div></aside>`;
 }

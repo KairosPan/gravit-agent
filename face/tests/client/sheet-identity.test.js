@@ -423,10 +423,9 @@ const imAt = () => R.identityConnectOpen(R.nav(emptyState(NOW), { screen: 'accou
 
 test("iMessage's steps lists, word for word", () => {
   assert.deepEqual(connectSteps(1, 'imessage'), [
-    'Make an account at Photon and create a project.',
-    "Open the project's Settings: it shows the project ID and the project secret.",
-    'Copy both into the first two fields, then type your own mobile number, starting with + and its country code.',
-    'Paste the secret only here, never in a chat, not even with Gravit.',
+    'Make a free Photon account and create a project used only for Gravit.',
+    "In the project's Settings, copy the project ID and the project secret.",
+    'Paste them below, with your own mobile number starting with + and its country code.',
   ]);
   assert.deepEqual(connectSteps(2, 'imessage'), [
     "On your iPhone, open the link or scan the code with the camera: a new message opens, addressed to Gravit's number. Send hi.",
@@ -439,24 +438,24 @@ test("iMessage's steps lists, word for word", () => {
   assert.deepEqual(connectSteps(4, 'imessage'), []);
 });
 
-test('sheet 1: Connect iMessage · 1 of 4 · Photon project — what Photon is, its link, three fields, a project alone, what Next does, where the secret is kept', () => {
+test('sheet 1: Connect iMessage · 1 of 4 · Photon project — one line on Photon, its guide on top with the button to Photon, three fields, where the secret is kept', () => {
   const html = renderConnectDrawer(imAt());
   assert.match(html, /<aside class="drawer sheet" aria-label="Connect iMessage · 1 of 4 · Photon project">/);
-  assert.match(decode(html), /Gravit's iMessage runs through Photon, a separate company, and your messages pass through its servers\./);
-  assert.match(html, /<a href="https:\/\/app\.photon\.codes" target="_blank" rel="noopener noreferrer">app\.photon\.codes<\/a>/);
+  assert.match(decode(html), /Gravit's iMessage goes through Photon, and your messages pass through its servers\./);
+  assert.match(html, /<a class="btn-sm sheet-link" href="https:\/\/app\.photon\.codes" target="_blank" rel="noopener noreferrer">Open Photon ↗<\/a>/);
   assert.match(html, /<input id="identity-photon-project" class="input" type="text" autocomplete="off"/);
   assert.match(html, /<input id="identity-photon-secret" class="input" type="password" autocomplete="off"/);
   assert.match(html, /<input id="identity-photon-phone" class="input" type="tel" autocomplete="off"/);
   for (const label of ['Project ID', 'Project secret', 'Your mobile number, with its country code']) assert.ok(html.includes(`>${label}</label>`), label);
-  assert.ok(decode(html).includes('Use a Photon project for Gravit alone'));
-  assert.ok(decode(html).includes('Next replaces your registration to get a new one.'));
   assert.ok(html.includes('Kept in: Account · :4820'));
   assert.ok(decode(html).includes("Never in: Gravit's box · ~/.dsh"));
   assert.doesNotMatch(html, /<form/);
-  // the steps above the keys
+  // the guide once, above the fields, the button in its first step
   const ol = html.indexOf('<ol class="sheet-steps">');
-  assert.ok(ol > html.indexOf('identity-photon-phone') && ol < html.lastIndexOf('<div class="btn-row">'));
-  assert.deepEqual(listOf(html), connectSteps(1, 'imessage'));
+  assert.ok(ol >= 0 && ol < html.indexOf('identity-photon-project'));
+  assert.equal(html.indexOf('<ol class="sheet-steps">', ol + 1), -1);
+  assert.ok(html.indexOf('app.photon.codes') < html.indexOf('</li>', ol));
+  assert.deepEqual([...html.slice(html.indexOf('<ol class="sheet-steps">'), html.indexOf('</ol>')).matchAll(/<li>([^<]*)/g)].map(m => decode(m[1])), connectSteps(1, 'imessage'));
 });
 
 test('connectNetwork for iMessage lists via Photon, the secret kept in the Account and its fingerprint', () => {

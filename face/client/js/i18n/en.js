@@ -617,17 +617,15 @@ export const EN = Object.freeze({
   'identity.slackSteps.wait': 'Wait here: this sheet moves on when the app hears you.',
   'identity.slackSteps.isMe': 'This is me: {name} talks only with this Slack account, in this direct message.',
   'identity.slackSteps.notMe': 'Not me: that sender is listed under Not you and never reaches {name}. Say hi again from your own Slack account.',
-  'identity.imessageSteps.signup': 'Make an account at Photon and create a project.',
-  'identity.imessageSteps.project': "Open the project's Settings: it shows the project ID and the project secret.",
-  'identity.imessageSteps.copy': 'Copy both into the first two fields, then type your own mobile number, starting with + and its country code.',
-  'identity.imessageSteps.paste': 'Paste the secret only here, never in a chat, not even with {name}.',
+  'identity.imessageSteps.signup': 'Make a free Photon account and create a project used only for {name}.',
+  'identity.imessageSteps.project': "In the project's Settings, copy the project ID and the project secret.",
+  'identity.imessageSteps.copy': 'Paste them below, with your own mobile number starting with + and its country code.',
   'identity.imessageSteps.text': "On your iPhone, open the link or scan the code with the camera: a new message opens, addressed to {name}'s number. Send hi.",
   'identity.imessageSteps.wait': 'Wait here: this sheet moves on when {name} hears you from your number.',
   'identity.imessageSteps.isMe': 'This is me: {name} talks only with this number, on iMessage.',
   'identity.imessageSteps.notMe': 'Not me: that sender is listed under Not you and never reaches {name}. Say hi again from your own iPhone.',
-  'identity.photon.signup': "{name}'s iMessage runs through Photon, a separate company, and your messages pass through its servers. A Photon account is free for personal use, for up to 10 people. Make one at:",
-  'identity.photon.alone': 'Use a Photon project for {name} alone: its stream carries every user registered on the project, and {name} counts everyone but you as a stranger.',
-  'identity.photon.replaces': 'Next checks the project with Photon and adds your number to it as a user (or finds it already there) to get the number {name} will speak from. If the number Photon gave you no longer works, Next replaces your registration to get a new one.',
+  'identity.photon.open': 'Open Photon',
+  'identity.photon.signup': "{name}'s iMessage goes through Photon, and your messages pass through its servers.",
 
 
   // the Account screen (render/account.js): its head, its tabs, Portfolio's figures and tables
