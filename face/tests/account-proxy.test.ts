@@ -97,11 +97,12 @@ const CALLBACK = "/data/account/signin/callback";
 /** A venue's page sending the browser back: a top-level GET document navigation, cross-site, no Origin. */
 const NAVIGATION = { host: "127.0.0.1:3090", "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" };
 const FOLLOW = "/data/account/stream/markets";
-/** The three write paths, in the order they are registered, the Account path each one asks, and its row. */
-const WRITES: ReadonlyArray<readonly [face: string, account: string, route: "pair" | "prepare" | "exchange"]> = [
+/** The four write paths, in the order they are registered, the Account path each one asks, and its row. */
+const WRITES: ReadonlyArray<readonly [face: string, account: string, route: "pair" | "prepare" | "exchange" | "act"]> = [
   ["/data/account/pair", "/api/account/pair", "pair"],
   ["/data/account/prepare", "/api/account/prepare", "prepare"],
   ["/data/account/exchange", "/api/exchange", "exchange"],
+  ["/data/account/act", "/api/account/act", "act"],
 ];
 type NewWrite = "challenge" | "prove" | "signinStart" | "bridgeRoutes" | "orderSent" | "orderRequote" | "sent" | "revoke" | "guard";
 /** The nine writes of the two halves, in the order they are registered after the three. */
@@ -215,14 +216,14 @@ test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", (
   assert.deepEqual(rebuildQuery("account", "/data/account"), { query: "", fresh: false });
 });
 
-test("the routes: forty-five exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
+test("the routes: forty-six exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
   const paths = [
     ...ROUTES.map(([face]) => face), ...NEW_READS.map(([face]) => face), ...CONNECTED.map(([face]) => face),
     ...IDENTITY_READS.map(([face]) => face), STREAM, FOLLOW,
     ...WRITES.map(([face]) => face), ...NEW_WRITES.map(([face]) => face), ...IDENTITY_WRITES.map(([face]) => face), CALLBACK,
   ];
-  assert.equal(paths.length, 45, "forty-five: the five public reads are the market's (src/market-proxy.ts)");
+  assert.equal(paths.length, 46, "forty-six: the five public reads are the market's (src/market-proxy.ts)");
   assert.ok(routes.every((r) => r.kind === "exact"), "no prefix route");
   assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), paths.map((face) => `exact ${face}`));
   for (const face of paths) {
@@ -893,9 +894,27 @@ test("a write forwards its body as bytes with the Account's status", async () =>
   assert.equal(a.status, 200); assert.equal(a.body, accepted);
 });
 
+test("act passes its body to /api/account/act unparsed and unlogged", async (t) => {
+  const seen: string[] = [];
+  const keep = (...args: unknown[]): void => { seen.push(args.map(String).join(" ")); };
+  t.mock.method(console, "log", keep); t.mock.method(console, "error", keep);
+  t.mock.method(console, "warn", keep); t.mock.method(console, "info", keep);
+  const body = '{ "action": {"type":"closeToAgents"},  "note":"caf\u00e9-secret-act" }';
+  const refusal = '{"ok":false,"refusal":{"code":"E_X","message":"no"}}';
+  for (const [status, answer] of [[200, '{"ok":true,"kind":"outcome"}'], [409, refusal]] as const) {
+    const { routes, fetched, inits } = proxyWith(answering(answer, status));
+    const a = await call(routes, "/data/account/act", JSON_POST, "POST", body);
+    assert.equal(a.status, status); assert.equal(a.body, answer, "the Account's bytes");
+    assert.equal(fetched.at(-1), `${URL_}/api/account/act`);
+    assert.deepEqual(inits.at(-1)!.headers, { "content-type": "application/json" });
+    assert.equal(inits.at(-1)!.body, body, "as posted, never parsed");
+  }
+  assert.equal(seen.some((line) => line.includes("secret-act")), false);
+});
+
 test("a write past its limit is 413, a non-JSON one 415, a query on it 400", async () => {
   assert.deepEqual(WRITE_BODY_LIMIT, {
-    pair: 4_096, prepare: 16_384, exchange: 65_536,
+    pair: 4_096, prepare: 16_384, exchange: 65_536, act: 16_384,
     challenge: 1_024, prove: 2_048, signinStart: 512, bridgeRoutes: 4_096, orderSent: 512, orderRequote: 512, sent: 512, revoke: 512, guard: 256,
     identityToken: 1_024, identitySlackToken: 1_024, identityImessageToken: 1_024, identityNotMe: 256, identityDrop: 256,
   });
@@ -922,7 +941,7 @@ test("a write past its limit is 413, a non-JSON one 415, a query on it 400", asy
     }
     assert.equal((await call(routes, face, { ...JSON_POST, origin: "https://evil.example" }, "POST", "{}")).status, 403, "the fence comes first");
   }
-  assert.equal(fetched.length, 3, "only the three bodies at their limits reach the Account");
+  assert.equal(fetched.length, WRITES.length, "only the bodies at their limits reach the Account");
   const cutOff = Object.assign(new Readable({ read() { this.destroy(new Error("aborted")); } }), { url: "/data/account/prepare", headers: JSON_POST, method: "POST" });
   const halfRead = fakeRes();
   await routes.find((r) => r.path === "/data/account/prepare")!.handler(cutOff as unknown as IncomingMessage, halfRead.res);
@@ -965,7 +984,7 @@ test("an unreachable Account on a write is 503 with the code", async () => {
 
 test("a write's abort is the row's", async (t) => {
   assert.deepEqual(WRITE_ABORT_MS, {
-    pair: 7_000, prepare: 30_000, exchange: 30_000,
+    pair: 7_000, prepare: 30_000, exchange: 30_000, act: 30_000,
     challenge: 7_000, prove: 12_000, signinStart: 30_000, bridgeRoutes: 30_000, orderSent: 30_000, orderRequote: 30_000, sent: 30_000,
     revoke: 7_000, guard: 7_000,
     identityToken: 30_000, identitySlackToken: 30_000, identityImessageToken: 30_000, identityNotMe: 7_000, identityDrop: 7_000,

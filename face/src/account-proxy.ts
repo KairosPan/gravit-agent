@@ -5,7 +5,7 @@
  * origin — so the face's page never asks it: the page asks the face, and the
  * face asks the Account with a plain loopback fetch (no Origin, no
  * Sec-Fetch-Site, no cookie, the URL's own Host, `redirect: "error"`).
- * Forty-five routes: twenty-five reads ({@link ReadRoute} — the Account,
+ * Forty-six routes: twenty-five reads ({@link ReadRoute} — the Account,
  * a connected venue's market and comparison, holdings and venues, the wallet
  * half's `asset`, `funding`, `receive`, `earn`, `sellable` and
  * `signin/status`, and, since plan A2, a connected venue's own
@@ -13,8 +13,8 @@
  * Identity tab's `identity` and `identity/pending`; the public reads
  * `explore`, `quotes`, `candles`, `book` and `trades` are the market's,
  * src/market-proxy.ts, since plan A2's Task 7), the Account's push channel — `stream`, and
- * `stream/markets`, the markets it follows — and seventeen writes
- * ({@link WriteRoute}: `pair`, `prepare`, `exchange`, `wallet/challenge`,
+ * `stream/markets`, the markets it follows — and eighteen writes
+ * ({@link WriteRoute}: `pair`, `prepare`, `exchange`, `act`, `wallet/challenge`,
  * `wallet/prove`, `signin/start`, `bridge-routes`, `live/order-sent`,
  * `live/order-requote`, `live/sent`, `revoke`, `guard`, and Identity's
  * `identity/telegram/token`, since plan B2 `identity/slack/token`, since the iMessage plan `identity/imessage/token`,
@@ -69,8 +69,8 @@
  *   falls 256 KiB behind (the response then destroyed, as `quotes.ts` does)
  *   and on `dispose`. Any other answer is the Account's status and body — its
  *   refusal past 32 streams among them.
- * - The eighteen POST routes — `stream/markets` and the seventeen writes, each at
- *   its Account path ({@link WRITE_PATHS}: `exchange` is `/api/exchange`,
+ * - The nineteen POST routes — `stream/markets` and the eighteen writes, each at
+ *   its Account path ({@link WRITE_PATHS}: `exchange` is `/api/exchange`, `act` `/api/account/act`,
  *   `revoke` `/api/revoke`, `guard` `/api/mode`, the rest
  *   `/api/account/<path>`) — take a body declared `application/json` (else 415, as
  *   the face's other POST routes answer) and a target that names no query
@@ -149,20 +149,20 @@ export const ACCOUNT_ABORT_MS: Readonly<Record<ReadRoute, number>> = {
  * `identityImessageToken` (the Photon project's secret, under the same rule), `identityNotMe` and
  * `identityDrop`. */
 export type WriteRoute =
-  | "pair" | "prepare" | "exchange"
+  | "pair" | "prepare" | "exchange" | "act"
   | "challenge" | "prove" | "signinStart" | "bridgeRoutes" | "orderSent" | "orderRequote" | "sent" | "revoke" | "guard"
   | "identityToken" | "identitySlackToken" | "identityImessageToken" | "identityNotMe" | "identityDrop";
 
 /** Most bytes a write's body may carry, per route; `guard`'s is read under its limit and discarded. */
 export const WRITE_BODY_LIMIT: Readonly<Record<WriteRoute, number>> = {
-  pair: 4_096, prepare: 16_384, exchange: 65_536,
+  pair: 4_096, prepare: 16_384, exchange: 65_536, act: 16_384,
   challenge: 1_024, prove: 2_048, signinStart: 512, bridgeRoutes: 4_096, orderSent: 512, orderRequote: 512, sent: 512, revoke: 512, guard: 256,
   identityToken: 1_024, identitySlackToken: 1_024, identityImessageToken: 1_024, identityNotMe: 256, identityDrop: 256,
 };
 
 /** How long the Account may take on a write, headers and body, per route: a prepare asks the venue for a quote. */
 export const WRITE_ABORT_MS: Readonly<Record<WriteRoute, number>> = {
-  pair: 7_000, prepare: 30_000, exchange: 30_000,
+  pair: 7_000, prepare: 30_000, exchange: 30_000, act: 30_000,
   challenge: 7_000, prove: 12_000, signinStart: 30_000, bridgeRoutes: 30_000, orderSent: 30_000, orderRequote: 30_000, sent: 30_000,
   revoke: 7_000, guard: 7_000,
   identityToken: 30_000, identitySlackToken: 30_000, identityImessageToken: 30_000, identityNotMe: 7_000, identityDrop: 7_000,
@@ -281,6 +281,7 @@ const WRITE_PATHS: Readonly<Record<WriteRoute, { face: string; account: string }
   pair: { face: "pair", account: "/api/account/pair" },
   prepare: { face: "prepare", account: "/api/account/prepare" },
   exchange: { face: "exchange", account: "/api/exchange" },
+  act: { face: "act", account: "/api/account/act" },
   challenge: { face: "wallet/challenge", account: "/api/account/wallet/challenge" },
   prove: { face: "wallet/prove", account: "/api/account/wallet/prove" },
   signinStart: { face: "signin/start", account: "/api/account/signin/start" },
@@ -375,8 +376,8 @@ const originHeader = (req: IncomingMessage): Record<string, string> => {
   return origin === null ? {} : { [FACE_ORIGIN_HEADER]: origin };
 };
 
-/** Mount the twenty-five read routes, the two stream routes, the seventeen write routes and the OAuth sign-in's
- * callback (`signin/callback`, behind `isTrustedNavigation`) — forty-five in all — on the host webserver, over the
+/** Mount the twenty-five read routes, the two stream routes, the eighteen write routes and the OAuth sign-in's
+ * callback (`signin/callback`, behind `isTrustedNavigation`) — forty-six in all — on the host webserver, over the
  * proxy core (src/upstream-proxy.ts). The reader returned is the `account` route's own: it and `/data/account` read
  * through one cache, so the seat route `main.ts` hands it to shares that route's upstream read. `dispose` forgets
  * every kept answer and aborts every open stream's upstream. */
