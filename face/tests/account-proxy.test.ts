@@ -946,7 +946,7 @@ test("a write past its limit is 413, a non-JSON one 415, a query on it 400", asy
   const halfRead = fakeRes();
   await routes.find((r) => r.path === "/data/account/prepare")!.handler(cutOff as unknown as IncomingMessage, halfRead.res);
   assert.equal(halfRead.out.status, 400, "a body that breaks off is refused, never a rejection"); assert.equal(halfRead.out.body, INVALID);
-  assert.equal(fetched.length, 3);
+  assert.equal(fetched.length, WRITES.length);
 });
 
 test("a write never serves stale and never caches", async () => {
