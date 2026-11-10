@@ -45,6 +45,7 @@ describe("the unsigned door", () => {
     expect(unsignedProblem({ type: "connectVenue", connector: "live:alpaca" })).toBe('"connectVenue" is signed: only a browser that signs for the account takes it');
     expect(unsignedProblem(null)).toBe("not an instruction this account knows");
     expect(unsignedProblem({})).toBe("not an instruction this account knows");
+    expect(unsignedProblem({ type: "notAType" })).toBe("not an instruction this account knows");
   });
 
   it("an unsigned paper opening is taken, and its row says local", async () => {
@@ -126,7 +127,8 @@ describe("the unsigned door", () => {
     const routing = { type: "setRouting", routing: "telegram", quietFrom: "", quietTo: "" };
     expect(await ex.act(routing)).toEqual({ ok: true, kind: "account", summary: "routing: telegram" });
     expect(seen).toEqual([routing]);
-    expect(lastRow()).toMatchObject({ kind: "action", venue: "*", tool: "setRouting", signer: UNSIGNED_SIGNER, outcome: "ok", reason: "routing: telegram", native: { unsigned: routing } });
+    expect(lastRow()).toMatchObject({ kind: "action", venue: "*", tool: "setRouting", signer: UNSIGNED_SIGNER, outcome: "ok", reason: "routing: telegram" });
+    expect(lastRow().native).toBeUndefined();
     // the host's own problem refuses, in its words, and the host is not asked
     problem = "no network is connected";
     expect(messageOf(await ex.act(routing))).toBe("no network is connected");
@@ -134,6 +136,30 @@ describe("the unsigned door", () => {
     problem = null;
     expect(messageOf(await ex.act({ ...routing, routing: "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }))).toBe(IDENTITY_WORDS.tokenInField);
     expect(seen.length).toBe(1);
+  });
+
+  it("an unsigned connectNetwork writes neither its keyHash nor its salt to the ledger, taken or refused", async () => {
+    const { svc, ex, rows } = await boot();
+    const keyHash = "0x" + "ab12".repeat(16);
+    const salt = "5a17" + "cd34".repeat(7);
+    const connect = { type: "connectNetwork", network: "telegram", pending: "pend-1", botId: "1", speaksAs: "gravit_bot", operatorId: "2", talksOnlyWith: "2", routing: "telegram", keyHash, salt };
+    const identity = (svc as unknown as { identity?: object }).identity;
+    if (!identity) throw new Error("the service keeps no identity");
+    let problem: string | null = "no pending connection pend-1";
+    Object.assign(identity, { apply: async () => ({ ok: true, kind: "account", summary: "telegram connected" }), problem: () => problem });
+    expect(messageOf(await ex.act(connect))).toBe("no pending connection pend-1");
+    problem = null;
+    expect((await ex.act(connect)).ok).toBe(true);
+    const text = readFileSync(svc.ledgerPath(), "utf8");
+    expect(rows().filter((r) => r.tool === "connectNetwork").map((r) => r.kind)).toEqual(["account-refusal", "action"]);
+    expect(text).not.toContain(keyHash.slice(2));
+    expect(text).not.toContain(salt);
+  });
+
+  it("a type the account does not know is refused without its words, at the door and on the ledger", async () => {
+    const { ex, rows } = await boot();
+    expect(messageOf(await ex.act({ type: "made-up-type-words" }))).toBe("not an instruction this account knows");
+    expect(JSON.stringify(rows())).not.toContain("made-up-type-words");
   });
 
   it("POST /api/account/act: 200 an outcome, 409 a refusal, 400 an action that is not an object", async () => {

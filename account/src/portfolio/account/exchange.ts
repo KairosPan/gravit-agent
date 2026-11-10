@@ -561,8 +561,8 @@ export class AccountEngine {
 
   /** THE UNSIGNED DOOR (account/unsigned.ts; POST /api/account/act): Identity's four and opening a paper account, taken with no signature,
    * in the same line as the signed instructions. No nonce and no envelope: the act is checked as the signed one's fields are (malformed),
-   * then by the same code the signed door runs after its signature check. Its ledger row names the signer `local` and keeps the act itself
-   * (native.unsigned), which is what a restart reads back (restore.ts) */
+   * then by the same code the signed door runs after its signature check. Its ledger row names the signer `local`; a paper opening's row
+   * keeps the act itself (native.unsigned), which is what a restart reads back (restore.ts), an Identity act's keeps none of its fields */
   act(action: unknown): Promise<Outcome> {
     return this.serially(() => this.takeUnsigned(action));
   }
@@ -588,7 +588,9 @@ export class AccountEngine {
       if (problem) return refuse(problem);
       const r = await this.host.identity(action);
       if (isRefusal(r)) return this.unsignedRefused(r, tool);
-      this.host.log({ kind: "action", venue: "*", tool, signer: UNSIGNED_SIGNER, outcome: "ok", reason: r.kind === "account" ? r.summary : tool, native: { unsigned: action } });
+      // no fields on the row: a connect's keyHash and salt never reach the ledger (the signed door keeps only the fingerprint, in its taken
+      // row), and a restart replays no Identity act — the identity's state file is the record
+      this.host.log({ kind: "action", venue: "*", tool, signer: UNSIGNED_SIGNER, outcome: "ok", reason: r.kind === "account" ? r.summary : tool });
       return r;
     }
     if (action.type !== "connectVenue") return refuse(`"${tool}" is signed: only a browser that signs for the account takes it`);

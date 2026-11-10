@@ -6,6 +6,7 @@
  * Who can knock: any program on this machine (the server's fence turns away another site's page), Gravit's shell included — the accepted
  * residual of §6. The ledger's row of an unsigned act names its signer `local`, and a restart brings back only an unsigned row of one of
  * these types (restore.ts); a `local` row of any other type is skipped and said */
+import { isAgentAction, isOwnerAction } from "./sign.ts";
 
 /** the signer an unsigned act's ledger row names */
 export const UNSIGNED_SIGNER = "local";
@@ -22,8 +23,9 @@ export const signedOnly = (type: string): string => `"${type}" is signed: only a
 /** null when `action` may be taken unsigned; else why not, in one fixed sentence (a non-paper connectVenue names connectVenue) */
 export function unsignedProblem(action: unknown): string | null {
   const type = action && typeof action === "object" ? (action as { type?: unknown }).type : undefined;
-  if (typeof type !== "string" || !type) return "not an instruction this account knows";
-  if (!UNSIGNED_TYPES.has(type)) return signedOnly(type.slice(0, 40));
+  // a type the account does not know is said as the signed door says it: never words the caller chose
+  if (typeof type !== "string" || !(isOwnerAction({ type }) || isAgentAction({ type }))) return "not an instruction this account knows";
+  if (!UNSIGNED_TYPES.has(type)) return signedOnly(type);
   if (type === "connectVenue" && (action as { connector?: unknown }).connector !== UNSIGNED_CONNECTOR) return signedOnly(type);
   return null;
 }
