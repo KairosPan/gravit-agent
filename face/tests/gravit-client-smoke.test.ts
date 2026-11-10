@@ -162,11 +162,12 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
       const row = drawn.match(/<div class="venue" data-network="slack">[\s\S]*?<\/div>/)?.[0] ?? "";
       assert.match(row, /Connected/);
       assert.match(row, /Speaks as @gravit/);
-      assert.match(row, /data-kind="disconnectNetwork" data-network="slack"/);
+      // Disconnect… asks first (sign-only-money: Identity without a signature, its own sheet), no signed action drawn on the row
+      assert.match(row, /data-action="askIdentityDisconnect" data-network="slack"/);
       assert.match(drawn, /<input type="checkbox" aria-label="Chat with Gravit on Slack" checked data-action="identityTick" data-row="chat" data-network="slack">/);
       signed.dispatch("identityConnectOpen", "slack");
       const sheet = renderConnectDrawer(signed.get());
-      assert.match(sheet, /Connect Slack · 1 of 4 · App tokens/);
+      assert.match(sheet, /Connect Slack · 1 of 3 · App tokens/);
       assert.match(sheet, /id="identity-manifest"[^>]*>[\s\S]*socket_mode_enabled/);
       assert.match(sheet, /id="identity-app-token"/);
       assert.match(sheet, /id="identity-bot-token"/);

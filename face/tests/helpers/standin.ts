@@ -68,14 +68,22 @@ export const freePort = (): Promise<number> => new Promise((resolvePort, reject)
  * process, and what it said. */
 export interface Standin { url: string; marketUrl: string; home: string; code: string; child: ChildProcess; log: () => string }
 
-/** The stand-in's account, market, pairing code and home lines, read from what it printed; `undefined` until all four are
- * there. */
-export function parseStandinLines(out: string): { url: string; marketUrl: string; code: string; home: string } | undefined {
+/** The code the stand-in's account printed for each browser that asked for one (`a browser asks to sign for the account (<label>
+ * · <kid8>): code ABCD-EFGH, …`), by the first eight characters of its key id — the last line for a browser wins, as a new ask
+ * makes a new code. */
+export type StandinAsks = Record<string, string>;
+const ASK_LINE = /^a browser asks to sign for the account \(.* · ([0-9a-f]{8})\): code (\S+?),/gm;
+
+/** The stand-in's account, market, pairing code and home lines, read from what it printed, with the codes asked for so far
+ * ({@link StandinAsks}); `undefined` until the four lines are there. */
+export function parseStandinLines(out: string): { url: string; marketUrl: string; code: string; home: string; asks: StandinAsks } | undefined {
   const url = /^\s*account\s+(http\S+)/m.exec(out)?.[1];
   const marketUrl = /^\s*market\s+(http\S+)/m.exec(out)?.[1];
   const code = /^\s*pairing code\s+(\S+)/m.exec(out)?.[1];
   const home = /^\s*home\s+(\S+)/m.exec(out)?.[1];
-  return url !== undefined && marketUrl !== undefined && code !== undefined && home !== undefined ? { url, marketUrl, code, home } : undefined;
+  const asks: StandinAsks = {};
+  for (const [, kid8, asked] of out.matchAll(ASK_LINE)) asks[kid8!] = asked!;
+  return url !== undefined && marketUrl !== undefined && code !== undefined && home !== undefined ? { url, marketUrl, code, home, asks } : undefined;
 }
 
 /** Start the stand-in from the install `dir` ({@link STANDIN_DIR} unless given) on `port` and wait for its account,
@@ -91,7 +99,7 @@ export function startStandin(port: number, dir = STANDIN_DIR): Promise<Standin> 
     const timer = setTimeout(() => { child.kill("SIGINT"); reject(new Error(`the stand-in printed no account line in ${START_MS / 1000} s:\n${out}`)); }, START_MS);
     const look = (): void => {
       const lines = parseStandinLines(out);
-      if (lines !== undefined) { clearTimeout(timer); resolveStandin({ ...lines, child, log }); }
+      if (lines !== undefined) { clearTimeout(timer); const { url, marketUrl, code, home } = lines; resolveStandin({ url, marketUrl, code, home, child, log }); }
     };
     child.stdout.on("data", (chunk: Buffer) => { out += chunk.toString(); look(); });
     child.stderr.on("data", (chunk: Buffer) => { out += chunk.toString(); });

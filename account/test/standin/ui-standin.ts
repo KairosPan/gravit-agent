@@ -375,8 +375,9 @@ export async function startStandin(o: StandinOptions): Promise<Standin> {
   let misses = 0;
   let handed = false;
   const plain = (x: string) => x.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-  engine.pairDevice = (jwk: unknown, label = "this browser", given?: string) => {
-    if (handed || !isJwk(jwk) || isOwner(engine.state, `device:${kidOf(jwk)}`)) return pairDevice(jwk, label, given);
+  engine.pairDevice = (jwk: unknown, label = "this browser", given?: string, ask?: boolean) => {
+    // once a browser owns the account, every knock is the account's own: a code typed is that browser's, and Get a code (`ask`) reaches it
+    if (handed || !isJwk(jwk) || isOwner(engine.state, `device:${kidOf(jwk)}`)) return pairDevice(jwk, label, given, ask);
     const kid = kidOf(jwk);
     if (given === undefined || given === "") return { ok: true, kid, role: "needs-code" };
     if (misses >= 5) return no("E_ACCOUNT_OWNER_SURFACE", { message: "too many wrong pairing codes: restart the stand-in for a new one" });

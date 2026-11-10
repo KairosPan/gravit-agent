@@ -13,15 +13,21 @@ import { memoryKeys } from "../../client/js/wire/key-store.js";
 
 /** An answer as `host/owner.js` hands it back: the face's status and the body it passed through. */
 export interface OwnerAnswer { status: number; body: Record<string, unknown> }
+/** The unsigned door's answer, as `host/act.js` postAct hands it back: taken with the Account's body, or its sentence. */
+export type UnsignedAnswer = { ok: true; body: Record<string, unknown> } | { ok: false; said: string };
 /** The owner slice of the client's state: this device's standing at the Account. */
 export interface OwnerStanding { role: string; kid: string; refusal: string | null; busy: boolean }
 /** The device's calls, as `startOwner` returns them. */
 export interface OwnerCalls {
   ready(code?: string): Promise<void>;
+  /** Get a code: the pair route with `ask`, so the Account prints a code of this browser's own. */
+  askCode(): Promise<void>;
   standing(page: unknown): Promise<void>;
   prepare(draft: Record<string, unknown>): Promise<OwnerAnswer>;
   submit(prepared: unknown): Promise<OwnerAnswer>;
   act(draft: Record<string, unknown>): Promise<OwnerAnswer>;
+  /** An act the Account takes unsigned, posted once to its unsigned door (`host/act.js`). */
+  unsigned(action: Record<string, unknown>): Promise<UnsignedAnswer>;
   signOut(): Promise<OwnerAnswer>;
   signIn(): Promise<void>;
   close(): void;
