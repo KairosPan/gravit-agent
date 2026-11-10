@@ -66,17 +66,20 @@ import { actionHash, BRAIN_KEY_TTL_MS, PAPER_TTL_MS, PAPER_TYPES, SIGN_OUT_TTL_M
 import { deskBrainKeyProblem, fingerprintOf, setBrainKeyProblem } from "./brain-keys.ts";
 import { identitySignedProblem, isIdentityAction, type IdentityAction } from "../identity/identity.ts";
 import { UNSIGNED_SIGNER, unsignedProblem } from "./unsigned.ts";
+import { cleanLabel, DEVICE_CODE_MS, DEVICE_CODE_TRIES, pairingCode } from "./pairing.ts";
 import { LiveMoves, type LiveMoney } from "./live-moves.ts";
 import { LiveOrders, type CloseQuote, type LiveOrder, type OrderQuote } from "./live-orders.ts";
 import { LiveEarns, type EarnDesk, type EarnQuote, type LiveEarn } from "./live-earn.ts";
 import type { KeptAuthorisation } from "./pay-real.ts";
 import { CARD_TTL_MS, modeRules, type ModeRule } from "./mode-rules.ts";
 import { TOPIC_WORDS, type MemoryStore } from "./memory.ts";
-import { activeAgents, agentStatus, applyOwner, applyReport, ASK_TTL_MS, askProblem, ASKS_PER_AGENT, ASKS_PER_HOUR, cleanName, covers, deviceKeys, EARN_NAMES, emptyState, isOwner, MAX_ASKS, nameHolder, refsOf, renewSpend, spendFor, type AccountState, type AgentKey, type AgentReport, type AskKind, type OwnerKey, type SpendApproval, type SubAccount } from "./state.ts";
+import { activeAgents, agentStatus, applyOwner, applyReport, ASK_TTL_MS, askProblem, ASKS_PER_AGENT, ASKS_PER_HOUR, cleanName, covers, deviceKeys, EARN_NAMES, emptyState, isOwner, markLetIn, MAX_ASKS, MAX_SIGNERS, nameHolder, refsOf, renewSpend, spendFor, type AccountState, type AgentKey, type AgentReport, type AskKind, type OwnerKey, type SpendApproval, type SubAccount } from "./state.ts";
 
 const HUB = "metamask";
 /** devices that have asked to sign and wait for an owner, at most, at one time */
 const MAX_PENDING_DEVICES = 10;
+/** a code as it is compared: its letters and digits, in capitals — `abcd efgh` is `ABCD-EFGH` */
+const plain = (x: string): string => x.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 const STABLE = new Set(["USD", "USDC", "USDT", "pUSD"]);
 /** how long a card waits for the owner: written once, in account/mode-rules.ts (the page and the agents read it from there) */
 export { CARD_TTL_MS };
@@ -167,6 +170,8 @@ export interface Host {
   /** the last device that signed for the account signed out: a new pairing code is made and said where the first one was, so that the
    * code seen before lets no browser in */
   ownerGone?(): void;
+  /** a waiting browser asked for a code of its own (pairDevice with `ask`): the service prints it in its terminal, for that page */
+  askedCode?(label: string, kid: string, code: string): void;
   /** a real account's agent wallets (live/agent-wallet.ts): the address of the key made for one, and the wallet shown on the account once
    * the owner has signed it into being */
   agentWalletAddress?(name: string): Hex | Refusal;
@@ -415,6 +420,8 @@ export class AccountEngine {
   private earnSeq = 0;
   /** wrong pairing codes since the server started: after a few, none is accepted until it restarts */
   private codeMisses = 0;
+  /** the live code of each waiting browser that asked for one, by its kid: in memory only, so a restart voids every one */
+  private readonly deviceCodes = new Map<string, { code: string; until: number; misses: number }>();
   /** what agents have asked the owner for: in memory only, never rebuilt after a restart */
   private asks: AgentAsk[] = [];
   private askSeq = 0;
@@ -512,40 +519,80 @@ export class AccountEngine {
   // ---- the owner's device ---------------------------------------------------------
 
   /** A browser offers the public half of its device key. The first one becomes the owner's device (trust on first use: whoever opens the
-   * page first holds the account — a real product pairs out of band); a later one waits until the owner makes it a signer. */
-  pairDevice(jwk: unknown, label = "this browser", code?: string): { ok: true; kid: string; role: "owner" | "pending" | "needs-code" } | Refusal {
+   * page first holds the account — a real product pairs out of band); a later one waits until the owner makes it a signer, or until it types
+   * the code it asked for (`ask`), which the account printed in its terminal. The label it gives is cleaned first (pairing.ts cleanLabel) */
+  pairDevice(jwk: unknown, label?: string, code?: string, ask?: boolean): { ok: true; kid: string; role: "owner" | "pending" | "needs-code" | "asked" } | Refusal {
     if (!isJwk(jwk)) return no("E_ACCOUNT_BAD_ACTION", { message: "a device key is a P-256 public key (JWK)" });
     const kid = kidOf(jwk);
     const id = `device:${kid}`;
     if (isOwner(this.state, id)) return { ok: true, kid, role: "owner" };
+    const name = cleanLabel(label);
     // a server that moves real money does not hand the account to the first browser to ask: the owner types the code its terminal printed
     const expected = this.host.pairingCode?.();
     if (this.state.owners.length === 0 && expected !== undefined) {
       if (code === undefined || code === "") return { ok: true, kid, role: "needs-code" };
       if (this.codeMisses >= 5) return no("E_ACCOUNT_OWNER_SURFACE", { message: "too many wrong pairing codes: restart the server for a new one" });
-      const plain = (x: string) => x.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
       if (plain(code) !== plain(expected)) {
         this.codeMisses++;
         return no("E_ACCOUNT_OWNER_SURFACE", { message: `that is not the pairing code this server printed in its terminal (${5 - this.codeMisses} tries left)` });
       }
     }
     if (this.state.owners.length === 0) {
-      this.state = { ...this.state, owners: [{ id, kind: "device", label, jwk: { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y }, addedAt: this.host.now() }] };
+      this.deviceCodes.clear();
+      this.state = { ...this.state, owners: [{ id, kind: "device", label: name, jwk: { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y }, addedAt: this.host.now(), via: "first" }] };
       // its PUBLIC key rides on the row: a restarted account knows its owner's device again (account/restore.ts)
       // and whether it typed the pairing code: a restart that asks for one does not take an owner who paired without it
-      this.host.log({ kind: "action", venue: "*", tool: "account_pair", signer: id, reason: `the first device to open the account became its owner's device (${label})`, native: { jwk: { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y }, label, ...(expected !== undefined ? { code: true } : {}) } });
+      this.host.log({ kind: "action", venue: "*", tool: "account_pair", signer: id, reason: `the first device to open the account became its owner's device (${name})`, native: { jwk: { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y }, label: name, ...(expected !== undefined ? { code: true } : {}) } });
       return { ok: true, kid, role: "owner" };
     }
+    // the code it asked for: the right one lets it in as Let it sign does (owners from its waiting entry, the threshold unchanged)
+    if (code !== undefined && code !== "") return this.admitByCode(kid, code);
     if (!this.state.pendingDevices.some((d) => d.kid === kid)) {
       // a waiting device is only asking; an owner's signature makes it a signer (convertToMultiSigUser). At most ten wait at a time
       if (this.state.pendingDevices.length >= MAX_PENDING_DEVICES) return no("E_ACCOUNT_OWNER_SURFACE", { message: `${MAX_PENDING_DEVICES} devices are waiting already: the owner lets one in from a device that signs, or the server is restarted` });
       const key = { kty: "EC" as const, crv: "P-256" as const, x: jwk.x, y: jwk.y };
       // the label it gave goes with it: let in later, it is shown under that name, not as "device"
-      this.state = { ...this.state, pendingDevices: [...this.state.pendingDevices, { kid, jwk: key, at: this.host.now(), label }] };
+      this.state = { ...this.state, pendingDevices: [...this.state.pendingDevices, { kid, jwk: key, at: this.host.now(), label: name }] };
       // its PUBLIC key rides on the row too, so that the owner's signature making it a signer can be checked again after a restart
-      this.host.log({ kind: "action", venue: "*", tool: "account_pair", signer: id, reason: `a device asked to sign for the account (${label}); it waits until an owner lets it in`, native: { jwk: key, label, pending: true } });
+      this.host.log({ kind: "action", venue: "*", tool: "account_pair", signer: id, reason: `a device asked to sign for the account (${name}); it waits until an owner lets it in`, native: { jwk: key, label: name, pending: true } });
     }
-    return { ok: true, kid, role: "pending" };
+    if (!ask) return { ok: true, kid, role: "pending" };
+    // asking again while its code lives prints nothing new: one live code per waiting device, bound to its key
+    const now = this.nowMs();
+    for (const [k, c] of this.deviceCodes) if (now > c.until || !this.state.pendingDevices.some((d) => d.kid === k)) this.deviceCodes.delete(k);
+    if (!this.deviceCodes.has(kid)) {
+      const fresh = pairingCode();
+      this.deviceCodes.set(kid, { code: fresh, until: now + DEVICE_CODE_MS, misses: 0 });
+      this.host.askedCode?.(this.state.pendingDevices.find((d) => d.kid === kid)?.label || name, kid, fresh);
+    }
+    return { ok: true, kid, role: "asked" };
+  }
+
+  /** a waiting browser types the code the terminal printed for it: wrong tries are counted against that code alone, and the right one, once,
+   * makes it a signer and is gone. Its row is marked admitted by code: a restart lets it in again (restore.ts), the phone is told */
+  private admitByCode(kid: string, code: string): { ok: true; kid: string; role: "owner" } | Refusal {
+    const none = () => no("E_ACCOUNT_OWNER_SURFACE", { message: "no code is live for this browser: press Get a code" });
+    const live = this.deviceCodes.get(kid);
+    const waiting = this.state.pendingDevices.find((d) => d.kid === kid);
+    if (!live || this.nowMs() > live.until || !waiting) {
+      this.deviceCodes.delete(kid);
+      return none();
+    }
+    if (plain(code) !== plain(live.code)) {
+      live.misses++;
+      if (live.misses >= DEVICE_CODE_TRIES) {
+        this.deviceCodes.delete(kid);
+        return no("E_ACCOUNT_OWNER_SURFACE", { message: "too many wrong codes: press Get a code for a new one" });
+      }
+      return no("E_ACCOUNT_OWNER_SURFACE", { message: `that is not the code printed for this browser (${DEVICE_CODE_TRIES - live.misses} tries left)` });
+    }
+    if (this.state.owners.length >= MAX_SIGNERS) return no("E_ACCOUNT_LIMIT", { message: `an account has 1 to ${MAX_SIGNERS} signers: remove one under Settings › Devices first`, detail: { max: MAX_SIGNERS } });
+    this.deviceCodes.delete(kid);
+    const id = `device:${kid}`;
+    const label = waiting.label || "device";
+    this.state = { ...this.state, owners: [...this.state.owners, { id, kind: "device", label, jwk: waiting.jwk, addedAt: this.host.now(), via: "code" }], pendingDevices: this.state.pendingDevices.filter((d) => d !== waiting) };
+    this.host.log({ kind: "action", venue: "*", tool: "account_pair", signer: id, reason: `a device was let in with the code its terminal printed (${label})`, native: { jwk: waiting.jwk, label, code: true, admitted: true } });
+    return { ok: true, kid, role: "owner" };
   }
 
   // ---- the front door ---------------------------------------------------------------
@@ -752,7 +799,8 @@ export class AccountEngine {
         const here = action.type === "approveSpend" ? [...this.host.accounts().map((a) => a.id), ...this.state.subAccounts.map((x) => `sub:${x.name}`)] : [];
         const next = applyOwner(this.state, action, envelope, now, here, this.applyOptions());
         if (isRefusal(next)) return next;
-        this.state = next;
+        // a device a change of signers lets in was let in by the signer: Settings › Devices says from which
+        this.state = action.type === "convertToMultiSigUser" ? markLetIn(this.state, next, signer) : next;
         const summary = this.summary(action);
         // a limit over "every venue" is written out as the venues there were: the row keeps that list, so a restart rebuilds the same limit
         const made = action.type === "approveSpend" ? next.spends.find((x) => x.envelope === envelope) : undefined;
@@ -766,6 +814,7 @@ export class AccountEngine {
         // tries counted against the old one with it
         if (action.type === "signOut" && next.owners.length === 0) {
           this.codeMisses = 0;
+          this.deviceCodes.clear();
           this.host.ownerGone?.();
         }
         return { ok: true, kind: "account", summary };
@@ -1561,7 +1610,7 @@ export class AccountEngine {
       const runways: RunwayRow[] = [...d.in.map((x) => rail("In", x)), ...d.out.map((x) => rail("Out", x)), ...d.inside.map((x) => ({ dir: "Inside", protocol: x.protocol, carries: `${x.from} → ${x.to}`, chains: [], feeOn1000: 0, lands: "now", access: x.access, final: true })), ...d.swap.map((x) => ({ dir: "Swap", protocol: x.protocol, carries: x.pair.join(" ⇄ "), chains: [], feeOn1000: r2((1000 * x.feeBps) / 10_000), lands: "now", access: x.access, minUsd: x.minUsd, final: true }))];
       return { id: v.id, name: v.name, ...(v.connector ? { connector: v.connector } : {}), frontLine: d.frontLine, usd: r2(v.holdings.reduce((s, h) => s + h.usd, 0)), cashUsd: r2(v.holdings.filter((h) => stable(h) && !h.inTransit).reduce((s, h) => s + h.usd, 0)), holdings: v.holdings.map((h) => { const logo = holdingIcon(h, v.connector); return { asset: h.asset, amount: h.amount, usd: h.usd, class: h.class, note: h.note, inTransit: h.inTransit === true, ...(h.freeUsd !== undefined ? { freeUsd: h.freeUsd } : {}), ...(h.freeAmount !== undefined ? { freeAmount: h.freeAmount } : {}), ...(logo ? { icon: logo } : {}) }; }), ...(d.restricted ? { restricted: d.restricted } : {}), ...(v.plugged ? { plugged: true, via: v.watchOnly ? `${v.provider} · ${v.scope.limits[0] ?? ""}` : v.connector === "wallet" ? "plugged in by address" : `plugged in · ${v.scope.limits[0] ?? ""}` } : {}), ...(v.watchOnly ? { live: true as const, watchOnly: v.watchOnly, ...(v.paper ? { paper: true as const, ...(v.paperStartUsd ? { paperStartUsd: v.paperStartUsd } : {}), ...(v.paperAddedUsd ? { paperAddedUsd: v.paperAddedUsd } : {}) } : {}), ...(v.asOf ? { asOf: v.asOf } : {}), ...(v.stale ? { stale: v.stale } : {}), ...(v.proven ? { proven: v.proven } : {}), ...(v.liveCan ? { liveCan: v.liveCan } : {}), ...(v.liveTrade ? { trade: { ...v.liveTrade, kinds: v.liveTrade.kinds ?? tradeKinds(v.connector, v.liveTrade.what) } } : {}), ...earnOf(v.id), ...(v.noTradeBecause ? { noTradeBecause: v.noTradeBecause } : {}), ...(v.readOnlyBecause ? { readOnlyBecause: v.readOnlyBecause } : {}), ...(v.address ? { address: v.address } : {}) } : v.live ? { live: true as const } : {}), in: label(d.in[0], v.name), out: label(d.out[0], v.name), fiat: (d.in[0] ?? d.out[0])?.chains.length === 0, ledgers: [...new Set(d.inside.flatMap((x) => (x.from === "chain" ? [] : [x.from, x.to])))], swaps: d.swap.map((x) => ({ pair: x.pair, feeBps: x.feeBps, minUsd: x.minUsd, access: x.access })), agentKey: d.agentKey, runways };
     });
-    const owners = this.state.owners.map((o) => ({ id: o.id, kind: o.kind, label: o.label }));
+    const owners = this.state.owners.map((o) => ({ id: o.id, kind: o.kind, label: o.label, ...(o.via ? { via: o.via } : {}), ...(o.by ? { by: o.by } : {}), addedAt: o.addedAt }));
     // a paper account's numbers are not money: its row is on the page, nothing of it is in the totals
     const counted = venues.filter((v) => !("paper" in v && v.paper === true));
     return {
@@ -1769,7 +1818,7 @@ export interface AccountPage {
    * names its intent's kind (trade, move …). `agent`: the key that asked, and its name on the account */
   cards: Array<{ id: string; flight: string; usd: number; reason: string; hash: Hex; kind: string; agent?: string; agentName?: string; expiresAt?: string; shown: Array<{ name: string; value: string }> }>;
   subAccounts: Array<{ id: string; name: string; agent: string; agentName: string; address: string; capUsd: number; balanceUsd: number }>;
-  signers: { owners: Array<{ id: string; kind: string; label: string }>; threshold: number; pendingDevices: Array<{ kid: string; at: string }> };
+  signers: { owners: Array<{ id: string; kind: string; label: string; via?: "first" | "letIn" | "code"; by?: string; addedAt: string }>; threshold: number; pendingDevices: Array<{ kid: string; at: string }> };
   destinations: Array<AccountState["destinations"][number] & { usable: boolean; usableOn: string }>;
   activeKeys: number;
   /** the payees the account has paid and the payment sessions it holds open */

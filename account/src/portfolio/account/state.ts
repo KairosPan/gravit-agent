@@ -61,6 +61,16 @@ export interface OwnerKey {
   label: string;
   jwk?: Jwk | undefined;
   addedAt: string;
+  /** how it came in: the account's first device, let in by a signer's Let it sign (`by` that signer), or with the code its terminal
+   * printed. Read from the ledger again after a restart (account/restore.ts); absent on a signer that came in another way */
+  via?: "first" | "letIn" | "code" | undefined;
+  by?: string | undefined;
+}
+
+/** a change of signers just taken (convertToMultiSigUser): the devices it made signers were let in by `by` */
+export function markLetIn(before: AccountState, after: AccountState, by: string): AccountState {
+  const had = new Set(before.owners.map((o) => o.id));
+  return { ...after, owners: after.owners.map((o) => (o.kind === "device" && !had.has(o.id) ? { ...o, via: "letIn" as const, by } : o)) };
 }
 
 export interface AgentKey {

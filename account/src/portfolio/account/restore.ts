@@ -38,8 +38,9 @@ import type { LiveOrder } from "./live-orders.ts";
 import type { KeptAuthorisation } from "./pay-real.ts";
 import type { Payment } from "./payments.ts";
 import { actionHash, isAgentAction, isOwnerAction, isJwk, kidOf, malformed, signerOf, type AgentAction, type Envelope, type OwnerAction } from "./sign.ts";
-import { applyOwner, applyReport, deviceKeys, isOwner, type AccountState, type ApplyOptions, type SpendApproval } from "./state.ts";
+import { applyOwner, applyReport, deviceKeys, isOwner, markLetIn, MAX_SIGNERS, type AccountState, type ApplyOptions, type SpendApproval } from "./state.ts";
 import { UNSIGNED_CONNECTOR, UNSIGNED_SIGNER, UNSIGNED_TYPES } from "./unsigned.ts";
+import { cleanLabel } from "./pairing.ts";
 
 /** the first row of every run that continues the account */
 export interface RunMark {
@@ -223,9 +224,18 @@ export async function rebuild(rows: readonly LedgerRow[], base: AccountState, op
     }
     // the owner's first device: its public key, as the pairing row recorded it
     if (row.kind === "action" && row.tool === "account_pair") {
-      const n = row.native as { jwk?: unknown; label?: unknown; pending?: unknown } | undefined;
+      const n = row.native as { jwk?: unknown; label?: unknown; pending?: unknown; admitted?: unknown } | undefined;
       if (n?.pending === true) {
-        if (isJwk(n.jwk) && row.signer === `device:${kidOf(n.jwk)}`) asked.set(row.signer, { jwk: { kty: "EC", crv: "P-256", x: n.jwk.x, y: n.jwk.y }, ...(typeof n.label === "string" && n.label.trim() ? { label: n.label.trim().slice(0, 40) } : {}) });
+        if (isJwk(n.jwk) && row.signer === `device:${kidOf(n.jwk)}`) asked.set(row.signer, { jwk: { kty: "EC", crv: "P-256", x: n.jwk.x, y: n.jwk.y }, ...(typeof n.label === "string" && n.label.trim() ? { label: cleanLabel(n.label) } : {}) });
+        continue;
+      }
+      // a device let in with the code its terminal printed (exchange.ts admitByCode): a signer again, as it came in — only while the account
+      // had a signer then (no code is minted before the first device), and never past the most signers an account has
+      if (n?.admitted === true) {
+        if (!isJwk(n.jwk) || row.signer !== `device:${kidOf(n.jwk)}`) skipped.push(`a device let in with a code of ${row.ts}: its key does not match the device the row names`);
+        else if (s.owners.length === 0) skipped.push(`a device let in with a code of ${row.ts}: no device signed for the account then: not brought back`);
+        else if (s.owners.length >= MAX_SIGNERS) skipped.push(`a device let in with a code of ${row.ts}: the account had ${MAX_SIGNERS} signers then: not brought back`);
+        else if (!isOwner(s, row.signer)) s = { ...s, owners: [...s.owners, { id: row.signer, kind: "device", label: typeof n.label === "string" ? cleanLabel(n.label) : "device", jwk: { kty: "EC", crv: "P-256", x: n.jwk.x, y: n.jwk.y }, addedAt: row.ts, via: "code" }] };
         continue;
       }
       // an owner who paired without the code is not taken by a run that asks for one (a read-only run let the first browser in): it pairs again
@@ -234,7 +244,7 @@ export async function rebuild(rows: readonly LedgerRow[], base: AccountState, op
         continue;
       }
       if (s.owners.length === 0 && n && isJwk(n.jwk) && row.signer === `device:${kidOf(n.jwk)}`) {
-        s = { ...s, owners: [{ id: row.signer, kind: "device", label: typeof n.label === "string" ? n.label : "this browser", jwk: { kty: "EC", crv: "P-256", x: n.jwk.x, y: n.jwk.y }, addedAt: row.ts }] };
+        s = { ...s, owners: [{ id: row.signer, kind: "device", label: typeof n.label === "string" ? n.label : "this browser", jwk: { kty: "EC", crv: "P-256", x: n.jwk.x, y: n.jwk.y }, addedAt: row.ts, via: "first" }] };
       }
       continue;
     }
@@ -318,7 +328,7 @@ export async function rebuild(rows: readonly LedgerRow[], base: AccountState, op
           // it took an id when it was first taken (its row says it went through): the ids after it stay the ones they were given, so the
           // limits, and what was spent and placed under them, keep their names
           if (action.type === "approveSpend" || action.type === "createSubAccount" || (action.type === "setIntent" && action.id === "" && action.validUntil !== 0)) s = { ...s, seq: s.seq + 1 };
-        } else s = next;
+        } else s = action.type === "convertToMultiSigUser" ? markLetIn(from, next, signer && isOwner(from, signer) ? signer : [...signers][0]!) : next;
       } else if (action.type === "setPolicy") {
         if (action.change === "mode" && action.value === "open") openedAt = i;
         if (action.change === "maxLeverage" && /^\d{1,3}$/.test(action.value) && Number(action.value) >= 1) signedLeverage = Number(action.value);

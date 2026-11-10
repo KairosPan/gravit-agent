@@ -153,6 +153,26 @@ describe("the account after a restart", () => {
     ]);
   });
 
+  it("a device let in with a code comes back as one, from its row — only while a device signed for the account then", async () => {
+    const tablet = simKey("device:restore-tablet");
+    const key = { kty: "EC" as const, crv: "P-256" as const, x: tablet.jwk.x, y: tablet.jwk.y };
+    const admitted = { kind: "action" as const, venue: "*", tool: "account_pair", signer: `device:${tablet.kid}`, reason: "a device was let in with the code its terminal printed (Tablet)", native: { jwk: key, label: "Tablet\nhttps://evil.example", code: true, admitted: true } };
+    // no device signed then: an admission row does not make the first one
+    const bare = fresh();
+    await run(bare, 0);
+    new Ledger(join(bare, "portfolio", ledgers(bare)[0]!), () => new Date(START + 60_000).toISOString()).append(admitted);
+    const b = await run(bare, HOUR);
+    expect(b.engine.state.owners).toEqual([]);
+    expect((b.svc.restored as { skipped: string[] }).skipped).toEqual(["a device let in with a code of 2026-10-05T14:01:00.000Z: no device signed for the account then: not brought back"]);
+    // the owner's browser signed then: the row lets the tablet in, said so (the accepted residual of a ledger written by hand: Devices shows it)
+    const home = fresh();
+    const a = await run(home, 0);
+    expect(a.engine.pairDevice(browser.jwk, "Desk", "K7QX-M2PA")).toMatchObject({ role: "owner" });
+    new Ledger(join(home, "portfolio", ledgers(home)[0]!), () => new Date(START + 60_000).toISOString()).append(admitted);
+    const c = await run(home, HOUR);
+    expect(c.engine.state.owners.map((o) => [o.id, o.label, o.via])).toEqual([[`device:${browser.kid}`, "Desk", "first"], [`device:${tablet.kid}`, "Tablet <link>", "code"]]);
+  });
+
   it("a ledger whose hash chain breaks is read up to the break, and nothing after it comes back", async () => {
     const home = fresh();
     const a = await run(home, 0, { seedOwner: true });

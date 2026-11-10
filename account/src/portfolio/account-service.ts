@@ -95,6 +95,14 @@ export function codeLine(log: string): string | undefined {
   return start >= 0 ? lines.slice(start + 1).findLast((l) => l.includes("pairing code:"))?.trim() : undefined;
 }
 
+/** A WAITING BROWSER'S CODE IN THE SERVICE'S LOG, as `code` shows it once the account has an owner: the newest asks-to-sign line of the run
+ * that is up now (service.ts askedCode). An earlier run's is not this run's: its code died with it */
+export function askLine(log: string): string | undefined {
+  const lines = log.split("\n");
+  const start = lines.map((l) => l.startsWith("TRADING IS ON") || l.startsWith("read-only:")).lastIndexOf(true);
+  return start >= 0 ? lines.slice(start + 1).findLast((l) => l.startsWith("a browser asks to sign for the account ("))?.trim() : undefined;
+}
+
 const domain = (): string => `gui/${userInfo().uid}`;
 const launchctl = (args: string[], quiet = false): string => {
   try {
@@ -165,14 +173,16 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   } else if (cmd === "logs") {
     for (const f of [p.log, p.errLog]) if (existsSync(f)) console.log(`== ${f}\n${readFileSync(f, "utf8").split("\n").slice(-40).join("\n")}`);
   } else if (cmd === "code") {
-    // the code of the run that is up now, and only while no browser owns the account: a code already used, or an earlier run's, is not shown —
-    // and the last one this run said (the last device signed out: a new code replaced the one it started with)
+    // the code of the run that is up now: while no browser owns the account, the pairing code — a code already used, or an earlier run's, is
+    // not shown — and the last one this run said (the last device signed out: a new code replaced the one it started with); once one does,
+    // the newest code a waiting browser asked for (Get a code)
     const port = portOf(installed()?.args ?? rest);
     const owners = await ownerCount(port);
+    const log = () => (existsSync(p.log) ? readFileSync(p.log, "utf8") : "");
     if (owners === undefined) console.log(`the account is not answering on ${port} yet: give it a few seconds (npm run account:service -- status)`);
-    else if (owners > 0) console.log("no pairing code is needed: the account already has its owner's browser");
+    else if (owners > 0) console.log(askLine(log()) ?? "no browser asked for a code in this run: press Get a code on the page that does not sign");
     else {
-      const line = codeLine(existsSync(p.log) ? readFileSync(p.log, "utf8") : "");
+      const line = codeLine(log());
       console.log(line ?? "no pairing code in this run's log: npm run account:service -- logs");
     }
   } else {

@@ -41,7 +41,9 @@ describe("R1 · a change of signers survives a restart", () => {
     const b = await run(home, HOUR);
     expect(b.engine.state.owners.map((o) => o.id)).toEqual([dev(laptop)]);
     expect(agentStatus(b.engine.state, cc.address, b.now())).not.toBe("ok");
-    expect(b.engine.pairDevice(browser.jwk, "browser", CODE)).toMatchObject({ role: "pending" });
+    // the first owner's code is no way back once the account has a signer: typed now, it is a waiting browser's own code, and none is live
+    expect(b.engine.pairDevice(browser.jwk, "browser", CODE)).toMatchObject({ ok: false, message: "no code is live for this browser: press Get a code" });
+    expect(b.engine.pairDevice(browser.jwk, "browser")).toMatchObject({ role: "pending" });
     expect(b.engine.pairDevice(laptop.jwk, "laptop")).toMatchObject({ role: "owner" });
     expect(b.svc.restored?.skipped).toEqual([]);
   });

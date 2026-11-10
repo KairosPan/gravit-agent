@@ -654,6 +654,9 @@ export class PortfolioService {
       },
       pairingCode: () => this.pairCode,
       ownerGone: () => this.newPairingCode(),
+      // a waiting browser's own code (account/exchange.ts pairDevice): said in the server's own output, which only the user reads — the
+      // label is the browser's own, cleaned of line breaks and links before it got here (pairing.ts cleanLabel)
+      askedCode: (label, kid, code) => console.log(`a browser asks to sign for the account (${label} · ${kid.slice(0, 8)}): code ${code}, good for 10 minutes — type it on that page`),
       memory: () => this.memory,
       desk: (action, who) => (this.desk ? this.desk.apply(action, who) : Promise.resolve(no("E_ACCOUNT_BAD_ACTION", { message: "this account keeps no desk: it is the real account's" }))),
       // a brain's key (account/brain-keys.ts): the key staged for this signature is taken here — once — and written to the provider's file.

@@ -384,7 +384,8 @@ export async function startStandin(o: StandinOptions): Promise<Standin> {
       misses++;
       return no("E_ACCOUNT_OWNER_SURFACE", { message: `that is not the pairing code the stand-in printed in its terminal (${5 - misses} tries left)` });
     }
-    const asking = pairDevice(jwk, label, given);
+    // it knocks as a waiting browser (no code: once the account has an owner, a code typed is a device's own, which this one never asked for)
+    const asking = pairDevice(jwk, label);
     if (isRefusal(asking)) return asking;
     // one owner action, through the door: the account's signers become this browser and the seed key, one signature enough. It is in the
     // door's line before anything this browser can sign

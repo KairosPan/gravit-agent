@@ -25,7 +25,9 @@
  *   GET  /api/account                  what the face's Account screens read, with `agentSetup`: the command an agent's owner runs to add
  *                                      this account's MCP seat, and the lists the door accepts (`dollars`, `networks`, `bridgeChains`)
  *   GET  /api/now                      the service's clock (a signer takes its nonce from here)
- *   POST /api/account/pair   {jwk}     a browser offers the public half of its device key; the first one becomes the owner's device
+ *   POST /api/account/pair   {jwk, label?, code?, ask?: true}   a browser offers the public half of its device key; the first one becomes the
+ *                                      owner's device; once the account has one, a later one waits, asks for a code of its own (`ask`: printed in
+ *                                      this server's terminal) and becomes a signer by typing it (`code`) → {ok, kid, role}
  *   POST /api/account/prepare {draft}  turn what the owner asked for into the exact action to sign (a movement gets its route, fee and arrival;
  *                                      an order its exact size, price and the most it may be worth)
  *   GET  /api/account/exchanges        the exchanges the unified library covers, for the connect form
@@ -433,8 +435,9 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
 
   app.post("/api/account/pair", (req, res) => {
     if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
-    const { jwk, label, code } = req.body as { jwk?: unknown; label?: unknown; code?: unknown };
-    const r = svc.account.pairDevice(jwk, typeof label === "string" && label.trim() ? label.trim().slice(0, 40) : "this browser", typeof code === "string" ? code.slice(0, 20) : undefined);
+    const { jwk, label, code, ask } = req.body as { jwk?: unknown; label?: unknown; code?: unknown; ask?: unknown };
+    // the label is cleaned where it is taken (pairing.ts cleanLabel): no line break or link reaches the terminal, the ledger or the phone
+    const r = svc.account.pairDevice(jwk, typeof label === "string" ? label.slice(0, 400) : undefined, typeof code === "string" ? code.slice(0, 20) : undefined, ask === true);
     res.status(isRefusal(r) ? 400 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : r);
   });
 
