@@ -17,6 +17,9 @@ const HEX32 = /^[0-9a-f]{32}$/;
 const OPEN = { step: 1, pending: null, fp: null, busy: false, error: null, silent: false, copied: false };
 const CONNECTS = new Set(['telegram', 'imessage', 'slack']);
 const SAID_AT = new Set(['networks', 'grid', 'quiet', 'strangers']);
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+// the read's quiet hours: two clocks, or null for off (identity-view.js identityOf reads them the same)
+const quietOf = data => (isRecord(data?.quiet) && CLOCK.test(data.quiet.from) && CLOCK.test(data.quiet.to) ? { from: data.quiet.from, to: data.quiet.to } : null);
 // a patch of the connect drawer: its keys alone, each of its shape — whatever else rides on a patch never reaches the store; the
 // network is the drawer's from its opening and no patch changes it
 function connectPatch(p) {
@@ -73,6 +76,19 @@ export const reducers = {
     if (line === null || line === undefined) return s.identity.said ? id(s, { said: null }) : s;
     return SAID_AT.has(line.at) && isLine(line.words) ? id(s, { said: { at: line.at, words: line.words } }) : s;
   },
-  // quiet hours' editor open or shut; shut, its words go with it
-  identityQuietEdit: (s, on) => id(s, { quietEdit: on === true, ...(on === true || s.identity.said?.at !== 'quiet' ? {} : { said: null }) }),
+  // quiet hours' editor open or shut: opened, its draft (`quietDraft`: from, to, off) seeded from the account's quiet hours; shut,
+  // the draft and its words go with it
+  identityQuietEdit: (s, on) => {
+    if (on !== true) return id(s, { quietEdit: false, quietDraft: null, ...(s.identity.said?.at === 'quiet' ? { said: null } : {}) });
+    const q = quietOf(s.identity.data);
+    return id(s, { quietEdit: true, quietDraft: q ? { from: q.from, to: q.to, off: false } : { from: '', to: '', off: true } });
+  },
+  // a field of quiet hours' editor as changed: a clock (from, to) as typed, Off ticked or not
+  identityQuietField: (s, { name, value } = {}) => {
+    const d = s.identity.quietDraft;
+    if (!d || s.identity.quietEdit !== true) return s;
+    if ((name === 'from' || name === 'to') && typeof value === 'string') return id(s, { quietDraft: { ...d, [name]: value } });
+    if (name === 'off' && typeof value === 'boolean') return id(s, { quietDraft: { ...d, off: value } });
+    return s;
+  },
 };

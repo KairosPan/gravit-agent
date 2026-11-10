@@ -7063,15 +7063,11 @@ test('Block asks once, then posts blockSender unsigned; a refusal is said in Not
 });
 
 test('Change… on quiet hours: their clocks in place; Off sends both ends empty; unchanged is said and posts nothing', async () => {
-  const win = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
-  // the editor's fields, there only while it is drawn, each as rendered
-  const from = win.withSelector('#identity-quiet-from', { tagName: 'INPUT', type: 'time', id: 'identity-quiet-from', rendered: '23:00', presentIf: /id="identity-quiet-from"/ });
-  win.withSelector('#identity-quiet-to', { tagName: 'INPUT', type: 'time', id: 'identity-quiet-to', rendered: '07:00', presentIf: /id="identity-quiet-to"/ });
-  const off = win.withSelector('#identity-quiet-off', { tagName: 'INPUT', type: 'checkbox', id: 'identity-quiet-off', presentIf: /id="identity-quiet-off"/ });
-  const { f, h, store, acts } = actRig(IDENTITY_READ, undefined, win);
+  const { f, h, store, acts } = actRig();
   await h.ready();
   await settle();
-  // Save with no editor drawn sends nothing
+  const field = (name, value) => f.fire('root', name === 'off' ? 'change' : 'input', { target: { tagName: 'INPUT', type: name === 'off' ? 'checkbox' : 'time', name, checked: value === true, value: typeof value === 'string' ? value : '', dataset: { action: 'identityQuietField' } } });
+  // Save with no editor open sends nothing
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietSave' } });
   await settle();
   assert.deepEqual(acts, []);
@@ -7084,14 +7080,14 @@ test('Change… on quiet hours: their clocks in place; Off sends both ends empty
   assert.deepEqual(acts, []);
   assert.match(f.html(), /That is how it is now/);
   // a new start: sent with the account's routing
-  from.value = '22:00';
+  field('from', '22:00');
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietSave' } });
   await settle();
   assert.deepEqual(acts.at(-1), { type: 'setRouting', routing: 'chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram', quietFrom: '22:00', quietTo: '07:00' });
   assert.equal(store.get().identity.quietEdit, false, 'taken: the editor shuts');
   // Off: both ends empty
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietEdit' } });
-  off.checked = true;
+  field('off', true);
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietSave' } });
   await settle();
   assert.deepEqual(acts.at(-1), { type: 'setRouting', routing: 'chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram', quietFrom: '', quietTo: '' });
@@ -7100,6 +7096,28 @@ test('Change… on quiet hours: their clocks in place; Off sends both ends empty
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietCancel' } });
   assert.equal(store.get().identity.quietEdit, false);
   assert.equal(acts.length, 2);
+  store.timers.clear();
+});
+
+test('quiet hours from Off: untick Off, set 22:00-07:00, an unrelated redraw, Save sends the two clocks', async () => {
+  const { f, h, store, acts } = actRig({ ...IDENTITY_READ, quiet: null });
+  await h.ready();
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietEdit' } });
+  assert.match(f.html(), /id="identity-quiet-off"[^>]*checked/);
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'off', checked: false, dataset: { action: 'identityQuietField' } } });
+  for (const [name, value] of [['from', '22:00'], ['to', '07:00']]) f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'time', name, value, dataset: { action: 'identityQuietField' } } });
+  // an unrelated redraw (Details opened and shut): the editor draws as it was set
+  const writes = f.writes;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityDetails', network: 'telegram' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityDetails', network: 'telegram' } });
+  assert.ok(f.writes > writes, 'redrawn');
+  assert.doesNotMatch(f.html(), /id="identity-quiet-off"[^>]*checked/);
+  assert.match(f.html(), /id="identity-quiet-from" class="input" type="time" value="22:00"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityQuietSave' } });
+  await settle();
+  assert.deepEqual(acts, [{ type: 'setRouting', routing: 'chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram', quietFrom: '22:00', quietTo: '07:00' }]);
+  assert.equal(store.get().identity.quietEdit, false);
   store.timers.clear();
 });
 

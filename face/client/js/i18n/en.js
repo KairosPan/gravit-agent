@@ -513,6 +513,7 @@ export const EN = Object.freeze({
   'identity.connect': 'Connect…',
   'identity.disconnect': 'Disconnect…',
   'identity.confirm.disconnect': 'Disconnect {network}? Gravit stops talking with you there, and its token is deleted.',
+  'identity.confirm.photonStays': "Your number stays registered in your Photon project, which is yours: to make the old secret useless, rotate it in the project's Settings.",
   'identity.confirm.disconnectYes': 'Yes, disconnect',
   'identity.confirm.block': 'Block {sender}? It never reaches Gravit.',
   'identity.confirm.blockYes': 'Yes, block',

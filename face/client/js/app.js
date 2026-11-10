@@ -1849,12 +1849,10 @@ export function boot(win, host = {}) {
     identityQuietEdit: () => store.dispatch('identityQuietEdit', true),
     identityQuietCancel: () => store.dispatch('identityQuietEdit', false),
     identityQuietSave: () => {
-      // the editor's own fields, read at the press; one missing (the editor not drawn) sends nothing, never Off by accident
-      const [from, to, offBox] = ['#identity-quiet-from', '#identity-quiet-to', '#identity-quiet-off'].map(sel => root.querySelector(sel));
-      if (!from || !to || !offBox) return;
-      const off = offBox.checked === true;
-      const value = el => (off || typeof el.value !== 'string' ? '' : el.value);
-      void identity.saveRouting(routingOf(store.get().identity?.data), value(from), value(to), 'quiet');
+      // the editor as the store holds it (each field set as it changed); no editor open sends nothing, never Off by accident
+      const q = store.get().identity?.quietDraft;
+      if (!q || store.get().identity?.quietEdit !== true) return;
+      void identity.saveRouting(routingOf(store.get().identity?.data), q.off ? '' : q.from, q.off ? '' : q.to, 'quiet');
     },
     setHistoryRange: el => { void account.loadHistory(el.dataset.value); },
     openVenueDetails: el => store.dispatch('openVenueDetails', el.dataset.id),
@@ -2084,7 +2082,10 @@ export function boot(win, host = {}) {
     else if (el.dataset?.action === 'runSheetField' && typesWords(el)) act.runSheetField(el);
     else if (el.dataset?.action === 'sellManyQty') sellMany.setQty(el.dataset.index, el.value);
     else if (el.dataset?.action === 'lunhuiMinute') moveCursor(el, Number(el.value));
+    else if (el.dataset?.action === 'identityQuietField') quietField(el);
   }
+  // quiet hours' editor: each clock and Off into the store as changed, so a redraw draws them as they were set
+  const quietField = el => store.dispatch('identityQuietField', { name: el.name, value: el.type === 'checkbox' ? el.checked === true : el.value });
   // an indices chart's cursor, from its slider or the pointer over the chart: patched in place, never through the store
   function moveCursor(el, minute) {
     applyCursor(doc, el.dataset.id, cursorFor(store.get(), el, minute));
@@ -2117,6 +2118,7 @@ export function boot(win, host = {}) {
     // the files picked, then the input emptied, so the same file can be picked again
     if (el.id === 'attach-input') { const files = Array.from(el.files ?? []); el.value = ''; addFiles(files); }
     // a tick on Identity's grid: the draft routing, on any page
+    if (el.dataset?.action === 'identityQuietField') quietField(el);
     if (el.type === 'checkbox' && el.dataset?.action === 'identityTick') {
       store.dispatch('identityTick', { row: el.dataset.row, network: el.dataset.network, on: el.checked === true });
     }

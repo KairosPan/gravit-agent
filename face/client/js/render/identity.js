@@ -61,7 +61,9 @@ function networkRow(net, row, state) {
 function disconnectKey(net, name, state) {
   const c = state.confirm;
   return c?.action === 'identityDisconnect' && c.network === net
-    ? `<span class="dim">${esc(t('identity.confirm.disconnect', { network: name }))}</span>${confirmPair(t('identity.confirm.disconnectYes'))}`
+    ? `<span class="dim">${esc(t('identity.confirm.disconnect', { network: name }))}</span>${confirmPair(t('identity.confirm.disconnectYes'))}` +
+      // iMessage's number stays registered in the operator's own Photon project: said beneath the ask
+      (net === 'imessage' ? `<br><span class="dim">${esc(t('identity.confirm.photonStays'))}</span>` : '')
     : button(t('identity.disconnect'), { 'data-action': 'askIdentityDisconnect', 'data-network': net }, 'btn-danger');
 }
 // an act's words where it was pressed (host/identity.js): the account's refusal, or why it was not sent
@@ -89,15 +91,18 @@ function gridCard(v, state) {
   const hours = v.quiet ? t('identity.quiet.range', { from: v.quiet.from, to: v.quiet.to }) : t('identity.quiet.off');
   const editing = state.identity.quietEdit === true;
   const quiet = `<div class="venues"><div class="venue"><span><b>${th('identity.quiet.title')}</b><br><span class="dim">${esc(hours)}</span><br><span class="dim">${esc(quietWords())}</span></span>` +
-    `${keys(editing ? '' : button(t('identity.quiet.change'), { 'data-action': 'identityQuietEdit' }))}</div></div>${editing ? quietEditor(v.quiet) : ''}`;
+    `${keys(editing ? '' : button(t('identity.quiet.change'), { 'data-action': 'identityQuietEdit' }))}</div></div>${editing ? quietEditor(state.identity.quietDraft, v.quiet) : ''}`;
   return box(`${title(t('identity.grid.title'))}${table}${save}${saidAt(state, 'grid')}${quiet}${saidAt(state, 'quiet')}`, t('identity.grid.title'));
 }
 
-// quiet hours' editor (Change…): two clocks of New York's day and Off, seeded from the account's; Save applies at once
-function quietEditor(q) {
-  const clock = (id, label, value) => `<label class="field"><span class="field-label">${esc(label)}</span><input${attrs({ id, class: 'input', type: 'time', value })}></label>`;
-  return `<div class="identity-quiet">${clock('identity-quiet-from', t('identity.quiet.from'), q ? q.from : '')}${clock('identity-quiet-to', t('identity.quiet.to'), q ? q.to : '')}` +
-    `<label class="sheet-check"><input${attrs({ id: 'identity-quiet-off', type: 'checkbox', checked: !q })}>${esc(t('identity.quiet.offTick'))}</label>` +
+// quiet hours' editor (Change…): two clocks of New York's day and Off, drawn from the store's draft (seeded from the account's; none
+// held, the account's); Save applies at once
+function quietEditor(draft, q) {
+  const d = draft ?? (q ? { from: q.from, to: q.to, off: false } : { from: '', to: '', off: true });
+  const field = name => ({ name, 'data-action': 'identityQuietField' });
+  const clock = (id, name, label, value) => `<label class="field"><span class="field-label">${esc(label)}</span><input${attrs({ id, class: 'input', type: 'time', value, ...field(name) })}></label>`;
+  return `<div class="identity-quiet">${clock('identity-quiet-from', 'from', t('identity.quiet.from'), d.from)}${clock('identity-quiet-to', 'to', t('identity.quiet.to'), d.to)}` +
+    `<label class="sheet-check"><input${attrs({ id: 'identity-quiet-off', type: 'checkbox', checked: d.off === true, ...field('off') })}>${esc(t('identity.quiet.offTick'))}</label>` +
     `<div class="btn-row">${button(t('common.cancel'), { 'data-action': 'identityQuietCancel' })}${button(t('identity.quiet.save'), { 'data-action': 'identityQuietSave' }, 'btn-primary')}</div></div>`;
 }
 

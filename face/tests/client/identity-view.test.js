@@ -184,9 +184,18 @@ test('quiet hours read 23:00–07:00 ET with Change…; none reads Off', () => {
   assert.doesNotMatch(html, /identity-quiet-from/, 'the clocks only once Change… is pressed');
   // Change…: two clocks seeded from the account's, Off unticked, Cancel and Save in place of Change…
   const editing = boxOf(renderIdentityTab(R.identityQuietEdit(signing(CONNECTED), true), NOW), 'What reaches you where');
-  assert.match(editing, /<input id="identity-quiet-from" class="input" type="time" value="23:00">/);
-  assert.match(editing, /<input id="identity-quiet-to" class="input" type="time" value="07:00">/);
-  assert.match(editing, /<input id="identity-quiet-off" type="checkbox">Off: no quiet hours/);
+  assert.match(editing, /<input id="identity-quiet-from" class="input" type="time" value="23:00" name="from" data-action="identityQuietField">/);
+  assert.match(editing, /<input id="identity-quiet-to" class="input" type="time" value="07:00" name="to" data-action="identityQuietField">/);
+  assert.match(editing, /<input id="identity-quiet-off" type="checkbox" name="off" data-action="identityQuietField">Off: no quiet hours/);
+  // the editor is drawn from its draft in the store: Off unticked and two clocks set stay so on any redraw
+  const set = [['off', false], ['from', '22:00'], ['to', '06:30']].reduce((st, [name, value]) => R.identityQuietField(st, { name, value }), R.identityQuietEdit(signing({ ...CONNECTED, quiet: null }), true));
+  assert.deepEqual(set.identity.quietDraft, { from: '22:00', to: '06:30', off: false });
+  const redrawn = renderIdentityTab(set, NOW);
+  assert.match(redrawn, /id="identity-quiet-from" class="input" type="time" value="22:00"/);
+  assert.match(redrawn, /<input id="identity-quiet-off" type="checkbox" name="off"/);
+  assert.doesNotMatch(redrawn, /id="identity-quiet-off"[^>]*checked/);
+  assert.equal(R.identityQuietField(set, { name: 'off', value: 'yes' }), set, 'a field of another shape is none');
+  assert.equal(R.identityQuietEdit(set, false).identity.quietDraft, null, 'shut: the draft goes');
   assert.match(editing, /data-action="identityQuietCancel"[^>]*>Cancel</);
   assert.match(editing, /data-action="identityQuietSave"[^>]*>Save</);
   assert.ok(!keyed(editing, 'Change…'));
@@ -196,8 +205,8 @@ test('quiet hours read 23:00–07:00 ET with Change…; none reads Off', () => {
   assert.equal(R.identityQuietEdit(said, false).identity.said, null);
   // quiet hours off: Off ticked, the clocks empty
   const offEdit = renderIdentityTab(R.identityQuietEdit(signing({ ...CONNECTED, quiet: null }), true), NOW);
-  assert.match(offEdit, /<input id="identity-quiet-off" type="checkbox" checked>/);
-  assert.match(offEdit, /<input id="identity-quiet-from" class="input" type="time" value="">/);
+  assert.match(offEdit, /<input id="identity-quiet-off" type="checkbox" checked name="off"/);
+  assert.match(offEdit, /<input id="identity-quiet-from" class="input" type="time" value="" name="from"/);
   const off = boxOf(renderIdentityTab(signing({ ...CONNECTED, quiet: null }), NOW), 'What reaches you where');
   assert.match(off, /Quiet hours[\s\S]*Off/);
   assert.doesNotMatch(off, /ET</);
@@ -252,6 +261,13 @@ test('Disconnect… and Block ask once in their place, saying what goes', () => 
   assert.match(notYou, /Block …789\? It never reaches Gravit\./);
   assert.match(notYou, /data-action="confirmYes">Yes, block</);
   assert.doesNotMatch(notYou, />Block</);
+  // iMessage's ask keeps the Photon note beneath its sentence; Telegram's has none
+  const imRead = { ...CONNECTED, networks: [...CONNECTED.networks, { network: 'imessage', speaksAs: '+14155550123', talksOnlyWith: '+14155550100', state: 'connected', polling: true }] };
+  const im = boxOf(renderIdentityTab(R.askConfirm(readOnly(imRead), { action: 'identityDisconnect', network: 'imessage' }), NOW), 'Gravit');
+  const sentence = im.indexOf('Disconnect iMessage? Gravit stops talking with you there');
+  const note = esc("Your number stays registered in your Photon project, which is yours: to make the old secret useless, rotate it in the project's Settings.");
+  assert.ok(sentence >= 0 && im.indexOf(note) > sentence, 'the Photon note beneath the ask');
+  assert.doesNotMatch(gravit, /Photon project/, "Telegram's ask has no Photon note");
   // a refusal is said in the card where it was pressed
   const said = R.identitySaid(readOnly(CONNECTED_WITH_STRANGER), { at: 'networks', words: 'Telegram is not connected' });
   assert.match(boxOf(renderIdentityTab(said, NOW), 'Gravit'), /Telegram is not connected/);

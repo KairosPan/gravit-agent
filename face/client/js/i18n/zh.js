@@ -509,6 +509,7 @@ export const ZH = Object.freeze({
   'identity.connect': '连接…',
   'identity.disconnect': '断开连接…',
   'identity.confirm.disconnect': '断开 {network}？Gravit 将不再在那里与你交谈，其 token 也会被删除。',
+  'identity.confirm.photonStays': '你的号码仍注册在你自己的 Photon 项目中：如需让旧密钥失效，请在项目的设置中轮换它。',
   'identity.confirm.disconnectYes': '是的，断开连接',
   'identity.confirm.block': '屏蔽 {sender}？它的消息永远不会到达 Gravit。',
   'identity.confirm.blockYes': '是的，屏蔽',
