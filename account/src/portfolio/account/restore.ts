@@ -39,6 +39,7 @@ import type { KeptAuthorisation } from "./pay-real.ts";
 import type { Payment } from "./payments.ts";
 import { actionHash, isAgentAction, isOwnerAction, isJwk, kidOf, malformed, signerOf, type AgentAction, type Envelope, type OwnerAction } from "./sign.ts";
 import { applyOwner, applyReport, deviceKeys, isOwner, type AccountState, type ApplyOptions, type SpendApproval } from "./state.ts";
+import { UNSIGNED_CONNECTOR, UNSIGNED_SIGNER, UNSIGNED_TYPES } from "./unsigned.ts";
 
 /** the first row of every run that continues the account */
 export interface RunMark {
@@ -234,6 +235,22 @@ export async function rebuild(rows: readonly LedgerRow[], base: AccountState, op
       }
       if (s.owners.length === 0 && n && isJwk(n.jwk) && row.signer === `device:${kidOf(n.jwk)}`) {
         s = { ...s, owners: [{ id: row.signer, kind: "device", label: typeof n.label === "string" ? n.label : "this browser", jwk: { kty: "EC", crv: "P-256", x: n.jwk.x, y: n.jwk.y }, addedAt: row.ts }] };
+      }
+      continue;
+    }
+    // an act the unsigned door took (account/unsigned.ts): no signature to check. A paper account opened comes back as a signed connection
+    // does, on an id no connection holds; the Identity acts are not replayed (the identity's state file is their record); a `local` row of
+    // any other type — which the door never writes — is not brought back
+    if (row.kind === "action" && row.outcome === "ok" && row.signer === UNSIGNED_SIGNER && !row.envelope) {
+      const u = (row.native as { unsigned?: { type?: unknown; venue?: unknown; connector?: unknown; label?: unknown; credentialRef?: unknown } } | undefined)?.unsigned;
+      if (!UNSIGNED_TYPES.has(String(row.tool)) || (row.tool === "connectVenue" && u?.connector !== UNSIGNED_CONNECTOR)) {
+        skipped.push(`${String(row.tool)} of ${row.ts}: an unsigned row of a signed act: not brought back`);
+        continue;
+      }
+      if (row.tool === "connectVenue" && u) {
+        const venue = String(u.venue ?? "");
+        if (connections.has(venue)) skipped.push(`connectVenue of ${row.ts}: an unsigned paper account on ${venue}, which a connection holds: not brought back`);
+        else connections.set(venue, { venue, connector: UNSIGNED_CONNECTOR, label: String(u.label ?? ""), credentialRef: String(u.credentialRef ?? ""), at: row.ts });
       }
       continue;
     }

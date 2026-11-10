@@ -65,6 +65,7 @@ import { heldUsd, inFlightUsd, launch, newPayment, settleDue, type Advance, type
 import { actionHash, BRAIN_KEY_TTL_MS, PAPER_TTL_MS, PAPER_TYPES, SIGN_OUT_TTL_MS, isAgentAction, isDeviceSig, isJwk, isOwnerAction, kidOf, malformed, MEMORY_TYPES, micro, MONEY_TTL_MS, MONEY_TYPES, NonceBook, ownEnvelope, ownerTypedData, shownFields, signerOf, type Action, type AgentAction, type AnySig, type Envelope, type Hex, type Jwk, type OwnerAction, type SendAsset } from "./sign.ts";
 import { deskBrainKeyProblem, fingerprintOf, setBrainKeyProblem } from "./brain-keys.ts";
 import { identitySignedProblem, isIdentityAction, type IdentityAction } from "../identity/identity.ts";
+import { UNSIGNED_SIGNER, unsignedProblem } from "./unsigned.ts";
 import { LiveMoves, type LiveMoney } from "./live-moves.ts";
 import { LiveOrders, type CloseQuote, type LiveOrder, type OrderQuote } from "./live-orders.ts";
 import { LiveEarns, type EarnDesk, type EarnQuote, type LiveEarn } from "./live-earn.ts";
@@ -202,6 +203,9 @@ export interface Host {
   identity?(action: IdentityAction): Promise<Outcome>;
   /** why the host would refuse one of the four now, or null — what /api/account/prepare says before the dialog shows it to be signed */
   identityProblem?(action: IdentityAction): string | null;
+  /** whether a venue id is taken: connected now, or a connection the owner signed that waits for its venue to answer this network. An
+   * unsigned paper opening (act) takes no such id — it would replace that venue, an unsigned disconnect in effect (absent: connected only) */
+  venueInUse?(venue: string): boolean;
 }
 
 /** one way of connecting a real venue, as the page offers it */
@@ -555,6 +559,57 @@ export class AccountEngine {
     return this.serially(() => this.take(envelope));
   }
 
+  /** THE UNSIGNED DOOR (account/unsigned.ts; POST /api/account/act): Identity's four and opening a paper account, taken with no signature,
+   * in the same line as the signed instructions. No nonce and no envelope: the act is checked as the signed one's fields are (malformed),
+   * then by the same code the signed door runs after its signature check. Its ledger row names the signer `local` and keeps the act itself
+   * (native.unsigned), which is what a restart reads back (restore.ts) */
+  act(action: unknown): Promise<Outcome> {
+    return this.serially(() => this.takeUnsigned(action));
+  }
+
+  private async takeUnsigned(sent: unknown): Promise<Outcome> {
+    const type = sent && typeof sent === "object" ? (sent as { type?: unknown }).type : undefined;
+    // the ledger names a type the account knows, never words a caller chose
+    const tool = typeof type === "string" && (isOwnerAction({ type }) || isAgentAction({ type })) ? type : "unknown";
+    const refuse = (message: string, venue?: string): Refusal => this.unsignedRefused(no("E_ACCOUNT_BAD_ACTION", { message, ...(venue ? { venue } : {}) }), tool);
+    const wrong = unsignedProblem(sent);
+    if (wrong) return refuse(wrong);
+    // the act as the account keeps it: its own fields, no nonce (none is spent); checked as a signed one's fields are, with a nonce of 0
+    const { nonce: _nonce, ...fields } = sent as Record<string, unknown>;
+    const bad = malformed({ ...fields, nonce: 0 } as unknown as Action);
+    if (bad) return refuse(bad);
+    const action = fields as unknown as Action;
+    if (isIdentityAction(action)) {
+      // a bot token pasted into a field: refused before the row below would write the fields to the ledger, which cannot be cleaned
+      const keyed = identitySignedProblem(action);
+      if (keyed) return refuse(keyed);
+      if (!this.host.identity) return refuse("this account keeps no identity: it is the account layer's");
+      const problem = this.host.identityProblem?.(action) ?? null;
+      if (problem) return refuse(problem);
+      const r = await this.host.identity(action);
+      if (isRefusal(r)) return this.unsignedRefused(r, tool);
+      this.host.log({ kind: "action", venue: "*", tool, signer: UNSIGNED_SIGNER, outcome: "ok", reason: r.kind === "account" ? r.summary : tool, native: { unsigned: action } });
+      return r;
+    }
+    if (action.type !== "connectVenue") return refuse(`"${tool}" is signed: only a browser that signs for the account takes it`);
+    // a paper account opened: a venue id in use (connected, or waiting for its network) is not taken — a kept book that no connection has
+    // open is in neither, and is continued
+    const inUse = this.host.venueInUse ? this.host.venueInUse(action.venue) : this.host.adapter(action.venue) !== undefined;
+    if (inUse) return refuse(`"${action.venue}" is in use: an unsigned paper account takes a name no venue has`, action.venue);
+    const busy = this.connectBusy(action);
+    if (busy) return this.unsignedRefused(busy, tool);
+    const r = await this.host.connect(action.venue, action.connector, action.label, action.credentialRef);
+    if (isRefusal(r)) return this.unsignedRefused(r, tool);
+    this.host.log({ kind: "action", venue: action.venue, tool, signer: UNSIGNED_SIGNER, outcome: "ok", reason: r.summary, native: { unsigned: action } });
+    return { ok: true, kind: "account", summary: r.summary };
+  }
+
+  /** a refusal at the unsigned door: on the ledger as the signed door's are, under the signer `local` */
+  private unsignedRefused(r: Refusal, tool: string): Refusal {
+    this.host.log({ kind: "account-refusal", venue: r.venue ?? "*", tool, code: r.code, reason: r.message, signer: UNSIGNED_SIGNER });
+    return r;
+  }
+
   /** run `fn` in the same line as the instructions: what changes an order or a payment never runs in the middle of one */
   serially<T>(fn: () => Promise<T>): Promise<T> {
     const turn = this.queue.then(fn);
@@ -664,6 +719,19 @@ export class AccountEngine {
     return r;
   }
 
+  /** why a venue cannot be connected or disconnected now, or undefined: a venue with money on its way to it or from it stays plugged in until
+   * that has landed; an order still open there keeps it plugged in too — disconnected, the account could neither follow the order nor
+   * cancel it. Both hold only while the venue IS connected: one that did not come back after a restart is connected again so that its open
+   * order can be followed, or canceled */
+  private connectBusy(action: Extract<OwnerAction, { type: "connectVenue" | "disconnectVenue" }>): Refusal | undefined {
+    const connected = this.host.adapter(action.venue) !== undefined;
+    const busy = connected ? this.payments.find((p) => (p.status === "pending" || (p.status === "authorized" && p.live)) && (p.from === action.venue || p.to === action.venue)) : undefined;
+    if (busy) return no("E_ACCOUNT_BAD_ACTION", { venue: action.venue, message: `${this.name(action.venue)} has a payment in flight (${busy.id}): it can be ${action.type === "connectVenue" ? "connected live" : "unplugged"} when that has landed`, detail: { payment: busy.id } });
+    const open = connected ? this.trade.openAt(action.venue) : undefined;
+    if (open) return no("E_ACCOUNT_BAD_ACTION", { venue: action.venue, message: `${this.name(action.venue)} has an open order (${open.id}): cancel it, or let it fill, before ${action.type === "connectVenue" ? "connecting it again" : "disconnecting it"}`, detail: { order: open.id } });
+    return undefined;
+  }
+
   private async run(action: Action, envelope: Envelope, signer: string, agent: AgentKey | undefined, hash: Hex): Promise<Outcome> {
     const now = this.nowMs();
     if (this.host.real && ((SIMULATED_ONLY.has(action.type) && !(REAL_PAYS.has(action.type) && this.paysReal())) || (action.type === "approveSpend" && action.scope === "payees" && micro(action.budget) > 0 && !this.paysReal()))) return realOnly(action.type === "approveSpend" ? "approveSpend · payees" : action.type);
@@ -709,14 +777,9 @@ export class AccountEngine {
       }
       case "connectVenue":
       case "disconnectVenue": {
-        // a venue with money on its way to it or from it stays plugged in until that has landed; an order still open there keeps it
-        // plugged in too — disconnected, the account could neither follow the order nor cancel it. Both hold only while the venue IS
-        // connected: one that did not come back after a restart is connected again so that its open order can be followed, or canceled
-        const connected = this.host.adapter(action.venue) !== undefined;
-        const busy = connected ? this.payments.find((p) => (p.status === "pending" || (p.status === "authorized" && p.live)) && (p.from === action.venue || p.to === action.venue)) : undefined;
-        if (busy) return no("E_ACCOUNT_BAD_ACTION", { venue: action.venue, message: `${this.name(action.venue)} has a payment in flight (${busy.id}): it can be ${action.type === "connectVenue" ? "connected live" : "unplugged"} when that has landed`, detail: { payment: busy.id } });
-        const open = connected ? this.trade.openAt(action.venue) : undefined;
-        if (open) return no("E_ACCOUNT_BAD_ACTION", { venue: action.venue, message: `${this.name(action.venue)} has an open order (${open.id}): cancel it, or let it fill, before ${action.type === "connectVenue" ? "connecting it again" : "disconnecting it"}`, detail: { order: open.id } });
+        // a payment in flight or an order open there keeps it as it is (connectBusy)
+        const busy = this.connectBusy(action);
+        if (busy) return busy;
         const r = action.type === "connectVenue" ? await this.host.connect(action.venue, action.connector, action.label, action.credentialRef) : this.host.disconnect(action.venue);
         if (isRefusal(r)) return r;
         this.host.log({ kind: "action", venue: action.venue, tool: action.type, signer, envelope, outcome: "ok", reason: r.summary, ...("native" in r && r.native !== undefined ? { native: r.native } : {}) });

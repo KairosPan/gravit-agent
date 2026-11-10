@@ -134,6 +134,10 @@
  *   POST /api/account/live/order-sent {order, hash}      the face says which transaction the wallet sent for a DEX order
  *   POST /api/account/live/order-requote {order}         a wallet order whose approval is on chain: the swap built again from a fresh quote
  *   POST /api/account/live/sent {payment, hash}          the face says which transaction the wallet sent for a movement
+ *   POST /api/account/act {action}     THE UNSIGNED DOOR (account/unsigned.ts): Identity's four (connectNetwork, disconnectNetwork, setRouting,
+ *                                      blockSender) and opening a paper account (connectVenue, connector live:paper, on an id no venue has or a
+ *                                      kept book's), taken with no signature; the ledger's row names the signer `local` (200 the outcome · 409
+ *                                      refused, every other act in one sentence naming it as signed · 400 an action that is not an object)
  *   POST /api/exchange {action, nonce, signature}   THE door: every instruction, signed — an owner action by an owner key, an agent's by an
  *                                      authorised agent key (200 done · 202 a card is waiting · 401 not a signer · 409 refused)
  *
@@ -806,6 +810,15 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     const draft = (req.body as { draft?: unknown }).draft;
     if (!draft || typeof draft !== "object") return void bad(res, "need {draft: {type, ...}}");
     const r = await svc.account.prepare(draft as Record<string, unknown>);
+    res.status(isRefusal(r) ? 409 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : r);
+  }));
+
+  // THE UNSIGNED DOOR (account/unsigned.ts): Identity's four and opening a paper account, for a page that does not sign; every other act is
+  // refused in one sentence naming it as signed. Behind the same fence as every route: no other site's page reaches it
+  app.post("/api/account/act", wrap(async (req, res) => {
+    const action = (req.body as { action?: unknown } | undefined)?.action;
+    if (!action || typeof action !== "object" || Array.isArray(action)) return void bad(res, "need {action: {type, ...}}");
+    const r = await svc.act(action);
     res.status(isRefusal(r) ? 409 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : r);
   }));
 

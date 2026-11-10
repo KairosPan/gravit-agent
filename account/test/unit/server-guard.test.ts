@@ -67,6 +67,20 @@ describe("who the server answers", () => {
       await srv.close();
     }
   });
+  it("/api/account/act answers 403 to another site's origin", async () => {
+    const svc = await service();
+    const srv = await startPortfolioServer({ port: 0, service: svc });
+    try {
+      const post = (headers: Record<string, string>) => fetch(`${srv.url}/api/account/act`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ action: { type: "setRouting", routing: "telegram", quietFrom: "", quietTo: "" } }) }).then((r) => r.status);
+      expect(await post({ origin: "https://evil.example" })).toBe(403);
+      expect(await post({ "sec-fetch-site": "cross-site" })).toBe(403);
+      expect(await post({ "sec-fetch-site": "same-site" })).toBe(403);
+      // a local program reaches the route: a body that is no action is the route's own 400, not the fence's 403
+      expect(await fetch(`${srv.url}/api/account/act`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "x" }) }).then((r) => r.status)).toBe(400);
+    } finally {
+      await srv.close();
+    }
+  });
   it("parseHosts trims and drops empties", () => {
     expect(parseHosts(undefined)).toEqual([]);
     expect(parseHosts(" a:1 , ,b:2")).toEqual(["a:1", "b:2"]);

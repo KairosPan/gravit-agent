@@ -676,6 +676,8 @@ export class PortfolioService {
       // the networks Gravit speaks on (identity/identity.ts): built after the host, so read when an instruction comes
       identity: (action) => (this.identity ? this.identity.apply(action) : Promise.resolve(no("E_ACCOUNT_BAD_ACTION", { message: "this account keeps no identity: it is the account layer's" }))),
       identityProblem: (action) => (this.identity ? this.identity.problem(action) : "this account keeps no identity: it is the account layer's"),
+      // a venue id taken: connected now, or a connection the owner signed that waits for its venue (the unsigned door's paper opening)
+      venueInUse: (venue) => this.adapters.has(venue) || this.waiting.has(venue),
       ...(real && this.opts.liveWrites
         ? {
             agentWalletAddress: (name: string) => {
@@ -2684,6 +2686,13 @@ export class PortfolioService {
       if (asked) this.adapters.get(v)?.wake?.();
     }
     return r;
+  }
+
+  /** THE UNSIGNED DOOR (account/unsigned.ts): Identity's four and opening a paper account, taken with no signature. Neither writes at a
+   * venue, so nothing kept of a venue's reads goes */
+  async act(action: unknown): Promise<Outcome> {
+    if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted on this service" });
+    return this.account.act(action);
   }
 
   /** the venues a signed instruction writes at, when it is one that writes at a venue: an order and what is done to it, a movement's two
