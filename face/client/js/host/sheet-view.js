@@ -31,6 +31,9 @@ const str = v => (typeof v === 'string' ? v : '');
  *  since sign-only-money: unsigned, host/identity.js's. */
 export const SHEET_KINDS = ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
   'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'reopen', ...MARKET_KINDS, ...RULES_KINDS, ...MONEY_KINDS];
+/** The kinds that take no signature (sign-only-money §4.4, §5.3): their draft goes to the account's unsigned door as it stands —
+ *  nothing prepared, no What you sign (host/sheet.js). Opening a paper account alone; top-up, reset and disconnect stay signed. */
+export const UNSIGNED_KINDS = ['paper'];
 const isMarket = kind => MARKET_KINDS.includes(kind);
 const isRules = kind => RULES_KINDS.includes(kind);
 const isMoney = kind => MONEY_KINDS.includes(kind);

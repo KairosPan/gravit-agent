@@ -5,9 +5,11 @@
 // preparation with a `deadline` counts down every second and is prepared again at zero, and a press under thirty seconds prepares
 // again and signs the fresh one. Only the latest ask lands, and only it is handed to `onPrepared` (plan 4b Task 2: a bridge's
 // routes are read beside it). A sheet that asks something before it signs (plan 4b Task 6: a sign-out in Beast with its Guard box
-// ticked, host/sheet-view.js guardFirstOf) has `beforeSign` asked first, and signs nothing when it refuses. The engine draws nothing, knows no kind's fields, holds no key and
+// ticked, host/sheet-view.js guardFirstOf) has `beforeSign` asked first, and signs nothing when it refuses. A kind the account takes
+// unsigned (host/sheet-view.js UNSIGNED_KINDS, sign-only-money §5.3) prepares nothing: its complete form is ready as it stands and
+// its go key posts the draft once through `owner.unsigned`. The engine draws nothing, knows no kind's fields, holds no key and
 // logs nothing of a preparation or an answer.
-import { draftOf, fieldsOf, guardFirstOf, guardFirstDone, guardFirstRefused } from './sheet-view.js';
+import { draftOf, fieldsOf, guardFirstOf, guardFirstDone, guardFirstRefused, UNSIGNED_KINDS } from './sheet-view.js';
 import { refusedAt, refusalOf, saidOf } from './owner-view.js';
 import { said, isLine } from '../i18n/words.js';
 
@@ -18,6 +20,8 @@ export const RESIGN_UNDER_MS = 30_000;
 /** A quote older than this is prepared again, quietly, when its market moved (the Trade ticket's, Task 9). */
 export const FRESH_MS = 3_000;
 const TICK_MS = 1_000;
+// a kind the account takes unsigned (sign-only-money §5.3): its complete form is ready as it stands, and its go key posts the draft
+const unsignedKind = kind => UNSIGNED_KINDS.includes(kind);
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 // the preparation's deadline in milliseconds (the Account's u64), or null
@@ -75,6 +79,12 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
       return null;
     }
     const asked = askedOf(s);
+    // nothing to prepare for an unsigned kind: ready on the form as it stands, with no preparation and no deadline
+    if (unsignedKind(s.kind)) {
+      stopTick();
+      store.dispatch('sheetPrepared', { prepared: null, at: now(), asked, deadline: null });
+      return null;
+    }
     store.dispatch('sheetAsking', { quiet });
     if (current()?.deadline === null) stopTick();
     const r = await owner.prepare(draft);
@@ -108,7 +118,9 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
     if (!s) return;
     store.dispatch('sheetField', { name, value });
     clearQuiet();
-    quietTimer = schedule(() => { quietTimer = null; prepareNow({ quiet: true }); }, PREPARE_QUIET_MS);
+    // an unsigned kind asks nothing: ready (or what is missing) at once
+    if (unsignedKind(s.kind)) void prepareNow();
+    else quietTimer = schedule(() => { quietTimer = null; prepareNow({ quiet: true }); }, PREPARE_QUIET_MS);
     onChange(s.kind, name, value);
   }
 
@@ -118,6 +130,7 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
     const s = current();
     if (!s || s.status === 'signing' || s.status === 'done') return;
     if (s.status !== 'ready' || askedOf(s) !== s.asked) { await prepareNow(); return; }
+    if (unsignedKind(s.kind)) { await postUnsigned(s); return; }
     let prepared = s.prepared;
     if (s.deadline !== null && s.deadline - now() < RESIGN_UNDER_MS) {
       prepared = await prepareNow();
@@ -151,6 +164,29 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
     // taken: the Account changed, whether or not the sheet is still open, and whatever a subscriber did at done
     try {
       if (here) { stopTick(); store.dispatch('sheetDone', { said: first ? guardFirstDone(saidOf(r.body)) : saidOf(r.body) }); }
+    } finally {
+      afterAction(s.kind, r.body);
+    }
+  }
+
+  /** An unsigned kind's go key: the form's draft posted once to the account's unsigned door (`owner.unsigned`) — no preparation,
+   *  no signature. Taken: done in the account's words and afterAction, as a signed one; refused: the account's sentence. */
+  async function postUnsigned(s) {
+    const draft = draftOf(s.kind, s.fields, s.seed, now());
+    if (typeof draft === 'string') { store.dispatch('sheetIncomplete', draft); return; }
+    const mine = opened;
+    seq += 1;
+    clearQuiet();
+    store.dispatch('sheetSigning');
+    let r;
+    try { r = await owner.unsigned(draft); } catch { r = { ok: false, said: said('account.noAnswer') }; }
+    const here = mine === opened && current() !== null;
+    if (!r?.ok) {
+      if (here) store.dispatch('sheetRefused', { message: r?.said || said('owner.refused') });
+      return;
+    }
+    try {
+      if (here) store.dispatch('sheetDone', { said: saidOf(r.body) });
     } finally {
       afterAction(s.kind, r.body);
     }

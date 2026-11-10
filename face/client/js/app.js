@@ -66,7 +66,7 @@ import { identityOf, routingOf, SPOKEN } from './host/identity-view.js';
 import { renderConnectDrawer } from './render/identity.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
 import { startSellMany } from './host/sell-many.js';
-import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, signOutSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
+import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, UNSIGNED_KINDS, signOutSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
 import { startSearch } from './host/search.js';
 import { tradeableOf } from './host/trade-view.js';
@@ -1185,10 +1185,11 @@ export function boot(win, host = {}) {
     return (Array.isArray(f.options) ? f.options : []).map(o => o.value).filter(v => on.has(v));
   }
 
-  // an owner key's sheet, its seed built from the store by kind and the key's data; only on a page that signs
+  // an owner key's sheet, its seed built from the store by kind and the key's data; only on a page that signs, but for an unsigned
+  // kind's (Open a paper account, sign-only-money §4.4), on any page
   function openSheetFrom(el) {
-    if (!signs()) return;
     const d = el.dataset;
+    if (!signs() && !UNSIGNED_KINDS.includes(d.kind)) return;
     const page = store.get().account.data;
     switch (d.kind) {
       case 'letIn': void sheet.open('letIn', { address: d.address ?? '', name: d.name ?? '' }); break;
@@ -1232,7 +1233,7 @@ export function boot(win, host = {}) {
   }
   // the connect and paper sheets are seeded from a read beside the page (where this account can connect, the kept paper
   // books): at once with what was read, else once the read lands — when no other sheet was opened meanwhile and the page
-  // still signs
+  // still signs (the paper sheet, unsigned, on any page)
   // the Earn sheet from the earn read as it stands; never read: read first, and opened only when no other sheet was opened
   // meanwhile and the page still signs
   async function openEarn(preset) {
@@ -1274,7 +1275,7 @@ export function boot(win, host = {}) {
     if (slice().data === null) {
       const opened = sheetOpens;
       await read;
-      if (opened !== sheetOpens || !signs()) return;
+      if (opened !== sheetOpens || (!signs() && !UNSIGNED_KINDS.includes(kind))) return;
     }
     const page = store.get().account.data;
     if (kind === 'paper') { void sheet.open('paper', paperSeedOf(page, slice().data)); return; }

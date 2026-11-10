@@ -9,6 +9,7 @@ import { kidOf, publicJwkOf, signPrepared, makeKey } from '../wire/owner-key.js'
 import { pageOk } from './account-view.js';
 import { whyOf, refusedAt } from './owner-view.js';
 import { said } from '../i18n/words.js';
+import { postAct } from './act.js';
 
 const PAIR = '/data/account/pair', PREPARE = '/data/account/prepare', EXCHANGE = '/data/account/exchange';
 // the Account's pair roles under the face's names
@@ -161,6 +162,10 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
     }
   }
 
+  /** An action the account takes unsigned (sign-only-money §5.3: opening a paper account), posted once to its unsigned door
+   *  (host/act.js): `{ ok: true, body }` taken, else `{ ok: false, said }` in the account's words. No key, from any page. */
+  const unsigned = action => postAct(post, action);
+
   /** Prepare, then sign only a preparation that came back with fields to show; anything else is handed back unsigned. */
   async function act(draft) {
     const p = await prepare(draft);
@@ -204,5 +209,5 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
     closed = true;
   }
 
-  return { ready, standing, prepare, submit, act, signOut, signIn, close };
+  return { ready, standing, prepare, submit, act, unsigned, signOut, signIn, close };
 }

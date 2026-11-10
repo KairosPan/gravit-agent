@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { SHEET_KINDS, fieldsOf, refieldsOf, draftOf, titleOf, goWord, grantOf, grantsAsk, limitSeedOf, letDeviceSeedOf, paperSeedOf, signOutSeedOf, signOutLineOf, guardFirstOf, connectCheckOf } from '../../client/js/host/sheet-view.js';
+import { SHEET_KINDS, UNSIGNED_KINDS, fieldsOf, refieldsOf, draftOf, titleOf, goWord, grantOf, grantsAsk, limitSeedOf, letDeviceSeedOf, paperSeedOf, signOutSeedOf, signOutLineOf, guardFirstOf, connectCheckOf } from '../../client/js/host/sheet-view.js';
 import { moveSeedOf } from '../../client/js/host/sheet-money.js';
 import { venuesOf, connectOptionsOf } from '../../client/js/host/account-view.js';
 import { moveSourcesOf } from '../../client/js/host/money-view.js';
@@ -24,6 +24,9 @@ test('SHEET_KINDS: every kind with a title and its go word', () => {
     'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'reopen', 'close', 'amend', 'leverage', 'beast', 'cap', 'session', 'leverageCap', 'move', 'earn', 'subWallet']);
   // Account › Identity's acts are no sheet since sign-only-money: unsigned, host/identity.js's
   for (const k of ['connectNetwork', 'disconnectNetwork', 'routing', 'block']) assert.ok(!SHEET_KINDS.includes(k), k);
+  // opening a paper account takes no signature (sign-only-money §4.4); top-up, reset and disconnect stay signed
+  assert.deepEqual(UNSIGNED_KINDS, ['paper']);
+  assert.ok(UNSIGNED_KINDS.every(k => SHEET_KINDS.includes(k)));
   assert.deepEqual(SHEET_KINDS.map(k => goWord(k)), ['Let it in', 'Give the limit', 'End the limit', 'Revoke', 'Connect', 'Open the account',
     'Top up', 'Start over', 'Disconnect', 'Approve', 'Decline', 'Let it sign', 'Sign out', 'Sign and place', 'Sign and reopen', 'Sign and close', 'Sign and change', 'Sign leverage',
     'Sign Beast', 'Sign the cap', 'Renew for 30 days', 'Sign leverage', 'Sign and move', 'Sign and put in', 'Make it']);

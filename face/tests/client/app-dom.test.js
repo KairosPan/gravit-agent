@@ -2070,6 +2070,43 @@ test('Let in… opens the sheet on the knocking key; a field change prepares aga
   store.timers.clear();
 });
 
+// sign-only-money §4.4, §5.3: opening a paper account takes no signature — on a page that does not sign, its key opens the sheet on
+// the kept books, the form is ready as it is filled, and Open posts the draft once to the account's unsigned door: no prepare, no
+// What you sign, no exchange
+test('a page that does not sign opens a paper account: Open posts connectVenue live:paper unsigned', async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const door = ownerDoor({ role: 'needs-code' });
+  const through = door.post;
+  door.post = async (path, body) => {
+    if (path !== '/data/account/act') return through(path, body);
+    door.posts.push([path, body]);
+    return { status: 200, body: { ok: true, kind: 'account', summary: 'paper-desk opened with $10000' } };
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/paper/books': fx('paper-books') } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(() => store.get().owner.role === 'needs-code', 'the page to need the code');
+  await settle();
+  assert.match(f.html(), /<button type="button" class="btn-sm" data-action="openSheet" data-kind="paper">Open a paper account<\/button>/);
+  assert.doesNotMatch(f.html(), /data-kind="connect"/, 'Connect an account stays signed');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'paper' } });
+  await until(() => store.get().sheet?.kind === 'paper', 'the paper sheet');
+  const field = (name, value, type = 'text') => f.fire('root', 'input', { target: { tagName: 'INPUT', type, name, value, dataset: { action: 'sheetField' } } });
+  field('label', 'Desk');
+  field('usd', '10000', 'number');
+  await until(() => store.get().sheet.status === 'ready', 'the form ready');
+  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Open a paper account">/);
+  assert.doesNotMatch(f.html(), /What you sign/);
+  assert.match(f.html(), /data-action="sheetSubmit">Open the account<\/button>/, 'the go key on');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => door.sent('/data/account/act').length === 1, 'the unsigned post');
+  assert.deepEqual(door.sent('/data/account/act'), [{ action: { type: 'connectVenue', venue: 'paper-desk', connector: 'live:paper', label: 'Desk', credentialRef: '10000' } }]);
+  await until(() => store.get().sheet === null, 'the done sheet to close');
+  assert.deepEqual([door.sent('/data/account/prepare'), door.sent('/data/account/exchange')], [[], []], 'nothing prepared, nothing signed');
+  assert.equal(store.get().owner.role, 'needs-code', 'the page still does not sign');
+  store.timers.clear();
+});
+
 test('Grant opens the limit sheet on the ask, Decline its own, Revoke… asks twice; Escape closes the sheet; a page that does not sign opens none', async () => {
   const f = fakeWindow({ hash: '#/account/cards', storage: memoryStorage() });
   // the sheet's close key, its focus counted (the renders after it, asking and prepared, keep it by its action in a browser)

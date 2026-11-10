@@ -11,6 +11,9 @@ import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startSheet, PREPARE_QUIET_MS, RESIGN_UNDER_MS, FRESH_MS } from '../../client/js/host/sheet.js';
 import { spoken } from './helpers/spoken.js';
+import { postAct, ACT } from '../../client/js/host/act.js';
+import { UNSIGNED_KINDS } from '../../client/js/host/sheet-view.js';
+import { renderSheet } from '../../client/js/render/owner.js';
 
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(r => setTimeout(r, 0)); };
 const watch = () => JSON.parse(readFileSync(new URL('../fixtures/account/prepared-watch.json', import.meta.url), 'utf8'));
@@ -21,6 +24,7 @@ const DRAFT = { type: 'topUpPaper', venue: 'paper-a', usd: '500' };
 const REQUOTE = { status: 409, body: { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_EXPIRED', layer: 'account', message: 'this order was good for ten minutes after it was prepared: prepare it again' } } };
 const BAD = { status: 409, body: { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_BAD_ACTION', layer: 'account', message: 'not an instruction this account knows' } } };
 const TAKEN = { status: 200, body: { ok: true, kind: 'account', summary: 'paper-a topped up by $500' } };
+const OPENED = { status: 200, body: { ok: true, kind: 'account', summary: 'paper-desk opened with $10000' } };
 
 // a deferred answer the test resolves by hand
 function deferred() {
@@ -46,6 +50,10 @@ function fakeOwner(clock, { deadlineMs = null } = {}) {
     o.envelopes.push(prepared);
     return Promise.resolve(o.submitWith.length ? o.submitWith.shift() : TAKEN);
   };
+  // the unsigned door (host/owner.js unsigned): postAct over a recorded post, `actWith` queuing answers ahead of a taken one
+  o.posts = []; o.actWith = [];
+  o.post = (path, body) => { o.posts.push([path, body]); return Promise.resolve(o.actWith.length ? o.actWith.shift() : OPENED); };
+  o.unsigned = action => postAct(o.post, action);
   return o;
 }
 
@@ -492,4 +500,49 @@ test('beforeSign is not asked for a sheet that does not need it', async () => {
   assert.deepEqual(asked, []);
   assert.equal(r.owner.envelopes.length, 3);
   assert.equal(spoken(r.s().said), 'Done', 'no Guard words');
+});
+
+test('an unsigned kind posts its draft to /data/account/act with no prepare and no signature', async () => {
+  assert.deepEqual(UNSIGNED_KINDS, ['paper']);
+  const r = rig();
+  await r.sheet.open('paper', { books: [], venues: [{ id: 'paper-desk' }] });
+  assert.equal(r.s().status, 'incomplete');
+  assert.equal(r.s().words, 'Type a name');
+  // a change is the form's at once: nothing to ask, so nothing waits for the quiet
+  r.sheet.change('label', 'Desk');
+  r.sheet.change('usd', '10000');
+  await settle();
+  assert.equal(r.timers.pending.size, 0, 'no quiet spell and no countdown');
+  assert.equal(r.s().status, 'ready');
+  assert.equal(r.s().prepared, null, 'nothing prepared');
+  assert.equal(r.s().deadline, null);
+  const draft = { type: 'connectVenue', venue: 'paper-desk-2', connector: 'live:paper', label: 'Desk', credentialRef: '10000' };
+  assert.equal(r.s().asked, JSON.stringify(draft));
+  // drawn: no What you sign, the go key on
+  const html = renderSheet(r.store.get(), START);
+  assert.doesNotMatch(html, /What you sign/);
+  assert.match(html, /<button type="button" class="btn-primary" data-action="sheetSubmit">Open the account<\/button>/);
+  await r.sheet.submit();
+  assert.deepEqual(r.owner.drafts, [], 'never prepared');
+  assert.deepEqual(r.owner.envelopes, [], 'never signed');
+  assert.deepEqual(r.owner.posts, [[ACT, { action: draft }]], 'posted once, to the unsigned door');
+  assert.equal(r.s().status, 'done');
+  assert.equal(r.s().said, 'paper-desk opened with $10000');
+  assert.deepEqual(r.done, [['paper', OPENED.body]]);
+  await r.sheet.submit();
+  assert.equal(r.owner.posts.length, 1, 'a done sheet posts nothing more');
+
+  // refused: the account's own sentence, nothing done
+  const used = '"paper-desk-2" is in use: an unsigned paper account takes a name no venue has';
+  r.owner.actWith.push({ status: 409, body: { ok: false, refusal: { ok: false, code: 'E_ACCOUNT_BAD_ACTION', layer: 'account', message: used } } });
+  await r.sheet.open('paper', { books: [], venues: [{ id: 'paper-desk' }] }, [
+    { name: 'book', type: 'select', value: '' }, { name: 'label', type: 'text', value: 'Desk' }, { name: 'usd', type: 'number', value: '10000' },
+  ]);
+  assert.equal(r.s().status, 'ready', 'a complete form is ready on open');
+  await r.sheet.submit();
+  assert.equal(r.s().status, 'refused');
+  assert.equal(r.s().message, used);
+  assert.equal(r.done.length, 1, 'no afterAction on a refusal');
+  assert.deepEqual(r.owner.drafts, []);
+  assert.deepEqual(r.owner.envelopes, []);
 });

@@ -652,11 +652,27 @@ test("the Venues' keys: Connect an account, Open a paper account, Disconnect, To
   // a page that does not sign: none of these keys, the rows and Details as before
   for (const role of ['pending', 'none', 'needs-code', 'signed-out', 'unknown']) {
     const out = draw(R.openVenueDetails(R.ownerStanding(state({ tab: 'venues' }), { role, kid: KID }), 'paper-momentum'));
-    for (const k of ['data-action="openSheet"', 'askDisconnect', 'Connect an account', 'Open a paper account', 'Disconnect…', 'Top up', 'Start over']) lacks(out, k, `${role}: ${k}`);
+    // Open a paper account excepted: it takes no signature (sign-only-money §4.4, the test below)
+    for (const k of ['data-kind="connect"', 'data-kind="topUp"', 'data-kind="resetPaper"', 'askDisconnect', 'Connect an account', 'Disconnect…', 'Top up', 'Start over']) lacks(out, k, `${role}: ${k}`);
     has(out, `data-id="ex">Details</button>${close('ex')}</div>`, `${role}: Close to agents needs no signature`);
   }
   // a page that signs but is not read, or not one the face recognises: nothing to connect from, no keys
   for (const p of [null, { ok: true }]) lacks(draw(signing(state({ tab: 'venues', page: p }))), 'data-action="openSheet"');
+});
+
+// sign-only-money §4.4: opening a paper account takes no signature, so its key is drawn for any page that reads the Account —
+// Connect an account, Top up, Start over and Disconnect stay signed
+test('Venues: Open a paper account for a page that does not sign', () => {
+  const venuesBox = html => html.match(/<section class="cardbox" aria-label="Venues">[\s\S]*?<\/section>/)?.[0] ?? '';
+  const paperKey = '<div class="btn-row"><button type="button" class="btn-sm" data-action="openSheet" data-kind="paper">Open a paper account</button></div>';
+  for (const role of ['pending', 'none', 'needs-code', 'signed-out', 'unknown']) {
+    const html = venuesBox(draw(R.ownerStanding(state({ tab: 'venues' }), { role, kid: 'a5048199a8081854' })));
+    has(html, paperKey, role);
+    assert.equal((html.match(/data-action="openSheet"/g) ?? []).length, 1, `${role}: the one key`);
+    lacks(html, 'Connect an account', role);
+  }
+  // a page not read, or not one the face recognises: no key
+  for (const p of [null, { ok: true }]) lacks(draw(state({ tab: 'venues', page: p })), 'data-action="openSheet"');
 });
 
 test('router: account tabs agents, cards, rules and identity parse; an unknown tab is portfolio', () => {

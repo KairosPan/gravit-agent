@@ -294,8 +294,9 @@ function venueDetails(v, state) {
 function venues(state, now) {
   const a = state.account;
   const rows = venuesOf(a.data).map(v => venueRow(v, now, state)).join('');
-  // for a page that signs, the page's own sheets: what to connect comes from its connectLive, so an unread page has none
-  const keys = signs(state) && pageOk(a.data) ? `<div class="btn-row">${sheetKey('connect', {}, t('venues.connect'))}${sheetKey('paper', {}, t('venues.openPaper'))}</div>` : '';
+  // the page's own sheets, on a page read: Connect an account for a page that signs (what to connect comes from its connectLive),
+  // Open a paper account for any page, unsigned (sign-only-money §4.4)
+  const keys = pageOk(a.data) ? `<div class="btn-row">${signs(state) ? sheetKey('connect', {}, t('venues.connect')) : ''}${sheetKey('paper', {}, t('venues.openPaper'))}</div>` : '';
   // what the last Close to agents said, each venue's: the face's sentence, or the Account's refusal
   const closings = pageOk(a.data) ? Object.values(a.closing ?? {}).map(c => c?.said || c?.message).filter(Boolean).map(note).join('') : '';
   const list = (pageNote(a) ?? (rows ? `<div class="venues">${rows}</div>` : note(t('venues.none')))) + closings + keys;
