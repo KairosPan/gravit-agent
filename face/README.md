@@ -682,7 +682,8 @@ cd account && npm run account -- --live-cap 1     # home: ~/.buyer-agent-demo, t
 
 Then start the face, open Account and pair this browser with the code the Account printed (the
 device line `Pair with the code the Account printed in its terminal`; an Account that already has
-an owner lets a new browser in only from one that signs, under Settings › Devices). Open a paper
+an owner lets a new browser in with a code of its own, **Get a code** on the device line, or from
+a browser that signs, **Let it sign** under Settings › Devices). Open a paper
 account (Account › Venues › **Open a paper account**: a name and $10,000; the id is
 `paper-<the name>`, `paper-1` below). Gravit's first `portfolio_account` call makes the seat knock;
 let it in under Account › Agents (Knocking › **Let in…**, under the name **Gravit**; good for 1 ·
@@ -1785,31 +1786,30 @@ that takes writes:
   "Identity"): the account's `GET /data/account/identity`, read on entering the tab, at the page's
   beat while `#/account/identity` is on screen, on Refresh and Retry and right after an Identity
   sheet is done (those `?fresh=1`, since a write does not clear the proxy's cache); it does not wait
-  for the Account's own read. Three cards. **Gravit** — Telegram `Not connected` with **Connect…**
-  *(signs)*, Slack (since plan B2) `Not connected` with **Install app…** *(signs)*, iMessage (through
-  Photon) `Not connected` with **Connect…** *(signs)*, or any of them
+  for the Account's own read. Three cards, none of them signed: every Identity act is taken
+  unsigned, on any page that reads the Account, through `POST /data/account/act`. **Gravit** —
+  Telegram `Not connected` with **Connect…**, Slack (since plan B2) `Not connected` with
+  **Install app…**, iMessage (through Photon) `Not connected` with **Connect…**, or any of them
   `Connected`, `Speaks as @<bot>`, `Talks only with @<you>`, the one problem line when there is
   one (blocked — Telegram's alone —, another program holding the bot's messages or the app's
   connection to Slack, reads failing, and iMessage's own: the Photon line moved to another number,
   Photon refusing to write to yours, messages Photon could no longer give back — that one for a
   day), **Details** (since when, the token's fingerprint, polling
-  or not) and **Disconnect…** *(signs)*. **What
+  or not) and **Disconnect…** (asks once in place). **What
   reaches you where** — five rows (Chat with Gravit, Watch alerts, Pre-close brief, Cards waiting,
   Fills and reports) by Face · Telegram · iMessage · Slack: Face ticked and disabled in every row,
-  each network's ticks live only once it is connected and only on a page
-  that signs;
-  ticks that differ from the account's routing say `Not saved yet` with **Save…** *(signs)*, and a
+  each network's ticks live only once it is connected;
+  ticks that differ from the account's routing say `Not saved yet` with **Save…** (applies at once), and a
   fresh read drops any tick for a network it does not show connected; **Quiet hours** `23:00–07:00
-  ET` or `Off` with **Change…** *(signs)* — inside them alerts, the brief, reports, cards and fills
+  ET` or `Off` with **Change…** — inside them alerts, the brief, reports, cards and fills
   are not sent, and not sent later; replies, urgent alerts and the watchdog always go. **Not you ·
   n** — each stranger who wrote to the bot, `Telegram · …789 · 3 messages · last <time>` (on
   Slack `Slack · …7QK · …`, the user id's last three characters), with
-  **Block** *(signs)*, or `Nobody else has written to Gravit.` On a page that does not sign the
-  cards are read, the ticks disabled, with `Only a browser that signs changes these.`; an account
+  **Block** (asks once), or `Nobody else has written to Gravit.` An account
   that does not answer draws `The account is not answering.` and Retry, never a stale Connected
   row.
 
-  **Connect…** is four sheets and one signature. Sheets 1–3 are a drawer of their own
+  **Connect…** is three sheets and no signature, a drawer of their own
   (`client/js/host/identity.js`), each ending with its numbered steps: **1 · Bot token** — a
   password field with no form around it and the password managers' ignore marks, so the browser
   should not offer to save it, Paste, and Next (or Enter): the page reads the field, clears it,
@@ -1820,19 +1820,20 @@ that takes writes:
   until the connection's ten minutes are up (`expired`, Start again), saying so when another
   program reads the bot (a 409) or the account does not answer; **3 · Is this you?** — the name,
   the handle, the id masked and the message heard, **Not me** (that sender goes to Not you, and
-  sheet 2 waits again) and **This is me**. **4 · What you sign** is the ordinary owner sheet,
-  kind `connectNetwork`: the pending connection, the bot, your id, Telegram ticked in all five
-  rows on top of the routing now (untick later with Save…) and the token's fingerprint — never
-  the token — signed with this browser's key (`Sign with this browser's key`). Cancel, ×, Escape,
-  Back from sheet 2 and Start again drop the pending connection at the account at once; a reload
-  starts at sheet 1 and the account's ten minutes cover a tab that died; a sheet 4 signed after
-  the ten minutes is refused in the account's words, with Start again. **Disconnect…**
-  (`disconnectNetwork`, `Sign disconnect`: Gravit stops reading and sending on Telegram, the token
-  is deleted from the account, the desk keeps working in the face), **Save…** and **Change…** (one
-  sheet, `routing`, the account's `setRouting`: the ticks as the routing and quiet hours as two
-  New York clocks or Off) and **Block** (`blockSender`, `Sign block`) are one signature each.
+  sheet 2 waits again) and **This is me**, which connects: one act at the account's unsigned door
+  (`connectNetwork`: the pending connection, the bot, your id, Telegram ticked in all five rows on
+  top of the routing now — untick later with Save… — and the token's fingerprint, never the
+  token), with no fourth sheet. Cancel, ×, Escape, Back from sheet 2 and Start again drop the
+  pending connection at the account at once; a reload starts at sheet 1 and the account's ten
+  minutes cover a tab that died; **This is me** after the ten minutes is refused in the account's
+  words, with Start again. **Disconnect…** (`disconnectNetwork`, asked once in place: Gravit stops
+  reading and sending on Telegram, the token is deleted from the account, the desk keeps working
+  in the face, and the account sends the phone a last line through that network first),
+  **Save…** and **Change…** (`setRouting`: the ticks as the routing and quiet hours as two New
+  York clocks or Off; each applies at once) and **Block** (`blockSender`, asked once) are one act
+  each, none signed.
 
-  **Install app…** (Slack, plan B2) is the same four sheets over the account's Slack routes. **1 ·
+  **Install app…** (Slack, plan B2) is the same three sheets over the account's Slack routes. **1 ·
   App tokens** — the account's app manifest (`slackManifest` in the identity read: Socket Mode, a
   bot user named Gravit, the Messages tab, the bot scopes `chat:write`, `im:history` and
   `users:read`, the event `message.im`) in a `<pre>` with **Copy**, the steps to create the app
@@ -1845,13 +1846,13 @@ that takes writes:
   `app_redirect` to the app) and its QR: DM the app anything; **3 · Is this you?** — the name, the
   handle (`@<username>`, which the person cannot change), the full Slack user id (`U…`) and the
   message; only a full member of the bot's own team is heard — another team's member, a guest or
-  a deactivated account is counted in Not you and the sheet waits on, and a bot is dropped; **4 ·
-  What you sign** — `connectNetwork` with `network: slack`, the bot as `<team>:<bot user>`, you as
+  a deactivated account is counted in Not you and the sheet waits on, and a bot is dropped; **This is
+  me** — `connectNetwork` with `network: slack`, the bot as `<team>:<bot user>`, you as
   `<team>:<user>`, Slack ticked in all five rows, the two tokens' one fingerprint, and the note
   `On Slack, type the phone's commands with ! — !status, !pause 30m, !mute 30m, !new, !stop.`
   Disconnect… Slack deletes both tokens from the account.
 
-  **Connect…** (iMessage, through Photon's hosted relay; the iMessage plan) is four sheets and one
+  **Connect…** (iMessage, through Photon's hosted relay; the iMessage plan) is three sheets and no
   signature over the account's iMessage route, for a user who has made their own free Photon
   project (the shared number pool only: a project Photon reports as dedicated is refused). **1 ·
   Photon project** — three fields, the project ID, the project secret (a password field under the
@@ -1862,7 +1863,7 @@ that takes writes:
   again); **2 · Say hi** — a link and its QR that open a message to Gravit's pool number on your
   iPhone: send `hi`; **3 · Is this you?** — the name, the number and the message; only a 1:1
   iMessage from the number typed on sheet 1 is heard — SMS and RCS never are, and any other handle,
-  your own email included, is counted in Not you; **4 · What you sign** — `connectNetwork` with
+  your own email included, is counted in Not you; **This is me** — `connectNetwork` with
   `network: imessage`, iMessage ticked in all five rows and the project's fingerprint, never the
   secret. The account keeps the project in `credentials/networks/imessage.json`, holds one
   outbound stream to Photon and reads again from `identity/imessage.cursor` after a restart.
@@ -1876,8 +1877,9 @@ that takes writes:
   lines kept after a refusal.
 - **Settings** (a drawer on every screen): the theme, Text size, More font settings (Text font, Code
   font, Code size), Keyboard shortcuts (Show all and `⌘/`), and **Devices** — the Account's owner devices
-  by label, this page's marked `this page`, the browsers waiting to be let in, with **Let it sign**
-  and this page's **Sign out** *(signs;* in Beast it offers `Switch to Guard first: whatever an
+  by label with how and when each came in (`first device`, `let in from <label>`, `let in with a
+  code`, the date in New York) and **Remove** *(signs)* on every other device, this page's marked
+  `this page`, the browsers waiting to be let in, with **Let it sign**, and this page's **Sign out** *(signs;* in Beast it offers `Switch to Guard first: whatever an
   agent asks for waits for a signature`, ticked for the last device that signs*)*.
 
 Not on the face, by the design (`../docs/superpowers/specs/2026-11-01-account-two-parts-design.md`
@@ -1908,8 +1910,8 @@ piped stream and the POST rules); the public `/data/account/{explore,quotes,cand
 went to the market's half, and the five connected reads below took their place.
 
 Each route is `exact` — the table is the allow-list, and nothing else of the Account's surface is
-reachable through the face (forty-five routes since the iMessage plan: twenty-five reads, the push
-channel's two, seventeen writes, the sign-in's callback):
+reachable through the face (forty-six routes: twenty-five reads, the push
+channel's two, eighteen writes, the sign-in's callback):
 
 | Route | What it reads at the Account | TTL | Abort | Query names |
 |---|---|---|---|---|
@@ -1940,9 +1942,10 @@ channel's two, seventeen writes, the sign-in's callback):
 | `GET /data/account/connected/trades` | a connected line's latest trades (plan A2) | 2 s | 7 s | `venue`, `symbol`, `limit` |
 | `GET /data/account/identity` | `GET /api/account/identity`: Account › Identity — the networks connected, the routing, quiet hours and Not you; never a token or a numeric id (plan B1a); the Identity tab's read (plan B1b) | 2 s | 7 s | `fresh` |
 | `GET /data/account/identity/pending` | `GET /api/account/identity/pending`: a Connect sheet's pending connection (plan B1a): sheet 2 reads it every 1.5 s, always `fresh=1`; once heard it carries the sender's numeric `id`, which sheet 4 signs (plan B1b) | 1 s | 7 s | `id`, `fresh` |
-| `POST /data/account/pair` | `POST /api/account/pair`: this page's public key, its label and the code (stage 2) | — | 7 s | none; at most 4,096 bytes |
+| `POST /data/account/pair` | `POST /api/account/pair`: this page's public key, its label and the code (stage 2); a new browser's `ask`, which makes the account print a code of its own for it, and its `code` | — | 7 s | none; at most 4,096 bytes |
 | `POST /data/account/prepare` | `POST /api/account/prepare`: a draft prepared, unsigned (stage 2) | — | 30 s | none; at most 16,384 bytes |
 | `POST /data/account/exchange` | `POST /api/exchange`: the signed envelope (stage 2) | — | 30 s | none; at most 65,536 bytes |
+| `POST /data/account/act` | `POST /api/account/act`: the account's unsigned door — an Identity act (connect or disconnect a network, routing and quiet hours, Not you) or opening a paper account, taken with no signature; a body at most 16,384 bytes | — | 30 s | none; at most 16,384 bytes |
 | `POST /data/account/wallet/challenge` | `POST /api/account/wallet/challenge`: a browser wallet's challenge, built on the face's origin (the two parts) | — | 7 s | none; at most 1,024 bytes |
 | `POST /data/account/wallet/prove` | `POST /api/account/wallet/prove`: the wallet's signed challenge (the two parts) | — | 12 s | none; at most 2,048 bytes |
 | `POST /data/account/signin/start` | `POST /api/account/signin/start`: a venue's sign-in, its redirect on the face's origin (the two parts) | — | 30 s | none; at most 512 bytes |
@@ -1973,8 +1976,8 @@ differ: `guard` reads its body under its limit and sends the fixed `{"mode":"gua
 and `wallet/challenge` and `signin/start` alone carry `x-gravit-face-origin`, the face's origin as
 the browser reached it (built from a loopback `Host` alone), on which the Account builds the wallet
 message's domain and the sign-in's redirect — the Account refuses a `signin/start` without it.
-`revoke` and `guard` are the two unsigned writes: each makes the Account safer, the direction the
-Account itself takes unsigned.
+`revoke` and `guard` are unsigned writes that make the Account safer, the direction the Account
+itself takes unsigned; `act` is the unsigned door for what moves no money.
 
 **The sign-in's callback** is the one route a page navigates to from elsewhere: a venue's sign-in
 page sends the browser back to `/data/account/signin/callback`. It has its own fence — a loopback
@@ -2152,7 +2155,8 @@ face's process holds no key, makes no envelope and signs nothing: it carries the
 | Line | What it means | Its key |
 |---|---|---|
 | `This page signs for the account` | this key is among the Account's owners: every owner key is drawn | — |
-| `Waiting to be let in — a browser that signs lets it in, under Settings › Devices` | the Account has an owner and this page asked to sign: an owner device presses Let it sign once — another face browser that signs, under its Settings › Devices | — |
+| `Waiting to be let in — a browser that signs lets it in, under Settings › Devices` | the Account has an owner and this page asked to sign: an owner device presses Let it sign once — another face browser that signs, under its Settings › Devices — or this page presses Get a code | **Get a code** |
+| `Type the code the Account printed in its terminal for this browser (<kid>)` | this page pressed Get a code: the Account printed `a browser asks to sign for the account (<label> · <kid8>): code ABCD-EFGH, good for 10 minutes — type it on that page` in its terminal (as a LaunchAgent, `npm run account:service -- code` shows the newest), and the page types it; the phone is told when a code lets a browser in | the code box and **Pair** |
 | `Pair with the code the Account printed in its terminal` | the Account has no owner yet: the code it printed makes this page the owner (five wrong tries end pairing until the Account restarts — its rule, in its words) | the code box and **Pair** |
 | `Signed out` | this page signed out; nothing is paired until you sign in | **Sign in** (a new key) |
 | `This browser cannot sign for the account` | no WebCrypto, or a key that could not be made | — |
@@ -2165,18 +2169,21 @@ list, or an owner dropped this device — the page pairs again, the line says so
 drawn until it signs again.
 
 **Settings › Devices**: the Account's owner devices by label, this page's own marked `this page`,
-the browsers waiting to be let in (`<kid> · since <date>`), each with **Let it sign** — which signs
-the owners list with that device added, so a second face browser is admitted from here — and this
-page's **Sign out**, a signed `signOut` of this device (in Beast the sheet offers `Switch to Guard
+how and when each came in (`first device`, `let in from <label>`, `let in with a code`, the date in
+New York), **Remove** on every other device (a signed `removeDevice`), the browsers waiting to be
+let in (`<kid> · since <date>`), each with **Let it sign** — which signs the owners list with that
+device added, so a second face browser is admitted from here — and this page's **Sign out**, a signed `signOut` of this device (in Beast the sheet offers `Switch to Guard
 first: whatever an agent asks for waits for a signature`, ticked for the last device that signs):
 taken, the key is deleted and `gravit.owner.signedOut.v1` is set in this browser. When the last
 device signs out the Account prints a new pairing code in its own terminal; the face cannot read
-it. **Keep a second face browser paired** (another profile or browser, let in from this one): the
-face is the only page that signs, so a lost profile with no second device leaves nothing that can
-let a new one in and no code: the way back is `npm run account -- --fresh`, which throws away the
+it. **A lost profile** is not a lost account: any new browser presses **Get a code** on its device
+line and types the code the Account prints in its own terminal (`npm run account:service -- code`
+as a LaunchAgent), or is let in with **Let it sign** from a browser that still signs; a second
+paired browser still spares the trip to the terminal. Only if the Account's terminal is out of
+reach is the way back `npm run account -- --fresh`, which throws away the
 owner, the venues, the agents and their limits (`DEVELOPMENT.md` R53).
 
-**Every owner action is prepare → What you sign → sign**, the Account's own: the key opens a sheet
+**Every owner action that moves money is prepare → What you sign → sign**, the Account's own (Identity's acts and opening a paper account are taken unsigned, through `act`, and draw no What you sign): the key opens a sheet
 (a drawer over the screen) whose form drafts the Account's action; a complete form is prepared at
 the Account at once and again 300 ms after a change; the sheet shows the Account's quote and **What
 you sign**, a fold that opens on a click — every field the signature covers, `name: value`, as
@@ -2187,9 +2194,8 @@ minutes (`Your signature is good for m:ss more.`): at zero it is prepared again,
 its last 30 seconds prepares again and signs the fresh one. A refusal is the Account's sentence and
 nothing is signed (`Prepare again` where the price moved or the time ran out). Only a star and a
 Cancel are one press (prepare, then sign at once), as on the retired page. Each sheet's go word
-says what it signs: `Let it in`, `Give the limit`, `End the limit`, `Revoke`, `Connect`, `Open the
-account`, `Top up`, `Start over`, `Disconnect`, `Sign and reopen`, `Approve` / `Reject`, `Decline`,
-`Let it sign`, `Sign out`, `Sign and place`, `Sign and close` / `Sign and sell`, `Sign and change`,
+says what it signs: `Let it in`, `Give the limit`, `End the limit`, `Revoke`, `Connect`, `Top up`, `Start over`, `Disconnect`, `Sign and reopen`, `Approve` / `Reject`, `Decline`,
+`Let it sign`, `Remove`, `Sign out`, `Sign and place`, `Sign and close` / `Sign and sell`, `Sign and change`,
 `Sign leverage`, `Sign Beast`, `Sign the cap`, `Renew for 30 days` / `Start a new one`, `Sign and
 move`, `Sign and put in` / `Sign and take out`, `Make it`.
 
@@ -2212,7 +2218,7 @@ move`, `Sign and put in` / `Sign and take out`, `Make it`.
   signed in the wallet), a venue's sign-in (**Sign in at <venue>**, finished through the face's
   callback), an address to watch, and the command-line connector. **Open a paper account** — a
   name and starting dollars (the id `paper-<the name, slugged>`, `-2` past one in use), or a kept
-  paper book continued. **Top up** and **Start over** a paper venue (its Details). **Reopen…** a
+  paper book continued, taken unsigned from any page (a venue's other acts stay signed). **Top up** and **Start over** a paper venue (its Details). **Reopen…** a
   venue closed to agents (Close to agents itself is unsigned). **Disconnect…** asks in place first;
   the Account refuses while an order or a payment is open there.
 - **Close…**, **Change…** and **Leverage…** (the Market half): close or sell a position, amend an
@@ -2222,7 +2228,7 @@ move`, `Sign and put in` / `Sign and take out`, `Make it`.
   Move, Earn in and out; **Sell many** from the Portfolio. A payment the Account built for your own
   browser wallet is signed by that wallet (**Send from wallet…**), never by the device key.
 - **The star** on an Account market (Markets) signs the Account's watch list.
-- **Let it sign** and **Sign out** (Settings › Devices).
+- **Let it sign**, **Remove** and **Sign out** (Settings › Devices); **Get a code** on the device line is the new browser's own request, not a signature.
 
 Not on the face, by the design (the two parts' spec §5.4): the Account's Superagent (the Desk and
 its Brains), Intents and Memory — their server code and seat tools stay in `../account/`. Nothing on
@@ -2368,12 +2374,12 @@ account, naming each message's kind, never its recipient.
 1. In Telegram, message **@BotFather**, send `/newbot`, and choose a name and a username that
    ends in `bot`. BotFather answers with the bot's token. It is a key: never paste it into a
    chat, a ticket or a commit.
-2. Connect it in Account › Identity › Telegram › **Connect…** on the face, on a page that signs,
-   with the account running (`npm run account`) — four sheets ("Markets and Account" › "Account"
-   above): you paste the token once (it passes through the face unparsed and unlogged, and the
+2. Connect it in Account › Identity › Telegram › **Connect…** on the face, on any page that
+   reads the account, with the account running (`npm run account`) — three sheets ("Markets and
+   Account" › "Account" above): you paste the token once (it passes through the face unparsed and unlogged, and the
    account keeps it in `<account home>/credentials/networks/telegram.json`), press Start on the
-   bot from your phone, confirm the account heard you — not a stranger — and read What you sign
-   and sign. The whole round, from the merge to Disconnect…, is "The phone drill" below.
+   bot from your phone, confirm the account heard you — not a stranger — with **This is me**
+   (nothing is signed). The whole round, from the merge to Disconnect…, is "The phone drill" below.
 
 An older home's `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OPERATOR_ID` lines in `$DSH_HOME/.env` are read
 by nothing now: remove them. With nothing connected, or the `mcp-account` row disabled, the face
@@ -6533,7 +6539,7 @@ live feeds, the phone and a real model are the operator's.
 ## The phone drill (run after plans B1a and B1b land, and after any change to `../account/src/portfolio/identity/`, src/phone.ts, src/phone-bridge.ts, src/card-notice.ts, scripts/watchdog.ts, client/js/host/identity.js, identity-view.js, sheet-identity.js, client/js/render/identity.js or client/js/reducers/identity.js)
 
 Telegram end to end through the account (`DEVELOPMENT.md` §3.9 "Identity" and §5; charter D20):
-Account › Identity connects it in four sheets and one signature, the desk talks to the phone
+Account › Identity connects it in three sheets and no signature, the desk talks to the phone
 through the account's inbox and send, and Disconnect… ends it. Every step is the operator's: it
 drives your launchd, your `~/.dsh` and your Telegram, and an agent never runs it.
 
@@ -6564,18 +6570,17 @@ reaches Telegram, a real browser's password manager, or Telegram's apps.
    `../account/`, `npm run market:service -- install` in `../market/`, then `npm run service --
    install` here again so the watchdog checks all three.
 
-**The drill**, on a page that signs, with the service, the account and the market running this
+**The drill**, on any page that reads the account, with the service, the account and the market running this
 code:
 
-1. **Connect, four sheets.** Account › Identity › Telegram › **Connect…**. Sheet 1: paste the
+1. **Connect, three sheets.** Account › Identity › Telegram › **Connect…**. Sheet 1: paste the
    token and press Next. PASS: the field is empty at once, and **the browser offers to save
    nothing** — no save-password prompt, no key in the address bar, and afterwards no entry for the
    face's host in the browser's saved passwords (check each browser you sign from; a prompt is a
    finding: record the browser and its version, since the field has no form around it and carries
    the password managers' ignore marks). Sheet 2: the bot's link and its QR; press **Start** on
    the phone. PASS: within a few seconds sheet 3 shows your name, your handle, your id masked and
-   `/start`. **This is me**, then sheet 4: What you sign names the bot, you, Telegram in all five
-   rows and the token's fingerprint, never the token. Sign.
+   `/start`. **This is me**: no fourth sheet and no signature, Telegram ticked in all five rows.
 2. **The tab.** PASS: Telegram `Connected`, `Speaks as @<your bot>`, `Talks only with @<you>`;
    Details shows since when, the fingerprint and `polling`; Slack `Not connected` with **Install
    app…** (since plan B2: "The Slack phone drill" below); iMessage `Not connected` (the iMessage drill below); the grid has Telegram ticked in every row; Not you is
@@ -6589,16 +6594,16 @@ code:
 4. **Status and chat.** On the phone send `/status`. PASS: the answer has a `phone: telegram
    polling …` line. Ask Gravit something. PASS: the answer comes back as a reply in the same chat.
 5. **A stranger.** From another Telegram account, message the bot. PASS: nothing answers; Not you
-   shows `Telegram · …<the last three digits> · 1 message`. **Block** it and sign. PASS: it leaves
+   shows `Telegram · …<the last three digits> · 1 message`. **Block** it, confirming once. PASS: it leaves
    the list, and a second message from it is not counted.
-6. **Routing.** Untick Telegram for Watch alerts; `Not saved yet` and **Save…** appear; sign.
+6. **Routing.** Untick Telegram for Watch alerts; `Not saved yet` and **Save…** appear; Save applies at once.
    PASS: `/status` still answers; the next watch alert does not reach the phone, and
    `$DSH_HOME/face/desk/alerts.jsonl` has its `delivered` record with `"delivery":{"undelivered":"not
    routed"}`. Tick it again and Save….
 7. **Quiet hours hold an alert.** Quiet hours › **Change…**, a window covering the next few
-   minutes, sign. PASS: a (non-urgent) watch alert is held — its record says `"undelivered":"quiet
+   minutes (Change… applies at once). PASS: a (non-urgent) watch alert is held — its record says `"undelivered":"quiet
    hours"` and nothing arrives later — while a text you send is still answered. Change… back
-   (or tick Off) and sign.
+   (or tick Off).
 8. **A card notice with no link.** Let Gravit place a paper order. PASS: the phone shows `Your call
    · … — waiting in Gravit` as plain text — no button, no link, any host in it defanged as in step
    3 — and nothing on the phone answers the card; approve it in the browser; the fill notice
@@ -6611,7 +6616,7 @@ code:
    is skipped.)
 10. **Pause and mute.** `/pause 30m` and `/mute 30m` from the phone answer as before; resume from a
     terminal (`npm run desk -- resume`, `npm run desk -- unmute`).
-11. **Disconnect.** Account › Identity › Telegram › **Disconnect…**, sign. PASS: the tab reads `Not
+11. **Disconnect.** Account › Identity › Telegram › **Disconnect…**, confirming once. PASS: the tab reads `Not
     connected`, with no unsaved ticks and no Save…; the bot stops answering; in a
     terminal, `npm run service -- status` (not the phone's `/status`, which has no bot to reach now)
     says `phone: nothing connected (Account › Identity)`;
@@ -6641,16 +6646,15 @@ face's `npm test` runs the Slack cases of `phone-bridge`, `watchdog`, `desk`, `d
 **Before the drill, once, after the merge:** restart the account, then the face, as after B1;
 hard-reload the page. No `npm ci` is needed.
 
-**The drill**, on a page that signs:
+**The drill**, on any page that reads the account:
 
-1. **Install app…, four sheets.** Sheet 1: **Copy** the manifest, then at api.slack.com/apps
+1. **Install app…, three sheets.** Sheet 1: **Copy** the manifest, then at api.slack.com/apps
    choose Create New App › From a manifest, in a workspace where you are the only person, or one
    whose owners you trust with what you and Gravit write there (a workspace's owners can export
    DMs on some plans). Make the app-level token (`xapp-…`) with `connections:write`, install the
    app, and paste both tokens. PASS: both fields are empty at once, and the browser offers to
    save nothing. Sheet 2: open the link and DM the app `hi`. PASS: sheet 3 shows you — your name,
-   `@<your username>`, your full Slack id and `hi`. Check that it is you, then read and sign sheet
-   4.
+   `@<your username>`, your full Slack id and `hi`. Check that it is you, then press **This is me**.
 2. **The tab.** PASS: Slack `Connected`, `Speaks as @gravit`, `Talks only with @you`; Slack's
    column is enabled and ticked; iMessage is `Not connected`.
 3. **Status and chat.** In the DM send `!status`. PASS: a `phone: … slack polling …` line. Ask
@@ -6666,7 +6670,7 @@ hard-reload the page. No `npm ci` is needed.
    the DM from the cursor). If Telegram is not connected, after ten minutes the watchdog's
    account-down line arrives on Slack.
 8. **Pause and mute.** `!pause 30m` and `!mute 30m` answer. Resume from a terminal.
-9. **Disconnect… Slack** and sign. PASS: the app stops answering;
+9. **Disconnect… Slack**, confirming once. PASS: the app stops answering;
    `credentials/networks/slack.json` is gone (`ls`, never `cat`). To retire the app, delete it at
    api.slack.com/apps, which revokes both tokens.
 
@@ -6690,10 +6694,10 @@ live check of a real project from your own terminal, with `PHOTON_PROJECT_ID`,
 `PHOTON_PROJECT_SECRET` and `PHOTON_PHONE` in the environment; it prints neither the secret nor a
 line token.
 
-1. **Connect, four sheets.** Make a free Photon project (for Gravit alone). Account › Identity ›
+1. **Connect, three sheets.** Make a free Photon project (for Gravit alone). Account › Identity ›
    iMessage › **Connect…**, fill the three fields, Next. PASS: the secret field is empty at once
    and the browser offers to save nothing. Sheet 2: open the link on the iPhone, send `hi`. PASS:
-   sheet 3 shows your number and `hi`. **This is me**, then read sheet 4 and sign.
+   sheet 3 shows your number and `hi`. **This is me**.
 2. **The tab.** PASS: iMessage `Connected`, `Talks only with` your number; iMessage's column in the
    grid is enabled and ticked; `credentials/networks/imessage.json` exists (`ls`, never `cat`).
 3. **Text and answer.** Text `/status`, then ask Gravit something. PASS: the answers arrive on
@@ -6706,11 +6710,11 @@ line token.
    again. PASS: the part that was cut arrives once, never twice (iMessage sends are written to the
    outbox before they go, each part under its own id).
 7. **The compose box.** With the host's account stopped, `docker compose up` and connect iMessage
-   from the boxed face. PASS: the same four sheets work and the answers come.
+   from the boxed face. PASS: the same three sheets work and the answers come.
 8. **The watchdog.** With only iMessage connected, stop the account for ten minutes or more. PASS:
    nothing arrives on iMessage, and nothing goes anywhere else either: the watchdog phones
    Telegram or Slack alone, so with neither connected it has no line to send.
-9. **Disconnect… iMessage** and sign. PASS: the number stops answering;
+9. **Disconnect… iMessage**, confirming once. PASS: the number stops answering;
    `credentials/networks/imessage.json` and `identity/imessage.cursor` are gone. Your Photon
    registration stays; delete the project at Photon to retire it.
 
