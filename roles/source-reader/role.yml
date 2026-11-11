@@ -1,0 +1,8 @@
+# roles/source-reader/role.yml - the source reader (analogs spec §6.5; charter D29): the one role that reads the open web.
+# Its mask is web_search alone. The face gives its children dsh's web_fetch itself (face/src/source-reader.ts), in each
+# child's own tool layer, behind a page budget and a secret check; no role.yml names web_fetch, and this role carries
+# no other tool (face/src/roles.ts WEB_ROLE_IDS).
+name: Source reader
+description: Finds past events of the kind a brief names and dates each from a page it opens - the company, its current US ticker, when the news first became public and at what point of the session, the URL and the page's own words; marks UNVERIFIED what no page confirmed.
+allow:
+  - web_search

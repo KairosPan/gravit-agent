@@ -30,7 +30,11 @@
  * a human, the open web, delegation, the cycle's goal and todo bookkeeping, the reserved PTC
  * transport `run_code`, the account and order tools under any server name, the AKShare tools
  * (`mcp__akshare__*` and the market's `market_akshare`, refused under any server name; the `NEVER`
- * table, with the reason for each). The job tools are a bash role's own: a
+ * table, with the reason for each). The open web has one exception, {@link WEB_ROLE_IDS}: the
+ * source reader (analogs spec §6.5) carries `web_search` and nothing beside it, so the open web
+ * never shares a session with another tool; `web_fetch` is in no role's `allow`, the source
+ * reader's included - the face gives its children `web_fetch` itself (src/source-reader.ts).
+ * The job tools are a bash role's own: a
  * command that outruns the executor's default timeout moves to a background job the child
  * owns, which it reads with `job_output` and stops with `job_kill`, and which is cancelled
  * when the child is. The reader refuses a never-carried `allow` entry where it reads the
@@ -84,15 +88,16 @@ export const TOOL_NAME_MAX = 64;
  *  (`entry === raw` or `entry.endsWith("__" + raw)`), the match src/orders.ts `isOrderTool`
  *  applies to the order tools, so a server the operator mounts under a name of their own
  *  cannot slip an account or order tool in. {@link readMeta} refuses an `allow` entry that
- *  matches, with the reason in the message. Every role the repository ships obeys it
- *  (`cn-market-analyst`, `cn-reviewer` and `cn-stock-analyst` today), and tests/roles.test.ts holds an independent
- *  copy of the names. */
+ *  matches, with the reason in the message - but `web_search` in the `allow` of a role in
+ *  {@link WEB_ROLE_IDS}. Every role the repository ships obeys it (`cn-market-analyst`, `cn-reviewer`,
+ *  `cn-stock-analyst`, `pdf-page-reader` and `source-reader` today), and tests/roles.test.ts holds an
+ *  independent copy of the names. */
 const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly string[]; prefixes: readonly string[]; rawNames: readonly string[] }> = [
   { what: "a tool that needs a human",
     because: "a delegated child has no human to ask or to review a plan (dsh refuses ask_user_question to it with DELEGATED_CALLER); a role that needs the operator says so in its report",
     names: ["ask_user_question", "exit_plan_mode"], prefixes: [], rawNames: [] },
   { what: "a web tool",
-    because: "a role works with the tree's own tools, never the open web",
+    because: "a role works with the tree's own tools, never the open web; web_search is the source reader's alone, and the face gives web_fetch to the source reader's children itself (src/source-reader.ts)",
     names: ["web_search", "web_fetch"], prefixes: [], rawNames: [] },
   { what: "a delegation tool",
     because: "Gravit alone delegates; a role is one hand, not a team",
@@ -119,6 +124,12 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
       "portfolio_live_leverage", "portfolio_live_move", "portfolio_live_earn", "portfolio_pay",
       "portfolio_order", "portfolio_execute", "portfolio_transfer"] },
 ];
+
+/** The roles that may read the open web: `web_search` is admitted in their `allow` and nothing
+ *  else is (the module header). The source reader alone (analogs spec §6.5; charter D29). */
+export const WEB_ROLE_IDS: ReadonlySet<string> = new Set(["source-reader"]);
+/** The one web tool a role in {@link WEB_ROLE_IDS} carries. */
+const WEB_ROLE_TOOL = "web_search";
 
 /** Why a role may not carry `entry`, as the end of a refusal; `undefined` when it may. */
 function neverCarries(entry: string): string | undefined {
@@ -183,8 +194,9 @@ function readPersona(file: string): string {
 const textOf = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 
-/** `role.yml`. Keys the face does not know are ignored. */
-function readMeta(file: string): Pick<RoleFile, "name" | "description" | "allow" | "model"> {
+/** `role.yml` of the role `id`. Keys the face does not know are ignored. */
+function readMeta(file: string, id: string): Pick<RoleFile, "name" | "description" | "allow" | "model"> {
+  const webRole = WEB_ROLE_IDS.has(id);
   const source = readBytes(file).toString("utf8");
   let doc: unknown;
   try {
@@ -213,8 +225,11 @@ function readMeta(file: string): Pick<RoleFile, "name" | "description" | "allow"
     if (typeof entry !== "string") throw refusal(file, `allow entry ${index + 1} is not a string`);
     if (entry.includes("*")) throw refusal(file, `allow entry ${JSON.stringify(entry)}: wildcards are not accepted; name the exact tool, e.g. read or mcp__<server>__<raw>`);
     if (!TOOL_NAME_RE.test(entry)) throw refusal(file, `allow entry ${JSON.stringify(entry)} is not a tool name (letters, digits, _ and - only)`);
-    const never = neverCarries(entry);
+    const never = webRole && entry === WEB_ROLE_TOOL ? undefined : neverCarries(entry);
     if (never !== undefined) throw refusal(file, `allow entry ${JSON.stringify(entry)}: ${never}`);
+    if (webRole && entry !== WEB_ROLE_TOOL) {
+      throw refusal(file, `allow entry ${JSON.stringify(entry)}: the source reader carries ${WEB_ROLE_TOOL} alone: the open web never shares a session with another tool`);
+    }
     if (seen.has(entry)) throw refusal(file, `allow entry ${JSON.stringify(entry)} is listed twice`);
     seen.add(entry);
     return entry;
@@ -236,7 +251,7 @@ function readRole(root: string, id: string): RoleFile {
   const tool = toolNameFor(id);
   if (tool.length > TOOL_NAME_MAX) throw refusal(dir, `the tool name ${tool} is ${tool.length} characters; the limit is ${TOOL_NAME_MAX} - shorten the directory name`);
   /* ROLE.md first, so its refusals come before role.yml's. */
-  return { id, tool, persona: readPersona(join(dir, PERSONA_FILE)), ...readMeta(join(dir, META_FILE)) };
+  return { id, tool, persona: readPersona(join(dir, PERSONA_FILE)), ...readMeta(join(dir, META_FILE), id) };
 }
 
 /** The role ids under `root`, sorted. A symbolic link, whatever its name, and a directory

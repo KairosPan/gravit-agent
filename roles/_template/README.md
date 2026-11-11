@@ -15,7 +15,7 @@ and declares the role's preset after boot (a role none of whose tools exists ref
 and a test fails when it drifts. Gravit proposes a role in conversation and never writes here.
 A tool a role names must exist in the tree when the role is called, or that call fails naming
 the tool. A role never carries `ask_user_question` (a child has no human to ask), delegation,
-goals, `run_code`, the account and order tools under any server name, or the AKShare passthrough (`market_akshare`, and an older seat's). The
+goals, `run_code`, the account and order tools under any server name, the AKShare passthrough (`market_akshare`, and an older seat's), or the web tools, with one exception: the source reader (`source-reader`, `WEB_ROLE_IDS` in `face/src/roles.ts`) carries `web_search` and nothing beside it, and no role names `web_fetch` — the face gives the source reader's children `web_fetch` itself. The
 job tools (`job_output`, `job_list`, `job_kill`) belong only beside `bash`: a command past the
 60 s default moves to a background job that is the child's own and is cancelled with it, so a
 `bash` role carries them to read or stop it. Copy this directory, never link it: a symbolic
