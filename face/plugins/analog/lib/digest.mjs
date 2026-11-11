@@ -2,8 +2,9 @@
 /**
  * The digest of a chart view: the few lines the model reads instead of the view, at most 2,048 bytes. Coverage
  * first, then the query's numbers, the counts, one row per group, the leading cases in the order the page shows them,
- * the cases still under way, and the three fixed sentences. When it does not fit, leading-case lines go from the end,
- * then under-way names, until it does.
+ * the cases still under way, and the three fixed sentences. When it does not fit, the under-way line gives its names
+ * without dates, then is cut from the end with `+N more`, then is left out (line 3 still counts the cases); only then
+ * do leading-case lines go from the end, followed by `… and N more in the view`. The fixed sentences are never cut.
  *
  * A percentage has one decimal, U+2212 for a negative and `+` for a positive, bare when it rounds to 0.0%; a ratio has
  * one decimal and `×`; a number the view does not have is `n/a`.
@@ -82,19 +83,28 @@ export function chartDigest(view) {
       return `${k.symbol} ${k.date} ${pct(k.depth)}/${k.days}d → +60 ${pct(k.after.r60)}, low ${pct(k.after.low60)} ` +
         `(${session(k.after.lowAt)})${n > 1 ? ` · stands for ${n}` : ""}`;
     });
-  const underWay = view.cases.filter((k) => k.state === "underWay").map((k) => `${k.symbol} ${k.date}`);
+  const underWayCases = view.cases.filter((k) => k.state === "underWay");
+  let underWay = underWayCases.map((k) => `${k.symbol} ${k.date}`);
+  let underWayCut = 0;
+  let underWayShown = underWay.length > 0;
+  let leadingCut = 0;
 
   const compose = () => [
     first, second, third, HEADER, ...rows,
-    ...(leading.length > 0 ? ["leading cases (own first, then one per market event):", ...leading] : []),
-    ...(underWay.length > 0 ? [`under way now: ${underWay.join(", ")}`] : []),
+    ...(leading.length > 0 || leadingCut > 0
+      ? ["leading cases (own first, then one per market event):", ...leading,
+        ...(leadingCut > 0 ? [`… and ${leadingCut} more in the view`] : [])]
+      : []),
+    ...(underWayShown ? [`under way now: ${underWay.join(", ")}${underWayCut > 0 ? ` +${underWayCut} more` : ""}`] : []),
     SENTENCES,
   ].join("\n");
   let text = compose();
-  while (Buffer.byteLength(text) > DIGEST_MAX && (leading.length > 0 || underWay.length > 0)) {
-    if (leading.length > 0) leading.pop();
-    else underWay.pop();
-    text = compose();
-  }
+  const over = () => Buffer.byteLength(text) > DIGEST_MAX;
+  // The under-way line gives way first, a step at a time: its dates, then names from the end, then the line itself
+  // (line 3 still counts them); only then are leading cases cut, and the digest says how many more the view holds.
+  if (over() && underWayShown) { underWay = underWayCases.map((k) => k.symbol); text = compose(); }
+  while (over() && underWayShown && underWay.length > 1) { underWay.pop(); underWayCut++; text = compose(); }
+  if (over() && underWayShown) { underWayShown = false; text = compose(); }
+  while (over() && leading.length > 0) { leading.pop(); leadingCut++; text = compose(); }
   return text;
 }

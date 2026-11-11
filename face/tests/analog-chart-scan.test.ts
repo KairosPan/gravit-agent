@@ -106,6 +106,83 @@ test("a digest of a large view still fits, and says a group's numbers once it ha
   assert.ok(text.includes(" · stands for 3"));
 });
 
+/** The fixture's view with `leadingN` past cases, all leading, and `underWayN` cases under way; `pad` bytes more on
+ * line 3 (a dropped condition's name) set how much room is left. */
+async function crowded(leadingN: number, underWayN: number, pad = 0) {
+  const view = { ...(await scan()), id: "an-20201126-0a1b2c3d" };
+  const [under, past] = [view.cases[0]!, view.cases[1]!];
+  const pasts = Array.from({ length: leadingN }, (_, k) => ({ ...past, id: `PASTCO${k}:2015-03-16`, symbol: `PASTCO${k}`, date: "2015-03-16", distance: k / 100 }));
+  const unders = Array.from({ length: underWayN }, (_, k) => ({ ...under, id: `UNDERWAY${k}:2020-11-21`, symbol: `UNDERWAY${k}`, distance: 1 + k / 100 }));
+  return {
+    ...view, cases: [...pasts, ...unders], leading: { own: [], others: pasts.map((c) => ({ id: c.id, standsFor: 3 })) },
+    parameters: { ...view.parameters, dropped: pad > 0 ? ["x".repeat(pad)] : [] },
+  };
+}
+const bytes = (text: string) => Buffer.byteLength(text);
+const leadingLines = (text: string) => text.split("\n").filter((l) => l.startsWith("PASTCO"));
+const underLine = (text: string) => text.split("\n").find((l) => l.startsWith("under way now: "));
+
+test("a digest over the cap gives the under-way names without dates first", async () => {
+  const names = Array.from({ length: 20 }, (_, k) => `UNDERWAY${k}`);
+  const room = bytes(`\nunder way now: ${names.join(", ")}`);
+  const bare = chartDigest(await crowded(12, 0, 1));
+  const view = await crowded(12, 20, 1 + (DIGEST_MAX - bytes(bare) - room)); // room for the line without dates, no more
+  const text = chartDigest(view);
+  assert.ok(bytes(text) <= DIGEST_MAX);
+  assert.equal(underLine(text), `under way now: ${names.join(", ")}`);
+  assert.equal(leadingLines(text).length, 12);
+});
+
+test("a digest over the cap cuts the under-way names from the end and says how many, before any leading case", async () => {
+  const text = chartDigest(await crowded(12, 70));
+  assert.ok(bytes(text) <= DIGEST_MAX);
+  assert.deepEqual(leadingLines(text), leadingLines(chartDigest(await crowded(12, 0))));
+  assert.equal(leadingLines(text).length, 12);
+  const line = underLine(text)!;
+  const m = /^under way now: (UNDERWAY\d+(?:, UNDERWAY\d+)*) \+(\d+) more$/.exec(line);
+  assert.ok(m !== null, line);
+  const kept = m[1]!.split(", ");
+  assert.deepEqual(kept, Array.from({ length: kept.length }, (_, k) => `UNDERWAY${k}`));
+  assert.equal(kept.length + Number(m[2]), 70);
+  assert.ok(!text.includes("more in the view"));
+});
+
+test("a digest with no room for one under-way name leaves the line out, keeping every leading case", async () => {
+  const bare = chartDigest(await crowded(12, 0, 1));
+  const view = await crowded(12, 70, 1 + (DIGEST_MAX - bytes(bare) - 5));
+  const text = chartDigest(view);
+  assert.ok(bytes(text) <= DIGEST_MAX);
+  assert.equal(underLine(text), undefined);
+  assert.equal(leadingLines(text).length, 12);
+  assert.ok(!text.includes("more in the view"));
+});
+
+test("only then are leading cases cut from the end, with a line saying how many more the view holds", async () => {
+  const text = chartDigest(await crowded(40, 0));
+  assert.ok(bytes(text) <= DIGEST_MAX);
+  const lines = text.split("\n");
+  const kept = leadingLines(text);
+  assert.ok(kept.length > 0 && kept.length < 40);
+  assert.deepEqual(kept.map((l) => l.split(" ")[0]), Array.from({ length: kept.length }, (_, k) => `PASTCO${k}`));
+  const at = lines.indexOf(kept.at(-1)!);
+  assert.equal(lines[at + 1], `… and ${40 - kept.length} more in the view`);
+  assert.ok(text.endsWith("No lookahead guard: never evidence for a trade."));
+  const header = "leading cases (own first, then one per market event):";
+  const none = chartDigest(await crowded(0, 0, 1));
+  const tight = chartDigest(await crowded(40, 0, 1 + (DIGEST_MAX - bytes(none) - bytes(`\n${header}\n… and 40 more in the view`)))); // room for no leading line
+  assert.ok(bytes(tight) <= DIGEST_MAX);
+  assert.equal(leadingLines(tight).length, 0);
+  const tightLines = tight.split("\n");
+  assert.equal(tightLines[tightLines.indexOf(header) + 1], "… and 40 more in the view");
+});
+
+test("the digest says a read on a later day than the latest bar, and a scan stopped at the deadline", async () => {
+  const later = chartDigest({ ...(await scan({ now: () => new Date("2020-11-28T15:00:00Z") })), id: "an-20201128-0a1b2c3d" });
+  assert.ok(later.split("\n")[1]!.startsWith("QRY as of 2020-11-26 (latest bar; read 2020-11-28): −30.0%"));
+  const late = chartDigest({ ...(await scan({ deadlineMs: -1 })), id: "an-20201126-0a1b2c3d" });
+  assert.ok(late.split("\n")[0]!.endsWith(" · stopped at the deadline"));
+});
+
 test("the universe is a list with its date and its rule", () => {
   assert.ok(UNIVERSE.length >= 30 && UNIVERSE.length <= 100); assert.equal(new Set(UNIVERSE).size, UNIVERSE.length);
   assert.ok(!UNIVERSE.includes("SPY")); assert.match(UNIVERSE_AS_OF, /^\d{4}-\d{2}-\d{2}$/); assert.ok(UNIVERSE_RULE.length > 20);
