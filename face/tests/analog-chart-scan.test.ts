@@ -12,7 +12,7 @@ const NOW = () => new Date("2020-11-26T20:00:00Z");
 const held = () => ({ QRY: { bars: SELLOFF }, PAST: { bars: PAST }, SPY: { bars: MARKET } });
 const scan = (over: object = {}, histories: Record<string, any> = held()) => {
   const market = fakeMarket(histories);
-  return scanChart({ symbol: "QRY", universe: ["PAST"], keep: createBarsKeep({ ask: market.ask }), now: NOW, ...over });
+  return scanChart({ symbol: "QRY", universe: ["PAST"], keep: createBarsKeep({ ask: market.ask, now: () => NOW().getTime() }), now: NOW, ...over });
 };
 const code = (c: string) => (e: unknown) => e instanceof AnalogError && e.code === c && e.message.startsWith(`${c} `);
 
@@ -24,7 +24,7 @@ test("the scan of the fixture", async () => {
   near(q.depth, -0.30); near(q.last5, -0.125); near(q.gap, -0.06); near(q.volume, 4);
   assert.deepEqual(q.market, { change: 0, group: "calm" }); assert.equal(q.path.length, 31); assert.deepEqual(q.path[30], [0, 101.43, 101.43, 100, 100, 1000]);
   assert.deepEqual(view.parameters.dropped, []);
-  assert.deepEqual(view.coverage, { asked: 2, read: 2, sources: { Nasdaq: 2 }, short: [], refused: [], stockDays: 527, episodes: 2, underWay: 1, short60: 0, noContext: 0, weeks: 1, deadline: false });
+  assert.deepEqual(view.coverage, { asked: 2, read: 2, sources: { Nasdaq: 2 }, short: [], refused: [], stockDays: 527, episodes: 2, underWay: 1, short60: 0, noContext: 0, weeks: 1, deadline: false, readFrom: "2020-11-26T20:00:00.000Z", sessionBars: 0 });
   assert.deepEqual(view.cases.map((c) => [c.id, c.state, c.market.group, c.sameWeek]), [["PAST:2020-11-21", "underWay", "calm", 0], ["PAST:2020-05-04", "past", "down", 0]]);
   assert.equal(view.cases[1]!.window!.length, 91); near(view.cases[1]!.after.r60, 0.25);
   assert.deepEqual([view.groups.all.n, view.groups.all.summarized, view.groups.own.n, view.groups.calm.n, view.groups.down.n], [1, false, 0, 0, 1]);
@@ -204,6 +204,23 @@ test("an as_of on or after an open session's date still says the session is open
   const closed = await scan({}, { ...held(), QRY: { bars: SELLOFF, today: CLOSED } });
   assert.deepEqual([closed.query.sessionOpen, closed.query.today, today.query.today, earlier.query.today], [false, CLOSED, "Today so far", null]);
   assert.ok(chartDigest({ ...closed, id }).split("\n")[1]!.startsWith(`QRY as of 2020-11-26 (${CLOSED}): −30.0%`));
+});
+
+test("other companies' bars read earlier are said, with how many end on a session-so-far bar", async () => {
+  let clock = Date.parse("2020-11-26T15:00:00Z");
+  const keep = createBarsKeep({ ask: fakeMarket({ ...held(), PAST: { bars: PAST, today: true } }).ask, now: () => clock });
+  const at = () => new Date(clock);
+  const id = "an-20201126-0a1b2c3d";
+  const first = await scanChart({ symbol: "QRY", universe: ["PAST"], keep, now: at });
+  clock += 3_600_000;
+  const second = await scanChart({ symbol: "QRY", universe: ["PAST"], keep, now: at });
+  assert.deepEqual([first.coverage.readFrom, first.coverage.sessionBars], ["2020-11-26T15:00:00.000Z", 1]);
+  assert.deepEqual([second.at, second.coverage.readFrom, second.coverage.sessionBars], ["2020-11-26T16:00:00.000Z", "2020-11-26T15:00:00.000Z", 1]);
+  assert.equal(chartDigest({ ...second, id }).split("\n")[3], "other companies' bars were read 2020-11-26 10:00 New York; 1 end on a session-so-far bar");
+  assert.ok(!chartDigest({ ...first, id }).includes("other companies' bars were read"));
+  const cut = await scanChart({ symbol: "QRY", asOf: "2020-11-22", universe: ["PAST"], keep, now: at }); // the session-so-far bar cut off
+  assert.deepEqual([cut.coverage.readFrom, cut.coverage.sessionBars], ["2020-11-26T15:00:00.000Z", 0]);
+  assert.equal(chartDigest({ ...cut, id }).split("\n")[3], "other companies' bars were read 2020-11-26 10:00 New York");
 });
 
 test("SPY asked about is scanned as the query's own stock", async () => {

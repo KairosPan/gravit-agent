@@ -1,7 +1,8 @@
 // face/plugins/analog/lib/digest.mjs
 /**
  * The digest of a chart view: the few lines the model reads instead of the view, at most 2,048 bytes. Coverage
- * first, then the query's numbers, the counts, one row per group, the leading cases in the order the page shows them,
+ * first, then the query's numbers, the counts, when the other companies' bars were read if that was ten minutes or
+ * more before the scan (and how many end on a session-so-far bar), one row per group, the leading cases in the order the page shows them,
  * the cases still under way, and the three fixed sentences. When it does not fit, the under-way line gives its names
  * without dates, then is cut from the end with `+N more`, then is left out (line 3 still counts the cases); only then
  * do leading-case lines go from the end, followed by `… and N more in the view`. The fixed sentences are never cut.
@@ -21,6 +22,17 @@ const SENTENCES =
   "One market crash appears once per company: the cases are not independent. No lookahead guard: never evidence for a trade.";
 const HEADER = "group  n  +5  +20  +60  [+60 quartiles]  further low (session)  ≥10% lower  higher at +60";
 const GROUPS = /** @type {const} */ (["all", "own", "calm", "down"]);
+/** Histories read this long or longer before the scan are said, with when. */
+const STALE_MS = 600_000;
+const NEW_YORK_MINUTE = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
+/** An ISO time as `YYYY-MM-DD HH:MM` in New York. @param {string} iso */
+function newYorkMinute(iso) {
+  const part = Object.fromEntries(NEW_YORK_MINUTE.formatToParts(new Date(iso)).map((p) => [p.type, p.value]));
+  return `${part.year}-${part.month}-${part.day} ${part.hour}:${part.minute}`;
+}
 
 /** @param {number | null | undefined} v */
 function pct(v) {
@@ -73,6 +85,10 @@ export function chartDigest(view) {
   const third = `matched ${counted(pastCount, "past sell-off", "past sell-offs")} in ${counted(c.weeks, "week", "weeks")}; ` +
     `${c.underWay} under way now; ${c.short60} short of 60 sessions; ${c.noContext} without market context` +
     (dropped.length > 0 ? `; dropped: ${dropped.join(", ")}` : "");
+  const stale = Date.parse(view.at) - Date.parse(c.readFrom) >= STALE_MS
+    ? [`other companies' bars were read ${newYorkMinute(c.readFrom)} New York` +
+      (c.sessionBars > 0 ? `; ${c.sessionBars} end on a session-so-far bar` : "")]
+    : [];
   const rows = GROUPS.map((g) => groupRow(g === view.queryGroup ? `${g} *` : g, view.groups[g]));
 
   const byId = new Map(view.cases.map((k) => [k.id, k]));
@@ -92,7 +108,7 @@ export function chartDigest(view) {
   let leadingCut = 0;
 
   const compose = () => [
-    first, second, third, HEADER, ...rows,
+    first, second, third, ...stale, HEADER, ...rows,
     ...(leading.length > 0 || leadingCut > 0
       ? ["leading cases (own first, then one per market event):", ...leading,
         ...(leadingCut > 0 ? [`… and ${leadingCut} more in the view`] : [])]

@@ -14,8 +14,8 @@
  *
  * The keep:
  * - reads at most four companies at a time, and one read of a company serves every caller asking while it runs;
- * - reads `SPY` first when it is asked for; when the date of its latest bar differs from the date the keep last saw,
- *   every other kept history is dropped before the rest are read;
+ * - reads `SPY` first when it is asked for; when the date of its latest bar is later than any the keep has seen, every
+ *   other kept history is dropped before the rest are read (an answer ending earlier drops nothing and moves no date);
  * - reads a company named in `fresh` again, whole, unless a read of it is already running;
  * - waits out one hold of a minute or less per call: no new read starts while it lasts, and every read begun before
  *   it ended and refused with such a hold is asked once more after it; any later refusal is final;
@@ -161,7 +161,7 @@ export function createBarsKeep({ ask, now = Date.now, sleep = (ms) => new Promis
   const kept = new Map();
   /** @type {Map<string, Promise<History | Refused>>} */
   const flying = new Map();
-  /** @type {string | undefined} the date of the market's latest bar when it was last read */
+  /** @type {string | undefined} the latest date of the market's latest bar the keep has seen */
   let marketDate;
   let running = 0;
   /** @type {Array<() => void>} */
@@ -172,10 +172,11 @@ export function createBarsKeep({ ask, now = Date.now, sleep = (ms) => new Promis
   function keep(symbol, history) {
     if (symbol === MARKET_SYMBOL) {
       const date = dateOf(history.bars[history.bars.length - 1].t);
-      if (marketDate !== undefined && date !== marketDate) {
-        for (const other of [...kept.keys()]) if (other !== MARKET_SYMBOL) kept.delete(other);
+      // Only a later date is a new session: an answer without the session-so-far bar ends earlier and drops nothing.
+      if (marketDate === undefined || date > marketDate) {
+        if (marketDate !== undefined) for (const other of [...kept.keys()]) if (other !== MARKET_SYMBOL) kept.delete(other);
+        marketDate = date;
       }
-      marketDate = date;
     }
     if (history.short) return;
     kept.delete(symbol);

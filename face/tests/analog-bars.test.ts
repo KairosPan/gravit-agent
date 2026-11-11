@@ -114,6 +114,17 @@ test("when the market's latest session moves on, everything kept is read again",
   assert.equal(again.read.get("P1")!.bars.length, 331);
 });
 
+test("a SPY answer that ends earlier than the one already seen drops nothing", async () => {
+  const histories: Record<string, { bars: typeof PAST }> = { SPY: { bars: MARKET }, P1: { bars: PAST } };
+  const market = fakeMarket(histories);
+  const keep = createBarsKeep({ ask: market.ask });
+  await keep.histories(["SPY", "P1"], { fresh: ["SPY"] });
+  histories.SPY = { bars: MARKET.slice(0, 330) }; // the session-so-far bar is missing from this answer
+  const before = market.calls.length;
+  await keep.histories(["SPY", "P1"], { fresh: ["SPY"] });
+  assert.deepEqual(market.calls.slice(before).map((c) => c.symbol), ["SPY"]);
+});
+
 test("two scans at once share one read of each company", async () => {
   const market = fakeMarket({ SPY: { bars: MARKET }, P1: { bars: PAST } });
   const keep = createBarsKeep({ ask: async (q) => { await new Promise((r) => setTimeout(r, 5)); return market.ask(q); } });

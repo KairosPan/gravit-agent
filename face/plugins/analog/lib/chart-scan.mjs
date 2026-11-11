@@ -7,6 +7,9 @@
  * or a fall inside its own latest session is a refusal, and nothing else is read. The rest of the list is read through
  * the keep under the scan's deadline, and whatever was not read is counted, never silently left out. With `asOf`,
  * every history, the market's included, keeps only its bars dated on or before it, so no number reads a later bar.
+ * The rest of the list may come from the keep, read earlier in the session: `coverage.readFrom` is when the earliest
+ * history this scan measured was read, and `coverage.sessionBars` how many of the other companies end, as measured, on
+ * a bar built from a session's minutes.
  * `query.today` holds the market's words when day 0 is a bar built from the session's minutes (the history's latest bar),
  * else null; `query.sessionOpen` says whether those words say the session is still open, `asOf` or not.
  *
@@ -43,7 +46,7 @@ import { OPEN_SESSION } from "./bars.mjs";
  *   coverage: { asked: number, read: number, sources: Record<string, number>,
  *     short: Array<{ symbol: string, source: string, firstBar: string }>,
  *     refused: Array<{ symbol: string, words: string }>, stockDays: number, episodes: number, underWay: number,
- *     short60: number, noContext: number, weeks: number, deadline: boolean },
+ *     short60: number, noContext: number, weeks: number, deadline: boolean, readFrom: string, sessionBars: number },
  *   groups: { all: Summary, own: Summary, calm: Summary, down: Summary },
  *   queryGroup: "calm" | "down" | "unknown",
  *   leading: { own: string[], others: Array<{ id: string, standsFor: number }> },
@@ -163,6 +166,8 @@ export async function scanChart({ symbol: rawSymbol, asOf: rawAsOf, also: rawAls
   const cases = [];
   let read = 0;
   let stockDays = 0;
+  let readFrom = spy === undefined ? history.readAt : Math.min(history.readAt, spy.readAt);
+  let sessionBars = 0;
   for (const s of list) {
     const h = s === symbol ? history : others.read.get(s);
     if (h === undefined) {
@@ -170,10 +175,12 @@ export async function scanChart({ symbol: rawSymbol, asOf: rawAsOf, also: rawAls
       continue;
     }
     read++;
+    readFrom = Math.min(readFrom, h.readAt);
     const name = h.source.split(" · ")[0];
     sources[name] = (sources[name] ?? 0) + 1;
     if (h.short) short.push({ symbol: s, source: h.source, firstBar: h.firstBar });
     const bars = s === symbol ? queryBars : cut(h.bars);
+    if (s !== symbol && h.today !== null && bars.length === h.bars.length) sessionBars++;
     const found = episodesOf(s, bars, q, bands, { skipLast: s === symbol ? OWN_SKIP : 0 });
     stockDays += found.days;
     for (const e of found.episodes) {
@@ -208,6 +215,7 @@ export async function scanChart({ symbol: rawSymbol, asOf: rawAsOf, also: rawAls
       underWay: cases.length - past.length, short60: past.filter((c) => c.after.r60 === null).length,
       noContext: cases.filter((c) => c.market.group === "unknown").length,
       weeks: new Set(past.map((c) => weekOf(c.date))).size, deadline: timedOut.size > 0,
+      readFrom: new Date(readFrom).toISOString(), sessionBars,
     },
     groups: {
       all: summarize(cases),
