@@ -11,6 +11,7 @@ import { composeFace, globalInstructionAudit, globalInstructionFiles } from "../
 import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
 import { MARKET_ROW_ID } from "../src/market-row.ts";
 import { LUNHUI_ROW_IDS } from "../src/lunhui.ts";
+import { ANALOG_ROW_IDS } from "../src/analog.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
 import { CYCLE_PATH, DESK_PATH, readCycle, readDesk } from "../src/cycle.ts";
 import { readProtocols } from "../src/protocols.ts";
@@ -72,7 +73,8 @@ test("composeFace: patch order ends with the face overlay; root is rewritten emp
 /* The exact layer count, so a lost or duplicated layer is a failure rather
  * than a silent change of shape. With the telemetry switch unset the stack is:
  * dsh-base insert + the policy layer (src/policy.ts) + the
- * Account seat insert + the Lunhui rows' insert + hmr disable + system-prompt persona +
+ * Account seat insert + the market row's insert + the Lunhui rows' insert +
+ * the analog rows' insert + hmr disable + system-prompt persona +
  * agent-instructions + face overlay. The
  * policy layer is pinned both by size (8 id patches + 1 insert against
  * 0.2.1-rc.5's dsh-base) and by POSITION - directly after the bundle layer,
@@ -89,7 +91,7 @@ test("composeFace stacks exactly the layers it means to", () => {
     );
     const policy = facePolicyPatches(baseRows);
     assert.equal(policy.length, 8, "7 id patches + 1 insert at dsh-base 0.2.1-rc.5 (D6 keeps the web-fetch-http provider on since 2026-11-07)");
-    assert.equal(patches.length, 8 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
+    assert.equal(patches.length, 9 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
     assert.deepEqual(patches.slice(1, 1 + policy.length), policy, "the policy layer sits right above the bundle layer");
     assert.equal((patches[1 + policy.length] as InsertPatch).insert?.[0]?.id, ACCOUNT_SEAT_ROW_ID, "the Account seat row sits right above the policy layer");
     assert.equal((patches[2 + policy.length] as InsertPatch).insert?.[0]?.id, MARKET_ROW_ID, "the market row sits right after the Account seat row");
@@ -98,6 +100,7 @@ test("composeFace stacks exactly the layers it means to", () => {
       "lunhui-environment", "lunhui-sentiment", "lunhui-theme", "lunhui-leader", "lunhui-mode", "lunhui-review",
       "lunhui-present",
     ], "the twelve Lunhui rows sit right after the market row, in one insert: the backbone, the freezes, the modules, then the composed answer");
+    assert.deepEqual((patches[4 + policy.length] as InsertPatch).insert?.map((row) => row.id), ["analog-views", "analog-chart"], "the two analog rows sit right after the Lunhui rows, in one insert");
   } finally {
     if (previous === undefined) delete process.env.DSH_TELEMETRY_DISABLED;
     else process.env.DSH_TELEMETRY_DISABLED = previous;
@@ -127,6 +130,7 @@ test("every face row lands in the composed tree exactly once", () => {
   assert.equal(counts.get(ACCOUNT_SEAT_ROW_ID), 1, "the Account seat must be registered exactly once");
   assert.equal(counts.get(MARKET_ROW_ID), 1, "the market row must be registered exactly once");
   for (const id of LUNHUI_ROW_IDS) assert.equal(counts.get(id), 1, `${id} must be registered exactly once`);
+  for (const id of ANALOG_ROW_IDS) assert.equal(counts.get(id), 1, `${id} must be registered exactly once`);
   // dsh-base's own gateway: the face must not have added a second one.
   assert.equal(counts.get("typert-gateway"), 1);
 });

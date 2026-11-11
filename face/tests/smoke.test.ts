@@ -41,6 +41,7 @@ import { registerLunhuiViewRoute, type LunhuiViewService } from "../src/lunhui-v
 import { isTrustedDataRequest } from "../src/http.ts";
 import { hasApprovalGrant, type ApprovalEventLike } from "../src/orders.ts";
 import { LUNHUI_ROW_IDS, LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
+import { ANALOG_ROW_IDS, ANALOG_TOOL_NAMES } from "../src/analog.ts";
 import { panelDeps, pluginListing } from "../src/panels.ts";
 import { boundPort, remote, signIn } from "./remote.ts";
 
@@ -260,6 +261,18 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     const listedRows = pluginListing(panelDeps(ctx, process.cwd(), home)).rows;
     for (const id of LUNHUI_ROW_IDS) {
       // The listing carries the Loader's id, the row id under its include path.
+      const row = listedRows.find((r) => r.id.endsWith(`:${id}`));
+      assert.ok(row, `${id} must be listed; saw ${listedRows.map((r) => r.id).join(", ")}`);
+      assert.equal(row.phase, "active", id);
+      assert.equal(row.enabled, true, id);
+    }
+    /* The analog rows (src/analog.ts), live the same way: `analog_chart`
+     * registered, and both rows enabled and ACTIVE - the tool row mounts only
+     * once the backbone has provided `analogViews`. */
+    for (const name of ANALOG_TOOL_NAMES) {
+      assert.ok(toolNames.includes(name), `${name} must be registered; saw ${toolNames.join(", ")}`);
+    }
+    for (const id of ANALOG_ROW_IDS) {
       const row = listedRows.find((r) => r.id.endsWith(`:${id}`));
       assert.ok(row, `${id} must be listed; saw ${listedRows.map((r) => r.id).join(", ")}`);
       assert.equal(row.phase, "active", id);

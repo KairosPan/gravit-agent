@@ -19,6 +19,7 @@ import { CONVERSATION_PRESET } from "../src/desk-names.ts";
 import { HttpError } from "../src/http.ts";
 import { BOTS_ROOT } from "../src/overlay.ts";
 import { LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
+import { ANALOG_TOOL_NAMES } from "../src/analog.ts";
 import { expandAllow } from "../plugins/bot.js";
 
 const noPresets = async () => [] as { id: string; broken?: string }[];
@@ -148,6 +149,16 @@ test("no bot sees a lunhui_ tool: DEFAULT_ALLOW and every shipped bot's allow li
     assert.deepEqual(expandAllow(bot.allow, known).allow.filter(isLunhui), [], bot.id);
     assert.deepEqual(bot.allow.filter(isLunhui), [], `${bot.id} names no lunhui_ tool`);
   }
+});
+
+/* The analog tool is registered tree-wide as the Lunhui tools are; expanded
+ * against a tree that has it, neither the default nor any shipped bot admits it. */
+test("no bot sees an analog_ tool: DEFAULT_ALLOW and every shipped bot's allow list admit none", async () => {
+  assert.deepEqual([...ANALOG_TOOL_NAMES], ["analog_chart"]);
+  const known = new Set([...DEFAULT_ALLOW, ...ANALOG_TOOL_NAMES]);
+  const isAnalog = (name: string) => name.startsWith("analog_");
+  assert.deepEqual(expandAllow([...DEFAULT_ALLOW], known).allow.filter(isAnalog), [], "DEFAULT_ALLOW");
+  for (const bot of await listBots(BOTS_ROOT, noPresets)) assert.deepEqual(expandAllow(bot.allow, known).allow.filter(isAnalog), [], bot.id);
 });
 
 test("createBot copies the template, writes the three files, renders the composition, and refuses a second time", async () => {
