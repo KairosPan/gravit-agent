@@ -98,20 +98,26 @@ test("a hold of a minute or less is waited out once; a longer one, and a second 
 });
 
 test("one wait serves every company the same hold refused, and no new read starts while it lasts", async () => {
-  const market = fakeMarket({ SPY: { bars: MARKET }, P1: { bars: PAST }, P2: { bars: PAST }, P3: { bars: PAST }, P4: { bars: PAST }, P5: { bars: PAST } });
+  const market = fakeMarket({ SPY: { bars: MARKET }, P1: { bars: PAST }, P2: { bars: PAST }, P3: { bars: PAST }, P4: { bars: PAST }, P5: { bars: PAST }, P6: { bars: PAST } });
   let held = true;
   const asked: string[] = [];
   const ask = async (q: Record<string, string>) => {
     asked.push(q.symbol!);
-    return held && q.symbol !== "SPY" ? { status: 409, body: { ok: false, ...refusal("E_VENUE_UNREACHABLE", "Nasdaq could not be reached") } } : market.ask(q);
+    return held && (q.symbol === "P1" || q.symbol === "P2") ? { status: 409, body: { ok: false, ...refusal("E_VENUE_UNREACHABLE", "Nasdaq could not be reached") } } : market.ask(q);
   };
   const slept: number[] = [];
-  const keep = createBarsKeep({ ask, sleep: (ms) => { slept.push(ms); return new Promise<void>((done) => setTimeout(() => { held = false; done(); }, 20)); } });
-  const got = await keep.histories(["SPY", "P1", "P2", "P3", "P4", "P5"], { fresh: ["SPY"] });
-  assert.deepEqual(slept, [20_000]);
-  assert.deepEqual([got.read.size, got.refused.size], [6, 0]);
-  assert.deepEqual(asked.filter((s) => s === "P1"), ["P1", "P1"], "P1 was asked again after the wait");
-  assert.deepEqual(asked.filter((s) => s === "P5"), ["P5"], "P5 was not asked while the hold was waited out");
+  let duringWait: string[] = ["never slept"];
+  const keep = createBarsKeep({ ask, sleep: (ms) => {
+    slept.push(ms);
+    const before = asked.length;
+    return new Promise<void>((done) => setTimeout(() => { duringWait = asked.slice(before); held = false; done(); }, 20));
+  } });
+  const got = await keep.histories(["SPY", "P1", "P2", "P3", "P4", "P5", "P6"], { fresh: ["SPY"] });
+  assert.deepEqual(slept, [20_000]); // one wait, though two companies were refused
+  assert.deepEqual(duringWait, [], "no read began while the hold was waited out");
+  assert.deepEqual([got.read.size, got.refused.size], [7, 0]);
+  assert.deepEqual([asked.filter((s) => s === "P1").length, asked.filter((s) => s === "P2").length], [2, 2], "both refused companies were asked once more");
+  assert.deepEqual(asked.filter((s) => s === "P5" || s === "P6").sort(), ["P5", "P6"]);
 });
 
 test("past the deadline the unread companies are named, not waited for; the keep holds at most max histories", async () => {
