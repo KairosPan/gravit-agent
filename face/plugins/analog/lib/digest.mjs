@@ -45,8 +45,8 @@ export function pct(v) {
 /** @param {number | null | undefined} v */
 export const ratio = (v) => (typeof v === "number" ? `${v.toFixed(1)}×` : "n/a");
 
-/** @param {number | null | undefined} v */
-const whole = (v) => (typeof v === "number" ? `${Math.round(v * 100)}%` : "n/a");
+/** A share as a whole percentage. @param {number | null | undefined} v */
+export const whole =(v) => (typeof v === "number" ? `${Math.round(v * 100)}%` : "n/a");
 
 /** @param {number | null | undefined} v */
 const session = (v) => (typeof v === "number" ? String(Math.round(v)) : "n/a");
