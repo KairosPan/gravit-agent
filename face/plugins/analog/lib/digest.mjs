@@ -60,8 +60,10 @@ export function chartDigest(view) {
   const { query: q, coverage: c } = view;
   const first = `read ${c.read} of ${c.asked} companies (${c.refused.length} refused, ${c.short.length} read short) · ` +
     `${c.stockDays} stock-days · view ${view.id}${c.deadline ? " · stopped at the deadline" : ""}`;
-  const note = q.asOf !== null ? (q.sessionOpen ? " (as asked; session still open)" : " (as asked)")
-    : q.sessionOpen ? " (session still open)"
+  // A session-so-far bar after the close carries the market's own words for it.
+  const words = q.sessionOpen ? "session still open" : typeof q.today === "string" ? q.today : null;
+  const note = q.asOf !== null ? (words !== null ? ` (as asked; ${words})` : " (as asked)")
+    : words !== null ? ` (${words})`
     : q.readDate !== q.date ? ` (latest bar; read ${q.readDate})`
     : "";
   const second = `${q.symbol} as of ${q.date}${note}: ${pct(q.depth)} from the high of ${q.peakDate} in ${q.days} sessions; ` +

@@ -7,7 +7,8 @@
  * or a fall inside its own latest session is a refusal, and nothing else is read. The rest of the list is read through
  * the keep under the scan's deadline, and whatever was not read is counted, never silently left out. With `asOf`,
  * every history, the market's included, keeps only its bars dated on or before it, so no number reads a later bar.
- * `query.sessionOpen` says whether day 0 is the bar of a session still open, `asOf` or not.
+ * `query.today` holds the market's words when day 0 is a bar built from the session's minutes (the history's latest bar),
+ * else null; `query.sessionOpen` says whether those words say the session is still open, `asOf` or not.
  *
  * `SPY` is the market's context and never one of the other companies scanned; asked about itself, it is the query's
  * own stock, scanned like any query's and measured against its own history for context.
@@ -19,6 +20,7 @@ import {
 import { MIN_GROUP, summarize } from "./summary.mjs";
 import { UNIVERSE } from "./universe.mjs";
 import { refuse } from "./errors.mjs";
+import { OPEN_SESSION } from "./bars.mjs";
 
 /**
  * @typedef {import("./selloff.mjs").Bar} Bar
@@ -32,7 +34,8 @@ import { refuse } from "./errors.mjs";
  *   days: number, last5: number, gap: number, volume: number | null, fromHigh: boolean | null, market: Context,
  *   sameWeek: number, state: "past" | "underWay", after: After, window: Path | null }} Case
  * @typedef {{ kind: "chart", version: 1, at: string,
- *   query: { symbol: string, date: string, readDate: string, asOf: string | null, sessionOpen: boolean, close: number,
+ *   query: { symbol: string, date: string, readDate: string, asOf: string | null, today: string | null,
+ *     sessionOpen: boolean, close: number,
  *     peak: number, peakDate: string, depth: number, days: number, last5: number, gap: number, gapDate: string,
  *     volume: number | null, fromHigh: boolean | null, market: Context, path: Path },
  *   parameters: { lookback: number, bands: Bands, dropped: string[], scale: typeof SCALE, contextCut: number,
@@ -187,14 +190,14 @@ export async function scanChart({ symbol: rawSymbol, asOf: rawAsOf, also: rawAls
   cases.sort((a, b) => a.distance - b.distance || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const past = cases.filter((c) => c.state === "past");
   const market = contextOf(marketBars, peakDate, date);
+  const today = day0 === history.bars.length - 1 ? history.today : null;
 
   return {
     kind: "chart",
     version: 1,
     at: now().toISOString(),
     query: {
-      symbol, date, readDate: NEW_YORK.format(now()), asOf,
-      sessionOpen: history.sessionOpen && day0 === history.bars.length - 1,
+      symbol, date, readDate: NEW_YORK.format(now()), asOf, today, sessionOpen: today === OPEN_SESSION,
       close: queryBars[day0].c, peak: queryBars[q.peakAt].h, peakDate, depth: q.depth, days: q.days,
       last5: q.last5, gap: q.gap, gapDate: dateOf(queryBars[q.gapAt].t), volume: q.volume, fromHigh: q.fromHigh,
       market, path: windowOf(queryBars, day0),

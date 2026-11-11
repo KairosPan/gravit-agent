@@ -1,6 +1,7 @@
 // face/tests/analog-bars.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { AT_ONCE, createBarsKeep, marketAsk, readHistory } from "../plugins/analog/lib/bars.mjs";
 import { MARKET, PAST, SELLOFF, barsFrom, dateAt, fakeMarket, flat } from "./analog-fixtures.ts";
 
@@ -45,6 +46,21 @@ test("a history read short is read again by the next call, not kept", async () =
   const again = await keep.histories(["SPY", "P1", "P2"], {});
   assert.deepEqual(market.calls.slice(before).map((c) => c.symbol), ["P1"]);
   assert.equal(again.read.get("P1")!.short, true);
+});
+
+test("a session-so-far bar after the close is not an open session", async () => {
+  const CLOSED = "Built from Robinhood's 1-minute bars of the session: its daily bar is not published yet";
+  const h = await readHistory(fakeMarket({ X: { bars: PAST, today: CLOSED } }).ask, "X");
+  assert.ok(!("refused" in h));
+  assert.deepEqual([h.sessionOpen, h.today], [false, CLOSED]);
+  const open = await readHistory(fakeMarket({ X: { bars: PAST, today: true } }).ask, "X");
+  assert.ok(!("refused" in open));
+  assert.deepEqual([open.sessionOpen, open.today], [true, "Today so far"]);
+});
+
+test("the market still words an open session as the rows read it", () => {
+  const market = readFileSync(new URL("../../market/src/live/history-stocks.ts", import.meta.url), "utf8");
+  assert.ok(market.includes('"Today so far"'));
 });
 
 test("a refusal keeps the market's words and says how long its source is held", async () => {

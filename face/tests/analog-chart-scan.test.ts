@@ -200,6 +200,10 @@ test("an as_of on or after an open session's date still says the session is open
   assert.equal(earlier.query.sessionOpen, false);
   assert.ok(chartDigest({ ...earlier, id }).split("\n")[1]!.startsWith("QRY as of 2020-11-22 (as asked): −21.0%"));
   assert.ok(chartDigest({ ...(await scan({}, open)), id }).split("\n")[1]!.startsWith("QRY as of 2020-11-26 (session still open): −30.0%"));
+  const CLOSED = "Built from Robinhood's 1-minute bars of the session: its daily bar is not published yet";
+  const closed = await scan({}, { ...held(), QRY: { bars: SELLOFF, today: CLOSED } });
+  assert.deepEqual([closed.query.sessionOpen, closed.query.today, today.query.today, earlier.query.today], [false, CLOSED, "Today so far", null]);
+  assert.ok(chartDigest({ ...closed, id }).split("\n")[1]!.startsWith(`QRY as of 2020-11-26 (${CLOSED}): −30.0%`));
 });
 
 test("SPY asked about is scanned as the query's own stock", async () => {
