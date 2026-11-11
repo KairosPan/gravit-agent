@@ -51,6 +51,33 @@ describe("bank days and market days are not the same days", () => {
   });
 });
 
+describe("a holiday is kept from the year it was first kept, as the market's copy of this calendar keeps it (market/src/calendar.ts)", () => {
+  /** [the date, a bank day, a market day], at the middle of its New York day */
+  const days = (dates: string[]): Array<[string, boolean, boolean]> => dates.map((d) => [d, isBankDay(at(`${d}T16:30:00Z`)), isMarketDay(at(`${d}T16:30:00Z`))]);
+
+  it("Juneteenth, from 2022: through 2021 the banks settled and the market traded on 19 June and on the weekday beside a weekend's", () => {
+    // 2021 and 2010: the 19th a Saturday; 2016: a Sunday; 2020: a Friday. The exchanges and the Federal Reserve first kept it on Monday 20 June 2022
+    expect(days(["2021-06-18", "2016-06-20", "2010-06-18", "2020-06-19"])).toEqual([
+      ["2021-06-18", true, true],
+      ["2016-06-20", true, true],
+      ["2010-06-18", true, true],
+      ["2020-06-19", true, true],
+    ]);
+    expect(days(["2022-06-20", "2023-06-19"])).toEqual([
+      ["2022-06-20", false, false],
+      ["2023-06-19", false, false],
+    ]);
+  });
+
+  it("Martin Luther King Jr. Day, the market's from 1998: through 1997 it is a bank holiday and a session", () => {
+    expect(days(["1990-01-15", "1997-01-20", "1998-01-19"])).toEqual([
+      ["1990-01-15", false, true],
+      ["1997-01-20", false, true],
+      ["1998-01-19", false, false],
+    ]);
+  });
+});
+
 describe("when an ACH lands", () => {
   it("sent on a Saturday, it goes out Monday and lands Tuesday", () => {
     const lands = achArrival(at("2026-10-03T09:00:00Z"));
