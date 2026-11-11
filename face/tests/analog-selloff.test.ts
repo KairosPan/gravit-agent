@@ -33,6 +33,9 @@ test("bands are relative to the query", () => {
   near(b.last5, -0.06625); near(b.gap, -0.033); near(b.volume, 2.48); assert.deepEqual(b.dropped, []);
   assert.deepEqual(bandsFor({ ...q, days: 4 }).days, [3, 7]);
   assert.deepEqual(bandsFor({ ...q, days: 40 }).days, [16, 59]);
+  assert.deepEqual(bandsFor({ ...q, days: 2 }).days, [2, 4]);
+  assert.deepEqual(bandsFor({ ...q, days: 1 }).days, [1, 2]);
+  assert.deepEqual(bandsFor({ ...q, days: 3 }).days, [3, 5]);
 });
 
 test("a condition the query does not meet is dropped and named", () => {

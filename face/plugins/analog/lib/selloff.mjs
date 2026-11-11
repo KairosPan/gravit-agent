@@ -12,6 +12,9 @@
  * - `volume`: the highest volume of the last five sessions over the mean volume of `[i − 55, i − 6]`.
  * Beside them, `gapAt` is the session of that gap, `peakAt` the session of the high, and `fromHigh` whether the high
  * was within 2% of the highest high of the year before it.
+ *
+ * The bands are relative to the query and always hold the query's own numbers; a query whose high is its own day
+ * (0 days) has no usable bands and is refused by the scan before `bandsFor` or `distance` sees it.
  */
 
 /**
@@ -112,8 +115,11 @@ export function featuresAt(bars, i) {
 }
 
 /**
- * The bands a query's numbers set. `last5`, `gap` and `volume` are active only when the query meets their need;
- * an inactive one is null and named in `dropped`.
+ * The bands a query's numbers set. The days band is `[max(3, 0.4·days), min(59, 1.8·days)]`, rounded, its lower edge
+ * lowered to the query's own days when the high is under three sessions old, so the band always holds the query's
+ * days (1 → [1, 2], 2 → [2, 4]). A query of 0 days is the scan's to refuse before it reaches here: daily bars cannot
+ * time a fall inside one session. `last5`, `gap` and `volume` are active only when the query meets their need; an
+ * inactive one is null and named in `dropped`.
  * @param {Features} q
  * @returns {Bands}
  */
@@ -127,7 +133,10 @@ export function bandsFor(q) {
     : (dropped.push("volume"), null);
   return {
     depth: [BAND.depthDeep * q.depth, BAND.depthShallow * q.depth],
-    days: [Math.max(3, Math.round(BAND.daysLo * q.days)), Math.min(LOOKBACK - 1, Math.round(BAND.daysHi * q.days))],
+    days: [
+      Math.min(q.days, Math.max(3, Math.round(BAND.daysLo * q.days))),
+      Math.min(LOOKBACK - 1, Math.round(BAND.daysHi * q.days)),
+    ],
     last5,
     gap,
     volume,
