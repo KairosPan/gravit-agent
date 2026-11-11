@@ -286,12 +286,13 @@ describe("daily and weekly: Robinhood's year or five, Nasdaq's by dates for all 
    * the 18th is a session — that June's quarterly expiration — in a year when Juneteenth, the 19th a Saturday, closed no exchange. NYSE
    * and Nasdaq first closed for it on Monday 20 June 2022 */
   const JUNE_2021: Candle[] = ([[14, 10], [15, 11], [16, 12], [17, 13], [18, 14], [21, 15]] as Array<[number, number]>).map(([d, c]) => ({ t: fromEt(2021, 6, d, 9, 30), o: c - 0.5, h: c + 1, l: c - 1, c, v: 1000 }));
-  const june2021 = () => {
+  /** a history whose Nasdaq answers exactly these days, and whose Robinhood is down: no bar of today's is built beside them */
+  const nasdaqDaysOf = (bars: Candle[]) => {
     const nq = nasdaq();
-    (nq.nasdaq as { daily: Nasdaq["daily"] }).daily = async () => ({ bars: JUNE_2021, noOpen: 0 });
-    // Robinhood down: no bar of today's is built beside Nasdaq's days
+    (nq.nasdaq as { daily: Nasdaq["daily"] }).daily = async () => ({ bars, noOpen: 0 });
     return history({ http: async () => json({ detail: "unavailable" }, 503), nq });
   };
+  const june2021 = () => nasdaqDaysOf(JUNE_2021);
 
   it("a first view of daily bars keeps the session of Friday 18 June 2021: Juneteenth is no holiday of a year before 2022", async () => {
     const p = page(await june2021().h("AAPL", "1d", { since: 0, limit: 5_000, range: "MAX" }));
@@ -305,6 +306,13 @@ describe("daily and weekly: Robinhood's year or five, Nasdaq's by dates for all 
       { t: fromEt(2021, 6, 14, 9, 30), o: 9.5, h: 15, l: 9, c: 14, v: 5000 },
       { t: fromEt(2021, 6, 21, 9, 30), o: 14.5, h: 16, l: 14, c: 15, v: 1000 },
     ]);
+  });
+
+  it("the week of Monday 20 January 1997 opens on that Monday: Martin Luther King Jr. Day closed no exchange before 1998, and Nasdaq's days go back that far", async () => {
+    // the third Monday of January 1997 and the four days after it, dates written out. MAX is drawn in weeks, folded from all of Nasdaq's days
+    const week: Candle[] = ([[20, 10], [21, 11], [22, 12], [23, 13], [24, 14]] as Array<[number, number]>).map(([d, c]) => ({ t: fromEt(1997, 1, d, 9, 30), o: c - 0.5, h: c + 1, l: c - 1, c, v: 1000 }));
+    const w = page(await nasdaqDaysOf(week).h("AAPL", "1w", { since: 0, limit: 5_000, range: "MAX" }));
+    expect(w.bars).toEqual([{ t: fromEt(1997, 1, 20, 9, 30), o: 9.5, h: 15, l: 9, c: 14, v: 5000 }]);
   });
 
   it("a page scrolled left before a chart's first day: ONE ask of Nasdaq by dates, the days before it; before Nasdaq's first, nothing, and why", async () => {

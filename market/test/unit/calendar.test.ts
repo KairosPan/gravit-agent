@@ -2,8 +2,10 @@
  * days (live/history-stocks.ts) and so is every row of Cboe's daily file (live/public-stocks.ts) — Nasdaq's days go back to 1990, Cboe's to
  * 2004 — so a holiday said of a year before the exchanges kept it takes a real session out of a chart. Every market day and market holiday
  * below that is past was checked against the days the sources themselves carry a bar on (Nasdaq's IBM from 1990, Cboe's SPY from 2004, read
- * 2026-11-11); Friday 18 June 2027 is NYSE's published calendar (nyse.com/trade/hours-calendars, read the same day); a bank day is the
- * Federal Reserve's rule, which no price source shows. */
+ * 2026-11-11), and test/fixtures/us-closed-weekdays.json holds every closed weekday of 1990 to 2025 from the same read; Friday 18 June
+ * 2027 is NYSE's published calendar (nyse.com/trade/hours-calendars, read the same day); a bank day is the Federal Reserve's rule, which
+ * no price source shows. */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { isBankDay, isMarketDay } from "../../src/calendar.ts";
 
@@ -13,26 +15,52 @@ const market = (dates: string[]): Array<[string, boolean]> => dates.map((d) => [
 const bank = (dates: string[]): Array<[string, boolean]> => dates.map((d) => [d, isBankDay(midday(d))]);
 
 describe("the calendar against the sessions the exchanges held", () => {
-  /** the sessions of each year, counted from Nasdaq's daily bars of IBM (read 2026-11-11, its first bar Tuesday 2 January 1990). Cboe's SPY
-   * counts the same from 2004, its two rows on closed days left out (Thanksgiving 2018, Memorial Day 2025) */
+  /** every Monday-to-Friday date from 1990 to 2025 with no session, by year, as MM-DD: the weekdays Nasdaq's daily history of IBM has no bar
+   * for, the one-off closures among them (the fixture says where it was read) */
+  const CLOSED = (JSON.parse(readFileSync(new URL("../fixtures/us-closed-weekdays.json", import.meta.url), "utf8")) as { closed: Record<string, string[]> }).closed;
+  /** the sessions of each year, counted from the same bars (Cboe's SPY counts the same from 2004, its rows on closed days left out) */
   const HELD: ReadonlyArray<[number, number]> = [
     [1990, 253], [1991, 253], [1992, 254], [1993, 253], [1994, 252], [1995, 252], [1996, 254], [1997, 253], [1998, 252], [1999, 252],
     [2000, 252], [2001, 248], [2002, 252], [2003, 252], [2004, 252], [2005, 252], [2006, 251], [2007, 251], [2008, 253], [2009, 252],
     [2010, 252], [2011, 252], [2012, 250], [2013, 252], [2014, 252], [2015, 252], [2016, 252], [2017, 251], [2018, 251], [2019, 252],
     [2020, 253], [2021, 252], [2022, 251], [2023, 250], [2024, 252], [2025, 250],
   ];
-  /** the exchanges' one-off closures since 1990 — a funeral, an attack, a storm. No rule gives them and the calendar does not list them:
-   * it counts each as a market day (the top of src/calendar.ts says why that keeps no bar wrongly) */
+  /** the exchanges' one-off closures since 1990 — a funeral, an attack, a storm. No rule gives them and the calendar does not list them */
   const ONE_OFF = ["1994-04-27", "2001-09-11", "2001-09-12", "2001-09-13", "2001-09-14", "2004-06-11", "2007-01-02", "2012-10-29", "2012-10-30", "2018-12-05", "2025-01-09"];
+  /** a year as the calendar says it: its Monday-to-Friday dates called closed, those called market days, and any weekend date called one */
+  const yearOf = (y: number): { closed: string[]; open: string[]; weekendOpen: string[] } => {
+    const out = { closed: [] as string[], open: [] as string[], weekendOpen: [] as string[] };
+    // 17:00 UTC is the middle of the day in New York, summer or winter: the UTC date is New York's
+    for (let t = Date.UTC(y, 0, 1, 17); t < Date.UTC(y + 1, 0, 1); t += 86_400_000) {
+      const day = new Date(t);
+      const date = day.toISOString().slice(0, 10);
+      if (day.getUTCDay() === 0 || day.getUTCDay() === 6) {
+        if (isMarketDay(t)) out.weekendOpen.push(date);
+      } else (isMarketDay(t) ? out.open : out.closed).push(date);
+    }
+    return out;
+  };
 
-  it("from 1990 to 2025 a year's market days number the sessions held that year and its one-off closures, no more and no fewer", () => {
-    const counted = HELD.map(([y]) => {
-      let n = 0;
-      // 17:00 UTC is midday in New York, summer or winter
-      for (let t = Date.UTC(y, 0, 1, 17); t < Date.UTC(y + 1, 0, 1); t += 86_400_000) if (isMarketDay(t)) n++;
-      return [y, n];
-    });
-    expect(counted).toEqual(HELD.map(([y, held]) => [y, held + ONE_OFF.filter((d) => d.startsWith(`${y}-`)).length]));
+  it("from 1990 to 2025 it closes the weekdays the exchanges held no session on, date for date — their one-off closures aside — and trades no weekend", () => {
+    expect(Object.keys(CLOSED)).toEqual(HELD.map(([y]) => String(y)));
+    for (const [y] of HELD) {
+      const said = yearOf(y);
+      const real = CLOSED[String(y)]!.map((d) => `${y}-${d}`);
+      expect([y, said.closed]).toEqual([y, real.filter((d) => !ONE_OFF.includes(d))]);
+      expect([y, said.weekendOpen]).toEqual([y, []]);
+    }
+  });
+
+  it("so a year's market days, its one-off closures aside, number the sessions held that year", () => {
+    expect(HELD.map(([y]) => [y, yearOf(y).open.filter((d) => !ONE_OFF.includes(d)).length])).toEqual(HELD.map(([y, held]) => [y, held]));
+  });
+
+  it("A KNOWN LIMIT, not a rule: each one-off closure was a closed day in fact, and is still called a market day here", () => {
+    // closed in fact: the sessions' own record has no bar on it
+    expect(ONE_OFF.map((d) => [d, CLOSED[d.slice(0, 4)]!.includes(d.slice(5))])).toEqual(ONE_OFF.map((d) => [d, true]));
+    // and not known to the calendar (the top of src/calendar.ts says what follows from that). Teach it these days, and this is the
+    // assertion to turn round, with the two "aside"s above
+    expect(market(ONE_OFF)).toEqual(ONE_OFF.map((d) => [d, true]));
   });
 });
 

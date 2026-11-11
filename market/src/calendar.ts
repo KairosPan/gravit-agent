@@ -25,12 +25,17 @@
  * against Nasdaq's IBM and Cboe's SPY on 2026-11-11 — and eleven it did not,
  * its ONE-OFF CLOSURES: 27 April 1994, 11 to 14 September 2001, 11 June 2004,
  * 2 January 2007, 29 and 30 October 2012, 5 December 2018 and 9 January 2025.
- * No rule gives those and nothing here lists them. No source read here
- * carries a row on any of them — Nasdaq's days, Cboe's file, and Robinhood's
- * five years for the last — so no bar is wrongly kept; but a closure yet to
- * come is not known here either, and on that day the session is said open.
- * Years before 1990 were not checked — no source read here goes back that
- * far — and the exchanges' older rules are not in it.
+ * No rule gives those and nothing here lists them. None of the histories read
+ * that day carries a row on one (Nasdaq's IBM, Cboe's SPY, Robinhood's five
+ * years of SPY), so no bar is known to be wrongly kept, of the shares read.
+ * Cboe does write rows on some closed days — SPY's file has Thanksgiving 2018
+ * and Memorial Day 2025, both left out by the rules. A closure yet to come is
+ * not known here either: on that day the session is said open, and a row Cboe
+ * copies onto it, as it copied Memorial Day 2025, is kept as a bar.
+ * The face's desk keeps its own rules and a hand-kept table of such closures
+ * (face/src/market-clock.ts, XNYS_AD_HOC_CLOSURES): a day added there is not
+ * known here. Years before 1990 were not checked — no source read here goes
+ * back that far — and the exchanges' older rules are not in it.
  *
  * The stock market's EARLY CLOSES are computed by rule too, from NYSE's own
  * calendar (https://www.nyse.com/trade/hours-calendars, read 2026-10-14; the
@@ -88,7 +93,9 @@ const key = (m: number, d: number) => m * 100 + d;
  * 19th a Sunday). The law is of Thursday 17 June 2021, and the 19th was a Saturday that year: the exchanges traded on Friday 18 June 2021,
  * and the Federal Reserve's services ran as usual that day too (it observes no Saturday holiday on a Friday), so the banks' first is the
  * same Monday. Every 19 June before is an ordinary day: said a holiday, it takes a real session out of a history held to this calendar
- * (live/history-stocks.ts, live/public-stocks.ts) — one a year, 32 of them from 1990 to 2021 */
+ * (live/history-stocks.ts, live/public-stocks.ts) — one a year, 32 of them from 1990 to 2021. For the banks the year moves no day (2021's
+ * holiday fell on the Saturday), and no source of this package reads a bank day: isBankDay and the arrival times below came with the
+ * copy from the account, which times transfers by them */
 const JUNETEENTH_FROM = 2022;
 /** THE FIRST YEAR THE MARKET KEEPS MARTIN LUTHER KING JR. DAY: NYSE and Nasdaq first closed for it on Monday 19 January 1998. Through 1997
  * the third Monday of January is a session, and Nasdaq's daily bars, which go back to 1990, have each one. The banks kept it before the
