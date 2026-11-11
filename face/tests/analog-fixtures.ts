@@ -38,9 +38,16 @@ export function near(actual: number | null | undefined, expected: number, tolera
   assert.ok(typeof actual === "number" && Math.abs(actual - expected) <= tolerance, `${actual} is not within ${tolerance} of ${expected}`);
 }
 
-type Held = { bars: Bar[]; source?: string; today?: boolean } | { refusal: object; status?: number };
+type Held = {
+  bars: Bar[]; source?: string; today?: boolean | string;
+  older?: "none" | { source: string; bars: Bar[] };
+} | { refusal: object; status?: number };
 /** A stand-in for the market's `/api/candles`, paging as it pages: `range=MAX` answers the latest `limit` bars,
- * `before` the `limit` bars before that bar, `more` whether older bars exist. `calls` records every query. */
+ * `before` the `limit` bars before that bar, `more` whether older bars exist. `calls` records every query.
+ * `older` answers every page asked with `before` as the market does when Nasdaq does not: `"none"` an empty page
+ * (Nasdaq holds nothing there), an object the last `limit` of its bars dated before it under its own source (Cboe's,
+ * where Nasdaq refused the request), both with `more: false`. `today` puts a session-so-far bar's words on the
+ * latest page: `true` is "Today so far" (the session open), a string the words themselves. */
 export function fakeMarket(histories: Record<string, Held>) {
   const calls: Array<Record<string, string>> = [];
   const ask = async (query: Record<string, string>): Promise<{ status: number; body: any }> => {
@@ -49,10 +56,17 @@ export function fakeMarket(histories: Record<string, Held>) {
     if (held === undefined) return { status: 409, body: { ok: false, refusal: { code: "E_VENUE_REJECTED", message: `Nasdaq keeps no daily bars of ${query.symbol}` } } };
     if ("refusal" in held) return { status: held.status ?? 409, body: { ok: false, refusal: held.refusal } };
     const limit = Number(query.limit);
+    const source = held.source ?? `Nasdaq · ${query.symbol}`;
+    if (query.before !== undefined && held.older !== undefined) {
+      if (held.older === "none") return { status: 200, body: { ok: true, candles: [], more: false, source } };
+      const before = held.older.bars.filter((b) => b.t < Number(query.before));
+      return { status: 200, body: { ok: true, candles: before.slice(Math.max(0, before.length - limit)), more: false, source: held.older.source } };
+    }
     const end = query.before === undefined ? held.bars.length : held.bars.findIndex((b) => b.t === Number(query.before));
     const from = Math.max(0, end - limit);
-    const today = held.today === true && query.before === undefined ? { today: { t: held.bars.at(-1)!.t, words: "Today so far" } } : {};
-    return { status: 200, body: { ok: true, candles: held.bars.slice(from, end), more: from > 0, source: held.source ?? `Nasdaq · ${query.symbol}`, ...today } };
+    const words = held.today === true ? "Today so far" : typeof held.today === "string" ? held.today : undefined;
+    const today = words !== undefined && query.before === undefined ? { today: { t: held.bars.at(-1)!.t, words } } : {};
+    return { status: 200, body: { ok: true, candles: held.bars.slice(from, end), more: from > 0, source, ...today } };
   };
   return { ask, calls };
 }

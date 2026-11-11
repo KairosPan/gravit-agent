@@ -27,6 +27,26 @@ test("a history from another source is read short; a session-so-far bar says the
   assert.deepEqual([h.short, h.sessionOpen], [true, true]);
 });
 
+test("an older page from another source, or one that brings nothing after more was promised, makes the history short", async () => {
+  const long = barsFrom(flat(6200, 50));
+  const a = await readHistory(fakeMarket({ X: { bars: long, older: { source: "Cboe · X", bars: long.slice(400, 1200) } } }).ask, "X");
+  assert.ok(!("refused" in a));
+  assert.deepEqual([a.bars.length, a.short, a.source, a.firstBar], [5800, true, "Cboe · X", dateAt(400)]);
+  const b = await readHistory(fakeMarket({ X: { bars: long, older: "none" } }).ask, "X");
+  assert.ok(!("refused" in b));
+  assert.deepEqual([b.bars.length, b.short, b.source, b.firstBar], [5000, true, "Nasdaq · X", dateAt(1200)]);
+});
+
+test("a history read short is read again by the next call, not kept", async () => {
+  const market = fakeMarket({ SPY: { bars: MARKET }, P1: { bars: PAST, source: "Cboe · P1" }, P2: { bars: PAST } });
+  const keep = createBarsKeep({ ask: market.ask });
+  await keep.histories(["SPY", "P1", "P2"], { fresh: ["SPY"] });
+  const before = market.calls.length;
+  const again = await keep.histories(["SPY", "P1", "P2"], {});
+  assert.deepEqual(market.calls.slice(before).map((c) => c.symbol), ["P1"]);
+  assert.equal(again.read.get("P1")!.short, true);
+});
+
 test("a refusal keeps the market's words and says how long its source is held", async () => {
   const market = fakeMarket({
     A: refusal("E_VENUE_UNREACHABLE", "Nasdaq could not be reached"),

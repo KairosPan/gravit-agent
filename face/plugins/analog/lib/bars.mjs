@@ -6,7 +6,9 @@
  *
  * A history is read latest page first (`range=MAX`, 5,000 bars), then older pages of 1,000 bars before the oldest bar
  * so far, at most 12 pages, until the market says there is no more or a page adds no older bar. A refusal on any page
- * refuses the whole read: a history is never returned shortened.
+ * refuses the whole read. The market answers a page it could not have from Nasdaq with another source's bars, and a
+ * page Nasdaq holds nothing for empty, so a history is `short` when any page's source is not Nasdaq's or when a page
+ * said there was more and the next brought no older bar; its `source` is then the first source that is not Nasdaq's.
  *
  * The keep:
  * - reads at most four companies at a time, and one read of a company serves every caller asking while it runs;
@@ -17,7 +19,8 @@
  *   it ended and refused with such a hold is asked once more after it; any later refusal is final;
  * - stops a call's reads when the market does not answer: the rest of the call is refused with those words;
  * - names, instead of reading, a company not yet started once `deadlineMs` have passed since the call began;
- * - holds at most `max` histories, dropping the least recently used (never `SPY`).
+ * - holds at most `max` histories, dropping the least recently used (never `SPY`);
+ * - never holds a history read short: the next call that asks for it reads it again.
  */
 import { marketOrigin } from "../../lunhui/lib/market-fetch.mjs";
 import { dateOf } from "./episodes.mjs";
@@ -117,20 +120,26 @@ export async function readHistory(ask, symbol, now = Date.now) {
   /** @type {Bar[]} */
   let bars = first.body.candles;
   if (bars.length === 0) return { symbol, refused: `the market answered no daily bars of ${symbol}`, holdMs: null, down: false };
+  /** @param {any} body */
+  const sourceOf = (body) => (typeof body.source === "string" ? body.source : "");
+  let source = sourceOf(first.body);
+  /** whether a page promised older bars and the next brought none */
+  let broken = false;
   let more = first.body.more === true;
   for (let pages = 1; more && pages < MAX_PAGES; pages++) {
     const oldest = bars[0].t;
     const page = await ask({ venue: "cboe", symbol, interval: "1d", before: String(oldest), limit: String(OLDER_PAGE) });
     if (!isPage(page)) return refusedBy(symbol, page);
+    const pageSource = sourceOf(page.body);
+    if (source.startsWith("Nasdaq") && !pageSource.startsWith("Nasdaq")) source = pageSource;
     /** @type {Bar[]} */
     const older = page.body.candles.filter((/** @type {Bar} */ b) => b.t < oldest);
-    if (older.length === 0) break;
+    if (older.length === 0) { broken = true; break; }
     bars = [...older, ...bars];
     more = page.body.more === true;
   }
-  const source = typeof first.body.source === "string" ? first.body.source : "";
   return {
-    symbol, bars, source, firstBar: dateOf(bars[0].t), short: !source.startsWith("Nasdaq"),
+    symbol, bars, source, firstBar: dateOf(bars[0].t), short: broken || !source.startsWith("Nasdaq"),
     sessionOpen: first.body.today != null, readAt: now(),
   };
 }
@@ -151,7 +160,8 @@ export function createBarsKeep({ ask, now = Date.now, sleep = (ms) => new Promis
   /** @type {Array<() => void>} */
   const waiting = [];
 
-  /** @param {string} symbol @param {History} history */
+  /** Notes `SPY`'s latest date, then holds `history` unless it was read short.
+   * @param {string} symbol @param {History} history */
   function keep(symbol, history) {
     if (symbol === MARKET_SYMBOL) {
       const date = dateOf(history.bars[history.bars.length - 1].t);
@@ -160,6 +170,7 @@ export function createBarsKeep({ ask, now = Date.now, sleep = (ms) => new Promis
       }
       marketDate = date;
     }
+    if (history.short) return;
     kept.delete(symbol);
     kept.set(symbol, history);
     for (const old of [...kept.keys()]) {
