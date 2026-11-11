@@ -72,6 +72,22 @@ test("a leading case is the last to lose anything", async (t) => {
   assert.deepEqual(kept.cases.filter((c) => c.window === null).map((c) => c.id), cases.slice(10 - windowsDropped, 10).map((c) => c.id), "the two leading cases, though the farthest, keep their windows");
 });
 
+test("cases without a distance are trimmed from the last backwards", async (t) => {
+  const window = Array.from({ length: 40 }, (_, k) => [k - 30, 101.11, 102.22, 99.33, 100.44, 123456789]);
+  const cases = Array.from({ length: 6 }, (_, k) => ({ id: `e${k}`, window }));
+  const expected = cases.map((c, k) => (k < 4 ? c : { ...c, window: null }));
+  // exactly the bytes of the view with four windows: a fifth would pass the cap
+  const maxBytes = Buffer.byteLength(JSON.stringify({ kind: "events", cases: expected, id: "an-20200101-00000000", windowsDropped: 2, casesDropped: 0 }), "utf8");
+  const store = createViewStore(await dir(t), { maxBytes });
+  for (let time = 0; time < 2; time++) {
+    const { id, bytes, windowsDropped, casesDropped } = await store.write({ kind: "events", cases });
+    const kept = await store.read(id) as { cases: Array<{ id: string; window: unknown }>; windowsDropped: number; casesDropped: number };
+    assert.ok(bytes <= maxBytes); assert.deepEqual([windowsDropped, casesDropped], [2, 0]);
+    assert.deepEqual([kept.windowsDropped, kept.casesDropped], [2, 0]);
+    assert.deepEqual(kept.cases, expected);
+  }
+});
+
 test("write leaves the view it was given as it was", async (t) => {
   const window = Array.from({ length: 91 }, (_, k) => [k - 30, 101.11, 102.22, 99.33, 100.44, 123456789]);
   const view = { kind: "chart", windowsDropped: 0, cases: Array.from({ length: 12 }, (_, k) => ({ id: `S${k}:2020-01-01`, distance: k, window })) };

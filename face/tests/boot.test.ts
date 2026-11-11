@@ -100,7 +100,7 @@ test("composeFace stacks exactly the layers it means to", () => {
       "lunhui-environment", "lunhui-sentiment", "lunhui-theme", "lunhui-leader", "lunhui-mode", "lunhui-review",
       "lunhui-present",
     ], "the twelve Lunhui rows sit right after the market row, in one insert: the backbone, the freezes, the modules, then the composed answer");
-    assert.deepEqual((patches[4 + policy.length] as InsertPatch).insert?.map((row) => row.id), ["analog-views", "analog-chart"], "the two analog rows sit right after the Lunhui rows, in one insert");
+    assert.deepEqual((patches[4 + policy.length] as InsertPatch).insert?.map((row) => row.id), ["analog-views", "analog-chart", "analog-events"], "the three analog rows sit right after the Lunhui rows, in one insert");
   } finally {
     if (previous === undefined) delete process.env.DSH_TELEMETRY_DISABLED;
     else process.env.DSH_TELEMETRY_DISABLED = previous;

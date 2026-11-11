@@ -1,32 +1,34 @@
-/** The analog rows: past sell-offs like a US stock's present one, as in-process
+/** The analog rows: past sell-offs like a US stock's present one, and past
+ * events like a stock's present news, measured, as in-process
  * dsh rows - boot.ts composes them right after the Lunhui rows, in the same
  * project layer, below everything the operator writes, so an operator row with
  * one of these ids replaces that row's config (a replacement restates
  * `viewsDir`) and `disabled: true` removes it.
  *
- * Two cordis file-plugin rows under `face/plugins/analog/`, in one insert:
+ * Three cordis file-plugin rows under `face/plugins/analog/`, in one insert:
  * `analog-views`, the backbone that provides the `analogViews` service (the
- * keep of daily histories read through the market and the view store under
- * `$DSH_HOME/face/analog/views`), then `analog-chart`, injecting `tools` and
- * `analogViews` and registering `analog_chart`. The tool is registered
- * tree-wide, as dsh's own are; no bot's allow list names it
- * (`tests/bots.test.ts`), and the conversation's and the desk's presets carry
- * their own allow lists. */
+ * keep of daily histories read through the market, the record of the web
+ * pages a reader opened, and the view store under
+ * `$DSH_HOME/face/analog/views`), then `analog-chart` and `analog-events`,
+ * each injecting `tools` and `analogViews`, which register `analog_chart` and
+ * `analog_events` in turn. The tools are registered tree-wide, as dsh's own
+ * are; no bot's allow list names one (`tests/bots.test.ts`), and the
+ * conversation's and the desk's presets carry their own allow lists. */
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { FacePatchList } from "./boot.ts";
 
-export const ANALOG_ROW_IDS = ["analog-views", "analog-chart"] as const;
+export const ANALOG_ROW_IDS = ["analog-views", "analog-chart", "analog-events"] as const;
 
 /** The tools the rows register, in row order. */
-export const ANALOG_TOOL_NAMES = ["analog_chart"] as const;
+export const ANALOG_TOOL_NAMES = ["analog_chart", "analog_events"] as const;
 
 /** `face/plugins/analog/`, beside this file's `src/`. */
 const PLUGIN_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "plugins", "analog");
 
 /** The rows: each `name` the absolute file URL of its plugin file (`analog-views`
- * → `views-row.mjs`, `analog-chart` → `chart-row.mjs`); `home` is the harness
- * home, `$DSH_HOME`. */
+ * → `views-row.mjs`, `analog-chart` → `chart-row.mjs`, `analog-events` →
+ * `events-row.mjs`); `home` is the harness home, `$DSH_HOME`. */
 export function analogPatches(home: string): FacePatchList {
   return [{
     insert: ANALOG_ROW_IDS.map((id) => ({
