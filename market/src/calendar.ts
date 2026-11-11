@@ -14,6 +14,29 @@
  * (same-day ACH 3:00pm, standard ACH 8:30pm, NAV 4:00pm); they are quotes of
  * the rule, not measurements.
  *
+ * A HOLIDAY IS KEPT FROM THE YEAR IT WAS FIRST KEPT, because a price history
+ * is held to these days: a stock's daily bars on a first view
+ * (live/history-stocks.ts) and every row of Cboe's daily file
+ * (live/public-stocks.ts) are left out on a day this calendar calls closed,
+ * as far back as the sources go — Nasdaq's days to 1990, Cboe's to 2004. So
+ * Juneteenth is a holiday from 2022 and, for the market, Martin Luther King
+ * Jr. Day from 1998 (JUNETEENTH_FROM and MLK_MARKET_FROM below). From 1990 on
+ * the market's rules name every day it held a session — checked day by day
+ * against Nasdaq's IBM and Cboe's SPY on 2026-11-11 — and eleven it did not,
+ * its ONE-OFF CLOSURES: 27 April 1994, 11 to 14 September 2001, 11 June 2004,
+ * 2 January 2007, 29 and 30 October 2012, 5 December 2018 and 9 January 2025.
+ * No rule gives those and nothing here lists them. None of the histories read
+ * that day carries a row on one (Nasdaq's IBM, Cboe's SPY, Robinhood's five
+ * years of SPY), so no bar is known to be wrongly kept, of the shares read.
+ * Cboe does write rows on some closed days — SPY's file has Thanksgiving 2018
+ * and Memorial Day 2025, both left out by the rules. A closure yet to come is
+ * not known here either: on that day the session is said open, and a row Cboe
+ * copies onto it, as it copied Memorial Day 2025, is kept as a bar.
+ * The face's desk keeps its own rules and a hand-kept table of such closures
+ * (face/src/market-clock.ts, XNYS_AD_HOC_CLOSURES): a day added there is not
+ * known here. Years before 1990 were not checked — no source read here goes
+ * back that far — and the exchanges' older rules are not in it.
+ *
  * The stock market's EARLY CLOSES are computed by rule too, from NYSE's own
  * calendar (https://www.nyse.com/trade/hours-calendars, read 2026-10-14; the
  * older /markets/hours-calendars answers HTTP 302 to it): see earlyCloseDate
@@ -66,6 +89,19 @@ function easter(y: number): { m: number; d: number } {
 
 const key = (m: number, d: number) => m * 100 + d;
 
+/** THE FIRST YEAR JUNETEENTH IS KEPT, by the market and by the banks alike. NYSE and Nasdaq first closed for it on Monday 20 June 2022 (the
+ * 19th a Sunday). The law is of Thursday 17 June 2021, and the 19th was a Saturday that year: the exchanges traded on Friday 18 June 2021,
+ * and the Federal Reserve's services ran as usual that day too (it observes no Saturday holiday on a Friday), so the banks' first is the
+ * same Monday. Every 19 June before is an ordinary day: said a holiday, it takes a real session out of a history held to this calendar
+ * (live/history-stocks.ts, live/public-stocks.ts) — one a year, 32 of them from 1990 to 2021. For the banks the year moves no day (2021's
+ * holiday fell on the Saturday), and no source of this package reads a bank day: isBankDay and the arrival times below came with the
+ * copy from the account, which times transfers by them */
+const JUNETEENTH_FROM = 2022;
+/** THE FIRST YEAR THE MARKET KEEPS MARTIN LUTHER KING JR. DAY: NYSE and Nasdaq first closed for it on Monday 19 January 1998. Through 1997
+ * the third Monday of January is a session, and Nasdaq's daily bars, which go back to 1990, have each one. The banks kept it before the
+ * market did — it is a federal holiday from 1986 — and their rule here says it of every year: nothing reads a bank day that old */
+const MLK_MARKET_FROM = 1998;
+
 function holidays(y: number, market: boolean): Set<number> {
   const out = new Set<number>();
   // a fixed-date holiday: the bank observes a Sunday on Monday and ignores a Saturday; the market also closes the Friday before a Saturday
@@ -78,10 +114,10 @@ function holidays(y: number, market: boolean): Set<number> {
   };
   // New Year's Day on a Saturday is observed by neither (the market does not close 31 December)
   fixed(1, 1, false);
-  out.add(key(1, nthDow(y, 1, 1, 3)));
+  if (!market || y >= MLK_MARKET_FROM) out.add(key(1, nthDow(y, 1, 1, 3)));
   out.add(key(2, nthDow(y, 2, 1, 3)));
   out.add(key(5, lastDow(y, 5, 1)));
-  fixed(6, 19);
+  if (y >= JUNETEENTH_FROM) fixed(6, 19);
   fixed(7, 4);
   out.add(key(9, nthDow(y, 9, 1, 1)));
   out.add(key(11, nthDow(y, 11, 4, 4)));
@@ -110,7 +146,8 @@ export function isBankDay(ms: number): boolean {
   return t.dow >= 1 && t.dow <= 5 && !holidaySet(t.y, false).has(key(t.m, t.d));
 }
 
-/** a day the stock market trades its regular session */
+/** a day the stock market trades its regular session, by the rules above: how far back they hold, and the one-off closures they do not
+ * know, are said at the top of this file */
 export function isMarketDay(ms: number): boolean {
   const t = et(ms);
   return t.dow >= 1 && t.dow <= 5 && !holidaySet(t.y, true).has(key(t.m, t.d));

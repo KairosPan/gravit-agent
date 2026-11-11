@@ -272,6 +272,8 @@ export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: strin
       const first = days[0]?.t;
       if (first !== undefined && first > since + 10 * DAY) ends = `Cboe's daily history of ${sym} starts ${nyDay(first)}`;
     }
+    // held to the calendar's market days, as Cboe's rows are when they are read (public-stocks.ts): a day the calendar wrongly called closed
+    // would lose its real bar here — calendar.ts says how far back its rules hold
     days = days.filter((b) => b.t >= since && isMarketDay(b.t));
     const today = await todayFrom(sym, days, now);
     if (today) days = [...days, today.bar];

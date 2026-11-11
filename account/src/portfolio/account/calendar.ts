@@ -14,6 +14,21 @@
  * (same-day ACH 3:00pm, standard ACH 8:30pm, NAV 4:00pm); they are quotes of
  * the rule, not measurements.
  *
+ * A HOLIDAY IS KEPT FROM THE YEAR IT WAS FIRST KEPT: Juneteenth from 2022 and,
+ * for the market, Martin Luther King Jr. Day from 1998 (JUNETEENTH_FROM and
+ * MLK_MARKET_FROM below), as the market service's copy of this file keeps
+ * them (its own calendar.ts, where a price history is held to these days and
+ * a holiday said too early took real sessions out of it; its header also
+ * names the exchanges' one-off closures, which no rule gives and neither file
+ * lists — the face's desk keeps a hand-kept table of them for its own clock,
+ * XNYS_AD_HOC_CLOSURES in its market-clock.ts, and a day added there is not
+ * known here). Every caller here asks about now or an instant not long past —
+ * when money lands, whether the market is open, the phase at a quote's own
+ * time, the close of a day in a paper account's curve — so none reaches a
+ * year before those. The two files say the same days so that the account's
+ * clock and the market's stay one clock, and test/unit/account-calendar.test.ts
+ * holds them to it day by day.
+ *
  * The stock market's EARLY CLOSES are computed by rule too, from NYSE's own
  * calendar (https://www.nyse.com/trade/hours-calendars, read 2026-10-14; the
  * older /markets/hours-calendars answers HTTP 302 to it): see earlyCloseDate
@@ -65,6 +80,16 @@ function easter(y: number): { m: number; d: number } {
 
 const key = (m: number, d: number) => m * 100 + d;
 
+/** THE FIRST YEAR JUNETEENTH IS KEPT, by the market and by the banks alike. NYSE and Nasdaq first closed for it on Monday 20 June 2022 (the
+ * 19th a Sunday). The law is of Thursday 17 June 2021, and the 19th was a Saturday that year: the exchanges traded on Friday 18 June 2021,
+ * and the Federal Reserve's services ran as usual that day too (it observes no Saturday holiday on a Friday), so the banks' first is the
+ * same Monday */
+const JUNETEENTH_FROM = 2022;
+/** THE FIRST YEAR THE MARKET KEEPS MARTIN LUTHER KING JR. DAY: NYSE and Nasdaq first closed for it on Monday 19 January 1998. The banks
+ * kept it before the market did — it is a federal holiday from 1986 — and their rule here says it of every year: nothing reads a bank day
+ * that old */
+const MLK_MARKET_FROM = 1998;
+
 function holidays(y: number, market: boolean): Set<number> {
   const out = new Set<number>();
   // a fixed-date holiday: the bank observes a Sunday on Monday and ignores a Saturday; the market also closes the Friday before a Saturday
@@ -77,10 +102,10 @@ function holidays(y: number, market: boolean): Set<number> {
   };
   // New Year's Day on a Saturday is observed by neither (the market does not close 31 December)
   fixed(1, 1, false);
-  out.add(key(1, nthDow(y, 1, 1, 3)));
+  if (!market || y >= MLK_MARKET_FROM) out.add(key(1, nthDow(y, 1, 1, 3)));
   out.add(key(2, nthDow(y, 2, 1, 3)));
   out.add(key(5, lastDow(y, 5, 1)));
-  fixed(6, 19);
+  if (y >= JUNETEENTH_FROM) fixed(6, 19);
   fixed(7, 4);
   out.add(key(9, nthDow(y, 9, 1, 1)));
   out.add(key(11, nthDow(y, 11, 4, 4)));

@@ -467,6 +467,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
         if (!m || o === undefined || h === undefined || l === undefined || c === undefined) continue;
         // a day's bar at its session's open, New York
         const t = fromEt(Number(m[1]), Number(m[2]), Number(m[3]), 9, 30);
+        // a row on a day the calendar calls closed is left out: calendar.ts says how far back its rules hold, and the closures they do not know
         if (!isMarketDay(t) || out.has(t)) continue;
         out.set(t, { t, o, h, l, c, ...(v !== undefined ? { v } : {}) });
       }
