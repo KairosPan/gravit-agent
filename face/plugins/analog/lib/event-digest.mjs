@@ -5,12 +5,17 @@
  * per group and `all` against the market, the measured cases in the view's order, the unmeasured ones with the words
  * that say why, what the flags mean, and the fixed sentences.
  *
- * When it does not fit, every note goes first; then the unmeasured line is cut from its end to `+N more`; then case
- * lines leave from the middle of the order, so the first and the last stay longest, with `… and N more in the view`
- * where they left; then the flags' line goes. Coverage, the title, the anchors, the market's refusal, the group rows
- * and the fixed sentences are never cut. Numbers are written as the chart digest writes them. The view is not changed.
+ * When it does not fit, in this order until it does: every note goes; the unmeasured line is cut from its end to
+ * `+N more`; case lines leave from the middle of the order, so the first and the last stay longest, with `… and N more
+ * in the view` where they left; the flags' line goes; then, all at once, texts are clipped by code point with `…` where
+ * they were clipped (the title to 20 characters, each anchor's label to 12, each group's name to 8 wherever it is
+ * printed, the market's words on an anchor's line or the SPY line to 80); then each measured anchor's line takes a
+ * short form without its gap, its +1 and its volume. A digest still over the bound is refused (`INTERNAL`), never
+ * returned. Line 1, the header, each row's numbers and the fixed sentences are never cut. Numbers are written as the
+ * chart digest writes them. The view is not changed.
  */
 import { DIGEST_MAX, pct, ratio, whole } from "./digest.mjs";
+import { refuse } from "./errors.mjs";
 
 /** @typedef {import("./event-scan.mjs").EventsView} EventsView */
 /** @typedef {import("./event-scan.mjs").EventCase} EventCase */
@@ -27,6 +32,14 @@ const FLAGS = "quiet: day 0 under 1.5× its usual volume. elsewhere: a busier se
 const CASES = "cases, by group, the most negative day 0 first:";
 /** A case's label is cut to this many characters. */
 const LABEL_MAX = 40;
+/** What clipping leaves of each text, in characters, when the digest still does not fit. */
+const CLIP = { title: 20, anchor: 12, group: 8, words: 80 };
+
+/** The first `max` code points of `text`; clipped ones end with `…`. @param {string} text @param {number} max */
+function clip(text, max) {
+  const points = Array.from(text);
+  return points.length <= max ? text : `${points.slice(0, max).join("")}…`;
+}
 
 /** @param {string} name @param {EventSummary} s */
 function groupRow(name, s) {
@@ -38,26 +51,34 @@ function groupRow(name, s) {
 }
 
 /**
- * One anchor of the present case.
+ * One anchor of the present case, clipped and in short form when asked.
  * @param {string} symbol @param {Anchor} a @param {NonNullable<EventsView["query"]>} q
+ * @param {{ clipped: boolean, short: boolean }} how
  */
-function anchorLine(symbol, a, q) {
-  const head = `${symbol} ${a.label} ${a.date} ${a.timing}`;
-  if (a.state !== "measured" || a.measure === null) return `${head}: unmeasured (${a.words})`;
+function anchorLine(symbol, a, q, { clipped, short }) {
+  const head = `${symbol} ${clipped ? clip(a.label, CLIP.anchor) : a.label} ${a.date} ${a.timing}`;
+  if (a.state !== "measured" || a.measure === null) {
+    const words = String(a.words);
+    return `${head}: unmeasured (${clipped ? clip(words, CLIP.words) : words})`;
+  }
   const m = a.measure;
   const open = a.day0 === q.latest && q.sessionOpen ? " (session still open)" : "";
+  if (short) {
+    return `${head} → day 0 ${a.day0}${open}: day 0 ${pct(m.r0)} (${pct(m.x0)} vs market); +5 ${pct(m.x5)}; ` +
+      `${m.sessionsAfter} sessions since`;
+  }
   return `${head} → day 0 ${a.day0}${open}: gap ${pct(m.gap)}; day 0 ${pct(m.r0)} (${pct(m.x0)} vs market); ` +
     `+1 ${pct(m.x1)}; +5 ${pct(m.x5)}; volume ${ratio(a.tape?.vol0)}; ${m.sessionsAfter} sessions since`;
 }
 
 /**
- * One measured case, with its note when `withNote`.
- * @param {EventCase} c @param {boolean} withNote
+ * One measured case, with its note when `withNote`, its group's name as given.
+ * @param {EventCase} c @param {string} group @param {boolean} withNote
  */
-function caseLine(c, withNote) {
+function caseLine(c, group, withNote) {
   const m = /** @type {NonNullable<EventCase["measure"]>} */ (c.measure);
   const label = Array.from(c.label).slice(0, LABEL_MAX).join("");
-  return `${c.group}: ${c.symbol} ${c.day0} ${label} day 0 ${pct(m.x0)}; +5 ${pct(m.x5)}; +60 ${pct(m.x60)}` +
+  return `${group}: ${c.symbol} ${c.day0} ${label} day 0 ${pct(m.x0)}; +5 ${pct(m.x5)}; +60 ${pct(m.x60)}` +
     (m.x0 === null ? ` · raw ${pct(m.r0)}` : "") +
     (c.flags.includes("quiet") ? " · quiet" : "") +
     (c.flags.includes("elsewhere") ? " · elsewhere" : "") +
@@ -77,9 +98,6 @@ export function eventsDigest(view) {
     `${c.verified} verified, ${c.unverified} unverified` +
     (c.unopened > 0 ? `, ${c.unopened} marked verified without an opened source` : "") +
     ` · view ${view.id}${c.deadline ? " · stopped at the deadline" : ""}`;
-  const anchors = q === null ? [] : q.anchors.map((a) => anchorLine(q.symbol, a, q));
-  const spy = c.market.words !== null ? [`SPY could not be read: ${c.market.words}`] : [];
-  const rows = [...view.groups.named.map((g) => groupRow(g.name, g.summary)), groupRow("all", view.groups.all)];
 
   const measured = view.cases.filter((k) => k.state === "measured" && k.measure !== null);
   const unmeasured = view.cases.filter((k) => k.state === "unmeasured").map((k) => `${k.symbol} ${k.date} (${k.words})`);
@@ -91,9 +109,18 @@ export function eventsDigest(view) {
   let head = Math.ceil(measured.length / 2);
   let tail = measured.length - head;
   let flagsShown = flagged;
+  let clipped = false;
+  let short = false;
 
   const compose = () => {
-    const lines = measured.map((k) => caseLine(k, notes));
+    /** @param {string} name */
+    const group = (name) => (clipped ? clip(name, CLIP.group) : name);
+    const anchors = q === null ? [] : q.anchors.map((a) => anchorLine(q.symbol, a, q, { clipped, short }));
+    const spy = c.market.words !== null
+      ? [`SPY could not be read: ${clipped ? clip(c.market.words, CLIP.words) : c.market.words}`]
+      : [];
+    const rows = [...view.groups.named.map((g) => groupRow(group(g.name), g.summary)), groupRow("all", view.groups.all)];
+    const lines = measured.map((k) => caseLine(k, group(k.group), notes));
     const cut = measured.length - head - tail;
     const cases = measured.length === 0 ? [] : [
       CASES, ...lines.slice(0, head), ...(cut > 0 ? [`… and ${cut} more in the view`] : []), ...lines.slice(lines.length - tail),
@@ -103,8 +130,8 @@ export function eventsDigest(view) {
       `unmeasured: ${[...unmeasured.slice(0, unmeasuredShown), ...(more > 0 ? [`+${more} more`] : [])].join("; ")}`,
     ];
     return [
-      first, view.title, ...anchors, ...spy, HEADER, ...rows, ...cases, ...unmeasuredLine,
-      ...(flagsShown ? [FLAGS] : []), EVENT_SENTENCES,
+      first, clipped ? clip(view.title, CLIP.title) : view.title, ...anchors, ...spy, HEADER, ...rows, ...cases,
+      ...unmeasuredLine, ...(flagsShown ? [FLAGS] : []), EVENT_SENTENCES,
     ].join("\n");
   };
   let text = compose();
@@ -116,5 +143,8 @@ export function eventsDigest(view) {
     text = compose();
   }
   if (over() && flagsShown) { flagsShown = false; text = compose(); }
+  if (over()) { clipped = true; text = compose(); }
+  if (over()) { short = true; text = compose(); }
+  if (over()) throw refuse.internal();
   return text;
 }
