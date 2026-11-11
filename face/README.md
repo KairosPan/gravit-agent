@@ -103,9 +103,9 @@ preceded by `gravit-face: order gate armed for …` when the Account seat's writ
 registered ("The Account seat" below). A bot the face could not declare
 is reported on stderr (`gravit-face: bot "<id>" is not declared - <reason>`),
 and the `agent presets` line then ends `; N bot(s) not declared, see above`.
-The sample's presets line is abridged: a real one also lists `kairos`, `gravit-desk` and the four
+The sample's presets line is abridged: a real one also lists `kairos`, `gravit-desk` and the five
 role presets (`role-cn-market-analyst`, `role-cn-reviewer`, `role-cn-stock-analyst`,
-`role-pdf-page-reader`). A global
+`role-pdf-page-reader`, `role-source-reader`). A global
 `AGENTS.md` (`$DSH_HOME/AGENTS.md`, or `AGENTS.md` under `DSH_AGENTS_HOME` or `~/.agents`) adds
 one stderr line each, saying it would enter every agent's instruction chain (D25).
 
@@ -866,7 +866,7 @@ run is `MISSING_EVIDENCE` at the read. Each item is against a module whose artif
 shows — never the mode — and cites at least one `ev_` evidence id of its own (`REFERENCE`
 otherwise); an empty `items` is a review that found nothing, a result.
 
-**The roles and the protocol.** Three Lunhui roles ship (the fourth role, `pdf-page-reader`, is not Lunhui's: "Roles" below). `../roles/cn-market-analyst/`: its tools are
+**The roles and the protocol.** Three Lunhui roles ship (the PDF page reader and the source reader are not Lunhui's: "Roles" below). `../roles/cn-market-analyst/`: its tools are
 `skill` and the six market module tools, its model `deepseek-official/deepseek-flash`, its Chinese
 persona the three modules in order — environment, sentiment, theme — each read once and submitted
 once, the artifact only in `analysis`, a stop after a failed read, a module's third rejection
@@ -2321,9 +2321,9 @@ the retired alpaca-kit's `earnings`, `daily_bars`, `calendar` and `corp_actions`
 tool since `alpaca_kit` left the tree). No shell and no
 background jobs: an unattended turn on untrusted text — a forwarded message, a web page, a
 filing — must not read the key files. No order or account tool, no
-question tool, no goals, no delegation, no AKShare. Three tools are the desk's own, given to each
-desk agent and to no other session — `web_fetch` (below, "The desk opens web pages"; a source
-reader's child has its own), and:
+question tool, no goals, no delegation, no AKShare. Each desk agent is given three tools in its
+own layer: dsh's `web_fetch` (below, "The desk opens web pages"), which a source reader's child is
+also given, and two that no other session has:
 `desk_quotes`, the price now for 1 to 20 symbols — US tickers or six-digit A shares (`600519`) —
 each with its feed and its exchange's time (`ROBINHOOD 10:21:03 ET`, `TENCENT 14:03:12 Beijing`),
 from the market's reads (`src/market-quotes.ts`: a US share's `explore` row, A shares' `quotes`
@@ -4557,7 +4557,7 @@ and `node --test` gives each file its own:
 | `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`), a stub headline read: the boot's tick at 09:15 ET inside the US window (04:00–20:00 ET) polling the US market alone, its pre-market prints making no record, and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply, run in a session of its own (never the desk conversation's, which reaches the model for none of it) and recorded `annotated`; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card |
 | `desk-carry-smoke.test.ts` | a graceful stop and a fresh boot, two real boots on one home, each in a child process of its own (the file runs itself as `one`, then `two`): the first face, the desk as `main.ts` installs it on the stub, posts `LONG` (`telegram:1`), whose model call hangs until its abort, and `QUEUED` (`telegram:2`) behind it, then shuts down as `main.ts` does - `desk.dispose(0)`, then the tree's; the ledger holds one `desk-carry` - `QUEUED`'s key, words and time, and `LONG`'s turn 1 as `cut` - before its `shutdown`; the second face's boot posts `QUEUED` again, its provenance line ending `(carried over a restart)`, the model answers it once and `LONG` not at all, the phone gets the restart line and then `echo QUEUED`, and `desk-carried` says `posted: 1, skipped: 0` (spec §16 H3, R93; the guard across dsh upgrades for `.superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md`) |
 | `analog-smoke.test.ts` | the analog rows against a stub market (`fakeMarket` on port 0; `analog-views` over a scratch views directory and a one-company universe): `analog_chart` and `analog_events` registered and the three rows active in `/data/plugins.json`'s listing; the booted `analogViews` scanning `QRY` and storing the view; `GET /data/analog/view` serving it with the cookie, 403 from another site's page, 404 for an unknown id; the stub asked only `/api/candles` on `cboe`; no `analog_` tool in the conversation's or the desk's preset |
-| `analog-events-smoke.test.ts` | the event analogs on the same stub: `role-source-reader` listed whole; a session created on it sees exactly `web_fetch` and `web_search`, the first in its own layer (`src/source-reader.ts`); a Gravit session, a PDF page reader's and a bot's see no `web_fetch`, the last two no analog tool; the reader's `web_fetch` of a loopback URL refused by dsh's provider until the fortieth page, the next refused by the guard; `analog_events` for Gravit measuring one event and storing the view, its source verified only once the page record holds it; the view route as above; the reader refused `analog_events` |
+| `analog-events-smoke.test.ts` | the event analogs on the same stub: `role-source-reader` listed whole; a session created on it sees exactly `web_fetch` and `web_search`, the first in its own layer (`src/source-reader.ts`); a Gravit session, a PDF page reader's and a bot's see no `web_fetch`, the last two no analog tool; the reader's `web_fetch` of a loopback URL refused by dsh's provider until the fortieth page, the next refused by the guard; `analog_events` for Gravit measuring one event and storing the view, its source verified only once the page record holds it; the view served with the cookie, 403 from another site's page; the reader refused `analog_events` |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
 `observed:` line each (S4, S7), the measurements the bots spec's amendments were
@@ -5737,7 +5737,8 @@ answer is the text, and the view is the stored file.
    the date the case gives.
 4. **Unverified shown as unverified.** The digest's first line counts `verified` and `unverified`,
    and `marked verified without an opened source` when the worker claimed a source no reader opened;
-   each such case line carries ` · unverified` (and ` · source not opened`). PASS: Gravit's report
+   each such measured case's line carries ` · unverified` (and ` · source not opened`); an unmeasured
+   case has no case line, so read its `verified` and `flags` in the view. PASS: Gravit's report
    names them as unverified, and no date the reader did not verify is told as checked.
 5. **A company gone is unmeasured.** PASS: a precedent whose stock no longer trades is in the
    list, under its last ticker, on the digest's `unmeasured:` line and in the view's
