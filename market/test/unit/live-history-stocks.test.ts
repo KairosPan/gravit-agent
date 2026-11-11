@@ -282,6 +282,31 @@ describe("daily and weekly: Robinhood's year or five, Nasdaq's by dates for all 
     expect(w.ends).toBe("Nasdaq's daily history of AAPL starts Mon 8 Jan 1990: its days before give no opening price and are left out");
   });
 
+  /** the week of Monday 14 June 2021 and the Monday after, as a source carries them (dates written out, not counted from the calendar): Friday
+   * the 18th is a session — that June's quarterly expiration — in a year when Juneteenth, the 19th a Saturday, closed no exchange. NYSE
+   * and Nasdaq first closed for it on Monday 20 June 2022 */
+  const JUNE_2021: Candle[] = ([[14, 10], [15, 11], [16, 12], [17, 13], [18, 14], [21, 15]] as Array<[number, number]>).map(([d, c]) => ({ t: fromEt(2021, 6, d, 9, 30), o: c - 0.5, h: c + 1, l: c - 1, c, v: 1000 }));
+  const june2021 = () => {
+    const nq = nasdaq();
+    (nq.nasdaq as { daily: Nasdaq["daily"] }).daily = async () => ({ bars: JUNE_2021, noOpen: 0 });
+    // Robinhood down: no bar of today's is built beside Nasdaq's days
+    return history({ http: async () => json({ detail: "unavailable" }, 503), nq });
+  };
+
+  it("a first view of daily bars keeps the session of Friday 18 June 2021: Juneteenth is no holiday of a year before 2022", async () => {
+    const p = page(await june2021().h("AAPL", "1d", { since: 0, limit: 5_000, range: "MAX" }));
+    expect(p.bars.map((b) => nyDay(b.t))).toEqual(["Mon 14 Jun 2021", "Tue 15 Jun 2021", "Wed 16 Jun 2021", "Thu 17 Jun 2021", "Fri 18 Jun 2021", "Mon 21 Jun 2021"]);
+    expect(p.source).toBe("Nasdaq · AAPL");
+  });
+
+  it("the week folded from those days ends on that Friday: its close, its high and all five days' volume", async () => {
+    const w = page(await june2021().h("AAPL", "1w", { since: 0, limit: 5_000, range: "MAX" }));
+    expect(w.bars).toEqual([
+      { t: fromEt(2021, 6, 14, 9, 30), o: 9.5, h: 15, l: 9, c: 14, v: 5000 },
+      { t: fromEt(2021, 6, 21, 9, 30), o: 14.5, h: 16, l: 14, c: 15, v: 1000 },
+    ]);
+  });
+
   it("a page scrolled left before a chart's first day: ONE ask of Nasdaq by dates, the days before it; before Nasdaq's first, nothing, and why", async () => {
     const s = history({ nq: nasdaq({ from: "2000-01-03" }) });
     const until = fromEt(2021, 10, 18, 9, 30);
@@ -343,5 +368,30 @@ describe("through the US stocks line (public-stocks.ts)", () => {
     expect(sent[0]!.startsWith(`${ROBINHOOD_HISTORICALS}/SPY/?interval=day&span=year&bounds=regular`)).toBe(false);
     expect(sent.some((u) => u.startsWith(`${ROBINHOOD_HISTORICALS}/SPY/?interval=day&span=5year&bounds=regular`))).toBe(true);
     expect(sent.every((u) => ["api.robinhood.com", "api.nasdaq.com", "cdn-api.cboe.com"].includes(new URL(u).host))).toBe(true);
+  });
+
+  /** three rows of Cboe's SPY file as it answered on 2026-11-11: Friday 18 June 2021 is a session, with its own prices and volume — Juneteenth
+   * closed no exchange before Monday 20 June 2022, and the file has no row for that day */
+  const CBOE_JUNE_2021 = json({ timestamp: "11:00:08", data: [{ date: "2021-06-17", volume: 83963699, open: 421.62, high: 423.02, low: 419.32, close: 421.97 }, { date: "2021-06-18", volume: 110255685, open: 417.16, high: 417.83, low: 414.7, close: 414.92 }, { date: "2021-06-21", volume: 70626500, open: 416.85, high: 421.06, low: 415.93, close: 420.86 }] });
+  const JUNE_2021_CLOSES = [["Thu 17 Jun 2021", 421.97], ["Fri 18 Jun 2021", 414.92], ["Mon 21 Jun 2021", 420.86]];
+  const cboeJune2021 = () => {
+    const http: Http = async (url) => {
+      if (url.includes("/charts/historical/SPY.json")) return CBOE_JUNE_2021;
+      if (url.includes("api.nasdaq.com")) return { status: 403, body: undefined, text: "<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD></HTML>" };
+      return json({ detail: "unavailable" }, 503);
+    };
+    return usStocksPublic({ http, clock: () => NOW, pace: async () => undefined });
+  };
+
+  it("Cboe's days where the others refuse keep the session of Friday 18 June 2021: a first view", async () => {
+    const p = (await cboeJune2021().candles!("SPY", "1d", { since: fromEt(2021, 6, 1) })) as CandlePage;
+    expect(p.bars.map((b) => [nyDay(b.t), b.c])).toEqual(JUNE_2021_CLOSES);
+    expect(p.source).toBe("Cboe · SPY");
+  });
+
+  it("Cboe's days where Nasdaq refuses keep it on a page scrolled left too: the file's rows are held to the same calendar as they are read", async () => {
+    const p = (await cboeJune2021().candles!("SPY", "1d", { until: fromEt(2021, 6, 22, 9, 30), limit: 300 })) as CandlePage;
+    expect(p.bars.map((b) => [nyDay(b.t), b.c])).toEqual(JUNE_2021_CLOSES);
+    expect(p.source).toBe("Cboe · SPY");
   });
 });
