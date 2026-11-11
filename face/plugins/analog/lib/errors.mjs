@@ -54,6 +54,9 @@ export const refuse = {
   badSymbol: () =>
     new AnalogError("BAD_SYMBOL", "a symbol is a ticker of 1 to 10 letters, digits and dots starting with a letter, such as NVDA or BRK.B"),
   badAsOf: () => new AnalogError("BAD_AS_OF", "as_of is a date YYYY-MM-DD, or left out for the latest bar"),
+  /** The events' input refused at its first bad field, named by its path (`events[2].date`). */
+  invalidEvents: (/** @type {string} */ field, /** @type {string} */ reason) =>
+    new AnalogError("INVALID_EVENTS", `${field}: ${reason}`),
   badAlso: () => new AnalogError("BAD_ALSO", "also is a list of at most 20 tickers, each like NVDA or BRK.B"),
   notGravit: () =>
     new AnalogError(

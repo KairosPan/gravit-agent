@@ -10,7 +10,8 @@
  * page Nasdaq holds nothing for empty, so a history is `short` when any page's source is not Nasdaq's or when a page
  * said there was more and the next brought no older bar; its `source` is then the first source that is not Nasdaq's.
  * When the latest page's last bar is built from the session's minutes, `today` holds the market's words for it, and
- * `sessionOpen` is true only while those words say the session is open.
+ * `sessionOpen` is true only while those words say the session is open. `adjustment` holds the first page's words for
+ * how its prices are adjusted, when it gives them.
  *
  * The keep:
  * - reads at most four companies at a time, and one read of a company serves every caller asking while it runs;
@@ -31,7 +32,7 @@ import { dateOf } from "./episodes.mjs";
  * @typedef {import("./selloff.mjs").Bar} Bar
  * @typedef {(query: Record<string, string>) => Promise<{ status: number, body: any }>} Ask
  * @typedef {{ symbol: string, bars: Bar[], source: string, firstBar: string, short: boolean, today: string | null,
- *   sessionOpen: boolean, readAt: number }} History
+ *   sessionOpen: boolean, adjustment: string | null, readAt: number }} History
  * @typedef {{ symbol: string, refused: string, holdMs: number | null, down: boolean }} Refused
  * @typedef {{ read: Map<string, History>, refused: Map<string, string>, timedOut: string[], down: boolean }} Histories
  * @typedef {{ histories: (symbols: string[], options?: { fresh?: string[], deadlineMs?: number }) => Promise<Histories> }} BarsKeep
@@ -147,9 +148,10 @@ export async function readHistory(ask, symbol, now = Date.now) {
   }
   const words = first.body.today?.words;
   const today = typeof words === "string" ? words : null;
+  const adjustment = typeof first.body.adjustment === "string" ? first.body.adjustment : null;
   return {
     symbol, bars, source, firstBar: dateOf(bars[0].t), short: broken || !source.startsWith("Nasdaq"),
-    today, sessionOpen: today === OPEN_SESSION, readAt: now(),
+    today, sessionOpen: today === OPEN_SESSION, adjustment, readAt: now(),
   };
 }
 
