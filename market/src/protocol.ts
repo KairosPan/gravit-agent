@@ -22,7 +22,9 @@
  *   GET  /api/price?asset=                             number | null
  *   GET  /api/hub/covers?source=&symbol=               {covers, pricesOnly}
  *   GET  /api/hub/confirmed?source=&symbol=&maxAgeMs=&waitMs=   HubQuote | null (waiting HUB_WAIT_MAX_MS at most)
- *   GET  /api/hub?client=                              server-sent events, one JSON object per `data:` line (HubEvent)
+ *   GET  /api/hub?client=                              server-sent events, one JSON object per `data:` line (HubEvent); a stream whose
+ *                                                      socket is full is written no more until it drains, then told each market that
+ *                                                      moved meanwhile as it stands
  *   POST /api/hub/hold {client, source, symbol, book, held}     {ok: true}; every hold of a client let go when its /api/hub closes
  *   POST /api/hub/want {client, source, symbol}        value: boolean (hub.want) */
 import type express from "express";
@@ -366,32 +368,65 @@ function mountHub(app: express.Express, hub: MarketHub | undefined, idleMs: numb
     return until !== undefined && until > now;
   };
   const followsBook = (c: HubClient, k: string): boolean => c.holds.has(`${k}|book`);
-  const send = (c: HubClient, e: HubEvent): void => {
-    const line = "data: " + JSON.stringify(e) + "\n\n";
-    for (const r of c.streams) r.write(line);
+  /** A STREAM BEHIND: one whose socket did not take the last write at once (its reader is slow, stopped or gone quiet). Nothing more is
+   * written to it until it drains — what moved meanwhile is remembered by market and kind alone, and each is told once it drains, as the hub
+   * has it then (a market's trades: every ring entry since the last one the client was sent). So a client that stops reading costs the
+   * market what its socket holds, never a backlog of every word since: written regardless, every word of a market streamed around the clock
+   * (a paper book's BTC/USD, its trades and its book many times a second) would wait in this process, without bound, for a reader that had
+   * stopped */
+  type Told = "quote" | "book" | "trades" | "live";
+  const behind = new Map<express.Response, Map<string, { what: Told; source: string; symbol: string }>>();
+  const write = (c: HubClient, r: express.Response, text: string): void => {
+    if (r.write(text) || behind.has(r)) return;
+    behind.set(r, new Map());
+    r.once("drain", () => caughtUp(c, r));
   };
-  /** one market's word to each client that follows it, as the hub has it when it goes out */
-  const tell = (what: "quote" | "book" | "trades", source: string, symbol: string, only?: HubClient): void => {
+  const caughtUp = (c: HubClient, r: express.Response): void => {
+    const moved = behind.get(r);
+    behind.delete(r);
+    if (!moved || !c.streams.has(r)) return;
+    for (const m of moved.values()) tell(m.what, m.source, m.symbol, c);
+  };
+  /** the word a client is sent for a market now, as the hub has it; a market's trades move the client's place in the ring */
+  const eventOf = (c: HubClient, what: Told, source: string, symbol: string, k: string): HubEvent | undefined => {
+    if (!hub) return undefined;
+    if (what === "quote") {
+      const quote = hub.quote(source, symbol);
+      return quote ? { t: "quote", source, symbol, quote } : undefined;
+    }
+    if (what === "book") {
+      const book = hub.book(source, symbol);
+      return book ? { t: "book", source, symbol, book } : undefined;
+    }
+    if (what === "live") return { t: "live", source, symbol, live: hub.quote(source, symbol)?.live === true };
+    const after = c.sent.get(k) ?? 0;
+    const r = hub.ring?.(source, symbol, after) ?? { trades: [], evictedSeq: 0 };
+    const last = r.trades.reduce((m, t) => Math.max(m, t.seq), after);
+    c.sent.set(k, last);
+    return { t: "trades", source, symbol, ring: r.trades, evictedSeq: r.evictedSeq, recent: hub.trades(source, symbol, RECENT_TRADES) };
+  };
+  /** one market's word to each client that follows it, as the hub has it when it goes out — to each of its streams not behind; a stream
+   * behind is only told later that it moved. With every stream of a client behind, nothing is made for it now: its place in a market's
+   * ring stays where the last trades it was sent left it */
+  const tell = (what: Told, source: string, symbol: string, only?: HubClient): void => {
     if (!hub) return;
     const k = `${source}|${symbol}`;
     const now = Date.now();
-    if (what !== "quote" && hub.pricesOnly?.(source, symbol) === true) return;
+    if ((what === "book" || what === "trades") && hub.pricesOnly?.(source, symbol) === true) return;
     for (const c of only ? [only] : clients.values()) {
       if (!c.streams.size || !follows(c, k, now)) continue;
-      if (what === "quote") {
-        const quote = hub.quote(source, symbol);
-        if (quote) send(c, { t: "quote", source, symbol, quote });
-      } else if (what === "book") {
-        if (!followsBook(c, k)) continue;
-        const book = hub.book(source, symbol);
-        if (book) send(c, { t: "book", source, symbol, book });
-      } else {
-        const after = c.sent.get(k) ?? 0;
-        const r = hub.ring?.(source, symbol, after) ?? { trades: [], evictedSeq: 0 };
-        const last = r.trades.reduce((m, t) => Math.max(m, t.seq), after);
-        c.sent.set(k, last);
-        send(c, { t: "trades", source, symbol, ring: r.trades, evictedSeq: r.evictedSeq, recent: hub.trades(source, symbol, RECENT_TRADES) });
+      if (what === "book" && !followsBook(c, k)) continue;
+      const ready: express.Response[] = [];
+      for (const r of c.streams) {
+        const moved = behind.get(r);
+        if (moved) moved.set(`${what}|${k}`, { what, source, symbol });
+        else ready.push(r);
       }
+      if (!ready.length) continue;
+      const e = eventOf(c, what, source, symbol, k);
+      if (!e) continue;
+      const line = "data: " + JSON.stringify(e) + "\n\n";
+      for (const r of ready) write(c, r, line);
     }
   };
   /** at most once a window per market: the latest of what came, written when it goes out */
@@ -414,8 +449,7 @@ function mountHub(app: express.Express, hub: MarketHub | undefined, idleMs: numb
       for (const c of clients.values()) if (c.streams.size && follows(c, k, now)) any = true;
       if (!any) return;
       if (t.what === "live") {
-        const live = hub.quote(t.source, t.symbol)?.live === true;
-        for (const c of clients.values()) if (c.streams.size && follows(c, k, now)) send(c, { t: "live", source: t.source, symbol: t.symbol, live });
+        tell("live", t.source, t.symbol);
         later("quote", t.source, t.symbol);
         later("book", t.source, t.symbol);
         return;
@@ -450,14 +484,16 @@ function mountHub(app: express.Express, hub: MarketHub | undefined, idleMs: numb
     const c = clientOf(id!);
     res.status(200).set({ "content-type": "text/event-stream", connection: "keep-alive" });
     res.flushHeaders();
-    res.write(":\n\n");
+    write(c, res, ":\n\n");
     c.streams.add(res);
     if (c.idle) clearTimeout(c.idle);
     c.idle = undefined;
-    const beat = setInterval(() => res.write(":\n\n"), HEARTBEAT_MS);
+    // a heartbeat to a stream behind would be one more word it has not read
+    const beat = setInterval(() => void (behind.has(res) || write(c, res, ":\n\n")), HEARTBEAT_MS);
     beat.unref?.();
     res.on("close", () => {
       clearInterval(beat);
+      behind.delete(res);
       c.streams.delete(res);
       if (c.streams.size) return;
       // the client's last stream closed: every hold of it let go, its wants and what it was sent forgotten

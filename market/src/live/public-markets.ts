@@ -560,19 +560,27 @@ export function readLike<T>(x: T, ...from: unknown[]): T {
 
 /** an answer kept for `ms` from when it was asked (or for what `ms` says of the answer: until it has come, it is waited for up to KEEP_MS),
  * and one asked only once while it is on its way; a refusal is kept for holdBackMs (which is nothing for most), a throw is not kept. What it
- * takes is stamped with the moment it came back (stampRead) */
+ * takes is stamped with the moment it came back (stampRead).
+ *
+ * AN ANSWER PAST ITS KEEP IS LET GO as the next one comes in, not held until KEEPER_MOST newer keys push it out: a key that moves with the
+ * clock — a Kalshi candlestick window or a Polymarket price history's, a new URL each minute, whole bodies of thousands of candles — keeps
+ * only the answers within their keep. One still on its way is never let go, whatever its age */
 /** a keeper's answers, and `clear()`: the refusals it holds let go of, so the next ask asks the venue (a forced re-check that found the
- * venue answering this network: the place rule or edge it held was the network the user left) */
-export type Kept<T> = ((key: string, run: () => Promise<T | Refusal>) => Promise<T | Refusal>) & { clear(): void };
+ * venue answering this network: the place rule or edge it held was the network the user left). `size`: how many it keeps now */
+export type Kept<T> = ((key: string, run: () => Promise<T | Refusal>) => Promise<T | Refusal>) & { clear(): void; readonly size: number };
+/** the most answers one keeper keeps, within their keep */
+export const KEEPER_MOST = 200;
 export function keeper<T>(clock: () => number, ms: number | ((answer: T) => number)): Kept<T> {
-  const kept = new Map<string, { until: number; p: Promise<T | Refusal>; held?: boolean }>();
+  type Entry = { until: number; p: Promise<T | Refusal>; held?: boolean; settled?: boolean };
+  const kept = new Map<string, Entry>();
   const keep = ((key: string, run: () => Promise<T | Refusal>) => {
     const now = clock();
     const hit = kept.get(key);
     if (hit && now < hit.until) return hit.p;
-    const entry: { until: number; p: Promise<T | Refusal>; held?: boolean } = { until: now + (typeof ms === "number" ? ms : KEEP_MS), p: Promise.resolve() as unknown as Promise<T | Refusal> };
+    const entry: Entry = { until: now + (typeof ms === "number" ? ms : KEEP_MS), p: Promise.resolve() as unknown as Promise<T | Refusal> };
     entry.p = run().then(
       (r) => {
+        entry.settled = true;
         if (!isRefusal(r)) stampRead(r, clock());
         if (kept.get(key) !== entry) return r;
         if (isRefusal(r)) {
@@ -585,22 +593,25 @@ export function keeper<T>(clock: () => number, ms: number | ((answer: T) => numb
         return r;
       },
       (err: unknown) => {
+        entry.settled = true;
         if (kept.get(key) === entry) kept.delete(key);
         throw err;
       },
     );
+    for (const [k, e] of kept) if (e.settled && now >= e.until) kept.delete(k);
     kept.set(key, entry);
-    if (kept.size > 200) kept.delete(kept.keys().next().value!);
+    if (kept.size > KEEPER_MOST) kept.delete(kept.keys().next().value!);
     return entry.p;
   }) as Kept<T>;
   keep.clear = () => {
     for (const [k, e] of kept) if (e.held) kept.delete(k);
   };
+  Object.defineProperty(keep, "size", { get: () => kept.size });
   return keep;
 }
 
 /** one JSON answer from a fixed host, kept for a while: the body, or the venue's refusal */
-export function getter(get: Http, venue: string, name: string, clock: () => number, ms = KEEP_MS): ((url: string) => Promise<unknown>) & { clear(): void } {
+export function getter(get: Http, venue: string, name: string, clock: () => number, ms = KEEP_MS): ((url: string) => Promise<unknown>) & { clear(): void; readonly size: number } {
   const keep = keeper<unknown>(clock, ms);
   const got = (url: string) =>
     keep(url, async () => {
@@ -612,7 +623,7 @@ export function getter(get: Http, venue: string, name: string, clock: () => numb
       }
       return r.status === 200 && r.body !== undefined ? r.body : publicNo(venue, name, r);
     });
-  return Object.assign(got, { clear: keep.clear });
+  return Object.defineProperty(Object.assign(got, { clear: keep.clear }), "size", { get: () => keep.size }) as ((url: string) => Promise<unknown>) & { clear(): void; readonly size: number };
 }
 
 /** a history's interval and window, held to what a public source takes (live/history.ts badWindow): one of the bar sizes, a start before now */
