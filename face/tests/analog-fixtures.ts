@@ -70,3 +70,13 @@ export function fakeMarket(histories: Record<string, Held>) {
   };
   return { ask, calls };
 }
+
+/** An event: 100 sessions at 50, then day 0 at index 100 (2020-04-10): a gap down to 45 and a close of 44 on five
+ * times the usual volume; 42 a session later; 43, 44, 45, 46; 46 to index 120; 48 from index 121 to the last, 170
+ * (2020-06-19). */
+export const EVENT_CLOSES = [...flat(100, 50), 44, 42, 43, 44, 45, 46, ...flat(15, 46), ...flat(50, 48)];
+export const EVENT = barsFrom(EVENT_CLOSES, { 100: { o: 45, v: 5000 } });
+/** The same company with 2020-04-08 and 2020-04-09 not sessions: day 0 is then index 98. */
+export const EVENT_GAPPED = EVENT.filter((_, i) => i !== 98 && i !== 99);
+/** The market over the same days: 400, but 396 on 2020-04-10 and 408 from index 160. */
+export const EVENT_MARKET = barsFrom(flat(171, 400).map((v, i) => (i === 100 ? 396 : i >= 160 ? 408 : v)));

@@ -139,6 +139,15 @@ function byDate(marketBars) {
 }
 
 /**
+ * The bar of a series on a `YYYY-MM-DD` date (its first bar of that date), through the series' date index.
+ * @param {Bar[]} marketBars @param {string} date
+ * @returns {Bar | undefined}
+ */
+export function barOn(marketBars, date) {
+  return byDate(marketBars).get(date);
+}
+
+/**
  * The market's change from a case's high to its day 0, rounded to six decimals, and its group: `down` at or below
  * −7%, `calm` above it, `unknown` when there are no market bars, either date is not one of them, or the change is not
  * a finite number (a close of 0 or missing).
@@ -159,12 +168,12 @@ export function contextOf(marketBars, peakDate, date) {
 
 /**
  * The bars from 30 sessions before day `i` to 60 after, as many as there are, each `[k, o, h, l, c, v]`: `k` the
- * session relative to day 0, prices a percentage of day 0's close to two decimals, `v` as it is (0 when missing).
- * @param {Bar[]} bars @param {number} i
+ * session relative to day 0, prices a percentage of `base` (day 0's close unless given) to two decimals, `v` as it is
+ * (0 when missing).
+ * @param {Bar[]} bars @param {number} i @param {number} [base]
  * @returns {Array<[number, number, number, number, number, number]>}
  */
-export function windowOf(bars, i) {
-  const base = bars[i].c;
+export function windowOf(bars, i, base = bars[i].c) {
   /** @param {number} p */
   const pct = (p) => Math.round((p / base) * 10_000) / 100;
   /** @type {Array<[number, number, number, number, number, number]>} */
