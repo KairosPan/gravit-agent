@@ -20,9 +20,14 @@
  * them (its own calendar.ts, where a price history is held to these days and
  * a holiday said too early took real sessions out of it; its header also
  * names the exchanges' one-off closures, which no rule gives and neither file
- * lists). Every caller here asks about now — when money lands, whether the
- * market is open — so none reaches a year before those; the two files say the
- * same days so that the account's clock and the market's stay one clock.
+ * lists — the face's desk keeps a hand-kept table of them for its own clock,
+ * XNYS_AD_HOC_CLOSURES in its market-clock.ts, and a day added there is not
+ * known here). Every caller here asks about now or an instant not long past —
+ * when money lands, whether the market is open, the phase at a quote's own
+ * time, the close of a day in a paper account's curve — so none reaches a
+ * year before those. The two files say the same days so that the account's
+ * clock and the market's stay one clock, and test/unit/account-calendar.test.ts
+ * holds them to it day by day.
  *
  * The stock market's EARLY CLOSES are computed by rule too, from NYSE's own
  * calendar (https://www.nyse.com/trade/hours-calendars, read 2026-10-14; the

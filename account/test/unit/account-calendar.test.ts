@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { achArrival, DAY, et, etDate, fromEt, isBankDay, isEarlyClose, isMarketDay, marketSession, navArrival, nextRegularSession, regularSession, sameDayAchArrival, settlementArrival, usClock, usDayEndAt, usPhaseAt, usPhaseEndsAt, usSessionFull, whenLabel } from "../../src/portfolio/account/calendar.ts";
+import { isBankDay as marketsBankDay, isMarketDay as marketsMarketDay } from "../../../market/src/calendar.ts";
 
 const at = (iso: string) => Date.parse(iso);
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -75,6 +76,15 @@ describe("a holiday is kept from the year it was first kept, as the market's cop
       ["1997-01-20", false, true],
       ["1998-01-19", false, false],
     ]);
+  });
+
+  it("the two calendars are one clock: the account's and the market's say the same bank days and market days, every day from 1990 to 2035", () => {
+    const differ: string[] = [];
+    // 17:00 UTC is the middle of the day in New York, summer or winter
+    for (let t = Date.UTC(1990, 0, 1, 17); t < Date.UTC(2036, 0, 1); t += DAY) {
+      if (isMarketDay(t) !== marketsMarketDay(t) || isBankDay(t) !== marketsBankDay(t)) differ.push(iso(t).slice(0, 10));
+    }
+    expect(differ).toEqual([]);
   });
 });
 
