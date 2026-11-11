@@ -7,6 +7,10 @@
  * or a fall inside its own latest session is a refusal, and nothing else is read. The rest of the list is read through
  * the keep under the scan's deadline, and whatever was not read is counted, never silently left out. With `asOf`,
  * every history, the market's included, keeps only its bars dated on or before it, so no number reads a later bar.
+ * `query.sessionOpen` says whether day 0 is the bar of a session still open, `asOf` or not.
+ *
+ * `SPY` is the market's context and never one of the other companies scanned; asked about itself, it is the query's
+ * own stock, scanned like any query's and measured against its own history for context.
  */
 import { MIN_BARS, LOOKBACK, SCALE, SELLOFF_DEPTH, bandsFor, featuresAt } from "./selloff.mjs";
 import {
@@ -49,7 +53,7 @@ export const SCAN_DEADLINE_MS = 480_000;
 const ALSO_MAX = 20;
 /** The query's own last sessions are its sell-off, never a candidate. */
 const OWN_SKIP = 15;
-/** The market's own symbol: read for context, never scanned. */
+/** The market's own symbol: read for context, never scanned as another company. */
 const MARKET_SYMBOL = "SPY";
 const SYMBOL = /^[A-Z][A-Z0-9.]{0,9}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -117,7 +121,7 @@ export async function scanChart({ symbol: rawSymbol, asOf: rawAsOf, also: rawAls
   const symbol = normalizeSymbol(rawSymbol);
   const asOf = normalizeAsOf(rawAsOf);
   const also = normalizeAlso(rawAlso);
-  const list = [...new Set([symbol, ...universe, ...also])].filter((s) => s !== MARKET_SYMBOL);
+  const list = [...new Set([symbol, ...[...universe, ...also].filter((s) => s !== MARKET_SYMBOL)])];
   /** @param {Bar[]} bars */
   const cut = (bars) => (asOf === null ? bars : bars.filter((b) => dateOf(b.t) <= asOf));
 
@@ -189,7 +193,8 @@ export async function scanChart({ symbol: rawSymbol, asOf: rawAsOf, also: rawAls
     version: 1,
     at: now().toISOString(),
     query: {
-      symbol, date, readDate: NEW_YORK.format(now()), asOf, sessionOpen: asOf === null && history.sessionOpen,
+      symbol, date, readDate: NEW_YORK.format(now()), asOf,
+      sessionOpen: history.sessionOpen && day0 === history.bars.length - 1,
       close: queryBars[day0].c, peak: queryBars[q.peakAt].h, peakDate, depth: q.depth, days: q.days,
       last5: q.last5, gap: q.gap, gapDate: dateOf(queryBars[q.gapAt].t), volume: q.volume, fromHigh: q.fromHigh,
       market, path: windowOf(queryBars, day0),

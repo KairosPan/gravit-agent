@@ -59,7 +59,7 @@ export function chartDigest(view) {
   const { query: q, coverage: c } = view;
   const first = `read ${c.read} of ${c.asked} companies (${c.refused.length} refused, ${c.short.length} read short) · ` +
     `${c.stockDays} stock-days · view ${view.id}${c.deadline ? " · stopped at the deadline" : ""}`;
-  const note = q.asOf !== null ? " (as asked)"
+  const note = q.asOf !== null ? (q.sessionOpen ? " (as asked; session still open)" : " (as asked)")
     : q.sessionOpen ? " (session still open)"
     : q.readDate !== q.date ? ` (latest bar; read ${q.readDate})`
     : "";

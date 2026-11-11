@@ -111,3 +111,23 @@ test("the universe is a list with its date and its rule", () => {
   assert.ok(!UNIVERSE.includes("SPY")); assert.match(UNIVERSE_AS_OF, /^\d{4}-\d{2}-\d{2}$/); assert.ok(UNIVERSE_RULE.length > 20);
   for (const symbol of UNIVERSE) assert.equal(normalizeSymbol(symbol), symbol);
 });
+
+test("an as_of on or after an open session's date still says the session is open", async () => {
+  const open = { ...held(), QRY: { bars: SELLOFF, today: true } };
+  const id = "an-20201126-0a1b2c3d";
+  const today = await scan({ asOf: "2020-11-26" }, open);
+  assert.deepEqual([today.query.date, today.query.asOf, today.query.sessionOpen], ["2020-11-26", "2020-11-26", true]);
+  assert.ok(chartDigest({ ...today, id }).split("\n")[1]!.startsWith("QRY as of 2020-11-26 (as asked; session still open): −30.0%"));
+  assert.equal((await scan({ asOf: "2021-06-01" }, open)).query.sessionOpen, true); // after the latest bar: the latest bar, still open
+  const earlier = await scan({ asOf: "2020-11-22" }, open);
+  assert.equal(earlier.query.sessionOpen, false);
+  assert.ok(chartDigest({ ...earlier, id }).split("\n")[1]!.startsWith("QRY as of 2020-11-22 (as asked): −21.0%"));
+  assert.ok(chartDigest({ ...(await scan({}, open)), id }).split("\n")[1]!.startsWith("QRY as of 2020-11-26 (session still open): −30.0%"));
+});
+
+test("SPY asked about is scanned as the query's own stock", async () => {
+  const view = await scan({ symbol: "spy" }, { SPY: { bars: SELLOFF }, PAST: { bars: PAST } });
+  assert.deepEqual([view.query.symbol, view.coverage.asked, view.coverage.read, view.coverage.stockDays], ["SPY", 2, 2, 527]);
+  assert.equal(view.query.market.group, "down"); near(view.query.market.change, -0.30);
+  assert.equal((await scan({ universe: ["PAST", "SPY"], also: ["spy"] })).coverage.asked, 2); // as another company SPY is still never scanned
+});
