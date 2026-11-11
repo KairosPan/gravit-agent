@@ -54,6 +54,27 @@ test("the analog guide treats the report as data and never advises a trade", () 
   assert.ok(body.includes("never a recommendation to trade"));
 });
 
+test("the analog guide says the tools have no lookahead guard, never that they do not look ahead", () => {
+  const { body } = readSkill();
+  assert.equal(body.includes("looks ahead"), false);
+  assert.ok(body.includes("lookahead"));
+});
+
+test("the analog guide passes on every caveat the event digest ends with", () => {
+  const body = readSkill().body.replace(/\s+/g, " ");
+  assert.ok(body.includes("cannot be measured"));
+  assert.ok(body.includes("not every such event"));
+  assert.ok(body.includes("unverified date was not checked against a source"));
+  assert.ok(body.includes("no lookahead guard"));
+});
+
+test("the analog guide's anchors sentence names each anchor's label, date and timing", () => {
+  const { body } = readSkill();
+  const sentence = body.replace(/\s+/g, " ").split(". ").find((s) => s.includes("one to three anchors"));
+  assert.ok(sentence, "the body has the anchors sentence");
+  for (const word of ["label", "date", "timing"]) assert.ok(sentence.includes(word), word);
+});
+
 test("dsh/README.md's mechanics row names the analog guide", () => {
   const row = readFileSync(README, "utf8").split("\n").find((line) => line.startsWith("| `skills/mechanics/` |"));
   assert.ok(row, "the README has a mechanics row");

@@ -5,7 +5,7 @@ description: How to answer "what happened after cases like this" — analog_char
 
 # Analog guide (neutral mechanics)
 
-Two tools read the past for a present case. Neither looks ahead and neither forecasts.
+Two tools read the past for a present case. Neither forecasts, and neither guards against lookahead.
 
 - **Which tool.** A US stock's fall, read from its chart, is `analog_chart` (`symbol`, optional `as_of` and `also`);
   it refuses a stock less than 10% below its 60-session high. A news event measured against past ones is
@@ -26,14 +26,15 @@ Two tools read the past for a present case. Neither looks ahead and neither fore
   `mcp__market__market_explore` before giving it up. A company whose stock no longer trades is still listed, under its
   last ticker; it comes back unmeasured, and that absence is part of the answer.
 - **The present case** goes in `query`: its `symbol` and one anchor per stage of the story (the first report, the
-  admission), one to three anchors, each with its date and timing.
+  admission), one to three anchors, each with a label, its date and its timing.
 - **No clean precedent.** When a facet has none, say so, and do not fill the list with near misses.
 
 ## Reporting to the operator
 
 - What the precedents did, with counts and groups, then how the present case differs from them.
 - The caveats the digest ends with, in your own report: the list leans favourable because a stock that no longer
-  trades cannot be measured, one search found these events and not every such event, and there is no lookahead guard.
+  trades cannot be measured, one search found these events and not every such event, an unverified date was not
+  checked against a source, and there is no lookahead guard.
 - Each flag beside the case that carries it: `quiet` (day 0 on light volume), `elsewhere` (a busier session close
   by), unverified, and source not opened.
 - Numbers from the digest only. Write the few that matter into the report's own text: the phone gets the text and no
