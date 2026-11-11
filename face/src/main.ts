@@ -25,6 +25,7 @@ import { readBotJournal } from "./bot-journal.ts";
 import { BOTS_ROOT, faceBind } from "./overlay.ts";
 import { isTrustedDataRequest } from "./http.ts";
 import { registerLunhuiViewRoute, type LunhuiViewService } from "./lunhui-view.ts";
+import { registerAnalogViewRoute, type AnalogViewService } from "./analog-view.ts";
 import { registerAccountProxy } from "./account-proxy.ts";
 import { registerMarketProxy } from "./market-proxy.ts";
 import { composedMarketRow } from "./market-row.ts";
@@ -238,7 +239,13 @@ const disposeView = registerLunhuiViewRoute(booted.ctx.webServer, {
   isTrusted: isTrustedDataRequest,
   runs: () => booted.ctx.get("lunhuiRuns") as LunhuiViewService | undefined,
 });
-disposeData = () => { disposeView(); };
+/* A stored analog view (src/analog-view.ts), read through the plugin's
+ * `analogViews` service as provided at the moment of each request. */
+const disposeAnalogView = registerAnalogViewRoute(booted.ctx.webServer, {
+  isTrusted: isTrustedDataRequest,
+  views: () => booted.ctx.get("analogViews") as AnalogViewService | undefined,
+});
+disposeData = () => { disposeView(); disposeAnalogView(); };
 /* The Account's reads for the screens (src/account-proxy.ts) and the seat's
  * standing for its box (src/seat.ts): loopback reads of the Account at the URL
  * of the `mcp-account` row AS COMPOSED — an operator patch may have pointed it
