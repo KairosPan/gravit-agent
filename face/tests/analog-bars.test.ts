@@ -86,9 +86,11 @@ test("a market that does not answer is down, at once", async () => {
 
 test("marketAsk asks the market's candles route and nothing else", async () => {
   const seen: string[] = [];
-  const ask = marketAsk("http://127.0.0.1:4821", async (url) => { seen.push(String(url)); return Response.json({ ok: true, candles: [], more: false, source: "Nasdaq · X" }); });
+  const redirects: unknown[] = [];
+  const ask = marketAsk("http://127.0.0.1:4821", async (url, init) => { seen.push(String(url)); redirects.push(init?.redirect); return Response.json({ ok: true, candles: [], more: false, source: "Nasdaq · X" }); });
   assert.equal((await ask({ venue: "cboe", symbol: "X", interval: "1d", range: "MAX", limit: "5000" })).status, 200);
   assert.deepEqual(seen, ["http://127.0.0.1:4821/api/candles?venue=cboe&symbol=X&interval=1d&range=MAX&limit=5000"]);
+  assert.deepEqual(redirects, ["error"], "a redirect is refused, never followed to another host");
   assert.throws(() => marketAsk("http://127.0.0.1:4821/api"), /an origin alone/);
 });
 
@@ -142,6 +144,16 @@ test("a hold of a minute or less is waited out once; a longer one, and a second 
   assert.deepEqual(slept, [20_000]);
   assert.deepEqual([...got.read.keys()].sort(), ["P1", "SPY"]);
   assert.deepEqual([...got.refused], [["P2", "no service here"]]);
+});
+
+test("a retry refused again with a short hold after the wait is final: nothing more is slept", async () => {
+  const market = fakeMarket({ SPY: { bars: MARKET }, P1: refusal("E_VENUE_UNREACHABLE", "Nasdaq could not be reached") });
+  const slept: number[] = [];
+  const keep = createBarsKeep({ ask: market.ask, sleep: async (ms) => { slept.push(ms); } });
+  const got = await keep.histories(["SPY", "P1"], { fresh: ["SPY"] });
+  assert.deepEqual(slept, [20_000]);
+  assert.deepEqual([...got.refused], [["P1", "Nasdaq could not be reached"]]);
+  assert.equal(market.calls.filter((c) => c.symbol === "P1").length, 2, "asked once, then once more after the wait");
 });
 
 test("one wait serves every company the same hold refused, and no new read starts while it lasts", async () => {

@@ -62,8 +62,9 @@ const HOLD_RATE_LIMITED_MS = 60_000;
 const HOLD_GEOBLOCKED_MS = 600_000;
 
 /**
- * An `Ask` onto the market's candles route at `origin`. A request that gets no JSON answer within 30 s is the market
- * being down: status 0 and the refusal `E_MARKET_DOWN`.
+ * An `Ask` onto the market's candles route at `origin`. A redirect is refused, never followed, so no other host is
+ * reached. A request that gets no JSON answer within 30 s, or is redirected, is the market being down: status 0 and
+ * the refusal `E_MARKET_DOWN`.
  * @param {string} origin
  * @param {typeof fetch} [fetchImpl]
  * @returns {Ask}
@@ -75,6 +76,7 @@ export function marketAsk(origin, fetchImpl = (url, init) => globalThis.fetch(ur
     try {
       const response = await fetchImpl(`${base}/api/candles?${new URLSearchParams(query)}`, {
         headers: { accept: "application/json" },
+        redirect: "error",
         signal: AbortSignal.timeout(ASK_TIMEOUT_MS),
       });
       return { status: response.status, body: await response.json() };

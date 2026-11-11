@@ -5,6 +5,8 @@
  * `Error: <CODE> …`; none names a path. What an unexpected error says goes to the face's stderr, the operator's log,
  * and never into a result.
  */
+import { pct, ratio } from "./digest.mjs";
+
 export { callerIsChild } from "../../lunhui/lib/errors.mjs";
 
 export class AnalogError extends Error {
@@ -20,19 +22,18 @@ export class AnalogError extends Error {
   }
 }
 
-/**
- * A fraction as a percentage with one decimal, U+2212 for a negative.
- * @param {number} v
- */
-const percent = (v) => `${(v * 100).toFixed(1).replace("-", "−")}%`;
-
 /** The refusal table, one maker per refusal. */
 export const refuse = {
-  /** A query whose depth is above −10%: version 1 matches sell-offs only. */
-  notASelloff: (/** @type {string} */ symbol, /** @type {number} */ depth, /** @type {string} */ peakDate) =>
+  /** A query whose depth is above −10%: version 1 matches sell-offs only. Its five numbers, as the digest writes them. */
+  notASelloff: (
+    /** @type {string} */ symbol, /** @type {string} */ date,
+    /** @type {import("./selloff.mjs").Features} */ q, /** @type {string} */ peakDate,
+  ) =>
     new AnalogError(
       "NOT_A_SELLOFF",
-      `${symbol} is ${percent(depth)} from its 60-session high of ${peakDate}: a sell-off is a fall of 10% or more from that high`,
+      `${symbol} as of ${date}: ${pct(q.depth)} from the 60-session high of ${peakDate} in ${q.days} sessions; ` +
+        `last 5 ${pct(q.last5)}; worst gap ${pct(q.gap)}; volume ${ratio(q.volume)}: ` +
+        "a sell-off is a fall of 10% or more from that high",
     ),
   /** A query whose 60-session high is its own latest bar: daily bars cannot time a fall inside one session. */
   highIsLatest: (/** @type {string} */ symbol, /** @type {string} */ date) =>

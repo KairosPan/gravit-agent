@@ -3,7 +3,7 @@
  * `analog-views` - the analog backbone row. It provides the `analogViews` service the tool row injects: one keep of
  * daily histories read through the market (`createBarsKeep`) and one view store under the harness home
  * (`createViewStore`), both for the row's life, so two scans at once share each company's read and a later scan of
- * the same trading day reads nothing again.
+ * the same trading day reads again only the query's stock, SPY and any history that was read short.
  *
  * The service: `scanChart({ symbol, asOf?, also? })`, the scan of one query over the fixed universe; `writeView(view)`,
  * which stores a view under a new id and answers `{ id, bytes, windowsDropped, casesDropped }`; `readView(id)`, a

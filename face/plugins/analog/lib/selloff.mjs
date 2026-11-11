@@ -13,8 +13,10 @@
  * Beside them, `gapAt` is the session of that gap, `peakAt` the session of the high, and `fromHigh` whether the high
  * was within 2% of the highest high of the year before it.
  *
- * The bands are relative to the query and always hold the query's own numbers; a query whose high is its own day
- * (0 days) has no usable bands and is refused by the scan before `bandsFor` or `distance` sees it.
+ * The bands are relative to the query and hold the query's own numbers when its high is 1 to 59 sessions old. A high
+ * 60 sessions old sits on the window's edge: the days band's cap of 59 leaves the query's own days out, and a higher
+ * high may lie older than the window, so the fall may be deeper than the window shows. A query whose high is its own
+ * day (0 days) has no usable bands and is refused by the scan before `bandsFor` or `distance` sees it.
  */
 
 /**
@@ -116,8 +118,9 @@ export function featuresAt(bars, i) {
 
 /**
  * The bands a query's numbers set. The days band is `[max(3, 0.4·days), min(59, 1.8·days)]`, rounded, its lower edge
- * lowered to the query's own days when the high is under three sessions old, so the band always holds the query's
- * days (1 → [1, 2], 2 → [2, 4]). A query of 0 days is the scan's to refuse before it reaches here: daily bars cannot
+ * lowered to the query's own days when the high is under three sessions old, so the band holds the query's days from
+ * 1 to 59 (1 → [1, 2], 2 → [2, 4]); at 60, the high on the window's edge, the cap leaves them out ([24, 59]), and that
+ * high may not be the stock's highest, nor the fall its deepest, beyond the window. A query of 0 days is the scan's to refuse before it reaches here: daily bars cannot
  * time a fall inside one session. `last5`, `gap` and `volume` are active only when the query meets their need; an
  * inactive one is null and named in `dropped`.
  * @param {Features} q

@@ -56,7 +56,7 @@ test("as_of cuts every history first", async () => {
 });
 
 test("what the scan refuses", async () => {
-  await assert.rejects(scan({ symbol: "CALM" }, { ...held(), CALM: { bars: barsFrom(flat(331, 50)) } }), code("NOT_A_SELLOFF"));
+  await assert.rejects(scan({ symbol: "CALM" }, { ...held(), CALM: { bars: barsFrom(flat(331, 50)) } }), (e: unknown) => code("NOT_A_SELLOFF")(e) && (e as Error).message.includes("2020-11-26") && (e as Error).message.includes("0.0%"));
   await assert.rejects(scan({ symbol: "NONE" }), code("NO_HISTORY"));
   await assert.rejects(scan({ symbol: "NEW" }, { ...held(), NEW: { bars: SELLOFF.slice(-100) } }), code("NO_HISTORY"));
   const down = async () => ({ status: 0, body: { ok: false, refusal: { code: "E_MARKET_DOWN", message: "the market at http://127.0.0.1:9 did not answer" } } });

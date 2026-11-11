@@ -26,7 +26,7 @@ async function mounted(t: { after(fn: () => Promise<unknown>): unknown }) {
   const viewsDir = join(await mkdtemp(join(tmpdir(), "analog-rows-")), "views");
   t.after(() => rm(join(viewsDir, ".."), { recursive: true, force: true }));
   const scope = fakeScope();
-  const market = fakeMarket({ QRY: { bars: SELLOFF }, PAST: { bars: PAST }, SPY: { bars: MARKET } });
+  const market = fakeMarket({ QRY: { bars: SELLOFF }, PAST: { bars: PAST }, SPY: { bars: MARKET }, EXTRA: { bars: PAST } }); // EXTRA: outside the universe
   viewsRow.apply(scope.ctx, { viewsDir, ask: market.ask, universe: ["PAST"], now: () => new Date("2020-11-26T20:00:00Z") });
   chartRow.apply(scope.ctx);
   return { ...scope, viewsDir, market };
@@ -63,9 +63,11 @@ test("analog_chart answers a digest and the id of a stored view", async (t) => {
 });
 
 test("as_of and also reach the scan; a delegated child and a bad symbol are refused", async (t) => {
-  const { tools } = await mounted(t);
-  const asked = JSON.parse(await tools[0]!.execute({ symbol: "QRY", as_of: "2020-11-22", also: ["PAST"] }, ROOT));
+  const { tools, market } = await mounted(t);
+  const asked = JSON.parse(await tools[0]!.execute({ symbol: "QRY", as_of: "2020-11-22", also: ["EXTRA"] }, ROOT));
   assert.ok(asked.digest.includes("QRY as of 2020-11-22 (as asked)"));
+  assert.ok(market.calls.some((c) => c.symbol === "EXTRA"), "the market was asked for the ticker also named");
+  assert.ok(asked.digest.split("\n")[0].startsWith("read 3 of 3 companies"));
   await assert.rejects(tools[0]!.execute({ symbol: "QRY" }, CHILD), code("NOT_GRAVIT"));
   await assert.rejects(tools[0]!.execute({ symbol: "not a ticker" }, ROOT), code("BAD_SYMBOL"));
   await assert.rejects(tools[0]!.execute({ symbol: "PAST", as_of: "2020-08-01" }, ROOT), code("NOT_A_SELLOFF"));

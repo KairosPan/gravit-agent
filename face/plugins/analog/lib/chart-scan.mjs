@@ -144,7 +144,7 @@ export async function scanChart({ symbol: rawSymbol, asOf: rawAsOf, also: rawAls
   const q = /** @type {import("./selloff.mjs").Features} */ (featuresAt(queryBars, day0));
   const date = dateOf(queryBars[day0].t);
   const peakDate = dateOf(queryBars[q.peakAt].t);
-  if (q.depth > SELLOFF_DEPTH) throw refuse.notASelloff(symbol, q.depth, peakDate);
+  if (q.depth > SELLOFF_DEPTH) throw refuse.notASelloff(symbol, date, q, peakDate);
   if (q.days === 0) throw refuse.highIsLatest(symbol, date);
   const bands = bandsFor(q);
   const spy = first.read.get(MARKET_SYMBOL);

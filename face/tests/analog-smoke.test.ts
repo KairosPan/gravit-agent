@@ -1,7 +1,8 @@
 /** `analog_chart`'s rows on a real boot against a stub market: the running registry lists the tool and
  * `/data/plugins.json`'s listing shows both rows active; the booted `analogViews` service scans `QRY` over a
  * universe of `PAST`, reading every history from the stub, and stores the view; the view route serves it with the
- * signed-in cookie, refuses it without, and answers 404 for an unknown id; the stub saw only `/api/candles` on the
+ * signed-in cookie, refuses with 403 a request that fails the fence (from another site's page), and answers 404 for
+ * an unknown id; the stub saw only `/api/candles` on the
  * `cboe` venue; and neither the conversation's preset nor the desk's lists any `analog_` tool.
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is its own file.
@@ -116,7 +117,7 @@ test("analog smoke: analog_chart's rows on a real boot scan a stub market, store
     /* `/data` is fence-only, no cookie (smoke.test.ts step 8, PLAN D8): what refuses a request without the
      * cookie is the fence, so the request without it comes from another site's page. */
     const bare = await fetch(`${base}/data/analog/view?id=${written.id}`, { headers: { origin: "http://evil.example.com" } });
-    assert.ok(bare.status === 401 || bare.status === 403, `without the cookie, from another origin: HTTP ${bare.status}`);
+    assert.equal(bare.status, 403, "from another site's page the fence refuses");
     await bare.arrayBuffer();
     const unknown = await fetch(`${base}/data/analog/view?id=an-20200101-00000000`, { headers: { cookie } });
     assert.equal(unknown.status, 404);

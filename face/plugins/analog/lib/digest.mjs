@@ -35,7 +35,7 @@ function newYorkMinute(iso) {
 }
 
 /** @param {number | null | undefined} v */
-function pct(v) {
+export function pct(v) {
   if (typeof v !== "number") return "n/a";
   const s = (v * 100).toFixed(1);
   if (s === "0.0" || s === "-0.0") return "0.0%";
@@ -43,7 +43,7 @@ function pct(v) {
 }
 
 /** @param {number | null | undefined} v */
-const ratio = (v) => (typeof v === "number" ? `${v.toFixed(1)}×` : "n/a");
+export const ratio = (v) => (typeof v === "number" ? `${v.toFixed(1)}×` : "n/a");
 
 /** @param {number | null | undefined} v */
 const whole = (v) => (typeof v === "number" ? `${Math.round(v * 100)}%` : "n/a");
