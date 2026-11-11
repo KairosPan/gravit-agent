@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { request, type ClientRequest } from "node:http";
+import { request, type ClientRequest, type IncomingMessage } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createMarketCore, realMarketCore, type MarketCore } from "../../src/core.ts";
 import { HUB_WAIT_MAX_MS, mountProtocol, type HubClient, type HubEvent, type ProtocolOptions } from "../../src/protocol.ts";
@@ -50,10 +50,12 @@ function fakeHub() {
     ring.push({ seq: ++seq, at: 1_000 + seq, price, snap: false });
     for (const fn of listeners) fn({ source: "coinbase", symbol: "BTC/USD", what: "trades" });
   };
-  const tick = (what: HubTick["what"]) => {
-    for (const fn of listeners) fn({ source: "coinbase", symbol: "BTC/USD", what });
+  const tick = (what: HubTick["what"], symbol = "BTC/USD") => {
+    for (const fn of listeners) fn({ source: "coinbase", symbol, what });
   };
-  return { hub, seen, trade, tick };
+  /** a trade put in the ring without a word to anyone */
+  const silentTrade = (price: number) => void ring.push({ seq: ++seq, at: 1_000 + seq, price, snap: false });
+  return { hub, seen, trade, tick, silentTrade, lastSeq: () => seq };
 }
 
 const servers: MarketServerHandle[] = [];
@@ -209,6 +211,69 @@ describe("the hub over HTTP", () => {
     // a want is the hub's, its answer the value
     expect((await post(`${url}/api/hub/want`, { client: CLIENT, source: "coinbase", symbol: "SOL/USD" })).body).toEqual({ ok: true, value: true });
     expect((await post(`${url}/api/hub/want`, { client: CLIENT, source: "kraken", symbol: "SOL/USD" })).body).toEqual({ ok: true, value: false });
+  });
+
+  it("writes no more to a stream whose socket is full: a client that stops reading costs no backlog, and is told every market as it stands once it reads again", async () => {
+    const f = fakeHub();
+    const clients = new Map<string, HubClient>();
+    const url = await serve(createMarketCore({ hub: f.hub }), { clients });
+    // a ring long enough that a market's first trades are half a megabyte, and twenty markets held with their books: far more than a
+    // socket takes before its reader reads
+    for (let i = 0; i < 10_000; i++) f.silentTrade(100 + (i % 50));
+    const symbols = Array.from({ length: 20 }, (_, i) => `C${i}/USD`);
+    // a client that opens its stream, and then reads nothing
+    const paused = await new Promise<IncomingMessage>((resolve, reject) => {
+      const req = request(`${url}/api/hub?client=${CLIENT}`, (res) => {
+        res.setEncoding("utf8");
+        res.pause();
+        resolve(res);
+      });
+      req.on("error", (e) => (streams.includes(req) ? undefined : reject(e)));
+      req.end();
+      streams.push(req);
+    });
+    for (const symbol of symbols) await post(`${url}/api/hub/hold`, { client: CLIENT, source: "coinbase", symbol, book: true, held: true });
+    for (const symbol of symbols) f.tick("trades", symbol);
+    await sleep(400);
+    const stream = () => [...clients.get(CLIENT)!.streams][0]!;
+    // the socket is full: what waits for it now (once it stands still) is all the market keeps for this client
+    let held = -1;
+    await until(() => {
+      const now = stream().writableLength;
+      const still = now === held;
+      held = now;
+      return still;
+    }, 3_000);
+    expect(held).toBeGreaterThan(0);
+    // the markets go on moving, round after round, while the client reads nothing
+    for (let round = 0; round < 8; round++) {
+      f.silentTrade(200 + round);
+      for (const symbol of symbols) for (const what of ["quote", "book", "trades", "live"] as const) f.tick(what, symbol);
+      await sleep(120);
+    }
+    await sleep(400);
+    expect(stream().writableLength).toBeLessThanOrEqual(held);
+    // reading again: every market told as it stands, its trades every ring entry since the last one it was sent, none twice
+    const events: HubEvent[] = [];
+    let buf = "";
+    paused.on("data", (chunk: string) => {
+      buf += chunk;
+      let i: number;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        if (block.startsWith("data: ")) events.push(JSON.parse(block.slice(6)) as HubEvent);
+      }
+    });
+    paused.resume();
+    const trades = (symbol: string) => events.filter((e): e is Extract<HubEvent, { t: "trades" }> => e.t === "trades" && e.symbol === symbol);
+    const last = f.lastSeq();
+    await until(() => symbols.every((s) => trades(s).some((e) => e.ring.some((t) => t.seq === last))), 10_000);
+    for (const symbol of symbols) {
+      expect(trades(symbol).flatMap((e) => e.ring.map((t) => t.seq))).toEqual(Array.from({ length: last }, (_, i) => i + 1));
+      expect(events.some((e) => e.t === "quote" && e.symbol === symbol)).toBe(true);
+      expect(events.some((e) => e.t === "book" && e.symbol === symbol)).toBe(true);
+    }
   });
 
   it("proxies confirmed, waiting no more than 5000 ms", async () => {

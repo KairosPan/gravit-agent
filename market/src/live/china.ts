@@ -28,6 +28,8 @@ export const STALE_KEEP_MS = 600_000;
 export const DELAYED_MS = 300_000;
 /** the searches kept, least recently used first out, and the most asked of Tencent at once (the face's SEARCH_CACHE_LIMIT, SEARCH_FLIGHT_LIMIT) */
 export const SEARCH_KEEP = 128, SEARCH_FLIGHTS = 32;
+/** the most answers one of the source's keeps holds (cnKeeper) */
+export const CN_KEPT = 200;
 
 export interface ChinaStatus { state: "live" | "stale" | "unavailable"; said: string; at?: string | undefined }
 export interface ChinaRead { sort: ChinaSort; total: number; asOf: string; session: CnSession; status: ChinaStatus }
@@ -64,6 +66,36 @@ const round = (v: number, places: number): number => Math.round(v * 10 ** places
 
 type Kept<T> = { at: number; answer: T };
 type RankAnswer = { items: ExploreItem[]; read: ChinaRead };
+
+/** ONE OF THE SOURCE'S KEEPS: an answer kept `ttl` per key, a flight shared per key; `read` resolves to its answer or a refusal, which is
+ * never kept. As an answer comes in, those past their keep are let go and at most CN_KEPT stay, the oldest let go first: the quotes are kept
+ * by the set of codes asked and a chart by its URL, so a set asked once (the rows a page shows, as the ranking moves under them) or a chart
+ * opened once is not kept for the life of the process */
+export function cnKeeper<T>(now: () => number, ttl: (key: string) => number) {
+  const kept = new Map<string, Kept<T>>();
+  const flights = new Map<string, Promise<T | Refusal>>();
+  const keep = (key: string, answer: T): void => {
+    const at = now();
+    for (const [k, e] of kept) if (at - e.at >= ttl(k)) kept.delete(k);
+    kept.delete(key);
+    kept.set(key, { at, answer });
+    while (kept.size > CN_KEPT) kept.delete(kept.keys().next().value!);
+  };
+  return {
+    kept,
+    flights,
+    ask(key: string, read: () => Promise<T | Refusal>, isAnswer: (v: T | Refusal) => v is T): Promise<T | Refusal> {
+      const hit = kept.get(key);
+      if (hit && now() - hit.at < ttl(key)) return Promise.resolve(hit.answer);
+      const flying = flights.get(key);
+      if (flying) return flying;
+      const flight = read().then((v) => { if (isAnswer(v)) keep(key, v); return v; })
+        .finally(() => flights.delete(key));
+      flights.set(key, flight);
+      return flight;
+    },
+  };
+}
 
 /** one share as a China row: view-only, in CNY, in the China tab alone */
 function rowOf(r: { symbol: string; name: string; price: number | null; changePct: number | null; turnover: number | null }): ExploreItem {
@@ -107,26 +139,7 @@ export function chinaSource(deps: { http?: CnHttp; clock?: () => number } = {}):
     return reply.bytes;
   }
   const utf8 = (bytes: Uint8Array): string => new TextDecoder("utf-8").decode(bytes);
-
-  /** one keeper: an answer kept `ttl` per key, a flight shared per key; `read` resolves to its answer or a refusal, which is never kept */
-  function keeper<T>(ttl: (key: string) => number) {
-    const kept = new Map<string, Kept<T>>();
-    const flights = new Map<string, Promise<T | Refusal>>();
-    return {
-      kept,
-      flights,
-      ask(key: string, read: () => Promise<T | Refusal>, isAnswer: (v: T | Refusal) => v is T): Promise<T | Refusal> {
-        const hit = kept.get(key);
-        if (hit && now() - hit.at < ttl(key)) return Promise.resolve(hit.answer);
-        const flying = flights.get(key);
-        if (flying) return flying;
-        const flight = read().then((v) => { if (isAnswer(v)) kept.set(key, { at: now(), answer: v }); return v; })
-          .finally(() => flights.delete(key));
-        flights.set(key, flight);
-        return flight;
-      },
-    };
-  }
+  const keeper = <T>(ttl: (key: string) => number) => cnKeeper<T>(now, ttl);
 
   // ---- the ranking -----------------------------------------------------------------------------------------------------------------
   const good = new Map<ChinaSort, Kept<RankAnswer>>();
