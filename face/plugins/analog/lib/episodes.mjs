@@ -44,12 +44,12 @@ export function dateOf(t) {
 }
 
 /**
- * The whole calendar days between two `YYYY-MM-DD` dates, either order.
- * @param {string} a @param {string} b
+ * The whole calendar day number of a `YYYY-MM-DD` date (days since 1970-01-01), `NaN` for a date that does not parse.
+ * @param {string} date
  * @returns {number}
  */
-function daysApart(a, b) {
-  return Math.round(Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / DAY_MS);
+function dayNumber(date) {
+  return Math.round(Date.parse(`${date}T00:00:00Z`) / DAY_MS);
 }
 
 /**
@@ -115,17 +115,45 @@ export function aftermathOf(bars, i) {
 }
 
 /**
+ * Each market series' bars by date (the first bar of a date), built on the first call that sees the series.
+ * @type {WeakMap<Bar[], Map<string, Bar>>}
+ */
+const marketIndex = new WeakMap();
+
+/**
+ * The bars of a market series by date, built once per series.
+ * @param {Bar[]} marketBars
+ * @returns {Map<string, Bar>}
+ */
+function byDate(marketBars) {
+  let index = marketIndex.get(marketBars);
+  if (index === undefined) {
+    index = new Map();
+    for (const b of marketBars) {
+      const date = dateOf(b.t);
+      if (!index.has(date)) index.set(date, b);
+    }
+    marketIndex.set(marketBars, index);
+  }
+  return index;
+}
+
+/**
  * The market's change from a case's high to its day 0, rounded to six decimals, and its group: `down` at or below
- * −7%, `calm` above it, `unknown` when there are no market bars or either date is not one of them.
+ * −7%, `calm` above it, `unknown` when there are no market bars, either date is not one of them, or the change is not
+ * a finite number (a close of 0 or missing).
  * @param {Bar[] | null} marketBars @param {string} peakDate @param {string} date
  * @returns {{ change: number | null, group: "calm" | "down" | "unknown" }}
  */
 export function contextOf(marketBars, peakDate, date) {
   if (marketBars === null) return { change: null, group: "unknown" };
-  const from = marketBars.find((b) => dateOf(b.t) === peakDate);
-  const to = marketBars.find((b) => dateOf(b.t) === date);
+  const index = byDate(marketBars);
+  const from = index.get(peakDate);
+  const to = index.get(date);
   if (from === undefined || to === undefined) return { change: null, group: "unknown" };
-  const change = Math.round((to.c / from.c - 1) * 1e6) / 1e6 || 0;
+  const raw = to.c / from.c - 1;
+  if (!Number.isFinite(raw)) return { change: null, group: "unknown" };
+  const change = Math.round(raw * 1e6) / 1e6 || 0;
   return { change, group: change <= CONTEXT_CUT ? "down" : "calm" };
 }
 
@@ -149,13 +177,30 @@ export function windowOf(bars, i) {
 }
 
 /**
- * Sets `sameWeek` on each case: how many cases of another company fall within 7 calendar days of it.
+ * Sets `sameWeek` on each case: how many cases of another company fall within 7 calendar days of it. The cases are
+ * swept once in date order with a window of 7 days either side; a case's count is the window's cases less those of
+ * its own company (itself among them). A case whose date does not parse counts none and is counted by none.
  * @param {Array<{ symbol: string, date: string, sameWeek?: number }>} cases
  * @returns {void}
  */
 export function withClusters(cases) {
-  for (const c of cases) {
-    c.sameWeek = cases.filter((o) => o.symbol !== c.symbol && daysApart(o.date, c.date) <= WEEK_DAYS).length;
+  const days = cases.map((c) => dayNumber(c.date));
+  const order = [];
+  for (let k = 0; k < cases.length; k++) {
+    if (Number.isFinite(days[k])) order.push(k);
+    else cases[k].sameWeek = 0;
+  }
+  order.sort((a, b) => days[a] - days[b]);
+  /** @type {Map<string, number>} */
+  const inWindow = new Map();
+  /** @param {number} k @param {number} by */
+  const move = (k, by) => inWindow.set(cases[k].symbol, (inWindow.get(cases[k].symbol) ?? 0) + by);
+  let lo = 0;
+  let hi = 0;
+  for (const k of order) {
+    while (hi < order.length && days[order[hi]] <= days[k] + WEEK_DAYS) move(order[hi++], 1);
+    while (days[order[lo]] < days[k] - WEEK_DAYS) move(order[lo++], -1);
+    cases[k].sameWeek = hi - lo - (inWindow.get(cases[k].symbol) ?? 0);
   }
 }
 
@@ -172,13 +217,22 @@ export function withClusters(cases) {
 export function leadingCases(cases, symbol, limits = {}) {
   const nearest = [...cases].sort((a, b) => a.distance - b.distance || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const own = nearest.filter((c) => c.symbol === symbol).slice(0, limits.own ?? 4).map((c) => c.id);
-  /** @type {Array<{ id: string, date: string, standsFor: number }>} */
+  /** @type {Array<{ id: string, standsFor: number }>} */
   const events = [];
+  // The first event led on each day number: the first event within 10 days of a case is the earliest of those led on
+  // the 21 days around it.
+  /** @type {Map<number, number>} */
+  const firstLedOn = new Map();
   for (const c of nearest) {
     if (c.symbol === symbol) continue;
-    const event = events.find((e) => daysApart(e.date, c.date) <= EVENT_DAYS);
-    if (event !== undefined) event.standsFor++;
-    else events.push({ id: c.id, date: c.date, standsFor: 1 });
+    const day = dayNumber(c.date);
+    let first = Infinity;
+    if (Number.isFinite(day)) {
+      for (let d = day - EVENT_DAYS; d <= day + EVENT_DAYS; d++) first = Math.min(first, firstLedOn.get(d) ?? Infinity);
+    }
+    if (first !== Infinity) { events[first].standsFor++; continue; }
+    if (Number.isFinite(day) && !firstLedOn.has(day)) firstLedOn.set(day, events.length);
+    events.push({ id: c.id, standsFor: 1 });
   }
   return { own, others: events.slice(0, limits.others ?? 8).map(({ id, standsFor }) => ({ id, standsFor })) };
 }
