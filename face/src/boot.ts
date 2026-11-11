@@ -129,6 +129,7 @@ import { PERSONA_PATH, readPersona } from "./persona.ts";
 import { CYCLE_PATH, DESK_PATH, readCycle, readDesk, readRouter, REPO_ROOT, ROUTER_PATH } from "./cycle.ts";
 import { declareDeskPreset, deskPresetDefinition, deskRosterProblem } from "./desk-preset.ts";
 import { routerPresetDefinition } from "./router-preset.ts";
+import { installSourceReader, SOURCE_READER_ROLE } from "./source-reader.ts";
 import { readProtocols } from "./protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { accountSeatPatches } from "./account-seat.ts";
@@ -947,7 +948,11 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
   /* Single-shot like the CLI's (NEW apps/cli/src/profile-boot.ts:254-263): a
    * second call awaits the first teardown instead of racing it. */
   let disposal: Promise<void> | undefined;
+  /* What the boot installed on the settled root beside its rows - the source reader's fences - undone, last first,
+   * before the root fiber goes; each disposer never rejects. */
+  const installed: (() => Promise<void>)[] = [];
   const dispose = (): Promise<void> => disposal ??= (async () => {
+    for (const undo of installed.splice(0).reverse()) await undo();
     await app.current?.fiber.dispose();
   })();
   /* Gate 2's two fibers, set inside `prepare` and audited once boot() settles. */
@@ -1102,6 +1107,15 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * called before its preset is declared fails that call with dsh's agent-preset/not-found. Disposed
      * with the root, as the bots and the desk are. */
     for (const role of roles) await declarePreset(ctx, rolePresetDefinition(role), "role preset");
+    /* The source reader's web_fetch and its three fences (src/source-reader.ts), right after its preset is declared
+     * and before `appReady` commits: the equip, the guard - a page budget and the secret check - and the record of the
+     * pages that opened, which reaches the `analogViews` service (plugins/analog/views-row.mjs) at the moment of each
+     * page, through the root, since src imports nothing from plugins. Only when `roles/` holds the role. */
+    if (roles.some((role) => role.id === SOURCE_READER_ROLE)) {
+      installed.push(installSourceReader(ctx, {
+        onPage: (url) => (ctx.get("analogViews") as { notePage?(url: string): void } | undefined)?.notePage?.(url),
+      }));
+    }
     let roster: { id: string; broken?: string }[];
     try {
       roster = await presets.list();

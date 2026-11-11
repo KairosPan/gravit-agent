@@ -14,7 +14,7 @@
  * the one layer no restriction filters (dsh-tools `view`). So `DESK_ALLOW` does not list these two,
  * Gravit's agents never see them, and the global view - `/data/plugins.json` - never lists them, as with
  * the role tools. They unwind with the agent. `web_fetch` lands in the same layer through a child plugin of the
- * agent's context that injects `web` ({@link deskWebFetchLayer}): the agent's context reaches `tools` and
+ * agent's context that injects `web` ({@link webFetchLayer}): the agent's context reaches `tools` and
  * `systemPrompt` through the agent loop's injects, but no fiber above it injects `web`, and cordis refuses a service a
  * context did not inject. The child inherits the agent's scope, so the tool and its prompt section are the agent's
  * own, and it is disposed with the agent.
@@ -116,7 +116,7 @@ export interface DeskToolDeps {
 
 /** An agent as {@link installDeskTools} sees it: its id, for the log, and its own context, which the
  * preset registry reads, the tools register through, and cordis's `inject` starts `web_fetch`'s child plugin in
- * ({@link deskWebFetchLayer}). */
+ * ({@link webFetchLayer}). */
 export interface DeskAgentLike {
   id: string;
   ctx: {
@@ -401,37 +401,85 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
 }
 
 /**
- * The child plugin that gives one desk agent dsh's own `web_fetch`, started in the agent's context with `web`
- * injected: `applyWebFetchTool` registers the tool and its prompt section (`tool:web_fetch`, shown only where the
- * tool is visible) through `layer`, which carries the agent's scope - so both are the agent's own, and are withdrawn
- * when the agent's scope is disposed. The tool's budget and output cap are dsh's own defaults (30 s, 200,000
- * characters); what it may reach is the http provider's (public HTTP(S) only - its address check skipped for a
- * hop routed through a configured HTTP(S)_PROXY - no credentials in a URL, same-origin redirects only). Named,
- * and one function for every agent, so cordis keeps one plugin record for all of them.
+ * The child plugin that gives one agent dsh's own `web_fetch` - a desk agent here, a source reader's child in
+ * src/source-reader.ts - started in the agent's context with `web` injected: `applyWebFetchTool` registers the tool
+ * and its prompt section (`tool:web_fetch`, shown only where the tool is visible) through `layer`, which carries the
+ * agent's scope - so both are the agent's own, and are withdrawn when the agent's scope is disposed. The tool's budget
+ * and output cap are dsh's own defaults (30 s, 200,000 characters); what it may reach is the http provider's (public
+ * HTTP(S) only - its address check skipped for a hop routed through a configured HTTP(S)_PROXY - no credentials in a
+ * URL, same-origin redirects only). Named, and one function for every agent, so cordis keeps one plugin record for all
+ * of them.
  */
-function deskWebFetchLayer(layer: Context): void {
+export function webFetchLayer(layer: Context): void {
   applyWebFetchTool(layer, DEFAULT_WEB_TOOL_TIMEOUT_MS, DEFAULT_FETCH_MAX_OUTPUT_CHARS);
 }
 
 /**
- * Give every `gravit-desk` agent `definitions`, and dsh's `web_fetch` ({@link deskWebFetchLayer}), in its own tool
- * layer: one listener on the ROOT
- * context's `agent/created`, which sees every agent's create and resume - the face's, a browser's
- * `session/create` with `agentPreset: "gravit-desk"`, a controller's resume - and, in the same tick, one
- * sweep of `ctx.agents.list()`, the agents already live. bootFace serves unary `/api` before main.ts
- * reaches `installDesk`, so a desk agent can be created before the listener exists; an agent created
- * after the listener is the listener's, one created before it is in the list.
+ * Equip every agent on `preset` with `equip`, once: one listener on the ROOT context's `agent/created`, which sees
+ * every agent's create and resume - the face's, a browser's `session/create`, a controller's resume, a role's child -
+ * and, in the same tick, one sweep of `ctx.agents.list()`, the agents already live. An agent created after the
+ * listener is the listener's, one created before it is in the list.
  *
- * The listener is synchronous and never throws: `agent/created` is a serial, awaited dispatch, and a
- * throw or rejection there fails the agent's creation (src/bot-runtime.ts says the same). An agent whose
- * preset `ctx.agentPresets.composedPreset(agent.ctx)` reads as `gravit-desk` - the registry read late,
- * so a reloaded registry is followed - and that it has not seen gets `agent.ctx.tools.register(d)` for
- * each definition, then `web_fetch` through `agent.ctx.inject(["web"], ...)`, by the listener or the sweep
- * alike. It is marked seen first, in a `WeakSet`, so an
- * agent both reach is equipped once, a registration that fails is logged once and never retried, and
- * none is made twice; any failure, the registry's and the sweep's own included, is one `gravit-face:`
- * line through `log`. An agent still composing when swept - its preset not mounted yet - is not marked,
- * and the listener equips it when its creation is announced.
+ * The listener is synchronous and never throws: `agent/created` is a serial, awaited dispatch, and a throw or
+ * rejection there fails the agent's creation (src/bot-runtime.ts says the same). An agent whose preset
+ * `ctx.agentPresets.composedPreset(agent.ctx)` reads as `preset` - the registry read late, so a reloaded registry is
+ * followed - and that it has not seen is marked seen, in a `WeakSet`, then handed to `equip`, by the listener or the
+ * sweep alike: an agent both reach is equipped once, and an equip that throws is reported once and never retried. A
+ * registry that throws is the same failure. An agent still composing when swept - its preset not mounted yet - is not
+ * marked, and the listener equips it when its creation is announced.
+ * @param ctx - the booted ROOT context.
+ * @param preset - the preset whose agents are equipped.
+ * @param equip - what each such agent gets, in its own tool layer.
+ * @param failed - told of every failure: with the agent for an equip (or a registry read) that threw, and with
+ *   `undefined` when the sweep could not list the live agents. A `failed` that throws is swallowed.
+ * @returns the disposer that removes the listener. What was equipped stays with its agents and unwinds with them.
+ */
+export function equipAgents(
+  ctx: DeskToolsCtxLike,
+  preset: string,
+  equip: (agent: DeskAgentLike) => void,
+  failed: (agent: DeskAgentLike | undefined, error: unknown) => void,
+): () => void {
+  const report = (agent: DeskAgentLike | undefined, error: unknown): void => {
+    try {
+      failed(agent, error);
+    } catch {
+      /* the listener never throws */
+    }
+  };
+  const equipped = new WeakSet<DeskAgentLike>();
+  const visit = (agent: DeskAgentLike): void => {
+    try {
+      if (equipped.has(agent) || ctx.agentPresets.composedPreset(agent.ctx) !== preset) return;
+      equipped.add(agent);
+      equip(agent);
+    } catch (error) {
+      report(agent, error);
+    }
+  };
+  const off = ctx.on("agent/created", ({ agent }) => {
+    visit(agent);
+    return undefined;
+  });
+  try {
+    for (const agent of ctx.agents.list()) visit(agent);
+  } catch (error) {
+    report(undefined, error);
+  }
+  return () => {
+    off();
+  };
+}
+
+/**
+ * Give every `gravit-desk` agent `definitions`, and dsh's `web_fetch` ({@link webFetchLayer}), in its own tool
+ * layer, through {@link equipAgents}: one listener on the ROOT context's `agent/created` and one sweep of the agents
+ * already live. bootFace serves unary `/api` before main.ts reaches `installDesk`, so a desk agent can be created
+ * before the listener exists; the sweep finds it.
+ *
+ * A desk agent gets `agent.ctx.tools.register(d)` for each definition, then `web_fetch` through
+ * `agent.ctx.inject(["web"], ...)`, once; a registration that fails is logged once and never retried, and none is
+ * made twice; any failure, the registry's and the sweep's own included, is one `gravit-face:` line through `log`.
  * @param ctx - the booted ROOT context.
  * @param definitions - the tools to give, {@link deskToolDefinitions}'s.
  * @param options - `log`, where a failure is written (default `console.error`), for tests.
@@ -444,29 +492,14 @@ export function installDeskTools(
   options: { log?: (line: string) => void } = {},
 ): () => void {
   const log = options.log ?? ((line: string) => console.error(line));
-  const equipped = new WeakSet<DeskAgentLike>();
-  const equip = (agent: DeskAgentLike): void => {
-    try {
-      if (equipped.has(agent) || ctx.agentPresets.composedPreset(agent.ctx) !== DESK_PRESET) return;
-      equipped.add(agent);
-      for (const definition of definitions) agent.ctx.tools.register(definition);
-      agent.ctx.inject(["web"], deskWebFetchLayer as (layer: never) => void);
-    } catch (error) {
-      log(`${BIN}: the desk tools were not registered for agent ${agent.id}: ${messageOf(error)}`);
-    }
-  };
-  const off = ctx.on("agent/created", ({ agent }) => {
-    equip(agent);
-    return undefined;
+  return equipAgents(ctx, DESK_PRESET, (agent) => {
+    for (const definition of definitions) agent.ctx.tools.register(definition);
+    agent.ctx.inject(["web"], webFetchLayer as (layer: never) => void);
+  }, (agent, error) => {
+    log(agent === undefined
+      ? `${BIN}: the desk tools could not reach the agents already live: ${messageOf(error)}`
+      : `${BIN}: the desk tools were not registered for agent ${agent.id}: ${messageOf(error)}`);
   });
-  try {
-    for (const agent of ctx.agents.list()) equip(agent);
-  } catch (error) {
-    log(`${BIN}: the desk tools could not reach the agents already live: ${messageOf(error)}`);
-  }
-  return () => {
-    off();
-  };
 }
 
 /* ---------- the guard's write check ---------- */
