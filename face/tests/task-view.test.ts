@@ -53,6 +53,13 @@ class Log {
       message: { id: `r-${callId}`, role: "tool", toolCallId: callId, content: [{ type: "text", text: "ok" }], ...(isError ? { isError } : {}) },
     });
   }
+  /** A tool result whose text is `text`. */
+  resultText(turn: number, callId: string, text: string, isError = false, step = 1): this {
+    return this.push("tool/result", {
+      turn, step,
+      message: { id: `r-${callId}`, role: "tool", toolCallId: callId, content: [{ type: "text", text }], ...(isError ? { isError } : {}) },
+    });
+  }
   report(turn: number, callId: string, status: string, text: string): this {
     return this.call(turn, callId, "task_report", { status, text }).result(turn, callId);
   }
@@ -412,6 +419,23 @@ test("a worker that ended its turn after a dispatch is running and relays nothin
   roundEnd(log, 1);
   assert.equal(view(log).state, "running", "the wake is logged; its turn has not started yet");
   assert.deepEqual(relaysOf(view(log), log.events), []);
+});
+
+test("a task's views are the ids its analog tools answered, in order, once each", () => {
+  const ok = (view: string) => JSON.stringify({ ok: true, view, digest: "read 2 of 2 companies" });
+  const log = new Log().brief().start(1)
+    .call(1, "c1", "analog_chart", { symbol: "NVDA" }).resultText(1, "c1", ok("an-20261110-0a1b2c3d"))
+    .call(1, "c2", "analog_chart", { symbol: "AMD" }).resultText(1, "c2", "Error: NOT_A_SELLOFF AMD", true)
+    .call(1, "c3", "analog_events", { title: "x" }).resultText(1, "c3", ok("an-20261110-ffffffff"))
+    .call(1, "c4", "bash", { command: "echo" }).resultText(1, "c4", ok("an-20261110-00000000"))
+    .call(1, "c5", "analog_chart", { symbol: "NVDA" }).resultText(1, "c5", ok("an-20261110-0a1b2c3d"))
+    .call(1, "c6", "analog_chart", { symbol: "MU" }).resultText(1, "c6", "see an-20261110-11111111")
+    .call(1, "c7", "analog_chart", { symbol: "MU" }).resultText(1, "c7", JSON.stringify({ ok: true, view: "../../etc/passwd" }));
+  assert.deepEqual(view(log).views, ["an-20261110-0a1b2c3d", "an-20261110-ffffffff"]);
+});
+
+test("a task with no analog call has no views", () => {
+  assert.deepEqual(view(new Log().brief().start(1).say(1, "looking")).views, []);
 });
 
 test("a three-round debate relays once: the concluding turn's words, never the three turns that waited", () => {

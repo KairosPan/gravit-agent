@@ -9,6 +9,7 @@
  * @module
  */
 import { relative, sep } from "node:path";
+import { ANALOG_VIEW_ID_RE } from "./analog-view.ts";
 import type { TurnUsage } from "./desk.ts";
 import { turnUsage } from "./desk-session.ts";
 import { DEFAULT_PRESET } from "./overlay.ts";
@@ -33,6 +34,8 @@ export type TaskGroup = "you" | "running" | "done";
 
 /** The statuses `task_report` takes, in the order its schema lists them. */
 export const REPORT_STATUSES: readonly ReportStatus[] = Object.freeze(["progress", "ready", "blocked", "failed"]);
+/** The tools whose answer names an analog view: `{ "ok": true, "view": "<id>", … }` as a JSON text. */
+export const ANALOG_VIEW_TOOLS: readonly string[] = Object.freeze(["analog_chart", "analog_events"]);
 
 /** A session log event with dsh's own stamp, in ms since the epoch. */
 export type TimedEvent = EventLike & { time?: number };
@@ -54,6 +57,8 @@ export interface TaskView {
   steps: string[];
   result?: { status: "ready" | "blocked" | "failed"; text: string };
   usage?: TurnUsage;
+  /** The analog view ids its worker's {@link ANALOG_VIEW_TOOLS} calls answered, in the order answered, each once. */
+  views: string[];
   startedAt: number;
   lastEventAt: number;
   lastSeq: number;
@@ -121,6 +126,8 @@ interface Scan {
   lastStart: number;
   lastEnd: number;
   lastStopped: number;
+  /** The analog view ids the worker's {@link ANALOG_VIEW_TOOLS} calls answered, in the order answered, each once. */
+  views: string[];
 }
 
 /** Where a task was asked, as its brief's source names it (src/task-worker.ts `TaskMessageSource`): the conversation
@@ -172,8 +179,22 @@ function questionsOf(raw: unknown): string {
   return questions.map((q) => str((q as Data | null)?.question)).filter((q): q is string => q !== undefined && q !== "").join(" / ");
 }
 
+/** The view id an analog tool's answer names: its text parsed as a JSON object whose `view` matches
+ * {@link ANALOG_VIEW_ID_RE}; otherwise `undefined`. */
+function viewIdOf(content: unknown): string | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(textOf(content)) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const view = (value as Data).view;
+  return typeof view === "string" && ANALOG_VIEW_ID_RE.test(view) ? view : undefined;
+}
+
 function scan(events: readonly EventLike[]): Scan {
-  const s: Scan = { turns: [], reports: [], gates: [], dispatches: [], lastStart: -1, lastEnd: -1, lastStopped: -1 };
+  const s: Scan = { turns: [], reports: [], gates: [], dispatches: [], lastStart: -1, lastEnd: -1, lastStopped: -1, views: [] };
   const openTurns = new Map<number, Turn>();
   const asks = new Map<string, Gate>();
   const approvals = new Map<string, Gate>();
@@ -181,6 +202,8 @@ function scan(events: readonly EventLike[]): Scan {
   const calls = new Map<string, Report>();
   /* dispatch calls waiting for their result: a round runs once its result is logged and is no error */
   const dispatchCalls = new Set<string>();
+  /* analog calls waiting for their result: a view counts once its result is logged, is no error and names one */
+  const analogCalls = new Set<string>();
   events.forEach((event, at) => {
     const data = dataOf(event);
     switch (event.type) {
@@ -227,6 +250,8 @@ function scan(events: readonly EventLike[]): Scan {
           if (report !== undefined) calls.set(callId, { at, callId, ...report });
         } else if (data.name === "dispatch") {
           dispatchCalls.add(callId);
+        } else if (typeof data.name === "string" && ANALOG_VIEW_TOOLS.includes(data.name)) {
+          analogCalls.add(callId);
         } else if (data.name === "ask_user_question") {
           asks.set(callId, { at, id: callId, kind: "question", tool: "ask_user_question", detail: questionsOf(data.arguments) });
         }
@@ -238,6 +263,10 @@ function scan(events: readonly EventLike[]): Scan {
         if (callId === undefined) break;
         asks.delete(callId);
         if (dispatchCalls.delete(callId) && message?.isError !== true) s.dispatches.push(at);
+        if (analogCalls.delete(callId) && message?.isError !== true) {
+          const view = viewIdOf(message?.content);
+          if (view !== undefined && !s.views.includes(view)) s.views.push(view);
+        }
         const report = calls.get(callId);
         if (report !== undefined) {
           calls.delete(callId);
@@ -410,6 +439,7 @@ export function taskViewOf(input: { id: string; header: { createdAt: number; cwd
     steps,
     ...(result === undefined ? {} : { result }),
     ...(usage === undefined ? {} : { usage }),
+    views: s.views,
     startedAt: input.header.createdAt,
     lastEventAt,
     lastSeq: last?.seq ?? 0,
