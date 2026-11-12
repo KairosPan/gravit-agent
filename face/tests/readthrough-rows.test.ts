@@ -4,8 +4,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as serviceRow from "../plugins/readthrough/service-row.mjs";
+import * as toolRow from "../plugins/readthrough/tool-row.mjs";
 import { ReadThroughError } from "../plugins/readthrough/lib/errors.mjs";
 import { ID_RE, createRecord } from "../plugins/readthrough/lib/record.mjs";
+import { READ_THROUGH_ROW_IDS, READ_THROUGH_TOOL_NAMES, readThroughPatches } from "../src/readthrough.ts";
 
 const AT = "2026-11-09T09:03:10.000Z";          // 04:03 ET, Monday
 const FRIDAY_CLOSE = "2026-11-06T21:00:00.000Z"; // 16:00 ET
@@ -16,10 +18,16 @@ const ARGS = {
 };
 const RUN = { pass: "p-1", asks: [{ symbol: "NVDA", ref: "2026-11-06" }] };
 
+type ToolDef = { name: string; description: string; parameters: unknown; execute(args: unknown, exec: unknown): Promise<string> };
 function fakeScope() {
   const provided = new Map<string, unknown>();
-  const ctx: any = { effect(fn: () => unknown) { return fn(); }, provide(key: string, value: unknown) { provided.set(key, value); ctx[key] = value; return () => {}; } };
-  return { ctx, provided };
+  const tools: ToolDef[] = [];
+  const ctx: any = {
+    effect(fn: () => unknown) { return fn(); },
+    provide(key: string, value: unknown) { provided.set(key, value); ctx[key] = value; return () => {}; },
+    tools: { register(def: ToolDef) { tools.push(def); return () => { tools.splice(tools.indexOf(def), 1); }; } },
+  };
+  return { ctx, provided, tools };
 }
 /** A mounted, wired service over a scratch record - or over `dir`, an earlier one's, as after a restart; `rows` are
  * the prices by symbol, changeable between calls. */
@@ -29,6 +37,7 @@ async function mounted(t: { after(fn: () => Promise<unknown>): unknown }, wire =
   const scope = fakeScope();
   serviceRow.apply(scope.ctx, { recordDir, universe: ["NVDA", "AMD", "AVGO", "INTC"], now: () => new Date(AT) });
   const service = scope.provided.get("readThrough") as any;
+  const tools = scope.tools;
   const rows: Record<string, { price: number | null; changePct: number | null; feed?: string; asOf?: string | null }> = {
     NVDA: { price: 173.07, changePct: -7.27 }, AMD: { price: 473.39, changePct: 5.42 }, SPY: { price: 740, changePct: -0.4 }, CRWV: { price: 90, changePct: 1 },
   };
@@ -42,7 +51,13 @@ async function mounted(t: { after(fn: () => Promise<unknown>): unknown }, wire =
     },
     deskSymbols: async () => ["CRWV", "SPY"], usSessionOn: () => state.on, refClose: (date: string) => (date === "2026-11-06" ? FRIDAY_CLOSE : undefined),
   });
-  return { service, rows, asked, state, recordDir };
+  return { service, rows, asked, state, recordDir, scope, tools };
+}
+/** `mounted(t)`, then the tool row applied on the same scope. */
+async function mountedWithTool(t: { after(fn: () => Promise<unknown>): unknown }) {
+  const m = await mounted(t);
+  toolRow.apply(m.scope.ctx);
+  return m;
 }
 
 test("the row is named, needs an absolute record directory, and provides readThrough", async (t) => {
@@ -184,4 +199,32 @@ test("a run closed while its prices are read: ALERT_ONLY, nothing kept, nothing 
   await assert.rejects(call, code("ALERT_ONLY"));
   assert.equal(await service.given("NVDA", "2026-11-06"), false);
   assert.equal((await createRecord(recordDir).given("NVDA", "2026-11-06")), undefined);
+});
+
+const ROOT = (id: string, agentPreset?: string) => ({ agent: { session: { header: { id, ...(agentPreset === undefined ? {} : { agentPreset }) } } } });
+const CHILD = { agent: { session: { header: { id: "s-child", origin: "subagent" } } } };
+
+test("the rows are named as the face composes them", () => {
+  assert.deepEqual([serviceRow.name, toolRow.name], [...READ_THROUGH_ROW_IDS]);
+  assert.deepEqual(toolRow.inject, ["tools", "readThrough"]);
+  const [patch] = readThroughPatches("/home/dsh") as Array<{ insert: Array<{ id: string; name: string; config: object }> }>;
+  assert.deepEqual(patch!.insert.map((row) => row.id), ["read-through-service", "read-through-tool"]);
+  assert.deepEqual(patch!.insert.map((row) => row.config), [{ recordDir: "/home/dsh/face/readthrough" }, {}]);
+  assert.ok(patch!.insert[0]!.name.endsWith("/face/plugins/readthrough/service-row.mjs") && patch!.insert[1]!.name.endsWith("/face/plugins/readthrough/tool-row.mjs"));
+  assert.throws(() => toolRow.apply(fakeScope().ctx), /read-through-tool: readThrough is missing; mount the read-through-service row first/);
+});
+
+test("read_through: its schema, a task's answer, a desk agent's refusal outside the lane, a child's refusal", async (t) => {
+  const { service, tools } = await mountedWithTool(t);
+  assert.deepEqual(tools.map((tool) => tool.name), [...READ_THROUGH_TOOL_NAMES]);
+  const schema = tools[0]!.parameters as { properties: object; required: string[] };
+  assert.deepEqual(Object.keys(schema.properties), ["symbol", "basis", "event", "sources", "logic", "peers", "no_direction", "counter", "certainty"]);
+  assert.deepEqual(schema.required, ["symbol", "basis", "event", "sources", "logic", "peers", "certainty"]);
+  assert.ok(toolRow.READ_THROUGH_DESCRIPTION.startsWith("Which rivals a company's own bad news points to: your inference, not an order."));
+  const answer = JSON.parse(await tools[0]!.execute(ARGS, ROOT("s-task")));
+  assert.equal(answer.ok, true); assert.match(answer.id, ID_RE); assert.ok(answer.block.startsWith("推演 · Gravit 的推断，不是下单 · 确定度 中\n· 事件："));
+  await assert.rejects(tools[0]!.execute(ARGS, ROOT("s-desk", "gravit-desk")), code("ALERT_ONLY"));
+  await assert.rejects(tools[0]!.execute(ARGS, CHILD), code("NOT_GRAVIT"));
+  service.open("s-run", RUN);
+  assert.equal(JSON.parse(await tools[0]!.execute(ARGS, ROOT("s-run", "gravit-desk"))).block.includes("· 事件："), false);
 });

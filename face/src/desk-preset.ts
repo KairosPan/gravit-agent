@@ -28,7 +28,9 @@
  * which no restriction filters (docs/superpowers/plans/2026-10-20-desk-p1-bridge.md, Global
  * Constraints; src/desk-tools.ts `installDeskTools`). `web_fetch` is not in {@link DESK_ALLOW} either: the tree
  * registers none (src/policy.ts D6), so naming it would expose nothing, and the desk's own layer is the only place
- * it exists. A tool the mask hides is refused at dispatch.
+ * it exists. A tool the mask hides is refused at dispatch. The mask names `read_through` because its row
+ * (src/readthrough.ts) registers it tree-wide, and that row itself refuses a desk agent's call outside an
+ * annotation run.
  *
  * DECLARED AFTER BOOT, like the bots and the role presets (src/roles.ts `rolePresetDefinition`, D20/B1)
  * and unlike Gravit's default. `bootFace` calls {@link declareDeskPreset} right after `declareBots`, and
@@ -76,7 +78,7 @@ export { DESK_PRESET };
  * tests/desk-preset.test.ts: whatever is added here reaches every unattended desk turn. */
 export const DESK_ALLOW: readonly string[] = Object.freeze([
   "read", "write", "edit", "read_image", "glob", "grep", "str_replace_editor", "skill", "web_search", "todo_write",
-  "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions",
+  "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions", "read_through",
 ]);
 
 /** `plugins/bot.js` as the mask row's `name`, defined in src/roles.ts beside {@link GRAVIT_PLUGIN_URL}

@@ -136,6 +136,7 @@ import { accountSeatPatches } from "./account-seat.ts";
 import { marketRowPatches } from "./market-row.ts";
 import { lunhuiPatches } from "./lunhui.ts";
 import { analogPatches } from "./analog.ts";
+import { readThroughPatches } from "./readthrough.ts";
 import { facePolicyPatches } from "./policy.ts";
 import {
   auditOrderTools, effectiveApprovalPolicy, isOrderTool, orderApprovalDecision, orderGuardReasonForSession,
@@ -405,13 +406,16 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
   /* The analog rows (src/analog.ts): the same project layer, right after the
    * Lunhui rows; their views live under the harness home. */
   const analogRows = analogPatches(home);
+  /* The read-through rows (src/readthrough.ts): the same project layer, right
+   * after the analog rows; their record lives under the harness home. */
+  const readThroughRows = readThroughPatches(home);
   const homePatches = loadOptionalPatches(BIN, join(home, PROFILE_PATCH_FILENAME)) ?? [];
   /* Cloned: the include's patch algorithm pushes inserted rows by reference
    * and later patches assign into them, so composing the caller's own objects
    * could rewrite them under the caller. */
   const extraPatches: FacePatchList = structuredClone(opts.extraPatches ?? []);
   const patches: FacePatchList = [
-    ...bundlePatches, ...policyPatches, ...seatPatches, ...marketPatches, ...lunhuiRows, ...analogRows, ...profile.patches, ...homePatches, ...extraPatches,
+    ...bundlePatches, ...policyPatches, ...seatPatches, ...marketPatches, ...lunhuiRows, ...analogRows, ...readThroughRows, ...profile.patches, ...homePatches, ...extraPatches,
   ];
   /* Both switches below are guarded on the row actually being in the composed
    * tree. A patch that matches nothing is inert and — measured, not assumed —
@@ -422,7 +426,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * never mounted the row. (With the policy layer disabling
    * `session-telemetry-otel` by default the env switch is redundant until an
    * operator re-enables the row - and then it still wins, composing after.) */
-  const below = composeEntries([bundlePatches, policyPatches, seatPatches, marketPatches, lunhuiRows, analogRows, profile.patches, homePatches, extraPatches]);
+  const below = composeEntries([bundlePatches, policyPatches, seatPatches, marketPatches, lunhuiRows, analogRows, readThroughRows, profile.patches, homePatches, extraPatches]);
   const rows = new Set(below.flatMap((row) => (typeof row.id === "string" ? [row.id] : [])));
   /* app-boot exports the CLI's own resolver now (NEW packages/boot/app-boot/
    * src/profile-context.ts:52-55): ANY non-empty value disables, and a
