@@ -1110,7 +1110,7 @@ test("a stock's page at an event: the banner, 事件前后 pressed, the candles 
   const svg = svgOf(history);
   assert.equal([...svg.matchAll(/class="ew-body (up|down)"/g)].length, 91);
   assert.ok(svg.includes('>01-26 Wynn Resorts · Steve Wynn</text>'));
-  assert.ok(svg.includes('>B 创始人/当天离任</text>'), 'the other event, labelled with its group');
+  assert.ok(svg.includes('>B 创始人/当天离任 · Wynn Resorts · Steve Wynn resigns</text>'), 'the other event, labelled with its group and its label');
   assert.ok(svg.includes('>5 天 −14.6%</text>'));
   assert.ok(svg.includes('>60 天 +2.0%</text>'));
   assert.doesNotMatch(history, /class="mk-chart"/, 'no close line');
@@ -1140,7 +1140,7 @@ test('a case whose rel is null draws the sentence, not the line (Review Focus 4)
   assert.ok(bannerOf(html).includes('>B 创始人/当天离任<'));
   // its day 0 labelled with its own label, the first event the other mark
   assert.ok(svgOf(history).includes('>02-07 Wynn Resorts · Steve Wynn resigns</text>'));
-  assert.ok(svgOf(history).includes('>A 创始人/被查·在任</text>'));
+  assert.ok(svgOf(history).includes('>A 创始人/被查·在任 · Wynn Resorts · Steve Wynn</text>'));
 });
 
 test('+60 is not flagged when the window holds fewer than 61 bars after day 0 (Review Focus 2)', () => {

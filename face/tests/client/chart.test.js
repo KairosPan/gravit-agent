@@ -124,7 +124,7 @@ test('eventCandlesSvg: one body and one wick per bar, five price lines, about se
   const bars = windowBars(91);
   const svg = eventCandlesSvg(bars, {
     day0: 30,
-    marks: [{ index: 30, label: 'Wynn <Resorts>', kind: 'day0' }, { index: 38, label: 'B 创始人/当天离任', kind: 'other' }],
+    marks: [{ index: 30, label: 'Wynn <Resorts>', kind: 'day0' }, { index: 38, label: 'B 创始人/当天离任 · Wynn resigns', kind: 'other' }],
     flags: [{ index: 35, label: '5 天', text: '−14.6%', tone: 'down' }, { index: 90, label: '60 天', text: '+2.0%', tone: 'up' }],
     unit: 'usd',
   });
@@ -143,9 +143,9 @@ test('eventCandlesSvg: one body and one wick per bar, five price lines, about se
   assert.match(svg, /<rect class="ew-band" /);
   // its label: the bar's date and the case's label, escaped
   assert.ok(svg.includes('>01-22 Wynn &lt;Resorts&gt;</text>'), svg.match(/ew-day0-label[^<]*<\/text>/)?.[0]);
-  // another mark: a dashed line at its bar, labelled with its group
+  // another mark: a dashed line at its bar, labelled as given (its group and label)
   assert.equal(svg.match(/<line class="ew-mark" x1="([\d.]+)"/)[1], wicks[38][2]);
-  assert.ok(svg.includes('>B 创始人/当天离任</text>'));
+  assert.ok(svg.includes('>B 创始人/当天离任 · Wynn resigns</text>'));
   // five price lines with their prices on the right; about seven MM-DD ticks
   assert.equal(allOf(svg, /<line class="ew-grid"/g).length, 5);
   const prices = allOf(svg, /<text class="ew-price"[^>]*>([^<]+)<\/text>/g).map(m => m[1]);

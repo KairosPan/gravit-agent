@@ -88,7 +88,7 @@ export function eventHistoryHtml(ev, now) {
   if (!shown) return card(note(t('markets.event.noDay', { date: ev.at })));
   const { bars, day0 } = shown;
   const marks = marksOf(ev.view, ev.caseId, shown).map(m => ({
-    index: m.index, kind: m.kind, label: maskExcerpt(m.kind === 'day0' ? m.label : m.group ?? m.label),
+    index: m.index, kind: m.kind, label: maskExcerpt(m.kind === 'day0' ? m.label : [m.group, m.label].filter(Boolean).join(' · ')), // words-order: the view's own texts, group then label
   }));
   const measure = ev.raw?.state === 'measured' && ev.raw.measure !== null && typeof ev.raw.measure === 'object' ? ev.raw.measure : null;
   const flags = measure ? FLAGS.filter(([n, , field]) => num(measure[field]) !== null && day0 + n < bars.length)
