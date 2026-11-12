@@ -17,8 +17,8 @@
  * end on a bar built from the session's minutes.
  *
  * `verified` is the reader's claim checked by the face: an event marked verified whose source no reader opened is
- * stored unverified and flagged `unopened`. The present case's anchors are measured like the events, and are in no
- * group.
+ * stored unverified and flagged `unopened`. The present case's anchors are measured like the events, are in no
+ * group, and may carry a source, `verified` and a note, checked the same way; an anchor's source may be left out.
  */
 import {
   ELSEWHERE, ELSEWHERE_OVER, MIN_BEFORE, MIN_VOLUMES, NEIGHBOURS, QUIET, TIMINGS, VOLUME_BASE,
@@ -42,12 +42,15 @@ import { refuse } from "./errors.mjs";
  * @typedef {import("./bars.mjs").History} History
  * @typedef {{ symbol: string, label: string, group: string, date: string, timing: When["timing"], source: string,
  *   verified: boolean, note: string | null }} EventIn
- * @typedef {{ label: string, date: string, timing: When["timing"] }} AnchorIn
+ * @typedef {{ label: string, date: string, timing: When["timing"], source: string | null, verified: boolean,
+ *   note: string | null }} AnchorIn
  * @typedef {{ state: "measured" | "unmeasured", words: string | null, day0: string | null, measure: Measure | null,
  *   tape: Tape | null, flags: string[], window: Path | null, rel: Array<[number, number]> | null }} Measured
  * @typedef {{ id: string, symbol: string, label: string, group: string, date: string, timing: string, source: string,
  *   note: string | null, claimed: boolean, opened: boolean, verified: boolean } & Measured} EventCase
- * @typedef {{ id: string, label: string, date: string, timing: string } & Measured} Anchor
+ * @typedef {{ claimed: boolean, opened: boolean, verified: boolean }} Checked
+ * @typedef {{ id: string, label: string, date: string, timing: string, source: string | null, note: string | null }
+ *   & Checked & Measured} Anchor
  * @typedef {{ kind: "events", version: 1, at: string, title: string,
  *   query: null | { symbol: string, readDate: string, latest: string | null, today: string | null,
  *     sessionOpen: boolean, words: string | null, source: string | null, short: boolean, firstBar: string | null,
@@ -79,7 +82,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DEADLINE_WORDS = "not read before the deadline";
 const NEW_YORK = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
 const EVENT_SHAPE = "an object with symbol, label, group, date, timing, source and verified";
-const ANCHOR_SHAPE = "an object with label, date and timing";
+const ANCHOR_SHAPE = "an object with label, date and timing, and optionally source, verified and note";
 
 /** @param {unknown} raw @returns {raw is Record<string, unknown>} */
 const isObject = (raw) => typeof raw === "object" && raw !== null && !Array.isArray(raw);
@@ -164,6 +167,31 @@ function sourceIn(raw, field) {
 }
 
 /**
+ * An optional note on one line ({@link oneLine}) of at most `LIMITS.note` characters, null when left out or blank, or
+ * the refusal of `field`.
+ * @param {unknown} raw @param {string} field
+ * @returns {string | null}
+ */
+function noteIn(raw, field) {
+  if (raw === null || raw === undefined) return null;
+  const note = typeof raw === "string" ? oneLine(raw) : null;
+  if (note === null || note.length > LIMITS.note) throw refuse.invalidEvents(field, `text of at most ${LIMITS.note} characters, or left out`);
+  return note === "" ? null : note;
+}
+
+/**
+ * The reader's claim checked by the face: `verified` only when claimed and its source opened; a claim whose source no
+ * reader opened adds `unopened` to a copy of `measured`'s flags.
+ * @param {boolean} claimed @param {string | null} source @param {(url: string) => boolean} opened @param {Measured} measured
+ * @returns {Checked & { flags: string[] }}
+ */
+function checkClaim(claimed, source, opened, measured) {
+  const isOpened = source !== null && opened(source);
+  const flags = claimed && !isOpened ? [...measured.flags, "unopened"] : measured.flags;
+  return { claimed, opened: isOpened, verified: claimed && isOpened, flags };
+}
+
+/**
  * One event, checked in the order symbol, label, group, date, timing, source, verified, note.
  * @param {unknown} raw @param {number} i
  * @returns {EventIn}
@@ -178,15 +206,27 @@ function eventIn(raw, i) {
   const timing = timingIn(raw.timing, `${at}.timing`);
   const source = sourceIn(raw.source, `${at}.source`);
   if (typeof raw.verified !== "boolean") throw refuse.invalidEvents(`${at}.verified`, "true or false");
-  /** @type {string | null} */
-  let note = null;
-  if (raw.note !== null && raw.note !== undefined) {
-    if (typeof raw.note !== "string") throw refuse.invalidEvents(`${at}.note`, `text of at most ${LIMITS.note} characters, or left out`);
-    note = oneLine(raw.note);
-    if (note.length > LIMITS.note) throw refuse.invalidEvents(`${at}.note`, `text of at most ${LIMITS.note} characters, or left out`);
-    if (note === "") note = null;
-  }
+  const note = noteIn(raw.note, `${at}.note`);
   return { symbol, label, group, date, timing, source, verified: raw.verified, note };
+}
+
+/**
+ * One anchor of the present case, checked in the order label, date, timing, source, verified, note; the source may be
+ * left out, and `verified` is false when left out.
+ * @param {unknown} raw @param {number} i
+ * @returns {AnchorIn}
+ */
+function anchorIn(raw, i) {
+  const at = `query.anchors[${i}]`;
+  if (!isObject(raw)) throw refuse.invalidEvents(at, ANCHOR_SHAPE);
+  const label = textOf(raw.label, `${at}.label`, LIMITS.label);
+  const date = dateIn(raw.date, `${at}.date`);
+  const timing = timingIn(raw.timing, `${at}.timing`);
+  const source = raw.source === null || raw.source === undefined ? null : sourceIn(raw.source, `${at}.source`);
+  const verified = raw.verified ?? false;
+  if (typeof verified !== "boolean") throw refuse.invalidEvents(`${at}.verified`, "true or false, or left out");
+  const note = noteIn(raw.note, `${at}.note`);
+  return { label, date, timing, source, verified, note };
 }
 
 /**
@@ -202,12 +242,7 @@ function queryIn(raw) {
   if (!Array.isArray(list) || list.length === 0 || list.length > ANCHORS_MAX) {
     throw refuse.invalidEvents("query.anchors", `a list of 1 to ${ANCHORS_MAX} anchors, each ${ANCHOR_SHAPE}`);
   }
-  const anchors = list.map((a, i) => {
-    const at = `query.anchors[${i}]`;
-    if (!isObject(a)) throw refuse.invalidEvents(at, ANCHOR_SHAPE);
-    return { label: textOf(a.label, `${at}.label`, LIMITS.label), date: dateIn(a.date, `${at}.date`), timing: timingIn(a.timing, `${at}.timing`) };
-  });
-  return { symbol, anchors };
+  return { symbol, anchors: list.map(anchorIn) };
 }
 
 /**
@@ -295,12 +330,9 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
   /** @type {EventCase[]} */
   const given = events.map((e) => {
     const m = measure(e.symbol, e);
-    const isOpened = opened(e.source);
-    const unopened = e.verified && !isOpened;
     return {
       id: `ev-${e.symbol}-${e.date}`, symbol: e.symbol, label: e.label, group: e.group, date: e.date, timing: e.timing,
-      source: e.source, note: e.note, claimed: e.verified, opened: isOpened, verified: e.verified && isOpened,
-      ...m, flags: unopened ? [...m.flags, "unopened"] : m.flags,
+      source: e.source, note: e.note, ...m, ...checkClaim(e.verified, e.source, opened, m),
     };
   });
   const cases = orderCases(given);
@@ -337,7 +369,13 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
       words: h === undefined ? wordsOf(query.symbol) : null,
       source: h === undefined ? null : h.source, short: h === undefined ? false : h.short,
       firstBar: h === undefined ? null : h.firstBar,
-      anchors: query.anchors.map((a, i) => ({ id: `q-${i + 1}`, label: a.label, date: a.date, timing: a.timing, ...measure(query.symbol, a) })),
+      anchors: query.anchors.map((a, i) => {
+        const m = measure(query.symbol, a);
+        return {
+          id: `q-${i + 1}`, label: a.label, date: a.date, timing: a.timing, source: a.source, note: a.note,
+          ...m, ...checkClaim(a.verified, a.source, opened, m),
+        };
+      }),
     };
   }
   if (spy !== undefined) used.push(spy);

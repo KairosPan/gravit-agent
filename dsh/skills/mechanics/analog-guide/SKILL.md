@@ -26,7 +26,9 @@ Two tools read the past for a present case. Neither forecasts, and neither guard
   `mcp__market__market_explore` before giving it up. A company whose stock no longer trades is still listed, under its
   last ticker; it comes back unmeasured, and that absence is part of the answer.
 - **The present case** goes in `query`: its `symbol` and one anchor per stage of the story (the first report, the
-  admission), one to three anchors, each with a label, its date and its timing.
+  admission), one to three anchors, each with a label, its date and its timing. Have the reader date the present
+  case too, and give each anchor its `source` and `verified` as you give an event's; an anchor with no source is
+  shown unverified.
 - **No clean precedent.** When a facet has none, say so, and do not fill the list with near misses.
 
 ## Reporting to the operator
@@ -37,6 +39,7 @@ Two tools read the past for a present case. Neither forecasts, and neither guard
   checked against a source, and there is no lookahead guard.
 - Each flag beside the case that carries it: `quiet` (day 0 on light volume), `elsewhere` (a busier session close
   by), unverified, and source not opened.
+- Your `ready` report names the id of every event view to draw (`an-…`), so the face can draw its table.
 - Numbers from the digest only. Write the few that matter into the report's own text: the phone gets the text and no
   chart.
 - A reading of the past, never a recommendation to trade.

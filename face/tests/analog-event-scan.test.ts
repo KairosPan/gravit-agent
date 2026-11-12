@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createPageRecord, pageKey } from "../plugins/analog/lib/pages.mjs";
-import { normalizeEvents, scanEvents } from "../plugins/analog/lib/event-scan.mjs";
+import { LIMITS, normalizeEvents, scanEvents } from "../plugins/analog/lib/event-scan.mjs";
 import { createBarsKeep } from "../plugins/analog/lib/bars.mjs";
 import { AnalogError } from "../plugins/analog/lib/errors.mjs";
 import { eventsDigest } from "../plugins/analog/lib/event-digest.mjs";
@@ -26,7 +26,7 @@ test("the input as people give it is normalized", () => {
   const got = normalizeEvents({ title: "  CEO scandals  ", events: [ev({ symbol: " evt ", label: " x ", note: "  " })], query: { symbol: "evt", anchors: [{ label: "first report", date: "2020-04-10", timing: "open" }] } });
   assert.equal(got.title, "CEO scandals");
   assert.deepEqual(got.events[0], { symbol: "EVT", label: "x", group: "hired", date: "2020-04-10", timing: "pre", source: A, verified: true, note: null });
-  assert.deepEqual(got.query, { symbol: "EVT", anchors: [{ label: "first report", date: "2020-04-10", timing: "open" }] });
+  assert.deepEqual(got.query, { symbol: "EVT", anchors: [{ label: "first report", date: "2020-04-10", timing: "open", source: null, verified: false, note: null }] });
   assert.equal(normalizeEvents({ title: "t", events: [ev()] }).query, null);
 });
 test("every bad field is refused by its name and index", () => {
@@ -159,4 +159,32 @@ test("past the deadline the unread companies are unmeasured and the view says it
   const view = await scanEvents({ title: "t", events: [ev()], keep: keepOf(), deadlineMs: -1 });
   assert.equal(view.coverage.deadline, true);
   assert.deepEqual(view.cases.map((c) => c.words), ["not read before the deadline"]);
+});
+test("an anchor's source is checked against the page record like an event's", async () => {
+  const anchors = [
+    { label: "first report", date: "2020-04-10", timing: "pre", source: "https://ex.com/a", verified: true },
+    { label: "admission", date: "2020-04-10", timing: "open", source: "https://ex.com/b", verified: true },
+    { label: "no source", date: "2020-04-10", timing: "pre" },
+  ];
+  const view = await scanEvents({ title: "t", events: [ev()], query: { symbol: "EVT", anchors }, keep: keepOf(), opened: (u) => u === "https://ex.com/a" });
+  const [a, b, c] = view.query!.anchors;
+  assert.deepEqual([a!.source, a!.claimed, a!.opened, a!.verified, a!.flags.includes("unopened")], ["https://ex.com/a", true, true, true, false]);
+  assert.deepEqual([b!.source, b!.claimed, b!.opened, b!.verified, b!.flags.includes("unopened")], ["https://ex.com/b", true, false, false, true]);
+  assert.deepEqual([c!.source, c!.claimed, c!.opened, c!.verified, c!.note, c!.flags], [null, false, false, false, null, []]);
+  assert.equal(a!.state, "measured");
+  assert.equal(view.coverage.unopened, 1, "the coverage counts the cases, not the anchors");
+});
+test("an anchor's note is one line and bounded like an event's", () => {
+  const q = (note: unknown) => ({ symbol: "EVT", anchors: [{ label: "x", date: "2020-04-10", timing: "pre", note }] });
+  assert.equal(normalizeEvents({ title: "t", events: [ev()], query: q("one\r\ntwo") }).query!.anchors[0]!.note, "one two");
+  assert.equal(normalizeEvents({ title: "t", events: [ev()], query: q("  ") }).query!.anchors[0]!.note, null);
+  assert.throws(() => normalizeEvents({ title: "t", events: [ev()], query: q("x".repeat(LIMITS.note + 1)) }), invalid("query.anchors[0].note"));
+  assert.throws(() => normalizeEvents({ title: "t", events: [ev()], query: q(7) }), invalid("query.anchors[0].note"));
+});
+test("an anchor's source must be http(s) without credentials", () => {
+  const q = (over: object) => ({ symbol: "EVT", anchors: [{ label: "x", date: "2020-04-10", timing: "pre", ...over }] });
+  for (const source of ["ftp://x", "https://u:p@x"]) {
+    assert.throws(() => normalizeEvents({ title: "t", events: [ev()], query: q({ source }) }), invalid("query.anchors[0].source"), source);
+  }
+  assert.throws(() => normalizeEvents({ title: "t", events: [ev()], query: q({ verified: "yes" }) }), invalid("query.anchors[0].verified"));
 });

@@ -75,6 +75,17 @@ test("the analog guide's anchors sentence names each anchor's label, date and ti
   for (const word of ["label", "date", "timing"]) assert.ok(sentence.includes(word), word);
 });
 
+test("the analog guide gives the present case's anchors a source and verified, as events have", () => {
+  const body = readSkill().body.replace(/\s+/g, " ");
+  assert.ok(body.includes("give each anchor its `source` and `verified` as you give an event's"));
+  assert.ok(body.includes("an anchor with no source is shown unverified"));
+});
+
+test("the analog guide's ready report names the event view ids for the face to draw", () => {
+  const body = readSkill().body.replace(/\s+/g, " ");
+  assert.ok(body.includes("Your `ready` report names the id of every event view to draw"));
+});
+
 test("dsh/README.md's mechanics row names the analog guide", () => {
   const row = readFileSync(README, "utf8").split("\n").find((line) => line.startsWith("| `skills/mechanics/` |"));
   assert.ok(row, "the README has a mechanics row");

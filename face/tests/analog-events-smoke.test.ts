@@ -183,11 +183,12 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
     assert.equal(gravitFetch.isError, true, "Gravit's session has no web_fetch to call");
     assert.doesNotMatch(textOf(gravitFetch), /non-public IP address/, "and its call never reached the provider");
 
-    // 5. analog_events for Gravit: one event, its source verified only once the page record holds it
+    // 5. analog_events for Gravit: one event and one anchor, each source verified only once the page record holds it
     const views = ctx.get("analogViews") as AnalogViews | undefined;
     assert.ok(views !== undefined, "analogViews must be provided");
     assert.equal(views.pageOpened(SOURCE), false, "the refused fetches noted no page");
-    const ask = { title: "a CEO leaves", events: [EVENT_IN] };
+    const anchor = { label: "first report", date: "2020-04-10", timing: "pre", source: SOURCE, verified: true };
+    const ask = { title: "a CEO leaves", events: [EVENT_IN], query: { symbol: "EVT", anchors: [anchor] } };
     const answerOf = (result: { isError: boolean; content?: { text?: string }[] }) => {
       assert.equal(result.isError, false, `analog_events answers; saw ${textOf(result)}`);
       return JSON.parse(textOf(result)) as { ok: boolean; view: string; digest: string };
@@ -204,9 +205,13 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
     // 6. the route serves the stored view with the cookie, and refuses another site's page
     const res = await fetch(`${base}/data/analog/view?id=${opened.view}`, { headers: { cookie } });
     assert.equal(res.status, 200);
-    const body = await res.json() as { ok: boolean; view: { kind: string; cases: { state: string }[] } };
+    type Checked = { source: string | null; claimed: boolean; opened: boolean; verified: boolean; flags: string[] };
+    const body = await res.json() as { ok: boolean; view: { kind: string; cases: { state: string }[]; query: { anchors: Checked[] } } };
     assert.equal(body.ok, true);
     assert.equal(body.view.kind, "events");
+    const [read] = body.view.query.anchors;
+    assert.deepEqual([read!.source, read!.claimed, read!.opened, read!.verified, read!.flags.includes("unopened")], [SOURCE, true, true, true, false],
+      "the present case's anchor, its source opened by a reader, reads back verified");
     assert.equal(body.view.cases.filter((c) => c.state === "measured").length, 1, "one measured case");
     assert.equal(body.view.cases.length, 1);
     const foreign = await fetch(`${base}/data/analog/view?id=${opened.view}`, { headers: { origin: "http://evil.example.com" } });
