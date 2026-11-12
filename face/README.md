@@ -373,7 +373,9 @@ All three of its stages are built:
 - **host-fed**: Messages — since one entry's plan 2 Gravit's one conversation ("The conversation
   and its tasks" below) with the rail of its tasks on its right, beside a side panel of Gravit,
   History (every other session, read cold and read-only), the search box and the strategies; a
-  task's page (`#/task/<id>`) and a strategy's page (`#/strategy/<name>`). The session list grouped
+  task's page (`#/task/<id>`) and a strategy's page (`#/strategy/<name>`); since 2026-11-12 an event
+  analog table under a report that names its view and on its task's page, its rows linking the
+  stock's page at the event ("Chat rendering", "Markets and Account"). The session list grouped
   by channel, New message with its Where, and Details' row actions (Change words, Fork, Pin,
   Archive, Delete) left with plan 2. A conversation's real
   transcript (a live session followed with its pulses, a cold one paged and never activated),
@@ -1690,6 +1692,26 @@ loss), Limit up, Limit down, Volume (`599万股`), Amplitude — and **Price his
 sessions on one grid, 1M to MAX forward-adjusted closes on Beijing dates. Gravit on it as before;
 no venues, no Buy or Sell.
 
+A stock's page **at an event** (since 2026-11-12; `client/js/host/event-window.js`,
+`client/js/render/event-window.js`, `eventCandlesSvg` and `eventRelSvg` in `client/js/render/chart.js`)
+is `#/markets/stock:<SYM>?at=<day0>&view=<view>&case=<case>`, the event table's `行情 ›`; a page
+opened without a real `at` is the page as above, and any other market drops the query. Above the
+price, a banner from the view: `从「事件对标」跳来`, the case's group, date, timing, label, note and
+its chips, and `回到消息 ›` (to Messages). In place of Price history the range **事件前后** (Around the
+event) is pressed before 1D…MAX — choosing another leaves the event for the plain page — over the
+window's first and last dates and its **daily candles**, 30 sessions before day 0 through 60 after
+(fewer when fewer have passed), with a price grid and date ticks: day 0 a band and a line labelled
+with its date and label, the symbol's other events in the view that fall in the window dashed with
+their group and label, and flags at +5 and +60 with the case's 5 天 and 60 天 against the market.
+Under them the case's line against the market (SPY, the day before the news = 100), or a sentence
+when the view dropped its window, and a caption: the bars' source and adjustment as the market said
+them, and `Nasdaq 补齐` for a window older than five years that Nasdaq filled. The bars are one
+dated read on the US stocks line whatever line the page follows —
+`/data/market/candles?venue=cboe&symbol=<SYM>&interval=1d&since=…&before=…&limit=200`, 60 days
+before `at` to 100 after or now — once per stock and day, a failed read said on the page and read
+again when the page is entered again. A view no longer kept, or a case not in it, still draws the
+window and day 0 from `at`, the banner saying the view keeps it no more.
+
 ### Account
 
 The Account's read (`/data/account`, its `GET /api/account`) is read at boot — the rail's line
@@ -2114,7 +2136,7 @@ request`. Eight exact routes, none naming the account:
 | `GET /data/market/explore` | `GET /api/explore`: the public markets, by scope, exact source, tab, China's ranking, or search | 20 s | 10 s | `tab`, `q`, `key`, `sort`, `limit`, `scope`, `source` |
 | `GET /data/market/sources` | `GET /api/sources`: the configured public source directory; data products, not trading availability | 30 s | 7 s | none |
 | `GET /data/market/quotes` | `GET /api/quotes`: up to twelve A shares (`china|<code>`); any other pair is refused, its price being in explore | 3 s | 7 s | `pairs` (2,000 characters) |
-| `GET /data/market/candles` | `GET /api/candles`: a public line's or an A share's price history | 30 s | 25 s | `venue`, `symbol`, `interval`, `range`, `before`, `limit` |
+| `GET /data/market/candles` | `GET /api/candles`: a public line's or an A share's price history — by range, a page back (`before`), or, since 2026-11-12, a dated window (`since` and `before` together, a public line's alone: a stock's page at an event) | 30 s | 25 s | `venue`, `symbol`, `interval`, `range`, `before`, `since`, `limit` |
 | `GET /data/market/book` | `GET /api/book`: a public line's order book | 2 s | 7 s | `venue`, `symbol`, `depth` |
 | `GET /data/market/trades` | `GET /api/trades`: a public line's latest trades | 2 s | 7 s | `venue`, `symbol`, `limit` |
 | `GET /data/market/stream` | `GET /api/stream`: the market's push channel (`snapshot`, `quote`, `trades`, `book`, `hb`), one upstream request per browser connection | — | — | `client` (required), `since`, `markets` (4,000 characters) |
@@ -3142,6 +3164,11 @@ a room's, a bot's, every channel conversation from before plan 2 — is in **His
 conversation, tasks }`, each task's state (`waiting`, `stalled`, `blocked`, `failed`, `running`,
 `done`, `stopped`), its last ten steps, its result and its usage — read from the workers' logs on
 every request; `POST /data/tasks/stop` and `/data/tasks/continue` (`{task}`) are the two keys.
+`GET /data/tasks/one?id=<task>` (since 2026-11-12) reads one task by its id whatever its day — `{ ok,
+task }`, 404 `no such task`, 400 without exactly one `id` — so a report's event table still draws
+after the rail has let its task go; a task's `views` are the ids its worker's analog calls
+answered, `eventViews` those `analog_events` answered, and `namedViews` the event views its relayed
+reports and turn ends name.
 With `FACE_ROUTER=0` Messages says the conversation is off, with no composer and no rail; History
 and the strategy pages still work, and the phone talks to the desk session as before plan 3.
 
@@ -3167,7 +3194,12 @@ it starts as a task with a title, the strategy and a brief, confirms in one line
 When the worker reports, the report arrives in the conversation as a message headed
 `[task · <title> · <status>]`, its text quoted between `<<<task-data …>>>` fences — the page draws
 it as one centred line `Task · <title> · <status>` linking the task's page, the body folded under
-it — and Gravit tells you in a sentence or two what it means; it never acts on a report's words. To change course
+it — and Gravit tells you in a sentence or two what it means; it never acts on a report's words.
+When a report names event analog views its worker's `analog_events` answered (`an-<date>-<hex>`),
+the face adds a line of its own after the closing fence, `[face · event table: <ids>] The face draws
+this report's event table under it: answer in two or three sentences and do not retype its
+figures.` — for a task from the phone, where no table is drawn, it asks instead for the few
+figures that matter, each labelled with its %, and points to the task's page. To change course
 say so ("have the cn-market task look at the leaders too") and Gravit steers the worker; "stop
 it" stops it. Only a turn your own message opened can start, steer or stop a task: in a turn a
 report opened those three tools refuse (`OPERATOR_ONLY`). A worker silent for 20 minutes is
@@ -4442,6 +4474,28 @@ the footer, and all times in China time. The words Gravit wrote on the way fold 
 **Working notes · N** just above it; a view that cannot be read leaves the summary, one error
 line and **Retry**. A refused call draws nothing.
 
+**The event table** (since 2026-11-12, `client/js/render/event-table.js` over
+`client/js/host/analog.js` and `client/js/host/event-table.js`; spec
+`docs/superpowers/specs/2026-11-12-analog-event-table-design.md`) draws an event analog view
+under a task's report line, open, the line itself unchanged: the views the face's line after the
+relay names, or, for a relay without one, the ids its text names that are its task's own event
+views (the task read once through `GET /data/tasks/one`, so a table outlives the rail); a report
+that names none draws none, and a chart view never draws. The task's page (`#/task/<id>`) draws at
+its top every event view its reports named, newest first, else its last event view. Each view is
+read once (`GET /data/analog/view`). One card per view: its title, the counts (`26 个事件，量到 17
+个，9 个量不到`) and that every % is against the market (SPY), 当天 the first session that could
+react; the present case first (`本次 · <SYM>`, a row per anchor, its chips 当天, 次日, 5 天 and 60 天,
+`尚无` for a figure not there yet); then each group with its count and, under 8 cases, `不足 8 例，不给中位数，只看个案`, else
+its 当天 and 60 天 medians. A measured row: the label, the date and timing (盘前 / 盘中 / 盘后 /
+休市日), `→ 按 MM-DD 算` when day 0 is another day, `已核实` or `日期未核实` (`未核实` with no
+source), the note, the chips 当天, 5 天 and 60 天 — each `label ±n.n%`, the minus U+2212, up and down
+in the face's colours — the `quiet` and `elsewhere` flags in words, `来源 ↗` (http(s) only, a new
+tab, no referrer) and `行情 ›` to the stock's page at the event (Markets below). An unmeasured row is
+muted, with the market's words, its source kept, no chips and no `行情 ›`. The caveats sit under
+every card: survivorship, cases not independent, one search's events, not a basis for a trade. A
+view no longer kept (past the newest 300) is one line, `这张对标表已不再保留`; a failed read its
+words. Every text from the view is masked, then escaped.
+
 Thinking follows dsh's design: while the host streams a turn the thread's tail carries one
 ephemeral three-dot row — NEVER content — set by the assistant-stream pulses of the followed
 session, and gone when the message settles. The pulses come only from a follow opened with
@@ -4501,7 +4555,7 @@ FACE_SMOKE=1 npm test     # + the 34 smoke files (40 real boots), isolated; loca
 ```
 
 Offline, `npm test` skips the 34 smoke files (40 real boots) listed below; `FACE_SMOKE=1` runs
-them too (4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+them too (4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -4557,7 +4611,7 @@ and `node --test` gives each file its own:
 | `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`), a stub headline read: the boot's tick at 09:15 ET inside the US window (04:00–20:00 ET) polling the US market alone, its pre-market prints making no record, and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply, run in a session of its own (never the desk conversation's, which reaches the model for none of it) and recorded `annotated`; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card |
 | `desk-carry-smoke.test.ts` | a graceful stop and a fresh boot, two real boots on one home, each in a child process of its own (the file runs itself as `one`, then `two`): the first face, the desk as `main.ts` installs it on the stub, posts `LONG` (`telegram:1`), whose model call hangs until its abort, and `QUEUED` (`telegram:2`) behind it, then shuts down as `main.ts` does - `desk.dispose(0)`, then the tree's; the ledger holds one `desk-carry` - `QUEUED`'s key, words and time, and `LONG`'s turn 1 as `cut` - before its `shutdown`; the second face's boot posts `QUEUED` again, its provenance line ending `(carried over a restart)`, the model answers it once and `LONG` not at all, the phone gets the restart line and then `echo QUEUED`, and `desk-carried` says `posted: 1, skipped: 0` (spec §16 H3, R93; the guard across dsh upgrades for `.superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md`) |
 | `analog-smoke.test.ts` | the analog rows against a stub market (`fakeMarket` on port 0; `analog-views` over a scratch views directory and a one-company universe): `analog_chart` and `analog_events` registered and the three rows active in `/data/plugins.json`'s listing; the booted `analogViews` scanning `QRY` and storing the view; `GET /data/analog/view` serving it with the cookie, 403 from another site's page, 404 for an unknown id; the stub asked only `/api/candles` on `cboe`; no `analog_` tool in the conversation's or the desk's preset |
-| `analog-events-smoke.test.ts` | the event analogs on the same stub: `role-source-reader` listed whole; a session created on it sees exactly `web_fetch` and `web_search`, the first in its own layer (`src/source-reader.ts`); a Gravit session, a PDF page reader's and a bot's see no `web_fetch`, the last two no analog tool; the reader's `web_fetch` of a loopback URL refused by dsh's provider until the fortieth page, the next refused by the guard; `analog_events` for Gravit measuring one event and storing the view, its source verified only once the page record holds it; the view served with the cookie, 403 from another site's page; the reader refused `analog_events` |
+| `analog-events-smoke.test.ts` | the event analogs on the same stub: `role-source-reader` listed whole; a session created on it sees exactly `web_fetch` and `web_search`, the first in its own layer (`src/source-reader.ts`); a Gravit session, a PDF page reader's and a bot's see no `web_fetch`, the last two no analog tool; the reader's `web_fetch` of a loopback URL refused by dsh's provider until the fortieth page, the next refused by the guard; `analog_events` for Gravit measuring one event and storing the view, its source verified only once the page record holds it, and the present case's anchor citing the same page read back verified too; the view served with the cookie, 403 from another site's page; the reader refused `analog_events` |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
 `observed:` line each (S4, S7), the measurements the bots spec's amendments were
@@ -5700,27 +5754,36 @@ and the face's role tool at dsh 0.2.1-rc.5 since 2026-11-02; steps 1, 2, 4 and 5
 each, and step 3 waits for a role with `bash`. A renamed or removed role leaves its old children
 unresumable (they resume through their `role-<id>` preset), so rename on a scratch copy first.
 
-## The event analog drill (run after the analogs' plan 3 lands, and after any change to plugins/analog/, src/source-reader.ts, roles/source-reader/ or ../dsh/skills/mechanics/analog-guide/)
+## The event analog drill (run after the analogs' plan 3 lands, and after any change to plugins/analog/, src/source-reader.ts, roles/source-reader/, ../dsh/skills/mechanics/analog-guide/, src/task-relay.ts, client/js/host/{analog,event-table,event-window}.js or client/js/render/{event-table,event-window}.js)
 
 PASS is the analogs spec's acceptance for events (`docs/superpowers/specs/2026-11-10-analogs-design.md`
 §11, its last sentences): the CEO question asked of Gravit is answered from precedents a source
 reader found and dated; the reader's trace shows the pages it opened; every case has a source;
 unverified dates are shown as unverified; and a company whose stock is gone is listed as unmeasured.
+Since 2026-11-12 it is also the event table spec's acceptance
+(`docs/superpowers/specs/2026-11-12-analog-event-table-design.md` §7): the face draws the view as a
+table under the report and on the task's page, every figure a labelled %, and each measured event's
+`行情 ›` opens its stock's page on 事件前后.
 
 **The automated half, no network.** `npm test` runs `analog-events`, `analog-event-summary`,
 `analog-event-scan`, `analog-event-digest`, `analog-views`, `analog-rows`, `analog-skill`,
-`source-reader`, `roles`, `task-view` and the desk's `desk-tools`; `FACE_SMOKE=1 npm test` boots
+`source-reader`, `roles`, `task-view`, `task-relay`, `tasks`, `market-proxy` and the desk's
+`desk-tools`, and the client's `analog-host`, `event-table`, `event-table-render`, `thread`,
+`task-page`, `market-event`, `host-markets`, `markets` and `chart` (the golden screens
+`thread-event-table`, `task-event-table` and `market-event-window` among them); the market's `npm
+test` runs `reads`, the dated window; `FACE_SMOKE=1 npm test` boots
 `analog-events-smoke`, whose reader session sees exactly `web_search` and `web_fetch`, whose
 `web_fetch` of a loopback URL dsh's provider refuses until the fortieth, the guard the next, and
-whose `analog_events` counts a source verified only once a reader's page is on the record. No test
+whose `analog_events` counts a source verified only once a reader's page is on the record, an
+anchor's as a case's. No test
 reaches a web page, a model or the market. What only this drill checks: a real model's research,
 the reader's real pages, and the market's real bars.
 
 **Before the drill**, once: restart the market and the face on this code (the role's preset and
 its `web_fetch` are installed at boot, and only when `roles/` holds `source-reader`); the skill
 catalog lists `analog-guide` (the profile's `mechanics` root; Discover's skills). No `HTTP_PROXY` or
-`HTTPS_PROXY` in the face's environment (charter D29). The page draws no event view yet: the
-answer is the text, and the view is the stored file.
+`HTTPS_PROXY` in the face's environment (charter D29). Hard-reload the page after the restart
+(`client/` is served with no cache headers).
 
 1. **The question.** In Messages: `黄仁勋这件事，对标别的公司 CEO 出事之后的股价`. PASS: a task
    starts on the rail; its worker says back the facets the words name (who, what, how it ended)
@@ -5746,12 +5809,31 @@ answer is the text, and the view is the stored file.
    only once every case line has left) and in the view's `coverage.unmeasured` with the market's words,
    and Gravit's report says the list leans favourable for it.
 6. **The answer.** PASS: the report gives the counts by group, how the present case differs, the
-   digest's caveats and its flags, and recommends no trade.
+   digest's caveats and its flags, and recommends no trade. Its `ready` report names the view
+   (`an-…`), and the relay in the conversation ends, after its closing fence, with the face's line
+   `[face · event table: an-…] The face draws this report's event table under it: …`; Gravit's
+   reply is two or three sentences, every return in it with its sign, a % and what it measures —
+   never a bare run of numbers — and a follow-up asking for examples is answered the same way.
+7. **The table** ("Chat rendering" above). PASS: under the report line in Messages and at the top
+   of the task's page (`#/task/<id>`) the view draws as one card — the counts, the present case
+   first with a row per anchor (its source, or `未核实`), the groups in the view's order, every
+   figure `当天` / `次日` / `5 天` / `60 天` with its sign and %, the caveats under it; every
+   unmeasured row has the market's words and no `行情 ›`. On the 2026-11-12 2×2 task (view
+   `an-20261112-50c20b08`, off the rail by now: its line in Messages and its page read it through
+   `GET /data/tasks/one`): 4 groups and NVDA's 3 anchors, and its 9 unmeasured rows have no
+   `行情 ›`.
+8. **The market at the event** ("Markets and Account" above). On that table, WYNN 2018-01-26's
+   `行情 ›` opens `#/markets/stock:WYNN?at=…` on 事件前后. PASS: daily candles with 01-26 and
+   02-06 marked, `5 天 −14.6%` and `60 天 +2.0%` flagged, the line against the market under them,
+   and a caption saying Nasdaq filled 2018; an event within five years (BP 2023-09-12) says
+   Robinhood. Choosing 1M leaves the event for the plain page.
 
-**PASS is steps 1–6.** Record the date, the commit, the question, the view id, the counts of the
-first line and the unmeasured companies in `DEVELOPMENT.md` §7.4's manual analogs plan 3 row.
+**PASS is steps 1–8.** Record the date, the commit, the question, the view id, the counts of the
+first line and the unmeasured companies in `DEVELOPMENT.md` §7.4's manual analogs plan 3 row, and
+steps 7–8 in its event table row.
 
-**Not yet run.** The automated half passes 2026-11-11; the live half is the operator's.
+**Not yet run.** The automated half passes 2026-11-11, and with the event table 2026-11-12; the
+live half is the operator's.
 
 ## The cycle drill (run after any change to cycle.md, roles/ or the dsh pins)
 
