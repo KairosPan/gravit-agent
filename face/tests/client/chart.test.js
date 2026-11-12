@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as chart from '../../client/js/render/chart.js';
-const { sessionsSvg } = chart;
+const { sessionsSvg, eventCandlesSvg, eventRelSvg } = chart;
 import { fmtClock, fmtDate } from '../../client/js/time.js';
 
 const { candlesSvg, curveSvg } = chart;
@@ -17,7 +17,7 @@ const word = i => `${fmtDate(Date.parse(at(i)))} ${fmtClock(Date.parse(at(i)))}`
 const GEOMETRY = /^M0\.0,[\d.]+L133\.3,6\.0L266\.7,134\.0L400\.0,[\d.]+$/;
 
 test('the charts are the Account\'s two: the daily_bars chart left with alpaca-kit', () => {
-  assert.deepEqual(Object.keys(chart).sort(), ['candlesSvg', 'curveSvg', 'sessionsSvg']);
+  assert.deepEqual(Object.keys(chart).sort(), ['candlesSvg', 'curveSvg', 'eventCandlesSvg', 'eventRelSvg', 'sessionsSvg']);
 });
 
 test("candlesSvg: a market's closes in the same box, the axis at its first and last bars' times; cents for an event; fewer than two closes draw nothing", () => {
@@ -103,4 +103,84 @@ test('sessionsSvg says one session in the singular, more in the plural', () => {
   const session = (date, n = 242) => ({ date, prec: 100, price: Array.from({ length: n }, (_, i) => 100 + (i % 5)), amount: [] });
   assert.match(sessionsSvg([session('2026-10-30')]), /aria-label="The last session, 10-30 to 10-30: low ¥100\.00, high ¥104\.00"/);
   assert.match(sessionsSvg([session('2026-10-29'), session('2026-10-30')]), /aria-label="The last 2 sessions, 10-29 to 10-30: /);
+});
+
+// an event's window (analog event table Task 9): weekday daily bars from 2017-12-11 at 14:30 UTC (09:30 New York), rising by one
+// a session but for bar 5, which falls
+function windowBars(n) {
+  const bars = [];
+  for (let t = Date.parse('2017-12-11T14:30:00Z'); bars.length < n; t += 86_400_000) {
+    const wd = new Date(t).getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    const i = bars.length;
+    const [o, c] = i === 5 ? [110, 100] : [100 + i, 100.5 + i];
+    bars.push({ t, o, h: Math.max(o, c) + 1, l: Math.min(o, c) - 1, c });
+  }
+  return bars;
+}
+const allOf = (svg, re) => [...svg.matchAll(re)];
+
+test('eventCandlesSvg: one body and one wick per bar, five price lines, about seven date ticks, day 0 at its bar, the marks and the flags', () => {
+  const bars = windowBars(91);
+  const svg = eventCandlesSvg(bars, {
+    day0: 30,
+    marks: [{ index: 30, label: 'Wynn <Resorts>', kind: 'day0' }, { index: 38, label: 'B 创始人/当天离任', kind: 'other' }],
+    flags: [{ index: 35, label: '5 天', text: '−14.6%', tone: 'down' }, { index: 90, label: '60 天', text: '+2.0%', tone: 'up' }],
+    unit: 'usd',
+  });
+  assert.match(svg, /^<svg class="ew-chart" viewBox="0 0 640 260" role="img" aria-label="[^"]+">/);
+  const bodies = allOf(svg, /<rect class="ew-body (up|down)" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"/g);
+  const wicks = allOf(svg, /<line class="ew-wick (up|down)" x1="([\d.]+)"/g);
+  assert.equal(bodies.length, 91);
+  assert.equal(wicks.length, 91);
+  assert.equal(bodies[5][1], 'down', 'a falling bar is down');
+  assert.equal(wicks[5][1], 'down');
+  assert.equal(bodies[4][1], 'up');
+  // the day-0 band and line sit at bar 30's centre
+  const day0 = svg.match(/<line class="ew-day0" x1="([\d.]+)"/)[1];
+  assert.equal(day0, wicks[30][2]);
+  assert.equal((Number(bodies[30][2]) + Number(bodies[30][3]) / 2).toFixed(1), day0);
+  assert.match(svg, /<rect class="ew-band" /);
+  // its label: the bar's date and the case's label, escaped
+  assert.ok(svg.includes('>01-22 Wynn &lt;Resorts&gt;</text>'), svg.match(/ew-day0-label[^<]*<\/text>/)?.[0]);
+  // another mark: a dashed line at its bar, labelled with its group
+  assert.equal(svg.match(/<line class="ew-mark" x1="([\d.]+)"/)[1], wicks[38][2]);
+  assert.ok(svg.includes('>B 创始人/当天离任</text>'));
+  // five price lines with their prices on the right; about seven MM-DD ticks
+  assert.equal(allOf(svg, /<line class="ew-grid"/g).length, 5);
+  const prices = allOf(svg, /<text class="ew-price"[^>]*>([^<]+)<\/text>/g).map(m => m[1]);
+  assert.equal(prices.length, 5);
+  assert.ok(prices.every(p => /^\$\d+\.\d\d$/.test(p)), prices.join());
+  const ticks = allOf(svg, /<text class="ew-tick"[^>]*>([^<]+)<\/text>/g).map(m => m[1]);
+  assert.ok(ticks.length >= 6 && ticks.length <= 8, ticks.join());
+  assert.ok(ticks.every(d => /^\d\d-\d\d$/.test(d)), ticks.join());
+  assert.equal(ticks[0], '12-11');
+  // the flags read as they were given, a chip each in its tone
+  assert.ok(svg.includes('>5 天 −14.6%</text>'));
+  assert.match(svg, /<g class="ew-flag down">/);
+  assert.match(svg, /<g class="ew-flag up">[^]*?>60 天 \+2\.0%<\/text>/);
+  assert.doesNotMatch(svg, /NaN|undefined/);
+  // fewer than two bars draw nothing
+  assert.equal(eventCandlesSvg(bars.slice(0, 1), { day0: 0, marks: [], flags: [] }), '');
+  assert.equal(eventCandlesSvg([], { day0: 0, marks: [], flags: [] }), '');
+  assert.equal(eventCandlesSvg(undefined, {}), '');
+  // a flag or a mark off the window is left out
+  const off = eventCandlesSvg(bars.slice(0, 40), { day0: 30, marks: [{ index: 45, label: 'gone', kind: 'other' }], flags: [{ index: 90, label: '60 天', text: '+2.0%', tone: 'up' }] });
+  assert.doesNotMatch(off, /ew-flag|ew-mark"|gone/);
+});
+
+test('eventRelSvg: the line against the market on the window\'s bars, a dashed 100 and day 0; fewer than two points draw nothing', () => {
+  const rel = [[-2, 98], [-1, 100], [0, 88.85], [1, 81.1], [70, 120]];
+  const svg = eventRelSvg(rel, { day0: 30, count: 91 });
+  assert.match(svg, /^<svg class="ew-rel" viewBox="0 0 640 110" role="img"/);
+  const line = svg.match(/<path class="ew-rel-line" d="([^"]+)"/)[1];
+  assert.equal(line.split(/[ML]/).filter(Boolean).length, 4, 'a point past the window is left out');
+  assert.match(svg, /<line class="ew-rel-base" /);
+  assert.match(svg, /<line class="ew-day0" /);
+  assert.ok(svg.includes('>100</text>'));
+  // the rel line's day 0 point sits on the candles' day 0
+  const candles = eventCandlesSvg(windowBars(91), { day0: 30, marks: [], flags: [] });
+  assert.equal(svg.match(/<line class="ew-day0" x1="([\d.]+)"/)[1], candles.match(/<line class="ew-day0" x1="([\d.]+)"/)[1]);
+  assert.equal(eventRelSvg([[0, 100]], { day0: 30, count: 91 }), '');
+  assert.equal(eventRelSvg(null, { day0: 30, count: 91 }), '');
 });

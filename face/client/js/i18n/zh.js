@@ -1534,6 +1534,19 @@ export const ZH = Object.freeze({
   'markets.chart.closes': '收盘价',
   'markets.chart.sessions': '最近 {n} 个交易日，{first} 至 {last}：最低 {low}，最高 {high}',
   'markets.chart.curve': '{label}，{first} 至 {last}',
+  // a stock's page at an event (analog event table Task 9): the banner, the range, the candles' card and the line against the market
+  'markets.event.range': '事件前后',
+  'markets.event.from': '从「事件对标」跳来',
+  'markets.event.back': '回到消息 ›',
+  'markets.event.gone': '对标视图已不再保留这个事件：只按日期画出当天',
+  'markets.event.span': '{first} 至 {last}',
+  'markets.event.failed': '无法读取这段日线',
+  'markets.event.noDay': '{date} 没有日线',
+  'markets.event.said': '日线 K 线，{first} 至 {last}：最低 {low}，最高 {high}',
+  'markets.event.relHead': '相对大盘（SPY）· 消息前一天 = 100',
+  'markets.event.relSaid': '相对大盘，消息前一天 = 100：最低 {low}，最高 {high}',
+  'markets.event.noRel': '视图没有保留这个事件相对大盘的走势',
+  'markets.event.filled': '{source} 补齐',
 
   // the Desk tab's view (host/desk-view.js): the server's status lines re-spelt from its fields — the desk, the phone, the
   // budget, the standing orders, the watch by market, the alerts, the filings, the files — and the gaps and the latencies

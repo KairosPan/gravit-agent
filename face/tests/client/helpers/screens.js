@@ -29,7 +29,7 @@ import { reducers as R } from '../../../client/js/reducers/index.js';
 import { emptyState } from '../../../client/js/data/empty.js';
 import { MIN } from '../../../client/js/time.js';
 import { VIEW_1027 } from './lunhui-view.js';
-import { EVENT_VIEW, EVENT_VIEW_ID } from './event-view.js';
+import { EVENT_VIEW, EVENT_VIEW_ID, EVENT_VIEW_WITH_B } from './event-view.js';
 import { stockDrawerHtml } from '../../../client/js/render/lunhui/stock.js';
 import { deskStatus } from './desk-status.js';
 import { editorHtml, dropOverlay, lightboxHtml } from '../../../client/js/composer/view.js';
@@ -414,7 +414,31 @@ export function namedStates() {
   return [
     ['thread-event-table', { ...thread, analog: { tasks: {}, views } }],
     ['task-event-table', { ...page, analog: { tasks: { wt: read }, views } }],
+    ['market-event-window', marketEventWindow()],
   ];
+}
+
+// a stock's page at an event (analog event table Task 9): WYNN at 2018-01-26 from the NVDA view with WYNN's second event, its
+// window's bars the view's WYNN window on weekdays from 2017-12-15, read from Nasdaq
+function marketEventWindow() {
+  const fx = name => JSON.parse(readFileSync(new URL(`../../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
+  const all = fx('explore-all');
+  const nvda = all.items.find(i => i.key === 'stock:NVDA');
+  all.items.push({ ...nvda, key: 'stock:WYNN', base: 'WYNN', name: 'Wynn Resorts', at: nvda.at.map(l => ({ ...l, symbol: 'WYNN' })) });
+  const rows = EVENT_VIEW_WITH_B.cases[0].window;
+  const candles = [];
+  for (let t = Date.parse('2017-12-15T14:30:00Z'); candles.length < rows.length; t += 86_400_000) {
+    const wd = new Date(t).getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    const [, o, h, l, c, v] = rows[candles.length];
+    candles.push({ t, o, h, l, c, v });
+  }
+  const route = { screen: 'markets', id: 'stock:WYNN', event: { at: '2018-01-26', view: EVENT_VIEW_ID, case: 'ev-WYNN-2018-01-26' } };
+  let s = R.exploreLoaded(R.setMarketsScope(R.nav(emptyState(), route), 'more'), { tab: 'all', data: all, at: NOW });
+  s = R.statementLoaded(R.holdingsLoaded(R.accountLoaded(s, { data: fx('account'), at: NOW }), { data: fx('holdings'), at: NOW }), { data: fx('statement'), at: NOW });
+  s = R.eventBarsLoaded(s, { key: 'stock:WYNN@2018-01-26', at: NOW,
+    data: { ok: true, candles, source: 'Nasdaq · WYNN', adjustment: 'split-adjusted, not dividend-adjusted', more: true } });
+  return { ...s, analog: { tasks: {}, views: { [EVENT_VIEW_ID]: { status: 'loaded', view: EVENT_VIEW_WITH_B } } } };
 }
 
 // Get a code and Settings › Devices (sign-only-money Task 7)

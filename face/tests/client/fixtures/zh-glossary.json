@@ -96,7 +96,11 @@
     {"en":"perp","zh":"永续合约","note":"perpetual contracts (the Perps tab)"},
     {"en":"event","zh":"事件合约","note":"event contracts (a prediction market's tile)", "except": {
       "analog.table.counts": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"},
-      "analog.table.caveats": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"}}},
+      "analog.table.caveats": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"},
+      "markets.event.range": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"},
+      "markets.event.from": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"},
+      "markets.event.gone": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"},
+      "markets.event.noRel": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"}}},
     {"en":"shares","zh":"股","note":"A shares → A 股, {n} shares → {n} 股"},
     {"en":"watchlist","zh":"自选","note":"the saved watch list of markets"},
     {"en":"Biggest moves","zh":"涨跌幅榜","note":"the movers sort of Markets"},

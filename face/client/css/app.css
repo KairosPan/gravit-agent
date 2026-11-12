@@ -338,6 +338,38 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .et-src, .et-market { color: var(--accent-ink); font-weight: 600; }
 .et-state { font-size: calc(12px * var(--fs)); color: var(--dim); text-align: center; padding: 4px 0; }
 .et-state.et-failed { color: var(--warn-text); }
+/* a stock's page at an event (analog event table Task 9): the banner above the price, the window's card, its candles and marks */
+.ew-banner { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; padding: 10px 12px; border-radius: var(--radius-s); background: var(--accent-soft); overflow-wrap: anywhere; }
+.ew-banner-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+.ew-from { font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--accent-ink); }
+.ew-back { font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--accent-ink); }
+.ew-banner-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+.ew-group { font-size: calc(12px * var(--fs)); font-weight: 700; color: var(--text); }
+.ew-label { font-size: calc(14px * var(--fs)); font-weight: 700; color: var(--text); }
+.ew-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--surface); }
+.ew-card-head, .ew-rel-head { font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--dim); font-variant-numeric: tabular-nums; }
+.ew-chart, .ew-rel { display: block; width: 100%; height: auto; }
+.ew-chart text, .ew-rel text { font-size: calc(10px * var(--fs)); fill: var(--dim); font-variant-numeric: tabular-nums; }
+.ew-price, .ew-tick, .ew-mark-label { fill: var(--dim); }
+.ew-grid { stroke: var(--border); stroke-width: 1; }
+.ew-body.up { fill: var(--up); }
+.ew-body.down { fill: var(--down); }
+.ew-wick { stroke-width: 1; }
+.ew-wick.up { stroke: var(--up); }
+.ew-wick.down { stroke: var(--down); }
+.ew-band { fill: var(--accent-soft); }
+.ew-day0 { stroke: var(--accent-ink); stroke-width: 1.5; }
+.ew-chart .ew-day0-label { fill: var(--accent-ink); font-weight: 700; }
+.ew-mark { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; }
+.ew-flag rect { fill: var(--surface-2); }
+.ew-flag.up rect { fill: var(--up-fill); }
+.ew-flag.down rect { fill: var(--down-fill); }
+.ew-chart .ew-flag text { font-weight: 600; fill: var(--dim); }
+.ew-chart .ew-flag.up text { fill: var(--up); }
+.ew-chart .ew-flag.down text { fill: var(--down); }
+.ew-rel-base { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 4 3; }
+.ew-rel-line { fill: none; stroke: var(--accent-ink); stroke-width: 1.5; }
+.ew-caption { margin: 0; }
 .lh-ix-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
 .lh-ix { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 8px; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-2); color: var(--text); text-align: left; }
 .lh-ix.pressed { border-color: var(--text); background: var(--surface); }

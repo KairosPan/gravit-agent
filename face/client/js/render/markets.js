@@ -22,6 +22,7 @@ import { price, number } from '../wire/market-model.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
 import { seg } from './controls.js';
 import { candlesSvg, sessionsSvg } from './chart.js';
+import { eventOf, eventBannerHtml, eventRangesHtml, eventHistoryHtml } from './event-window.js';
 import { orderWords, marketKeysOn, marketKey, changeKey, positionKeys, positionSideWord, statementStatusWord, statementByWord } from './account.js';
 import { marketLeverageSeedOf } from '../host/sheet-market.js';
 import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf, fundingMissingOf } from '../host/market-depth-view.js';
@@ -367,7 +368,9 @@ function accountPage(id, view, state, now) {
   const moved = (unit === 'cents' ? priced.change24h : priced.changePct) !== null;
   const outcomes = view.outcomes.map(o => `<span class="mk-out">${esc(`${o.label} ${priceWord(o.cents, 'cents')}`)}</span>`);
   const facts = [[th('markets.fact.volume'), volumeWordOf(priced)], [th('account.tab.venues'), String(view.legs.length)]];
-  const top = `<div class="mk-d-px"><span class="mk-big">${esc(priceWord(view.price, unit))}</span>${moved ? `${moveHtml(priced)}<span class="mk-basis">24h</span>` : ''}</div>` +
+  // a stock's page at an event (analog event table Task 9): the banner above the price, its window in place of the history
+  const ev = eventOf(state, id);
+  const top = `${ev ? eventBannerHtml(ev) : ''}<div class="mk-d-px"><span class="mk-big">${esc(priceWord(view.price, unit))}</span>${moved ? `${moveHtml(priced)}<span class="mk-basis">24h</span>` : ''}</div>` +
     `${outcomes.length ? `<div class="mk-outs">${outcomes.join('')}</div>` : ''}${view.sourceWord ? `<p class="mk-asof">${esc(view.sourceWord)}</p>` : ''}` +
     planHtml(markOf(state.desk?.data, id)) +
     `<dl class="mk-facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
@@ -378,11 +381,14 @@ function accountPage(id, view, state, now) {
   // closes kept for the range, with the Account's own words under them, or No history when it answered with fewer than two —
   // kept while the range is read again; Loading… while a range not drawn yet is read; nothing before a read
   const h = view.history;
-  const svg = h.current ? candlesSvg(view.candles.candles, { unit, range: view.range }) : '';
-  const failed = h.status === 'error' ? note(h.message || t('markets.history.unavailable')) : '';
-  const closesDrawn = h.current ? (svg ? svg + note([view.candles.ends, view.candles.note].filter(w => typeof w === 'string' && w.trim() !== '').join(' · ')) : note(t('markets.history.none')))
-    : h.status === 'loading' ? note(t('common.loading')) : '';
-  left.push(section(th('markets.history.title'), failed + closesDrawn, seg(candleRanges(), view.range, 'setRange', { 'data-id': id })));
+  if (ev) left.push(section(th('markets.history.title'), eventHistoryHtml(ev, now), eventRangesHtml(id)));
+  else {
+    const svg = h.current ? candlesSvg(view.candles.candles, { unit, range: view.range }) : '';
+    const failed = h.status === 'error' ? note(h.message || t('markets.history.unavailable')) : '';
+    const closesDrawn = h.current ? (svg ? svg + note([view.candles.ends, view.candles.note].filter(w => typeof w === 'string' && w.trim() !== '').join(' · ')) : note(t('markets.history.none')))
+      : h.status === 'loading' ? note(t('common.loading')) : '';
+    left.push(section(th('markets.history.title'), failed + closesDrawn, seg(candleRanges(), view.range, 'setRange', { 'data-id': id })));
+  }
   // Across venues: the lines the owner connected, the best marked, Paper where so; a public listing leads to Venues to connect
   const venues = view.legs.map(l => line('·',
     `${esc([l.venueName || l.venue, l.symbol, priceWord(l.price, unit)].filter(Boolean).join(' · '))}${l.best ? ` ${tag(t('markets.tag.best'))}` : ''}${l.paper ? ` ${tag(t('markets.tag.paper'))}` : ''}`,

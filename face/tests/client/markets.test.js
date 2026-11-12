@@ -16,6 +16,9 @@ import { createStore } from '../../client/js/store.js';
 import { startMarkets } from '../../client/js/host/markets.js';
 import { getJsonVia } from '../../client/js/app.js';
 import { withTable } from '../../client/js/i18n/words.js';
+import { ZH } from '../../client/js/i18n/zh.js';
+import { nyDay } from '../../client/js/host/event-window.js';
+import { EVENT_VIEW_ID, EVENT_VIEW_WITH_B, WYNN_B_CASE } from './helpers/event-view.js';
 
 // the renderer's clock: the stand-in's day — its statement is from that morning, its events close after it
 const NOW = Date.parse('2026-10-22T12:00:00.000Z');
@@ -1040,4 +1043,152 @@ test("a market page's conversation titles are masked", () => {
   const { html } = screen({ route: { screen: 'markets', id: 'coin:BTC' }, account: true, conversations: [conv('s1', { title: `BTC with ${SK}` })] });
   assert.ok(html.includes(`<div class="mk-t1">BTC with sk-proj-${'*'.repeat(SK.length - 8)}</div>`));
   assert.doesNotMatch(html, /aB3dE6fG9h/);
+});
+
+// ---- a stock's page at an event (analog event table Task 9): the window as daily candles, marked, against the market
+
+const WYNN_A = 'ev-WYNN-2018-01-26';
+const AT = '2018-01-26';
+const KEY = `stock:WYNN@${AT}`;
+// WYNN as All lists it: NVDA's row under WYNN's name and symbol
+const wynnItem = () => {
+  const nvda = itemOf(fx('explore-all'), 'stock:NVDA');
+  return { ...nvda, key: 'stock:WYNN', base: 'WYNN', name: 'Wynn Resorts', at: nvda.at.map(l => ({ ...l, symbol: 'WYNN' })) };
+};
+const allWithWynn = () => { const all = fx('explore-all'); all.items.push(wynnItem()); return all; };
+// the view's WYNN window (k = −30…60, o h l c v) on weekdays from 2017-12-15 at 09:30 New York, so k = 0 is 2018-01-26 and
+// WYNN's second event (day 0 2018-02-07) k = 8; `after` bars after day 0 at most
+function wynnBars(after = 60) {
+  const rows = EVENT_VIEW_WITH_B.cases[0].window.filter(([k]) => k <= after);
+  const bars = [];
+  for (let t = Date.parse('2017-12-15T14:30:00Z'); bars.length < rows.length; t += 86_400_000) {
+    const wd = new Date(t).getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    const [, o, h, l, c, v] = rows[bars.length];
+    bars.push({ t, o, h, l, c, v });
+  }
+  return bars;
+}
+const answer = (after = 60) => ({ ok: true, candles: wynnBars(after), source: 'Nasdaq · WYNN', adjustment: 'split-adjusted, not dividend-adjusted', more: true });
+const eventRoute = (over = {}) => ({ screen: 'markets', id: 'stock:WYNN', event: { at: AT, view: EVENT_VIEW_ID, case: WYNN_A, ...over } });
+// the page at the event, its window landed (or `bars` as given), its view as the analog slice holds it, drawn in Chinese
+function eventPage({ route = eventRoute(), bars = answer(), view = { status: 'loaded', view: EVENT_VIEW_WITH_B } } = {}) {
+  let { s } = screen({ route, all: allWithWynn(), account: true });
+  const key = `stock:WYNN@${route.event.at}`;
+  if (bars) s = R.eventBarsLoaded(s, { key, data: bars, at: NOW });
+  if (view) s = { ...s, analog: { tasks: {}, views: { [EVENT_VIEW_ID]: view } } };
+  return { s, html: withTable(ZH, () => renderMarketsScreen(s, NOW)) };
+}
+const svgOf = html => html.match(/<svg class="ew-chart"[\s\S]*?<\/svg>/)?.[0] ?? '';
+const bannerOf = html => html.match(/<div class="ew-banner">[\s\S]*?(?=<div class="mk-d-px">)/)?.[0] ?? '';
+
+test("a stock's page at an event: the banner, 事件前后 pressed, the candles marked, against the market, the caption", () => {
+  const { html } = eventPage();
+  assert.equal(nyDay(wynnBars()[30].t), AT);
+  // the banner above the price: where it came from, the case's group, date and timing, label, note and three chips, a link back
+  const banner = bannerOf(html);
+  assert.ok(banner, html.slice(0, 2000));
+  assert.ok(html.indexOf('class="ew-banner"') < html.indexOf('class="mk-big"'), 'above the price');
+  assert.ok(banner.includes('从「事件对标」跳来'));
+  assert.match(banner, /<a class="ew-back" href="#\/messages">回到消息 ›<\/a>/);
+  assert.ok(banner.includes('>A 创始人/被查·在任<'));
+  assert.ok(banner.includes('>2018-01-26<'));
+  assert.ok(banner.includes('>盘中<'));
+  assert.ok(banner.includes('>Wynn Resorts · Steve Wynn<'));
+  assert.ok(banner.includes('>WSJ 性行为不端报道，盘中；当日仍为董事长兼 CEO<'));
+  assert.deepEqual([...banner.matchAll(/<span class="et-chip (\w+)"><span class="et-chip-label">([^<]+)<\/span>([^<]+)<\/span>/g)].map(m => m.slice(1)),
+    [['down', '当天', '−11.2%'], ['down', '5 天', '−14.6%'], ['up', '60 天', '+2.0%']]);
+  // the range: 事件前后 first and pressed, then 1D…MAX
+  const history = section(html, '价格历史');
+  const items = [...history.matchAll(/<button type="button" class="seg-item( pressed)?" aria-pressed="(true|false)" data-action="setRange" data-value="([^"]+)" data-id="stock:WYNN">([^<]+)</g)].map(m => [m[3], m[2], m[4]]);
+  assert.deepEqual(items[0], ['event', 'true', '事件前后']);
+  assert.deepEqual(items.slice(1).map(i => i[0]), CANDLE_RANGES);
+  assert.ok(items.slice(1).every(i => i[1] === 'false'));
+  // the card titled with the window's first and last dates; the candles, day 0 and WYNN's other event in the window
+  const bars = wynnBars();
+  assert.ok(history.includes(`>${nyDay(bars[0].t)} 至 ${nyDay(bars[90].t)}<`), 'the card title');
+  const svg = svgOf(history);
+  assert.equal([...svg.matchAll(/class="ew-body (up|down)"/g)].length, 91);
+  assert.ok(svg.includes('>01-26 Wynn Resorts · Steve Wynn</text>'));
+  assert.ok(svg.includes('>B 创始人/当天离任</text>'), 'the other event, labelled with its group');
+  assert.ok(svg.includes('>5 天 −14.6%</text>'));
+  assert.ok(svg.includes('>60 天 +2.0%</text>'));
+  assert.doesNotMatch(history, /class="mk-chart"/, 'no close line');
+  // against the market, from the case's rel; the caption: the answer's source, its adjustment, and Nasdaq filled the window
+  assert.ok(history.includes('相对大盘（SPY）· 消息前一天 = 100'));
+  assert.match(history, /<svg class="ew-rel" /);
+  assert.ok(history.includes('<p class="mk-note ew-caption">Nasdaq · WYNN · split-adjusted, not dividend-adjusted · Nasdaq 补齐</p>'));
+});
+
+test("the event page's window: Loading…, a failed read's words, no bar on the day", () => {
+  const loading = eventPage({ bars: null });
+  assert.match(section(loading.html, '价格历史'), /<p class="mk-note">加载中…<\/p>/);
+  assert.equal(svgOf(loading.html), '');
+  const failed = withTable(ZH, () => renderMarketsScreen(R.eventBarsFailed(loading.s, { key: KEY, at: NOW, message: 'Nasdaq did not answer' }), NOW));
+  assert.match(section(failed, '价格历史'), /<p class="mk-note">Nasdaq did not answer<\/p>/);
+  assert.equal(svgOf(failed), '');
+  const none = eventPage({ bars: { ...answer(), candles: wynnBars().filter((_, i) => i !== 30) } });
+  assert.ok(section(none.html, '价格历史').includes('2018-01-26 没有日线'));
+});
+
+test('a case whose rel is null draws the sentence, not the line (Review Focus 4)', () => {
+  const { html } = eventPage({ route: eventRoute({ at: WYNN_B_CASE.day0, case: WYNN_B_CASE.id }) });
+  const history = section(html, '价格历史');
+  assert.ok(svgOf(history));
+  assert.ok(history.includes('视图没有保留这个事件相对大盘的走势'));
+  assert.doesNotMatch(history, /class="ew-rel"/);
+  assert.ok(bannerOf(html).includes('>B 创始人/当天离任<'));
+  // its day 0 labelled with its own label, the first event the other mark
+  assert.ok(svgOf(history).includes('>02-07 Wynn Resorts · Steve Wynn resigns</text>'));
+  assert.ok(svgOf(history).includes('>A 创始人/被查·在任</text>'));
+});
+
+test('+60 is not flagged when the window holds fewer than 61 bars after day 0 (Review Focus 2)', () => {
+  const svg = svgOf(eventPage({ bars: answer(40) }).html);
+  assert.equal([...svg.matchAll(/class="ew-body /g)].length, 71);
+  assert.ok(svg.includes('>5 天 −14.6%</text>'));
+  assert.doesNotMatch(svg, /60 天/);
+});
+
+test('a view no longer kept still draws the window and day 0, and says the view is no longer kept', () => {
+  const { html } = eventPage({ view: { status: 'failed', error: 'HTTP 404', gone: true } });
+  const svg = svgOf(html);
+  assert.equal([...svg.matchAll(/class="ew-body /g)].length, 91);
+  assert.match(svg, /<line class="ew-day0" /);
+  assert.ok(svg.includes('>01-26</text>'));
+  assert.doesNotMatch(svg, /ew-flag|ew-mark"/);
+  assert.ok(bannerOf(html).includes('对标视图已不再保留这个事件'));
+  assert.doesNotMatch(html, /相对大盘（SPY）/);
+  // the view's texts are masked and escaped: a key in a label is not drawn, markup is text
+  const key = 'sk-ant-api03-' + 'a'.repeat(40);
+  const view = { ...EVENT_VIEW_WITH_B, cases: EVENT_VIEW_WITH_B.cases.map(c => (c.id === WYNN_A ? { ...c, label: `<b>Wynn</b> ${key}`, note: '<img src=x>' } : c)) };
+  const masked = eventPage({ view: { status: 'loaded', view } }).html;
+  assert.doesNotMatch(masked, /<b>Wynn|<img src=x>/);
+  assert.ok(!masked.includes(key), 'the key is masked');
+  assert.ok(masked.includes('&lt;b&gt;Wynn&lt;/b&gt;'));
+});
+
+test('choosing 1M on the event page navigates to the plain stock page and draws 1M; 事件前后 does nothing', async () => {
+  const route = eventRoute();
+  let { s } = screen({ route, all: allWithWynn(), account: true });
+  s = R.eventBarsLoaded(s, { key: KEY, data: answer(), at: NOW });
+  const store = createStore({ initial: s, reducers: R });
+  const storage = { getItem: () => null, setItem() {}, removeItem() {} };
+  const win = { location: { hash: '#/markets/stock:WYNN?at=2018-01-26&view=an-20261112-50c20b08&case=ev-WYNN-2018-01-26' }, addEventListener() {}, removeEventListener() {} };
+  const reads = [];
+  const getJson = async path => { reads.push(path); return path.includes('/candles?') && path.includes('range=1M') ? { ...fx('candles'), range: '1M' } : { ok: false }; };
+  const markets = startMarkets({ store, getJson, storage, win, stream: { follow() {} }, schedule: () => null, cancelTimer() {}, now: () => NOW });
+  markets.range('stock:WYNN', 'event');
+  assert.equal(win.location.hash, '#/markets/stock:WYNN?at=2018-01-26&view=an-20261112-50c20b08&case=ev-WYNN-2018-01-26', '事件前后 is where it is');
+  assert.deepEqual(store.get().route, route);
+  markets.range('stock:WYNN', '1M');
+  assert.equal(win.location.hash, '#/markets/stock:WYNN');
+  assert.deepEqual(store.get().route, { screen: 'markets', id: 'stock:WYNN' });
+  for (let i = 0; i < 10; i++) await new Promise(r => setTimeout(r, 0));
+  assert.ok(reads.some(p => p.includes('/candles?') && p.includes('range=1M')), reads.join());
+  const history = section(renderMarketsScreen(store.get(), NOW), 'Price history');
+  assert.match(history, /class="seg-item pressed" aria-pressed="true" data-action="setRange" data-value="1M" data-id="stock:WYNN">1M</);
+  assert.doesNotMatch(history, /data-value="event"|ew-chart/);
+  assert.match(history, /class="mk-chart"/);
+  markets.close();
 });

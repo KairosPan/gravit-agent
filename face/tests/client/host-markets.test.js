@@ -2017,15 +2017,25 @@ test("a stock page at an event reads its window once from the US stocks line, be
   r.markets.close();
 });
 
-test("an event window's refusal lands failed with the market's words, and is not read again", async () => {
+test("an event window's refusal lands failed with the market's words; read once more each time the page is entered again (ruling 6)", async () => {
   const r = rig({ answer: p => (p.includes('since=') ? refused(400, { ok: false, error: 'since must be before before' }) : undefined) });
   const route = { screen: 'markets', id: 'stock:WYNN', event: { at: '2018-01-26' } };
   r.store.dispatch('nav', route);
   await settle();
   assert.deepEqual(r.m().event['stock:WYNN@2018-01-26'], { status: 'error', data: null, at: NOW, message: 'since must be before before' });
+  // staying on the page reads it no more, whatever else lands
+  r.store.dispatch('nav', route);
+  r.store.dispatch('setMarketsTab', 'stocks');
+  await settle();
+  assert.equal(r.reads.filter(p => p.includes('since=')).length, 1, 'not again while on the page');
+  // entered again: read once more, and failed again it waits for the next entry
   r.store.dispatch('nav', { screen: 'markets', id: null });
   r.store.dispatch('nav', route);
   await settle();
-  assert.equal(r.reads.filter(p => p.includes('since=')).length, 1);
+  assert.equal(r.reads.filter(p => p.includes('since=')).length, 2, 'once more on entering again');
+  assert.equal(r.m().event['stock:WYNN@2018-01-26'].status, 'error');
+  r.store.dispatch('nav', route);
+  await settle();
+  assert.equal(r.reads.filter(p => p.includes('since=')).length, 2);
   r.markets.close();
 });

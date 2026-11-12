@@ -1540,6 +1540,19 @@ export const EN = Object.freeze({
   'markets.chart.closes': 'Closes',
   'markets.chart.sessions': { one: 'The last session, {first} to {last}: low {low}, high {high}', other: 'The last {n} sessions, {first} to {last}: low {low}, high {high}' },
   'markets.chart.curve': '{label} from {first} to {last}',
+  // a stock's page at an event (analog event table Task 9): the banner, the range, the candles' card and the line against the market
+  'markets.event.range': 'Around the event',
+  'markets.event.from': 'From the event analogs',
+  'markets.event.back': 'Back to Messages ›',
+  'markets.event.gone': 'The analog view no longer keeps this event: Day 0 is drawn from its date alone',
+  'markets.event.span': '{first} to {last}',
+  'markets.event.failed': 'The window’s daily bars could not be read',
+  'markets.event.noDay': 'No daily bar on {date}',
+  'markets.event.said': 'Daily candles, {first} to {last}: low {low}, high {high}',
+  'markets.event.relHead': 'Against the market (SPY) · the day before the news = 100',
+  'markets.event.relSaid': 'Against the market, the day before the news = 100: low {low}, high {high}',
+  'markets.event.noRel': 'The view did not keep this event’s line against the market',
+  'markets.event.filled': 'filled by {source}',
 
   // the Desk tab's view (host/desk-view.js): the server's status lines re-spelt from its fields — the desk, the phone, the
   // budget, the standing orders, the watch by market, the alerts, the filings, the files — and the gaps and the latencies

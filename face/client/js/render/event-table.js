@@ -12,7 +12,7 @@ import { eventTableOf, pct, toneOf } from '../host/event-table.js';
 // a text from the view: masked, then escaped
 const text = v => esc(maskExcerpt(v ?? ''));
 
-const TIMING = {
+export const TIMING = {
   pre: () => th('analog.timing.pre'),
   open: () => th('analog.timing.open'),
   post: () => th('analog.timing.post'),
@@ -23,7 +23,7 @@ const FLAG = {
   elsewhere: () => th('analog.row.elsewhere'),
 };
 
-const chip = ({ label, text: value, tone }) =>
+export const chip = ({ label, text: value, tone }) =>
   `<span class="${cls('et-chip', tone)}"><span class="et-chip-label">${esc(label)}</span>${esc(value)}</span>`;
 
 // the badge: verified with its source; without a source, unverified; with one not verified, its date unverified

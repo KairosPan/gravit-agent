@@ -6,6 +6,8 @@
 
 const DAY = 86_400_000;
 export const BEFORE = 30, AFTER = 60;
+/** The range a stock's page at an event opens on (Around the event), beside the Account's: never read, only drawn pressed. */
+export const EVENT_RANGE = 'event';
 const str = v => (typeof v === 'string' ? v : null);
 const list = v => (Array.isArray(v) ? v : []);
 
