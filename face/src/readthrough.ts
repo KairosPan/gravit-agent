@@ -69,14 +69,17 @@ interface ReadThroughWiring {
   usSessionOn(): boolean;
 }
 
-/** The service's prices: each symbol asked of `quotes` as a US share, the prints in the order asked. Rejects with
- * the source's `unavailable` when it has no price at all, and with the snapshot's rejection. */
+/** The service's prices: each symbol asked of `quotes` as a US share, the prints in the order asked, each the quote
+ * whose `id` is that asset's - never the quote at its place, so a payload that drops or reorders one prices no wrong
+ * name; a symbol with no quote of its id is a print with no price and no change. Rejects with the source's
+ * `unavailable` when it has no price at all, and with the snapshot's rejection. */
 export function readThroughPrices(quotes: Pick<MarketQuoteSource, "snapshot" | "unavailable">): (symbols: string[]) => Promise<ReadThroughPrint[]> {
   return async (symbols) => {
     if (quotes.unavailable !== undefined) throw new Error(quotes.unavailable);
     const payload = await quotes.snapshot(symbols.map((symbol) => ({ id: idOf("us", symbol), market: "us", symbol })));
-    return symbols.map((symbol, i) => {
-      const q = payload.quotes[i];
+    const byId = new Map(payload.quotes.map((q) => [q.id, q] as const));
+    return symbols.map((symbol) => {
+      const q = byId.get(idOf("us", symbol));
       return { symbol, price: q?.price ?? null, changePct: q?.change_pct ?? null, feed: q?.feed ?? "", asOf: q?.as_of ?? null };
     });
   };

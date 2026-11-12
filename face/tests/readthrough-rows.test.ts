@@ -31,12 +31,13 @@ function fakeScope() {
   return { ctx, provided, tools };
 }
 /** A mounted, wired service over a scratch record - or over `dir`, an earlier one's, as after a restart; `rows` are
- * the prices by symbol and `state.now` the service's clock, each changeable between calls. */
+ * the prices by symbol, `state.now` the service's clock and `state.desk` the desk's symbols, each changeable between
+ * calls. */
 async function mounted(t: { after(fn: () => Promise<unknown>): unknown }, wire = true, dir?: string) {
   const recordDir = dir ?? join(await mkdtemp(join(tmpdir(), "readthrough-rows-")), "readthrough");
   if (dir === undefined) t.after(() => rm(join(recordDir, ".."), { recursive: true, force: true }));
   const scope = fakeScope();
-  const state = { on: true, fail: undefined as string | undefined, now: AT };
+  const state = { on: true, fail: undefined as string | undefined, now: AT, desk: ["CRWV", "SPY"] };
   serviceRow.apply(scope.ctx, { recordDir, universe: ["NVDA", "AMD", "AVGO", "INTC"], now: () => new Date(state.now) });
   const service = scope.provided.get("readThrough") as any;
   const tools = scope.tools;
@@ -50,7 +51,7 @@ async function mounted(t: { after(fn: () => Promise<unknown>): unknown }, wire =
       if (state.fail !== undefined) throw new Error(state.fail);
       return symbols.map((symbol) => ({ symbol, price: null, changePct: null, feed: "robinhood", asOf: AT, ...(rows[symbol] as Partial<(typeof rows)[string]> | undefined) }));
     },
-    deskSymbols: async () => ["CRWV", "SPY"], usSessionOn: () => state.on,
+    deskSymbols: async () => state.desk, usSessionOn: () => state.on,
   });
   return { service, rows, asked, state, recordDir, scope, tools };
 }
@@ -215,6 +216,24 @@ test("later re-prices a recorded direction; a no-direction, an unknown event and
   assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), ["推演（11-09 04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
   state.fail = "down";
   assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), []);
+});
+
+test("later names only the rivals still inside the fence, and writes no line with none left", async (t) => {   // final review M2
+  const { service, state } = await mounted(t);
+  service.open("s-1", RUN);
+  const { id } = await service.propose({ ...ARGS, peers: [{ symbol: "AMD", reason: "数据中心 GPU 的直接替代" }, { symbol: "CRWV", reason: "在桌面的文件里" }] }, { sessionId: "s-1", desk: true });
+  await service.sent([id], true);
+  const event = [{ symbol: "NVDA", ref: "2026-11-06" }];
+  assert.deepEqual(await service.later(event), ["推演（04:03 ET 已给）：做多 AMD，此后 0.0%；做多 CRWV，此后 0.0%"]);
+  state.desk = [];   // CRWV left the desk's files
+  assert.deepEqual(await service.later(event), ["推演（04:03 ET 已给）：做多 AMD，此后 0.0%"]);
+
+  const other = await mounted(t);
+  other.service.open("s-1", RUN);
+  const only = await other.service.propose({ ...ARGS, peers: [{ symbol: "CRWV", reason: "在桌面的文件里" }] }, { sessionId: "s-1", desk: true });
+  await other.service.sent([only.id], true);
+  other.state.desk = [];
+  assert.deepEqual(await other.service.later(event), [], "no rival left: no line");
 });
 
 test("sent writes one line an id", async (t) => {

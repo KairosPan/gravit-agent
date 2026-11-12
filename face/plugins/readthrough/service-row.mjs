@@ -9,7 +9,8 @@
  * `{ symbol, ref, since }` it asks - a print at or after `since`, the instant its event's session began, is the
  * market's reaction, one before it reads `未成交`; `close(sessionId)`, the blocks that run accepted, in call order, the
  * run then forgotten; `given(symbol, ref)`, whether a direction for that event is on record as sent (its latest
- * `sent` line true); `later(items)`, a re-priced line for each such direction that named rivals; `sent(ids, sent)`, one
+ * `sent` line true); `later(items)`, a re-priced line for each such direction that named rivals, naming only those
+ * still inside the fence the call passed, read again now, and no line with none left; `sent(ids, sent)`, one
  * `sent` line an id; and `propose(raw, { sessionId, desk })`, which checks a call (an index fund of `NEVER` is never
  * the company), prices it, renders its block and then records it, so a render that throws records nothing. Every
  * `propose` runs on one promise chain for the service; a run keeps the symbols it has accepted, so the second of two calls for one company in a run - arriving
@@ -179,17 +180,23 @@ export function apply(ctx, config) {
       const lines = [];
       for (const { symbol, ref } of items) {
         const entry = await record.given(symbol, ref);
-        if (entry === undefined || entry.peers.length === 0 || wiring === undefined) continue;
+        const w = wiring;
+        if (entry === undefined || entry.peers.length === 0 || w === undefined) continue;
+        let peers;
         let quotes;
         try {
-          quotes = await wiring.prices(entry.peers.map((p) => p.symbol));
+          // the fence the call passed, read now: a rival no longer inside it is left out of the line
+          const fence = fenceOf({ universe, desk: await w.deskSymbols(), stricken: entry.symbol });
+          peers = entry.peers.filter((p) => fence.has(p.symbol));
+          if (peers.length === 0) continue;
+          quotes = await w.prices(peers.map((p) => p.symbol));
         } catch {
           continue;
         }
         const line = renderLater({
           givenAt: entry.t,
           now: now().toISOString(),
-          peers: entry.peers.map((p, i) => ({ symbol: p.symbol, then: p.price, now: quotes[i]?.price ?? null })),
+          peers: peers.map((p, i) => ({ symbol: p.symbol, then: p.price, now: quotes[i]?.price ?? null })),
         });
         if (line !== null) lines.push(line);
       }

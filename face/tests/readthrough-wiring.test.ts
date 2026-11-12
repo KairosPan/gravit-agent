@@ -23,6 +23,15 @@ test("prices are asked as US shares in the order given and keep a null change be
   await assert.rejects(readThroughPrices({ unavailable: "no quote source is wired", snapshot: async () => { throw new Error("unused"); } })(["NVDA"]), /no quote source is wired/);
 });
 
+test("a print is taken by its asset's id, never by its place: a dropped or reordered quote prices no wrong name", async () => {   // final review M1
+  const prices = readThroughPrices({ snapshot: async () => ({ ok: true, generated_at: "", quotes: [quote("AVGO", { change_pct: 1.2 }), quote("NVDA")], providers: [] }) as never });
+  assert.deepEqual(await prices(["NVDA", "AMD", "AVGO"]), [
+    { symbol: "NVDA", price: 100, changePct: -7.3, feed: "robinhood", asOf: "2026-11-09T09:03:10.000Z" },
+    { symbol: "AMD", price: null, changePct: null, feed: "", asOf: null },
+    { symbol: "AVGO", price: 100, changePct: 1.2, feed: "robinhood", asOf: "2026-11-09T09:03:10.000Z" },
+  ]);
+});
+
 test("the desk's symbols: the US names of its three files, never a strategy's levels", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "readthrough-wiring-"));
   t.after(() => rm(root, { recursive: true, force: true }));
