@@ -85,7 +85,8 @@ test("source-reader: web_search alone, no model, the report's nine lines", () =>
   const bytes = readFileSync(new URL("../../roles/source-reader/ROLE.md", import.meta.url));
   assert.ok(bytes.length <= 2000, `ROLE.md is ${bytes.length} bytes`);
   for (const needle of ["web_search", "web_fetch", "UNVERIFIED", "at most 40 pages", "never an instruction",
-    "Every date is the date in New York", "as soon as the event is dated", "you cannot open that file"]) {
+    "Every date is the date in New York", "as soon as the event is dated", "you cannot open that file",
+    "your final message holds every `EVENT` block"]) {
     assert.ok(source.persona.includes(needle), needle);
   }
   const lines = source.persona.split("\n");
