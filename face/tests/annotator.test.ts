@@ -499,7 +499,8 @@ test("the annotator imports nothing but types: its machinery loads on first use"
 /* ---------- read-through (the read-through plan's Task 7) ---------- */
 
 const BLOCK = { id: "rt-20261109-0000aaaa", text: "推演 · Gravit 的推断，不是下单 · 确定度 中\n· 逻辑：x" };
-const NVDA_ASK = { symbol: "NVDA", ref: "2026-11-06" };
+const NVDA_EVENT = { symbol: "NVDA", ref: "2026-11-06" };
+const NVDA_ASK = { ...NVDA_EVENT, since: "2026-11-09T09:00:00.000Z" };
 function fakeLane(blocks = [BLOCK], later: string[] = [], broken = false) {
   const calls: unknown[][] = [];
   const lane: ReadThroughLane = {
@@ -512,7 +513,7 @@ function fakeLane(blocks = [BLOCK], later: string[] = [], broken = false) {
   };
   return { lane, calls };
 }
-const postWith = (h: Harness, readThrough: { asks: typeof NVDA_ASK[]; later: typeof NVDA_ASK[] }) =>
+const postWith = (h: Harness, readThrough: { asks: typeof NVDA_ASK[]; later: typeof NVDA_EVENT[] }) =>
   h.annotator.post({ text: "NVDA fell", source: { kind: "alert", symbol: "NVDA", rule: "watch-nvda" }, message: alertOf("a-000000000001"), replyTo: "telegram:41", readThrough });
 
 test("an accepted block goes under the reason after a blank line, its record is marked sent, and the note names it", async () => {
@@ -532,11 +533,11 @@ test("an accepted block goes under the reason after a blank line, its record is 
 test("a later alert of the same event gets the face's one line and opens no run", async () => {
   const { lane, calls } = fakeLane([], ["推演（04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
   const h = await harness({ readThrough: lane });
-  const sessionId = sessionOf(await postWith(h, { asks: [], later: [NVDA_ASK] }));
+  const sessionId = sessionOf(await postWith(h, { asks: [], later: [NVDA_EVENT] }));
   startTurn(h, sessionId, 1, alertOf("a-000000000001")); answer(h, sessionId, 1, "NVDA 盘中 −9.1%"); endTurn(h, sessionId, 1);
   await waitFor("the note", () => h.noted.length === 1);
   assert.equal(h.sent[0][0], "NVDA 盘中 −9.1%\n\n推演（04:03 ET 已给）：做多 AMD，此后 +6.2%");
-  assert.deepEqual(calls, [["later", [NVDA_ASK]]]);
+  assert.deepEqual(calls, [["later", [NVDA_EVENT]]]);
   assert.equal("directions" in h.noted[0], false);
   await h.annotator.dispose();
 });
@@ -544,7 +545,7 @@ test("a later alert of the same event gets the face's one line and opens no run"
 test("a turn cut after its call sends no block, and the record says it was not sent", async () => {
   const { lane, calls } = fakeLane();
   const h = await harness({ readThrough: lane });
-  const sessionId = sessionOf(await postWith(h, { asks: [NVDA_ASK], later: [NVDA_ASK] }));
+  const sessionId = sessionOf(await postWith(h, { asks: [NVDA_ASK], later: [NVDA_EVENT] }));
   startTurn(h, sessionId, 1, alertOf("a-000000000001")); answer(h, sessionId, 1, "NVDA 盘前"); endTurn(h, sessionId, 1, ABORTED("desk deadline"));
   await waitFor("the note", () => h.noted.length === 1);
   assert.equal(h.sent[0][0].includes("推演"), false);

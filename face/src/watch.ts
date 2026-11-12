@@ -84,10 +84,10 @@ import { HttpError } from "./http.ts";
 import { nyInstant, sessionBefore, sessionFor, xnysPrevious, xnysWindow, type DayAnswer, type DeskCalendars, type MarketSession } from "./market-clock.ts";
 import type { NewsAnswer } from "./market-news.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
-import type { ReadThroughAsk, ReadThroughLane } from "./readthrough-lane.ts";
+import type { ReadThroughAsk, ReadThroughEvent, ReadThroughLane } from "./readthrough-lane.ts";
 import { idOf, type Market } from "./symbols.ts";
 import {
-  AFTER_HOURS_MS, alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, REBUILD_WINDOW_MS, rebuildDay, snapOf,
+  AFTER_HOURS_MS, alertId, batchDue, batchId, CLOSE_PRINT_MS, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, REBUILD_WINDOW_MS, rebuildDay, snapOf,
   takeBatch, watchQuoteOf,
   type AlertAnnotation, type AlertBatch, type AlertDelivered, type AlertHit, type AlertRecord, type Hit, type PriceKey, type WatchDay, type WatchQuote,
 } from "./watch-eval.ts";
@@ -1079,7 +1079,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     try {
       const ctx = hits.some(whyOf) ? await whyContext(hits) : undefined;
       if (stopped) return;
-      let readThrough: { asks: ReadThroughAsk[]; later: ReadThroughAsk[] } | undefined;
+      let readThrough: { asks: ReadThroughAsk[]; later: ReadThroughEvent[] } | undefined;
       let body: ReturnType<typeof whyPost> | undefined;
       if (ctx !== undefined) {
         try {
@@ -1113,20 +1113,20 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   }
 
   /** A why post's read-through, or none when it has nothing to ask: with `deps.readThrough` ready, each symbol of the
-   * US price moves that fell (`quote.chgPct` below 0), once in the hits' order, as `{ symbol, ref }` - the hit's
-   * reference close, else its date - asked `given`: false is an ask, true a later alert of an event already given; a
-   * `given` that rejects leaves the symbol out of both, with one line. `undefined` with no lane, a lane not ready, or
-   * both lists empty. */
-  async function readThroughOf(hits: readonly AlertHit[]): Promise<{ asks: ReadThroughAsk[]; later: ReadThroughAsk[] } | undefined> {
+   * US price moves that fell (`quote.chgPct` below 0), once in the hits' order, as `{ symbol, ref, since }` - the hit's
+   * reference close, else its date, and {@link sinceOf} it - asked `given`: false is an ask, true a later alert of an
+   * event already given, listed as `{ symbol, ref }`; a `given` that rejects leaves the symbol out of both, with one
+   * line. `undefined` with no lane, a lane not ready, or both lists empty. */
+  async function readThroughOf(hits: readonly AlertHit[]): Promise<{ asks: ReadThroughAsk[]; later: ReadThroughEvent[] } | undefined> {
     const lane = deps.readThrough;
     if (lane === undefined || !lane.ready()) return undefined;
     const candidates = new Map<string, ReadThroughAsk>();
     for (const hit of hits) {
       if (!whyOf(hit) || hit.quote === null || typeof hit.quote.chgPct !== "number" || !(hit.quote.chgPct < 0)) continue;
-      if (!candidates.has(hit.symbol)) candidates.set(hit.symbol, { symbol: hit.symbol, ref: hit.ref ?? hit.date });
+      if (!candidates.has(hit.symbol)) candidates.set(hit.symbol, { symbol: hit.symbol, ref: hit.ref ?? hit.date, since: sinceOf(hit, hit.quote.asOf) });
     }
     const asks: ReadThroughAsk[] = [];
-    const later: ReadThroughAsk[] = [];
+    const later: ReadThroughEvent[] = [];
     for (const candidate of candidates.values()) {
       let given: boolean;
       try {
@@ -1135,9 +1135,25 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         log(`${BIN}: desk: watch read-through: ${candidate.symbol} ${candidate.ref}: the record could not be read: ${errText(err)}`);
         continue;
       }
-      (given ? later : asks).push(candidate);
+      if (given) later.push({ symbol: candidate.symbol, ref: candidate.ref });
+      else asks.push(candidate);
     }
     return asks.length === 0 && later.length === 0 ? undefined : { asks, later };
+  }
+
+  /** The instant a US price hit's event's session began, ISO - a print at or after it is the market's reaction to the
+   * event (plugins/readthrough/service-row.mjs): for a hit in after-hours, that session day's regular close plus
+   * {@link CLOSE_PRINT_MS}, past the closing cross, whose change is still the whole day's; for any other, 04:00 ET of
+   * the hit's date, so a print of the evening before is not taken for the reaction. When the close cannot be told,
+   * `printAt`, the alert's own print. */
+  function sinceOf(hit: AlertHit, printAt: string): string {
+    let at: number | undefined;
+    try {
+      at = hit.phase === "after" ? knownCloseOf(hit.date) : Date.parse(nyInstant(hit.date, 4, 0));
+    } catch {
+      at = undefined;   // not a date
+    }
+    return at !== undefined && Number.isFinite(at) ? new Date(hit.phase === "after" ? at + CLOSE_PRINT_MS : at).toISOString() : printAt;
   }
 
   /** `work`, or why not: a rejection's reason, or {@link WHY_READ_MS} on the clock passing - when its signal aborts. */
@@ -1162,8 +1178,8 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     }
   }
 
-  /** The close instant of the US session dated `date`: the calendar's, else the XNYS rules', else 16:00 ET. */
-  function closeOf(date: string): number {
+  /** The close instant of the US session dated `date`: the calendar's, else the XNYS rules', else `undefined`. */
+  function knownCloseOf(date: string): number | undefined {
     const window = deps.calendars.us.window();
     const session = window === undefined ? undefined : sessionFor(window, date);
     if (session !== undefined && session !== "closed") return Date.parse(session.close);
@@ -1171,9 +1187,14 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       const rules = xnysWindow(date, 1).sessions[0];
       if (rules !== undefined) return Date.parse(rules.close);
     } catch {
-      /* not a date: the fallback below */
+      /* not a date */
     }
-    return Date.parse(nyInstant(date, 16, 0));
+    return undefined;
+  }
+
+  /** The close instant of the US session dated `date`: {@link knownCloseOf}, else 16:00 ET. */
+  function closeOf(date: string): number {
+    return knownCloseOf(date) ?? Date.parse(nyInstant(date, 16, 0));
   }
 
   /** What a why post reads besides its alerts (spec §5.3): the US symbols' headlines since the earliest reference

@@ -5,8 +5,13 @@
  * src/readthrough.ts, the rows and the face's wiring, imports what it needs heavier (desk-book, market-clock,
  * watch-eval, js-yaml through standing) and re-exports everything here, so its importers are unchanged. */
 
-/** One event an annotation run may give a direction for: the stricken symbol and its reference date, `YYYY-MM-DD`. */
-export interface ReadThroughAsk { symbol: string; ref: string }
+/** One event a direction is recorded under: the stricken symbol and its reference date, `YYYY-MM-DD`. A later alert
+ * names the events already given this way. */
+export interface ReadThroughEvent { symbol: string; ref: string }
+
+/** One event an annotation run may give a direction for: the event, and `since`, the ISO instant its session began -
+ * a print at or after it is the market's reaction, one before it reads `未成交` (src/watch.ts `readThroughOf`). */
+export interface ReadThroughAsk extends ReadThroughEvent { since: string }
 
 /** The service's calls the annotator and the watch use, inert while the row is not mounted. */
 export interface ReadThroughLane {
@@ -14,7 +19,7 @@ export interface ReadThroughLane {
   open(sessionId: string, run: { pass: string; asks: ReadThroughAsk[] }): void;
   close(sessionId: string): { id: string; text: string }[];
   given(symbol: string, ref: string): Promise<boolean>;
-  later(items: ReadThroughAsk[]): Promise<string[]>;
+  later(items: ReadThroughEvent[]): Promise<string[]>;
   sent(ids: string[], sent: boolean): Promise<void>;
 }
 

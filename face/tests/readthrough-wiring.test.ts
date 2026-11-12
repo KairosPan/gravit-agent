@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deskFenceSymbols, readThroughLane, readThroughPrices, refClose, usSessionOn, wireReadThrough } from "../src/readthrough.ts";
+import { deskFenceSymbols, readThroughLane, readThroughPrices, usSessionOn, wireReadThrough } from "../src/readthrough.ts";
 
 const at = (iso: string) => Date.parse(iso);
 const quote = (symbol: string, over: object = {}) => ({
@@ -43,11 +43,6 @@ test("a US session is on from 04:00 to 20:00 ET on a session day, to 17:00 on an
   ] as const) assert.equal(usSessionOn(at(iso)), on, iso);
 });
 
-test("refClose is a session's regular close, 13:00 ET on an early one, and nothing for a closed day", () => {
-  assert.deepEqual([refClose("2026-11-06"), refClose("2026-11-27"), refClose("2026-11-08"), refClose("not a date")],
-    ["2026-11-06T21:00:00.000Z", "2026-11-27T18:00:00.000Z", undefined, undefined]);
-});
-
 test("the lane reads the service at each call and is inert without one", async () => {
   const services: Record<string, unknown> = {};
   const lane = readThroughLane({ get: (key) => services[key] });
@@ -65,6 +60,7 @@ test("wireReadThrough wires the service through inject, each time it is provided
   provide!({ readThrough: { wire: (deps: unknown) => { wired.push(deps); } } });
   provide!({ readThrough: { wire: (deps: unknown) => { wired.push(deps); } } });   // the row reloaded
   assert.equal(wired.length, 2);
-  assert.deepEqual([wired[0].usSessionOn(), wired[0].refClose("2026-11-06"), await wired[0].deskSymbols()], [true, "2026-11-06T21:00:00.000Z", []]);
+  assert.deepEqual(Object.keys(wired[0]).sort(), ["deskSymbols", "prices", "usSessionOn"]);
+  assert.deepEqual([wired[0].usSessionOn(), await wired[0].deskSymbols()], [true, []]);
   assert.equal((await wired[0].prices(["NVDA"]))[0].changePct, -7.3);
 });

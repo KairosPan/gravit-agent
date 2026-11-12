@@ -18,7 +18,7 @@ import type { DeliverResult, PostResult } from "../src/desk-conversation.ts";
 import type { DeskLine } from "../src/conversation.ts";
 import type { EdgarFetch } from "../src/edgar.ts";
 import type { NewsAnswer } from "../src/market-news.ts";
-import type { ReadThroughAsk, ReadThroughLane } from "../src/readthrough.ts";
+import type { ReadThroughAsk, ReadThroughEvent, ReadThroughLane } from "../src/readthrough.ts";
 import { bjDate } from "../src/et.ts";
 import { HttpError } from "../src/http.ts";
 import { deskCalendars, type DeskCalendars, type MarketCalendar, type MarketSession } from "../src/market-clock.ts";
@@ -109,7 +109,7 @@ interface HarnessOpts {
   source?: FakeSource;
   wall?: WallClock;
   deliver?: (text: string, n: number) => DeliverResult | Promise<DeliverResult>;
-  post?: (input: { text: string; source: unknown; message: unknown; replyTo?: string; urgent?: boolean; readThrough?: { asks: ReadThroughAsk[]; later: ReadThroughAsk[] } }) => PostResult | Promise<PostResult>;
+  post?: (input: { text: string; source: unknown; message: unknown; replyTo?: string; urgent?: boolean; readThrough?: { asks: ReadThroughAsk[]; later: ReadThroughEvent[] } }) => PostResult | Promise<PostResult>;
   readThrough?: Pick<ReadThroughLane, "ready" | "given">;
   budget?: BudgetState;
   news?: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>;
@@ -1696,6 +1696,8 @@ test("a US move alert's post is a why post: its alert, its headlines since its r
 
 const FALL_START = { start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE } };
 const NVDA_EVENT = { symbol: "NVDA", ref: "2026-11-27" };
+/** A regular-session hit's ask: its event, and since 04:00 ET of the hit's date. */
+const NVDA_ASK = { ...NVDA_EVENT, since: "2026-11-30T09:00:00.000Z" };
 
 test("a fall on a company with nothing on record carries the ask and names the company", async () => {
   const asked: [string, string][] = [];
@@ -1703,8 +1705,22 @@ test("a fall on a company with nothing on record carries the ask and names the c
   await nvdaGap(h);
   await until("the post", () => h.posts.length === 1);
   assert.ok(h.posts[0].text.endsWith("It may be called for: NVDA."), h.posts[0].text.slice(-200));
-  assert.deepEqual(h.posts[0].readThrough, { asks: [NVDA_EVENT], later: [] });
+  assert.deepEqual(h.posts[0].readThrough, { asks: [NVDA_ASK], later: [] });
   assert.deepEqual(asked, [["NVDA", "2026-11-27"]]);
+  await h.watch.dispose();
+});
+
+test("an after-hours fall's ask counts prints from the close plus the closing cross's minute", async () => {   // final review I1
+  const h = await harness({ start: "2026-10-30T20:05:00Z", files: { "desk/rules.yml": INTC_RULE }, calendars: { us: dstWeek() }, news: fakeNews().read,
+    readThrough: { ready: () => true, given: async () => false } });
+  h.source.tables.us.set("INTC", us(70, "2026-10-30T20:04:59Z", 92.07));
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+  h.source.tables.us.set("INTC", us(69.5, "2026-10-30T20:05:19Z", 92.07));
+  await h.wall.advance(20_000);
+  await until("the post", () => h.posts.length === 1);
+  /* 16:00 EDT is 20:00Z; the closing cross's minute after it */
+  assert.deepEqual(h.posts[0].readThrough, { asks: [{ symbol: "INTC", ref: "2026-10-30", since: "2026-10-30T20:01:00.000Z" }], later: [] });
   await h.watch.dispose();
 });
 

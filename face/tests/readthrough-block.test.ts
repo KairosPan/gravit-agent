@@ -20,7 +20,7 @@ test("pctText signs with + and U+2212, one decimal, and writes zero bare", () =>
 });
 
 test("the block under an alert: head, logic, direction, tape with one shared stamp, counter", () => {
-  assert.equal(renderBlock({ direction: D, tape: TAPE, shut: false, forTask: false }), [
+  assert.equal(renderBlock({ direction: D, tape: TAPE, shut: false, forTask: false, now: AT }), [
     "推演 · Gravit 的推断，不是下单 · 确定度 中",
     "· 逻辑：调查带来供应不确定 → 客户找备选",
     "· 方向：做多 AMD（数据中心 GPU 的直接替代）；做多 AVGO（云厂商自研芯片的设计伙伴）",
@@ -31,29 +31,44 @@ test("the block under an alert: head, logic, direction, tape with one shared sta
 
 test("prints of different feeds or minutes each carry their stamp; one not of the session reads 未成交", () => {   // Review Focus 2
   const tape = [t("NVDA", -7.31), t("AMD", 5.44, true, "nasdaq", "2026-11-09T09:01:40.000Z"), t("AVGO", null, false), t("SPY", 0.2, false)];
-  const line = renderBlock({ direction: D, tape, shut: false, forTask: false }).split("\n")[3];
+  const line = renderBlock({ direction: D, tape, shut: false, forTask: false, now: AT }).split("\n")[3];
   assert.equal(line, "· 盘面：NVDA −7.3%（ROBINHOOD 04:03 ET） · AMD +5.4%（NASDAQ 04:01 ET） · AVGO 未成交 · SPY 未成交");
 });
 
 test("a shut market, the certainty words, and a task's two extra lines", () => {
-  const task = renderBlock({ direction: { ...D, certainty: "high" }, tape: TAPE, shut: true, forTask: true }).split("\n");
+  const task = renderBlock({ direction: { ...D, certainty: "high" }, tape: TAPE, shut: true, forTask: true, now: AT }).split("\n");
   assert.deepEqual([task[0], task[1], task[4], task[6]], [
     "推演 · Gravit 的推断，不是下单 · 确定度 高", "· 事件：董事会对 CEO 启动独立调查",
     "· 盘面：休市，事件之后还没有成交", "来源：NVIDIA newsroom 11-08 18:00 ET · 8-K 11-09 06:02 ET",
   ]);
-  assert.ok(renderBlock({ direction: { ...D, certainty: "low" }, tape: TAPE, shut: false, forTask: false }).startsWith("推演 · Gravit 的推断，不是下单 · 确定度 低\n"));
+  assert.ok(renderBlock({ direction: { ...D, certainty: "low" }, tape: TAPE, shut: false, forTask: false, now: AT }).startsWith("推演 · Gravit 的推断，不是下单 · 确定度 低\n"));
 });
 
 test("no direction is one line under an alert, three for a task", () => {
   const none = { ...D, peers: [], counter: null, noDirection: "这是全行业的事，对手一起受累" };
-  assert.equal(renderBlock({ direction: none, tape: TAPE, shut: false, forTask: false }), "推演：没有方向 —— 这是全行业的事，对手一起受累");
-  assert.equal(renderBlock({ direction: none, tape: TAPE, shut: false, forTask: true }).split("\n").length, 3);
+  assert.equal(renderBlock({ direction: none, tape: TAPE, shut: false, forTask: false, now: AT }), "推演：没有方向 —— 这是全行业的事，对手一起受累");
+  assert.equal(renderBlock({ direction: none, tape: TAPE, shut: false, forTask: true, now: AT }).split("\n").length, 3);
 });
 
 test("a later alert's line re-prices each rival from its recorded print; no figure without both prints", () => {
   assert.equal(
-    renderLater({ givenAt: AT, peers: [{ symbol: "AMD", then: 473.39, now: 502.8 }, { symbol: "AVGO", then: null, now: 300 }, { symbol: "INTC", then: 40, now: 39.5 }] }),
+    renderLater({ givenAt: AT, now: AT, peers: [{ symbol: "AMD", then: 473.39, now: 502.8 }, { symbol: "AVGO", then: null, now: 300 }, { symbol: "INTC", then: 40, now: 39.5 }] }),
     "推演（04:03 ET 已给）：做多 AMD，此后 +6.2%；做多 AVGO；做多 INTC，此后 −1.3%",
   );
-  assert.equal(renderLater({ givenAt: AT, peers: [] }), null);
+  assert.equal(renderLater({ givenAt: AT, now: AT, peers: [] }), null);
+});
+
+test("a print of another New York day than now carries its date in the stamp", () => {   // final review I1
+  const saturday = "2026-11-07T15:00:00.000Z";   // 10:00 ET
+  const friday = "2026-11-07T00:58:00.000Z";     // 19:58 ET on Friday 11-06
+  const tape = [t("NVDA", -7.31, true, "robinhood", friday), t("AMD", 5.44, true, "robinhood", friday), t("SPY", -0.36, true, "robinhood", friday)];
+  const task = renderBlock({ direction: D, tape, shut: false, forTask: true, now: saturday }).split("\n")[4];
+  assert.equal(task, "· 盘面：NVDA −7.3% · AMD +5.4% · SPY −0.4%（ROBINHOOD 11-06 19:58 ET）");
+  const mixed = renderBlock({ direction: D, tape: [t("NVDA", -7.31), t("AMD", 5.44, true, "robinhood", friday)], shut: false, forTask: false, now: AT }).split("\n")[3];
+  assert.equal(mixed, "· 盘面：NVDA −7.3%（ROBINHOOD 04:03 ET） · AMD +5.4%（ROBINHOOD 11-06 19:58 ET）");
+});
+
+test("a later line for a direction given on an earlier New York day dates when it was given", () => {   // final review I1
+  const tuesday = "2026-11-10T15:00:00.000Z";
+  assert.equal(renderLater({ givenAt: AT, now: tuesday, peers: [{ symbol: "AMD", then: 473.39, now: 502.8 }] }), "推演（11-09 04:03 ET 已给）：做多 AMD，此后 +6.2%");
 });

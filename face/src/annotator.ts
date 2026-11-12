@@ -65,7 +65,7 @@ import type { BudgetState, OffState } from "./desk.ts";
 import type { DeskLine } from "./conversation.ts";
 import type { DeskConversation, PostResult } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionDeps, DeskTurnRecord, SessionEventsOn } from "./desk-session.ts";
-import type { ReadThroughAsk, ReadThroughLane } from "./readthrough-lane.ts";
+import type { ReadThroughAsk, ReadThroughEvent, ReadThroughLane } from "./readthrough-lane.ts";
 import type { AgentLike } from "./room.ts";
 import type { MessageLike } from "./room-rules.ts";
 import type { AnnotatedRecord } from "./watch.ts";
@@ -125,7 +125,7 @@ export interface AnnotatorDeps {
 /** The watch's annotation post: the conversation's post, and the read-through it asks for - `asks`, the events a
  * direction may be given for, the run opened only when it is not empty; `later`, the events one was already given for,
  * each a line of the lane's under the reply. */
-export type AnnotationPost = Parameters<DeskConversation["post"]>[0] & { readThrough?: { asks: ReadThroughAsk[]; later: ReadThroughAsk[] } };
+export type AnnotationPost = Parameters<DeskConversation["post"]>[0] & { readThrough?: { asks: ReadThroughAsk[]; later: ReadThroughEvent[] } };
 
 /** The lane. `post` takes the watch's annotation post - `message.pass`, else `message.alert`, names the pass - and
  * answers `opened` once its agent has the message, or why not (the module header); it never rejects. `dispose` shuts it

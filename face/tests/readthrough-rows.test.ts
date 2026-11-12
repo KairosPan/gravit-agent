@@ -10,13 +10,14 @@ import { ID_RE, createRecord } from "../plugins/readthrough/lib/record.mjs";
 import { READ_THROUGH_ROW_IDS, READ_THROUGH_TOOL_NAMES, readThroughPatches } from "../src/readthrough.ts";
 
 const AT = "2026-11-09T09:03:10.000Z";          // 04:03 ET, Monday
-const FRIDAY_CLOSE = "2026-11-06T21:00:00.000Z"; // 16:00 ET
+/** Monday's session began at 04:00 ET: a print before it is not the reaction to a pre-market alert's event. */
+const MONDAY_04 = "2026-11-09T09:00:00.000Z";
 const code = (c: string) => (e: unknown) => e instanceof ReadThroughError && e.code === c;
 const ARGS = {
   symbol: "NVDA", basis: "company", event: "董事会对 CEO 启动独立调查", sources: ["NVIDIA newsroom 11-08 18:00 ET"], logic: "供应不确定 → 客户找备选",
   peers: [{ symbol: "AMD", reason: "数据中心 GPU 的直接替代" }], counter: "调查针对个人", certainty: "medium",
 };
-const RUN = { pass: "p-1", asks: [{ symbol: "NVDA", ref: "2026-11-06" }] };
+const RUN = { pass: "p-1", asks: [{ symbol: "NVDA", ref: "2026-11-06", since: MONDAY_04 }] };
 
 type ToolDef = { name: string; description: string; parameters: unknown; execute(args: unknown, exec: unknown): Promise<string> };
 function fakeScope() {
@@ -30,26 +31,26 @@ function fakeScope() {
   return { ctx, provided, tools };
 }
 /** A mounted, wired service over a scratch record - or over `dir`, an earlier one's, as after a restart; `rows` are
- * the prices by symbol, changeable between calls. */
+ * the prices by symbol and `state.now` the service's clock, each changeable between calls. */
 async function mounted(t: { after(fn: () => Promise<unknown>): unknown }, wire = true, dir?: string) {
   const recordDir = dir ?? join(await mkdtemp(join(tmpdir(), "readthrough-rows-")), "readthrough");
   if (dir === undefined) t.after(() => rm(join(recordDir, ".."), { recursive: true, force: true }));
   const scope = fakeScope();
-  serviceRow.apply(scope.ctx, { recordDir, universe: ["NVDA", "AMD", "AVGO", "INTC"], now: () => new Date(AT) });
+  const state = { on: true, fail: undefined as string | undefined, now: AT };
+  serviceRow.apply(scope.ctx, { recordDir, universe: ["NVDA", "AMD", "AVGO", "INTC"], now: () => new Date(state.now) });
   const service = scope.provided.get("readThrough") as any;
   const tools = scope.tools;
   const rows: Record<string, { price: number | null; changePct: number | null; feed?: string; asOf?: string | null }> = {
     NVDA: { price: 173.07, changePct: -7.27 }, AMD: { price: 473.39, changePct: 5.42 }, SPY: { price: 740, changePct: -0.4 }, CRWV: { price: 90, changePct: 1 },
   };
   const asked: string[][] = [];
-  const state = { on: true, fail: undefined as string | undefined };
   if (wire) service.wire({
     prices: async (symbols: string[]) => {
       asked.push(symbols);
       if (state.fail !== undefined) throw new Error(state.fail);
       return symbols.map((symbol) => ({ symbol, price: null, changePct: null, feed: "robinhood", asOf: AT, ...(rows[symbol] as Partial<(typeof rows)[string]> | undefined) }));
     },
-    deskSymbols: async () => ["CRWV", "SPY"], usSessionOn: () => state.on, refClose: (date: string) => (date === "2026-11-06" ? FRIDAY_CLOSE : undefined),
+    deskSymbols: async () => ["CRWV", "SPY"], usSessionOn: () => state.on,
   });
   return { service, rows, asked, state, recordDir, scope, tools };
 }
@@ -122,13 +123,32 @@ test("the fence: the list, the desk's symbols, never SPY, QQQ or the company its
   }
 });
 
-test("a rival's print older than the reference close, or with no change, reads 未成交 and stays", async (t) => {   // Review Focus 2
+test("a rival's print from before its event's session began, or with no change, reads 未成交 and stays", async (t) => {   // Review Focus 2, final review I1
   const { service, rows } = await mounted(t);
-  rows.AMD = { price: 449.04, changePct: 0.2, asOf: "2026-11-06T20:59:00.000Z" };   // Friday, before the close
+  rows.AMD = { price: 449.04, changePct: 0.2, asOf: "2026-11-07T00:58:00.000Z" };   // Friday 19:58 ET, after its close but before the weekend's event
   rows.SPY = { price: 740, changePct: null };
   service.open("s-1", RUN);
   const { block } = await service.propose(ARGS, { sessionId: "s-1", desk: true });
   assert.equal(block.split("\n")[3], "· 盘面：NVDA −7.3%（ROBINHOOD 04:03 ET） · AMD 未成交 · SPY 未成交");
+});
+
+test("after an after-hours alert, a rival's closing-cross print reads 未成交; one a second past since counts", async (t) => {   // final review I1
+  const { service, rows, state } = await mounted(t);
+  state.now = "2026-11-09T21:30:00.000Z";   // 16:30 ET
+  const since = "2026-11-09T21:01:00.000Z";  // the close plus the closing cross's minute
+  rows.NVDA = { price: 160, changePct: -7.5, asOf: "2026-11-09T21:29:00.000Z" };
+  rows.AMD = { price: 480, changePct: 6.1, asOf: "2026-11-09T21:00:03.000Z" };   // the closing cross: the whole day's change
+  rows.SPY = { price: 740, changePct: -0.4, asOf: "2026-11-09T21:01:01.000Z" };
+  service.open("s-1", { pass: "p-1", asks: [{ symbol: "NVDA", ref: "2026-11-09", since }] });
+  const { block } = await service.propose(ARGS, { sessionId: "s-1", desk: true });
+  assert.equal(block.split("\n")[3], "· 盘面：NVDA −7.5%（ROBINHOOD 16:29 ET） · AMD 未成交 · SPY −0.4%（ROBINHOOD 16:01 ET）");
+});
+
+test("a task's tape dates a print of an earlier day", async (t) => {   // final review I1
+  const { service, rows } = await mounted(t);
+  rows.AMD = { price: 473.39, changePct: 5.42, asOf: "2026-11-07T00:58:00.000Z" };   // Friday 19:58 ET
+  const { block } = await service.propose(ARGS, { sessionId: "s-task", desk: false });
+  assert.equal(block.split("\n")[4], "· 盘面：NVDA −7.3%（ROBINHOOD 04:03 ET） · AMD +5.4%（ROBINHOOD 11-06 19:58 ET） · SPY −0.4%（ROBINHOOD 04:03 ET）");
 });
 
 test("a task: no run needed, the two extra lines, a shut market said, and no event opened", async (t) => {
@@ -156,6 +176,8 @@ test("later re-prices a recorded direction; a no-direction, an unknown event and
   await service.propose(ARGS, { sessionId: "s-1", desk: true });
   rows.AMD = { price: 502.8, changePct: 12 };
   assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }, { symbol: "INTC", ref: "2026-11-06" }]), ["推演（04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
+  state.now = "2026-11-10T15:00:00.000Z";   // the next day
+  assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), ["推演（11-09 04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
   state.fail = "down";
   assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), []);
 });
@@ -189,7 +211,7 @@ test("a run closed while its prices are read: ALERT_ONLY, nothing kept, nothing 
   const reading = new Promise<void>((resolve) => { asked = resolve; });
   service.wire({
     prices: async (symbols: string[]) => { asked(); await held; return symbols.map((symbol) => ({ symbol, price: 100, changePct: -1, feed: "robinhood", asOf: AT })); },
-    deskSymbols: async () => [], usSessionOn: () => true, refClose: () => FRIDAY_CLOSE,
+    deskSymbols: async () => [], usSessionOn: () => true,
   });
   service.open("s-1", RUN);
   const call = service.propose(ARGS, { sessionId: "s-1", desk: true });

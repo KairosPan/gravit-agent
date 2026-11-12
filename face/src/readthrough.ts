@@ -30,7 +30,7 @@ import type { ReadThroughLane } from "./readthrough-lane.ts";
 import { idOf, marketOf } from "./symbols.ts";
 import { AFTER_HOURS_MS } from "./watch-eval.ts";
 
-export { readThroughLane, type ReadThroughAsk, type ReadThroughLane } from "./readthrough-lane.ts";
+export { readThroughLane, type ReadThroughAsk, type ReadThroughEvent, type ReadThroughLane } from "./readthrough-lane.ts";
 
 export const READ_THROUGH_ROW_IDS = ["read-through-service", "read-through-tool"] as const;
 
@@ -67,7 +67,6 @@ interface ReadThroughWiring {
   prices(symbols: string[]): Promise<ReadThroughPrint[]>;
   deskSymbols(): Promise<string[]>;
   usSessionOn(): boolean;
-  refClose(date: string): string | undefined;
 }
 
 /** The service's prices: each symbol asked of `quotes` as a US share, the prints in the order asked. Rejects with
@@ -123,14 +122,6 @@ export function usSessionOn(now: number): boolean {
   return session !== undefined && now >= Date.parse(nyInstant(date, 4, 0)) && now < Date.parse(session.close) + AFTER_HOURS_MS;
 }
 
-/** A session's regular close as an ISO instant - 16:00 ET, 13:00 on an early close - on the builtin XNYS rules;
- * `undefined` for a closed day or anything that is no `YYYY-MM-DD` date. The close a run's print must be after to
- * count as traded on the news. */
-export function refClose(date: string): string | undefined {
-  const session = xnysSessionOn(date);
-  return session === undefined ? undefined : new Date(session.close).toISOString();
-}
-
 /**
  * Wire the face's half into the `readThrough` service through `ctx.inject(["readThrough"], …)`, so a reloaded row
  * is wired again: the Market's prices from `quotes`, the desk's symbols under `root` on the ET date of the moment
@@ -147,7 +138,6 @@ export function wireReadThrough(
     prices: readThroughPrices(deps.quotes),
     deskSymbols: () => deskFenceSymbols(deps.root, etDate(new Date(now()))),
     usSessionOn: () => usSessionOn(now()),
-    refClose,
   };
   ctx.inject(["readThrough"], (layer: { readThrough?: ReadThroughService }) => {
     layer.readThrough?.wire(wiring);

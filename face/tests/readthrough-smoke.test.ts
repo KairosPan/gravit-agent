@@ -42,6 +42,8 @@ const gated = process.env.FACE_SMOKE !== "1";
 const AT = "2026-11-09T09:03:10.000Z";
 /** The last session's date before it: Friday. */
 const REF = "2026-11-06";
+/** The instant the event's session began: 04:00 ET that Monday. */
+const SINCE = "2026-11-09T09:00:00.000Z";
 const ARGS = {
   symbol: "NVDA", basis: "company", event: "董事会对 CEO 启动独立调查", sources: ["NVIDIA newsroom 11-08 18:00 ET"], logic: "供应不确定 → 客户找备选",
   peers: [{ symbol: "AMD", reason: "数据中心 GPU 的直接替代" }], counter: "调查针对个人", certainty: "medium",
@@ -169,14 +171,14 @@ test("read-through smoke: who sees read_through, the lane, the fence and the rec
     // 5. inside a run: accepted with no event line, closed with the run, given; a later run of the event refused
     const lane = readThroughLane(ctx);
     const deskId = String(desk.session.header.id);
-    lane.open(deskId, { pass: "p-smoke", asks: [{ symbol: "NVDA", ref: REF }] });
+    lane.open(deskId, { pass: "p-smoke", asks: [{ symbol: "NVDA", ref: REF, since: SINCE }] });
     const alert = answerOf(await run(ARGS, desk));
     assert.equal(alert.ok, true);
     assert.match(alert.id, ID_RE);
     assert.equal(alert.block.split("\n").some((line) => line.startsWith("· 事件：")), false, `an alert's block has no event line; saw ${alert.block}`);
     assert.deepEqual(lane.close(deskId), [{ id: alert.id, text: alert.block }], "the run closes with its one block");
     assert.equal(await lane.given("NVDA", REF), true, "the event is given");
-    lane.open(deskId, { pass: "p-smoke-2", asks: [{ symbol: "NVDA", ref: REF }] });
+    lane.open(deskId, { pass: "p-smoke-2", asks: [{ symbol: "NVDA", ref: REF, since: SINCE }] });
     refusedWith(await run(ARGS, desk), "ALREADY_GIVEN");
     assert.deepEqual(lane.close(deskId), [], "the refused call left no block");
 

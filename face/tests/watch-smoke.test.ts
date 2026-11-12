@@ -74,7 +74,7 @@ import {
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
 import { deskJournalDir, type DeskSessionDeps } from "../src/desk-session.ts";
 import { EDGAR_SUBMISSIONS, EDGAR_TICKERS_URL, type EdgarFetch } from "../src/edgar.ts";
-import { bjDate } from "../src/et.ts";
+import { bjDate, etDate } from "../src/et.ts";
 import { isFilingRecord, type FilingRecord } from "../src/filings.ts";
 import { isFiringRecord, type FiringRecord } from "../src/firing.ts";
 import type { MarketSession } from "../src/market-clock.ts";
@@ -826,7 +826,10 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     const [reason, blank, ...block] = rtReply.text.split("\n");
     assert.deepEqual([rtReply.replyTo, reason, blank], [rtAt, RT_REASON, ""], `a reply under the alert: the reason, a blank line; saw ${JSON.stringify(rtReply.text)}`);
     assert.equal(block[0], "推演 · Gravit 的推断，不是下单 · 确定度 中", "then the block's head");
-    assert.equal(block.find((l) => l.startsWith("· 盘面：")), `· 盘面：${RT} −6.0% · ${RIVAL} +2.1% · SPY −0.4%（ROBINHOOD 09:45 ET）`,
+    /* the read-through service keeps the wall clock here (its row's `now` is test-only config, which a patch cannot
+     * carry), and a print of another New York day than its now is dated */
+    const stampDay = etDate(new Date()) === "2026-12-01" ? "" : "12-01 ";
+    assert.equal(block.find((l) => l.startsWith("· 盘面：")), `· 盘面：${RT} −6.0% · ${RIVAL} +2.1% · SPY −0.4%（ROBINHOOD ${stampDay}09:45 ET）`,
       "its tape names the company, the rival and SPY");
     heard([phone[expected.length], rtReply], "the alert, then the reason with its block");
     const rtSession = await annotationSession(rt.id);
@@ -852,7 +855,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.equal(againReply.replyTo, againAt, "its reply is under its alert");
     const last = againReply.text.split("\n").at(-1)!;
     assert.ok(last.startsWith("推演（") && last.includes("已给）：做多"), `it ends with the face's line for the direction given; saw ${JSON.stringify(againReply.text)}`);
-    assert.match(last, new RegExp(`^推演（\\d{2}:\\d{2} ET 已给）：做多 ${RIVAL}，此后 \\+1\\.0%$`), "the rival re-priced from its recorded print");
+    assert.match(last, new RegExp(`^推演（(\\d{2}-\\d{2} )?\\d{2}:\\d{2} ET 已给）：做多 ${RIVAL}，此后 \\+1\\.0%$`), "the rival re-priced from its recorded print");
     heard([phone[expected.length], againReply], "the alert, then the reply with the face's line");
     await waitFor("the second annotated record", async () => (await annotated()).some((r) => r.pass === again.pass));
     assert.equal((await annotated()).find((r) => r.pass === again.pass)?.directions, undefined, "it carried no block");

@@ -4,13 +4,15 @@
  * one record under the harness home (`createRecord`) held for the row's life, the annotation runs open now, and the
  * face's half once the face wires it.
  *
- * The service: `wire({ prices, deskSymbols, usSessionOn, refClose })`, the face's half, which may be wired again;
- * `ready()`, whether it is wired; `open(sessionId, { pass, asks })`, an annotation run that may give a direction for
- * each `{ symbol, ref }` it asks; `close(sessionId)`, the blocks that run accepted, in call order, the run then
- * forgotten; `given(symbol, ref)`, whether a direction is on record for that event; `later(items)`, a re-priced line
- * for each recorded direction that named rivals; `sent(ids, sent)`, one `sent` line an id; and `propose(raw,
- * { sessionId, desk })`, which checks a call, prices it, records it and renders its block. Every `propose` runs on one
- * promise chain for the service, so the second of two calls arriving together sees the first one's line.
+ * The service: `wire({ prices, deskSymbols, usSessionOn })`, the face's half, which may be wired again; `ready()`,
+ * whether it is wired; `open(sessionId, { pass, asks })`, an annotation run that may give a direction for each
+ * `{ symbol, ref, since }` it asks - a print at or after `since`, the instant its event's session began, is the
+ * market's reaction, one before it reads `未成交`; `close(sessionId)`, the blocks that run accepted, in call order, the
+ * run then forgotten; `given(symbol, ref)`, whether a direction is on record for that event; `later(items)`, a
+ * re-priced line for each recorded direction that named rivals; `sent(ids, sent)`, one `sent` line an id; and
+ * `propose(raw, { sessionId, desk })`, which checks a call, prices it, records it and renders its block. Every
+ * `propose` runs on one promise chain for the service, so the second of two calls arriving together sees the first
+ * one's line.
  *
  * Config: `recordDir`, the absolute record directory. `universe` and `now` are test-only. The service is provided
  * inside `ctx.effect`, so a reload of the row disposes it.
@@ -29,8 +31,8 @@ export const inject = [];
 /**
  * @typedef {{ symbol: string, price: number | null, changePct: number | null, feed: string, asOf: string | null }} Quote
  * @typedef {{ prices: (symbols: string[]) => Promise<Quote[]>, deskSymbols: () => Promise<string[]>,
- *   usSessionOn: () => boolean, refClose: (date: string) => string | undefined }} Wiring
- * @typedef {{ symbol: string, ref: string }} Ask
+ *   usSessionOn: () => boolean }} Wiring
+ * @typedef {{ symbol: string, ref: string, since: string }} Ask
  * @typedef {{ pass: string, asks: Ask[], blocks: { id: string, text: string }[] }} Run
  */
 
@@ -52,15 +54,15 @@ export function apply(ctx, config) {
   let chain = Promise.resolve();
 
   /**
-   * A print as the record keeps it: whether it traded is, for a run, a change printed after the reference close; for
-   * any other caller, a change at all.
+   * A print as the record keeps it: whether it traded is, for a run, a change printed at or after the instant its
+   * event's session began; for any other caller, a change at all.
    * @param {Quote} q
-   * @param {string | undefined} close the run's reference close, an ISO instant; undefined for any other caller
+   * @param {string | undefined} since the run's ask's `since`, an ISO instant; undefined for any other caller
    * @param {boolean} forRun
    */
-  function printOf(q, close, forRun) {
+  function printOf(q, since, forRun) {
     const traded = forRun
-      ? q.changePct !== null && q.asOf !== null && close !== undefined && Date.parse(q.asOf) > Date.parse(close)
+      ? q.changePct !== null && q.asOf !== null && since !== undefined && Date.parse(q.asOf) >= Date.parse(since)
       : q.changePct !== null;
     return { symbol: q.symbol, price: q.price, changePct: q.changePct, feed: q.feed, asOf: q.asOf, traded };
   }
@@ -94,8 +96,7 @@ export function apply(ctx, config) {
       throw refuse.notReady(String(/** @type {any} */ (error)?.message ?? error));
     }
     const forRun = run !== undefined;
-    const close = ask === undefined ? undefined : w.refClose(ask.ref);
-    const [stricken, ...rest] = quotes.map((q) => printOf(q, close, forRun));
+    const [stricken, ...rest] = quotes.map((q) => printOf(q, ask?.since, forRun));
     const spy = /** @type {ReturnType<typeof printOf>} */ (rest.pop());
     if (forRun && (stricken.price === null || stricken.changePct === null)) throw refuse.noTape(d.symbol);
     const shut = forRun ? false : !w.usSessionOn();
@@ -132,7 +133,7 @@ export function apply(ctx, config) {
       await record.sent(id, false, now().toISOString());
       throw refuse.alertOnly();
     }
-    const block = renderBlock({ direction: d, tape: [stricken, ...rest, spy], shut, forTask: !forRun });
+    const block = renderBlock({ direction: d, tape: [stricken, ...rest, spy], shut, forTask: !forRun, now: at.toISOString() });
     run?.blocks.push({ id, text: block });
     return { id, block };
   }
@@ -166,7 +167,7 @@ export function apply(ctx, config) {
     },
     given,
     /**
-     * @param {Ask[]} items
+     * @param {{ symbol: string, ref: string }[]} items
      * @returns {Promise<string[]>}
      */
     async later(items) {
@@ -183,6 +184,7 @@ export function apply(ctx, config) {
         }
         const line = renderLater({
           givenAt: entry.t,
+          now: now().toISOString(),
           peers: entry.peers.map((p, i) => ({ symbol: p.symbol, then: p.price, now: quotes[i]?.price ?? null })),
         });
         if (line !== null) lines.push(line);
