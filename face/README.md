@@ -3039,17 +3039,19 @@ times a plan check's — the Desk view's budget line shows what one costs, and y
 
 **The read-through** (since the read-through plan, 2026-11-12; spec
 `docs/superpowers/specs/2026-11-12-read-through-design.md`; charter A2). When a pass holds a US
-fall on a company with no direction on record under that move's reference close, its why post
-also asks: if the cause is a concrete event at that one company (`公司公布 · 确定` or `媒体报道`)
-and the fall is its own, not its group's or the market's, call `read_through` once, with the
-rivals the event points to or with none. The reason is then capped at 3,000 characters and may
-name no direction in its own words. The tool (`src/readthrough.ts`, the rows under
-`plugins/readthrough/`) admits only the hundred large companies of the analog list and the US
-names in `desk/rules.yml`, `desk/holdings.yml` and `desk/levels.yml` (never a strategy's
-`levels.yml`, SPY, QQQ or the company itself) — add a smaller rival to one of those files to allow
-it; it refuses `high` on an unconfirmed report and any call from a desk turn outside an alert's
-annotation. The face, not the model, writes the block, prices it from the Market and appends it
-under the reason after a blank line, in the same message:
+fall on a company — never an index fund, SPY or QQQ — with no direction given under that move's
+reference close, its why post also asks: if the cause is a concrete event at that one company
+(`公司公布 · 确定` or `媒体报道`) and the fall is its own, not its group's or the market's, call
+`read_through` once, with the rivals the event points to or with none. The reason is then capped
+at 3,000 characters and may name no direction in its own words. The tool (`src/readthrough.ts`,
+the rows under `plugins/readthrough/`) admits only the hundred large companies of the analog list
+and the US names in `desk/rules.yml`, `desk/holdings.yml` and `desk/levels.yml` (never a
+strategy's `levels.yml`, SPY, QQQ or the company itself) — add a smaller rival to one of those
+files to allow it; it refuses SPY or QQQ as the company, `high` on an unconfirmed report, any call
+from a desk turn outside an alert's annotation, a rival's reason holding the direction line's own
+markup (`（ ） ( ) ； ;` or `做多`), and any text holding a control or format character. The face,
+not the model, writes the block, prices it from the Market and appends it under the reason after a
+blank line, in the same message:
 
 ```
 推演 · Gravit 的推断，不是下单 · 确定度 中
@@ -3059,16 +3061,25 @@ under the reason after a blank line, in the same message:
 · 反方：<the strongest reason it is wrong>
 ```
 
-or one line, `推演：没有方向 —— <why>`. A block goes only under a turn that ended normally and a
-reply that was delivered; otherwise nothing of it is sent, its record says `sent: false`, and the
-next alert of the same event asks again. A later alert of an event already given carries no ask
-and ends with the face's own line, `推演（<HH:MM ET> 已给）：做多 AMD，此后 +2.1%`, each rival
-re-priced from its recorded print (nothing for a "no direction"). Every accepted call is a
-`direction` line in `$DSH_HOME/face/readthrough/directions.jsonl` — the caller, the arguments and
-the prints of that moment — followed, for an alert's, by a `sent` line; the pass's `annotated`
-record in `alerts.jsonl` names the ids under `directions`. A read-through that fails — the record
-unreadable, the Market down, the lane throwing — costs the block, never the reason. A task's worker
-can call it too: its block, with the event and sources added, is in the task's report.
+or one line, `推演：没有方向 —— <why>`. Under an alert a print counts on the `· 盘面：` line only
+when it was printed since the event's session began — for an after-hours alert, the close plus the
+closing cross's minute; for any other, 04:00 ET of the alert's date — and reads `未成交` otherwise.
+The stamp is shared at the line's end only when every print has a figure and all share feed and
+minute, and a stamp of another New York day than now carries its date (`ROBINHOOD 11-06 19:58
+ET`). A block goes only under a turn that ended normally and a reply that was delivered; otherwise
+nothing of it is sent, its record says `sent: false`, and the next alert of the same event asks
+again. A direction counts as given only once its record says it was sent (`sent: true`): one whose
+`sent` line never landed — a crash before delivery, a failed write — is asked again, which may
+send the operator a second block for it. A later alert of an event given carries no ask and ends
+with the face's own line, `推演（<HH:MM ET> 已给）：做多 AMD，此后 +2.1%` (`<MM-DD HH:MM ET>` when given
+on an earlier day), each rival still inside the fence re-priced from its recorded print (nothing
+for a "no direction", or with no rival left). Every accepted call is a `direction` line in
+`$DSH_HOME/face/readthrough/directions.jsonl` — the caller, the arguments and the prints of that
+moment — followed, for an alert's, by a `sent` line; the pass's `annotated` record in
+`alerts.jsonl` names the ids under `directions`. A read-through that fails — the record unreadable,
+the Market down, the lane throwing — costs the block, never the reason. A task's worker can call it
+too: its block, with the event and sources added, is returned to the worker, which is told to quote
+it.
 
 **`/mute` and `unmute`.** From the phone, `/mute 30m` (`Nm`, `Nh` or `Nd` — a duration is
 required) silences the alerts: `alerts muted until 14:33 ET; detection and the ledger go on. A
@@ -4587,7 +4598,8 @@ and `node --test` gives each file its own:
 | `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes`, `desk_state` and, since the why-it-moved plan, dsh's `web_fetch`, each `mcp__*__<raw>` entry matching one server's tool, and none of the three reaches Gravit's session or the global view; the desk's `web_fetch` of a loopback URL is refused by the http provider (`non-public IP address`) and written as one `desk-fetch` line, Gravit's call finding no such tool and writing none; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `phone-smoke.test.ts` | the bridge end to end on a real tree against `tests/fake-phone-account.ts`, a loopback fake of the account's inbox and send (since plan B1a; it replaced `telegram-smoke`): a text pushed into the inbox opens a desk turn and its answer reaches `/send` as `{kind: "chat", text, network: "telegram"}`; `/status` carries the phone line; `/pause` and `/resume`; the account away and back, the text answered; a send the account refuses shows as `send failed`; a parked card cut at its deadline; the write and the read canaries, the secret reaching the account as `<secret>`; the fence's plant; every send body carries only its four keys |
 | `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder. Then (P4) the strategies' book on 2026-11-30, a fake XSHG calendar beside the XNYS one and one fake quote source, in clock order: an A-share report on its Beijing date naming the screen that ran and its `TENCENT` close print; the canary in a strategy (five calls: it reads and rewrites `STANDING.md` and `levels.yml`, then tries the desk's `STANDING.md`), named by one outside-reports line and holding the next order by each pin in turn; two US reports at one anchor in file order; the fence in a strategy; a producer-only strategy order; the abort last |
-| `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`), a stub headline read: the boot's tick at 09:15 ET inside the US window (04:00–20:00 ET) polling the US market alone, its pre-market prints making no record, and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply, run in a session of its own (never the desk conversation's, which reaches the model for none of it) and recorded `annotated`; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card |
+| `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`), a stub headline read: the boot's tick at 09:15 ET inside the US window (04:00–20:00 ET) polling the US market alone, its pre-market prints making no record, and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply, run in a session of its own (never the desk conversation's, which reaches the model for none of it) and recorded `annotated`; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card; and, appended, the read-through (case 11): a fall on AVGO past its rule, the stub's `read_through` naming AMD inside the annotation's run, the block under the reason in the same reply with its tape, one `direction` line and one `sent: true` line, the `annotated` record naming its id, and a second crossing under the same close ending with the face's one line and recording no second direction |
+| `readthrough-smoke.test.ts` | the read-through rows on a real boot over a fake quote source and a scratch record: `read_through` registered and both rows active; a `gravit-desk` session sees it, a bot's and the source reader's do not, and the conversation's allow list does not name it; a Gravit root session's call priced, its block carrying the event, recorded as a task's; a desk session with no run refused `ALERT_ONLY`; inside a run opened through `readThroughLane`, accepted with no event line and closed with the run, not given until the lane marks it sent, then given and refused `ALREADY_GIVEN` in a later run of the event; a rival outside the fence refused by name; US shares alone asked of the source and no request leaving the process |
 | `desk-carry-smoke.test.ts` | a graceful stop and a fresh boot, two real boots on one home, each in a child process of its own (the file runs itself as `one`, then `two`): the first face, the desk as `main.ts` installs it on the stub, posts `LONG` (`telegram:1`), whose model call hangs until its abort, and `QUEUED` (`telegram:2`) behind it, then shuts down as `main.ts` does - `desk.dispose(0)`, then the tree's; the ledger holds one `desk-carry` - `QUEUED`'s key, words and time, and `LONG`'s turn 1 as `cut` - before its `shutdown`; the second face's boot posts `QUEUED` again, its provenance line ending `(carried over a restart)`, the model answers it once and `LONG` not at all, the phone gets the restart line and then `echo QUEUED`, and `desk-carried` says `posted: 1, skipped: 0` (spec §16 H3, R93; the guard across dsh upgrades for `.superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md`) |
 | `analog-smoke.test.ts` | the analog rows against a stub market (`fakeMarket` on port 0; `analog-views` over a scratch views directory and a one-company universe): `analog_chart` and `analog_events` registered and the three rows active in `/data/plugins.json`'s listing; the booted `analogViews` scanning `QRY` and storing the view; `GET /data/analog/view` serving it with the cookie, 403 from another site's page, 404 for an unknown id; the stub asked only `/api/candles` on `cboe`; no `analog_` tool in the conversation's or the desk's preset |
 | `analog-events-smoke.test.ts` | the event analogs on the same stub: `role-source-reader` listed whole; a session created on it sees exactly `web_fetch` and `web_search`, the first in its own layer (`src/source-reader.ts`); a Gravit session, a PDF page reader's and a bot's see no `web_fetch`, the last two no analog tool; the reader's `web_fetch` of a loopback URL refused by dsh's provider until the fortieth page, the next refused by the guard; `analog_events` for Gravit measuring one event and storing the view, its source verified only once the page record holds it; the view served with the cookie, 403 from another site's page; the reader refused `analog_events` |
@@ -6664,8 +6676,8 @@ that is falling that day on its own news. Markets open, the phone at hand.
    114 s seven why turns took on 2026-11-12, and are inside the 240 s deadline.
 3. **The prints.** PASS: each figure on the `· 盘面：` line matches Markets' row for the same name
    within the minutes between them (the line names its feed and New York time, once at its end
-   when every figure shares them); a rival that has not traded since the reference close reads
-   `未成交`.
+   when every print has a figure and all share feed and minute, with the date when of another
+   day); a rival that has not traded since the event's session began reads `未成交`.
 4. **The words.** PASS: the block has its `· 反方：` line; the reason above it names no rival to
    buy and no size, price or time; nor do the block's logic, reasons or counter-case (those are the
    model's words, unchecked — record any you find).
@@ -6674,12 +6686,15 @@ that is falling that day on its own news. Markets open, the phone at hand.
    company's and SPY's; then one `sent` line with its id and `sent: true`; and the pass's
    `annotated` record names that id under `directions`.
 6. **The market's fall.** On a day the index or a whole group falls (`index-move` on SPY or QQQ, or
-   a held name moving with its sector). PASS: the reason says it is the market's or the group's
-   and no block follows it; `directions.jsonl` gains no line for it.
+   a held name moving with its sector). PASS: an index alert carries no ask — the watch never asks
+   a read-through for SPY or QQQ, so its why post does not end `It may be called for: …`; the
+   reason says it is the market's or the group's and no block follows it; `directions.jsonl` gains
+   no line for it.
 7. **A second alert of the same event.** When the step-1 rule fires again past its cooldown under
    the same reference close. PASS: the reply carries no new block and ends with one line,
-   `推演（<HH:MM ET> 已给）：做多 <SYM>，此后 <±x.x%>…`; `directions.jsonl` gains no `direction`
-   line. (After a "no direction" nothing is appended.)
+   `推演（<HH:MM ET> 已给）：做多 <SYM>，此后 <±x.x%>…` (the time dated `<MM-DD HH:MM ET>` when the
+   direction was given on an earlier day); `directions.jsonl` gains no `direction` line. (After a
+   "no direction" nothing is appended.)
 8. **Asked, with a small company.** In the conversation, ask for a task: what a named company's
    bad news means for its rivals, naming as one rival a small company on no list and in none of
    the desk's three files. PASS: no direction names it — the tool answers `OUTSIDE_FENCE <SYM> is
