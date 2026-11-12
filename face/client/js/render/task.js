@@ -28,8 +28,8 @@ function facts(found, state) {
 }
 
 // the event views the page draws (analog event table §4.1): those its reports named, newest first, else its last event view;
-// the task as GET /data/tasks/one read it (the analog slice), so a task off the rail still draws
-function pageViews(state, id) {
+// the task as GET /data/tasks/one read it (the analog slice), so a task off the rail still draws (History draws them too)
+export function pageViews(state, id) {
   const entry = state.analog?.tasks?.[id];
   if (entry?.status !== 'loaded') return [];
   const strings = v => (Array.isArray(v) ? v.filter(s => typeof s === 'string') : []);

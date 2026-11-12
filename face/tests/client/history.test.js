@@ -86,3 +86,15 @@ test("a history page draws no Lunhui follow-ups and the stock drawer no Ask: not
   const { renderTaskScreen } = await import('../../client/js/render/task.js');
   assert.match(renderTaskScreen(at({ screen: 'task', id: 'h1' }, [task('h1')]), NOW), /lunhuiChoice/, 'and its follow-ups');
 });
+
+// ---- a task off the rail lands here once its New York day is over: its page still draws its event tables (fix wave, spec §4.1)
+test("a task's session read here draws its event tables at the top, as the task's page does", async () => {
+  const { EVENT_VIEW, EVENT_VIEW_ID } = await import('./helpers/event-view.js');
+  const base = listed([conv('c'), conv('w', { loaded: true, messages: [{ id: 'm1', from: 'gravit', kind: 'text', text: 'done', seq: 1, at: NOW, data: {} }] })], { route: { screen: 'history', id: 'w' } });
+  const s = { ...base, analog: { tasks: { w: { status: 'loaded', task: { id: 'w', eventViews: [EVENT_VIEW_ID], namedViews: [] } } }, views: { [EVENT_VIEW_ID]: { status: 'loaded', view: EVENT_VIEW } } } };
+  const h = renderHistoryScreen(s, NOW);
+  const thread = h.slice(h.indexOf('id="thread"'));
+  assert.match(thread, /^id="thread"><div class="et-list"><section class="et">/, 'at the top of the transcript');
+  assert.match(h, /done/);
+  assert.doesNotMatch(renderHistoryScreen(base, NOW), /et-list/, 'no task read (or no task): no table');
+});

@@ -17,7 +17,7 @@ import { chipInner, fileCard } from '../composer/view.js';
 import { metaText, sizeText, isImageSrc } from '../composer/files.js';
 import { maskSpans, maskExcerpt } from '../mask.js';
 import { railView } from '../host/turns-view.js';
-import { reportViews } from '../host/analog.js';
+import { reportViews, reportTaskFailure } from '../host/analog.js';
 import { eventTablesHtml } from './event-table.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
@@ -224,7 +224,10 @@ function taskMessage(m, conv, state) {
     const line = esc(t('thread.task.line', { title, status }));
     const head = typeof d.task === 'string' ? `<a class="task-link" href="#/task/${esc(encodeURIComponent(d.task))}">${line}</a>` : line;
     // the event tables the report carries, drawn open under its line (analog event table §4.1); none draws nothing
-    const tables = eventTablesHtml(state, reportViews(m, typeof d.task === 'string' ? state?.analog?.tasks?.[d.task]?.task?.eventViews ?? null : null));
+    // a task read that failed leaves them undrawable: its words, in one line
+    const failed = reportTaskFailure(m, state);
+    const tables = failed ? `<div class="et-list"><div class="et-state et-failed">${esc(sayOf(failed.error))}</div></div>`
+      : eventTablesHtml(state, reportViews(m, typeof d.task === 'string' ? state?.analog?.tasks?.[d.task]?.task?.eventViews ?? null : null));
     return `<details class="sysline ctx" id="relay-${esc(conv.id)}-${esc(m.id)}"><summary>${head}</summary><pre>${esc(maskExcerpt(d.body ?? ''))}</pre></details>${tables}`;
   }
   if (d.form === 'recovery') return `<div class="sysline">${th('thread.task.recovery')}</div>`;

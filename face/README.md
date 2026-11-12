@@ -374,7 +374,8 @@ All three of its stages are built:
   and its tasks" below) with the rail of its tasks on its right, beside a side panel of Gravit,
   History (every other session, read cold and read-only), the search box and the strategies; a
   task's page (`#/task/<id>`) and a strategy's page (`#/strategy/<name>`); since 2026-11-12 an event
-  analog table under a report that names its view and on its task's page, its rows linking the
+  analog table under a report that names its view and on its task's page (off the rail too, read
+  in History), its rows linking the
   stock's page at the event ("Chat rendering", "Markets and Account"). The session list grouped
   by channel, New message with its Where, and Details' row actions (Change words, Fork, Pin,
   Archive, Delete) left with plan 2. A conversation's real
@@ -1708,9 +1709,10 @@ when the view dropped its window, and a caption: the bars' source and adjustment
 them, and `Nasdaq 补齐` for a window older than five years that Nasdaq filled. The bars are one
 dated read on the US stocks line whatever line the page follows —
 `/data/market/candles?venue=cboe&symbol=<SYM>&interval=1d&since=…&before=…&limit=200`, 60 days
-before `at` to 100 after or now — once per stock and day, a failed read said on the page and read
-again when the page is entered again. A view no longer kept, or a case not in it, still draws the
-window and day 0 from `at`, the banner saying the view keeps it no more.
+before `at` to 100 after or now — once per stock and event date, a failed read said on the page and read
+again when the page is entered again. A view no longer kept, a case not in it, or a `view=` that is
+no view id (a hand-edited link, never read), still draws the window and day 0 from `at`, the banner
+saying the view keeps it no more.
 
 ### Account
 
@@ -4480,9 +4482,12 @@ line and **Retry**. A refused call draws nothing.
 under a task's report line, open, the line itself unchanged: the views the face's line after the
 relay names, or, for a relay without one, the ids its text names that are its task's own event
 views (the task read once through `GET /data/tasks/one`, so a table outlives the rail); a report
-that names none draws none, and a chart view never draws. The task's page (`#/task/<id>`) draws at
-its top every event view its reports named, newest first, else its last event view. Each view is
-read once (`GET /data/analog/view`). One card per view: its title, the counts (`26 个事件，量到 17
+that names none draws none, and a chart view never draws; a task read that failed is read once more
+when the conversation or the page is entered again (a 404 never), and until then the report's line
+says its words in one line where its table would be. The task's page — `#/task/<id>`, or, off the
+rail once its New York day is over, the same session at `#/history/<id>` — draws at its top every
+event view its reports named, newest first, else its last event view. Each view is read once
+(`GET /data/analog/view`). One card per view: its title, the counts (`26 个事件，量到 17
 个，9 个量不到`) and that every % is against the market (SPY), 当天 the first session that could
 react; the present case first (`本次 · <SYM>`, a row per anchor, its chips 当天, 次日, 5 天 and 60 天,
 `尚无` for a figure not there yet); then each group with its count and, under 8 cases, `不足 8 例，不给中位数，只看个案`, else
@@ -5819,8 +5824,8 @@ catalog lists `analog-guide` (the profile's `mechanics` root; Discover's skills)
    first with a row per anchor (its source, or `未核实`), the groups in the view's order, every
    figure `当天` / `次日` / `5 天` / `60 天` with its sign and %, the caveats under it; every
    unmeasured row has the market's words and no `行情 ›`. On the 2026-11-12 2×2 task (view
-   `an-20261112-50c20b08`, off the rail by now: its line in Messages and its page read it through
-   `GET /data/tasks/one`): 4 groups and NVDA's 3 anchors, and its 9 unmeasured rows have no
+   `an-20261112-50c20b08`, off the rail by now: its line in Messages and its page — which opens at
+   `#/history/<id>` once the rail has let it go — read it through `GET /data/tasks/one`): 4 groups and NVDA's 3 anchors, and its 9 unmeasured rows have no
    `行情 ›`.
 8. **The market at the event** ("Markets and Account" above). On that table, WYNN 2018-01-26's
    `行情 ›` opens `#/markets/stock:WYNN?at=…` on 事件前后. PASS: daily candles with 01-26 and

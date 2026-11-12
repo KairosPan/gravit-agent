@@ -658,3 +658,15 @@ test('a report line carrying an event view draws its table after the line; one n
   // a view not read yet draws its loading line under the report
   assert.match(renderMessage(report, conv(), state), /<\/details><div class="et-list"><div class="et-state">/);
 });
+
+test("a bare report whose task read failed draws the failure's words in one line; one naming no id, or with a face line, does not", async () => {
+  const { EVENT_VIEW_ID } = await import('./helpers/event-view.js');
+  const failed = { ...state, analog: { tasks: { t1: { status: 'failed', error: 'HTTP 500' } }, views: {} } };
+  const bare = taskMsg({ form: 'report', task: 't1', status: 'ready', title: 'Read the tape', body: `see ${EVENT_VIEW_ID}` });
+  const h = renderMessage(bare, conv(), failed);
+  assert.match(h, /<\/details><div class="et-list"><div class="et-state et-failed">HTTP 500<\/div><\/div>$/);
+  const none = taskMsg({ form: 'report', task: 't1', status: 'ready', title: 'Read the tape', body: 'no view named' });
+  assert.match(renderMessage(none, conv(), failed), /<\/details>$/, 'a body naming no view wanted no task: nothing drawn');
+  const loading = { ...state, analog: { tasks: { t1: { status: 'loading' } }, views: {} } };
+  assert.match(renderMessage(bare, conv(), loading), /<\/details>$/, 'a task still being read: nothing yet');
+});

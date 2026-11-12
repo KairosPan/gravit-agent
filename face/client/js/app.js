@@ -40,7 +40,7 @@ import { renderRunSheet } from './render/run-sheet.js';
 import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
 import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCursors, marketKey, stockCode } from './host/lunhui.js';
-import { wantedAnalog, ensureAnalog } from './host/analog.js';
+import { ensureAnalog } from './host/analog.js';
 import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn, venuesOf } from './host/account-view.js';
@@ -853,8 +853,9 @@ export function boot(win, host = {}) {
     tickClocks(false);
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
-    // an event table's task or view not read yet, likewise
-    { const w = wantedAnalog(store.get()); if (w.tasks.length || w.views.length) void ensureAnalog(store, getJson); }
+    // an event table's task or view not read yet, likewise; called on every render so it sees each screen entered (a task
+    // read that failed is read once more there), reading nothing when nothing is wanted
+    void ensureAnalog(store, getJson);
     // the operator's images the thread drew still to read: each asked once (thumb keeps its own in-flight set), its answer
     // landing through the store (hostThumb), which draws it
     if (open) for (const thumb of thumbsNeeded(open, s.thumbs)) void attachments.thumb(thumb.sessionId, thumb.attachmentId);

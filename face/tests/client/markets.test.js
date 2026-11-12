@@ -1168,6 +1168,14 @@ test('a view no longer kept still draws the window and day 0, and says the view 
   assert.ok(masked.includes('&lt;b&gt;Wynn&lt;/b&gt;'));
 });
 
+test('a hand-edited view= that is no view id says the view is no longer kept, never Loading… (it is never read)', () => {
+  const { html } = eventPage({ route: eventRoute({ view: 'not-a-view' }), view: null });
+  const banner = bannerOf(html);
+  assert.ok(banner.includes('对标视图已不再保留这个事件'), banner);
+  assert.doesNotMatch(banner, /加载|读取/);
+  assert.equal([...svgOf(html).matchAll(/class="ew-body /g)].length, 91, 'the window and day 0 still drawn');
+});
+
 test('choosing 1M on the event page navigates to the plain stock page and draws 1M; 事件前后 does nothing', async () => {
   const route = eventRoute();
   let { s } = screen({ route, all: allWithWynn(), account: true });

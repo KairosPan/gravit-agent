@@ -2,7 +2,8 @@
 // of its tasks (host/rail-view.js historyOf). #/history lists them newest first — the title, the strategy the session's
 // channel names (none for the root), when, a one-line preview as the list's preview read left it — each a link and no action;
 // #/history/<id> is one read cold and read-only: its head (the title, a Read-only tag, back to History) and its transcript,
-// earlier pages loadable, no composer, and a gate still open in its record drawn closed, never answerable.
+// earlier pages loadable, no composer, and a gate still open in its record drawn closed, never answerable; a task's session —
+// off the rail once its New York day is over — draws its event tables at the top, as its task's page does.
 import { esc } from '../html.js';
 import { th } from '../i18n/words.js';
 import { icon } from '../icons.js';
@@ -12,6 +13,8 @@ import { needsAnswer } from '../messages.js';
 import { historyOf, channelLabel } from '../host/rail-view.js';
 import { renderThread } from './thread.js';
 import { earlierKey } from './messages.js';
+import { pageViews } from './task.js';
+import { eventTablesHtml } from './event-table.js';
 
 // the strategy a session's channel names: its channel's display title, none for the root or a channel the list does not hold
 function strategyOf(conv, state) {
@@ -49,7 +52,7 @@ function sessionScreen(state, now, page) {
   // a gate the record still holds open waits on no one here: drawn closed, its keys never drawn
   const shown = { ...conv, messages: conv.messages.map(m => (needsAnswer(m) ? { ...m, answer: 'closed' } : m)) };
   return `<main class="main"><header class="head">${back()}<h1 class="head-title">${esc(maskExcerpt(conv.title))}</h1><span class="chip grey hist-tag">${th('history.readOnly')}</span></header>` +
-    `<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(shown, state, now, page)}</div></div></main>`;
+    `<div class="thread-box"><div class="thread" id="thread">${eventTablesHtml(state, pageViews(state, id))}${earlierKey(conv)}${renderThread(shown, state, now, page)}</div></div></main>`;
 }
 
 /** History's screen: the list at #/history, one session read-only at #/history/<id>. */

@@ -129,3 +129,67 @@ test('a task read that fails, or an answer with no view, ends failed', async () 
   assert.equal(viewless.get().analog.views[V1].status, 'failed');
   assert.equal(viewless.get().analog.views[V1].gone, false);
 });
+
+// ---- a task off the rail (its New York day over, routed to #/history/<id>) and a task read that failed (fix wave)
+test('a task off the rail, routed to History, wants /data/tasks/one and then its views, as its task page would', async () => {
+  const s = stateWith([], { screen: 'history', id: 't9' });
+  assert.equal((s.tasks.items ?? []).some(t => t.id === 't9'), false, 'not on the rail');
+  assert.deepEqual(wantedAnalog(s), { tasks: ['t9'], views: [] });
+  assert.deepEqual(wantedAnalog(R.analogTaskLoaded(s, { id: 't9', task: task('t9') })).views, [V2], 'its last event view');
+  assert.deepEqual(wantedAnalog({ ...s, route: { screen: 'history', id: null } }), { tasks: [], views: [] }, 'the History list wants none');
+  const store = storeOf(s);
+  const asked = [];
+  await ensureAnalog(store, async path => { asked.push(path); return path.startsWith('/data/tasks/one?') ? { ok: true, task: task('t9') } : { ok: true, view: EVENT_VIEW }; });
+  assert.deepEqual(asked, ['/data/tasks/one?id=t9', `/data/analog/view?id=${V2}`]);
+});
+
+test('a history session that is no task: its 404 lands failed once and is never read again, re-entered or forgotten', async () => {
+  const store = storeOf(stateWith([], { screen: 'history', id: 'h1' }));
+  const asked = [];
+  const getJson = async path => { asked.push(path); throw notFound(path); };
+  await ensureAnalog(store, getJson);
+  assert.deepEqual(store.get().analog.tasks.h1, { status: 'failed', error: 'HTTP 404', gone: true });
+  store.dispatch('nav', { screen: 'messages', id: null });
+  await ensureAnalog(store, getJson);
+  store.dispatch('nav', { screen: 'history', id: 'h1' });
+  await ensureAnalog(store, getJson);
+  store.dispatch('analogForgetFailed');
+  await ensureAnalog(store, getJson);
+  assert.deepEqual(asked, ['/data/tasks/one?id=h1'], 'asked once');
+});
+
+test('a task read that failed for a passing reason is read again once when its screen is entered again, not on every render', async () => {
+  const store = storeOf(stateWith([report('r1', 't2', `in ${V1}`)]));
+  const asked = [];
+  let fail = true;
+  const getJson = async path => {
+    asked.push(path);
+    if (path.startsWith('/data/tasks/one?')) { if (fail) throw new TypeError('Failed to fetch'); return { ok: true, task: task('t2') }; }
+    return { ok: true, view: EVENT_VIEW };
+  };
+  await ensureAnalog(store, getJson);
+  assert.equal(store.get().analog.tasks.t2.status, 'failed');
+  await ensureAnalog(store, getJson);
+  assert.deepEqual(asked, ['/data/tasks/one?id=t2'], 'the same screen: not read again');
+  fail = false;
+  store.dispatch('nav', { screen: 'trade', id: null });
+  await ensureAnalog(store, getJson);
+  store.dispatch('nav', { screen: 'messages', id: null });
+  await ensureAnalog(store, getJson);
+  assert.deepEqual(asked, ['/data/tasks/one?id=t2', '/data/tasks/one?id=t2', `/data/analog/view?id=${V1}`], 'the conversation entered again: read once more');
+  assert.equal(store.get().analog.tasks.t2.status, 'loaded');
+  // the task's page likewise: a failed read there is read again on coming back to it
+  const page = storeOf(stateWith([], { screen: 'task', id: 't9' }));
+  const pageAsked = [];
+  let pageFail = true;
+  const pageGet = async path => { pageAsked.push(path); if (pageFail) throw Object.assign(new Error('x'), { status: 502 }); return path.startsWith('/data/tasks/one?') ? { ok: true, task: task('t9') } : { ok: true, view: EVENT_VIEW }; };
+  await ensureAnalog(page, pageGet);
+  await ensureAnalog(page, pageGet);
+  assert.equal(pageAsked.length, 1);
+  pageFail = false;
+  page.dispatch('nav', { screen: 'messages', id: null });
+  await ensureAnalog(page, pageGet);
+  page.dispatch('nav', { screen: 'task', id: 't9' });
+  await ensureAnalog(page, pageGet);
+  assert.deepEqual(pageAsked, ['/data/tasks/one?id=t9', '/data/tasks/one?id=t9', `/data/analog/view?id=${V2}`]);
+});

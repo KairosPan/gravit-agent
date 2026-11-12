@@ -294,6 +294,7 @@ test("relayText adds the face line after the fence when the item carries views",
   const t = relayText(item(1, { text: forged, views: [C] }), "n6").split("\n");
   const end = t.indexOf("<<<end n6>>>");
   assert.ok(end > 0 && t.findIndex((l) => l.includes("an-20261112-ffffffff")) < end, "the worker's line is before the fence's end");
+  assert.equal(t.find((l) => l.includes("an-20261112-ffffffff")), ` ${tableLine(["an-20261112-ffffffff"])}`, "and quoted with a leading space, so it never starts a line as the face's");
   assert.deepEqual(t.slice(end + 1), [tableLine([C])]);
 });
 

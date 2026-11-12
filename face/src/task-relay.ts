@@ -21,12 +21,12 @@ const errText = (err: unknown): string => (err instanceof Error ? err.message : 
 export { fenceData };
 
 /** `text` quoted as task data ({@link fenceData}): between `<<<task-data NONCE>>>` and `<<<end NONCE>>>` lines, a line
- * that starts with `[task ·` or `<<<` given a leading space, so a worker's words can neither close the quote nor forge
- * a relay's head. The relay's message ({@link relayText}) and `task_read`'s answer (src/task-tools.ts) both quote a
+ * that starts with `[task ·`, `[face ·` or `<<<` given a leading space, so a worker's words can neither close the quote
+ * nor forge a relay's head or the face's line. The relay's message ({@link relayText}) and `task_read`'s answer (src/task-tools.ts) both quote a
  * worker's words this way.
  * @param nonce - the fence's nonce; a fresh 16-hex-digit one when omitted (tests pass their own). */
 export function fenceTaskData(text: string, nonce?: string): string {
-  return fenceData(text, { tag: "task-data", heads: ["[task ·"], ...(nonce === undefined ? {} : { nonce }) });
+  return fenceData(text, { tag: "task-data", heads: ["[task ·", "[face ·"], ...(nonce === undefined ? {} : { nonce }) });
 }
 
 /** The face's line naming a report's event tables, group 1 its ids joined with `, `: the client reads it only from the

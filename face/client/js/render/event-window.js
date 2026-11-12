@@ -14,6 +14,7 @@ import { chip, TIMING } from './event-table.js';
 import { candleRanges } from '../host/market-view.js';
 import { eventTableOf, pct, toneOf } from '../host/event-table.js';
 import { EVENT_RANGE, eventWindowOf, marksOf, nyDay } from '../host/event-window.js';
+import { VIEW_ID_RE } from '../host/analog.js';
 
 const str = v => (typeof v === 'string' ? v : null);
 const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -62,7 +63,9 @@ export function eventBannerHtml(ev) {
       `${row.chips.length ? `<div class="et-chips">${row.chips.map(chip).join('')}</div>` : ''}`;
   } else if (ev.viewId !== null) {
     const { entry } = ev;
-    const words = entry?.status === 'failed' && entry.gone !== true ? esc(sayOf(entry.error))
+    // a view= that is no view id (a hand-edited link) is never read: it is no longer kept, never Loading…
+    const words = !VIEW_ID_RE.test(ev.viewId) ? th('markets.event.gone')
+      : entry?.status === 'failed' && entry.gone !== true ? esc(sayOf(entry.error))
       : entry?.status === 'failed' || entry?.status === 'loaded' ? th('markets.event.gone') : th('analog.table.loading');
     body = `<p class="mk-note">${words}</p>`;
   }
