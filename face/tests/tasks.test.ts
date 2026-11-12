@@ -272,7 +272,7 @@ type Rec = {
 function recorder(): Rec {
   const routes = new Map<string, Handler>();
   const call = async (path: string, method: string, host: string, payload: string | undefined): Promise<{ status: number; body: Record<string, unknown> }> => {
-    const handler = routes.get(path);
+    const handler = routes.get(path.split("?")[0]!);
     assert.ok(handler, `a route at ${path}`);
     let status = 0;
     let body = "";
@@ -306,7 +306,7 @@ test("GET /data/tasks lists the conversation's workers — waiting for you first
   const tasks = await install(h, rec);
   t.after(() => tasks.dispose());
 
-  assert.deepEqual(rec.paths(), ["/data/tasks", "/data/tasks/stop", "/data/tasks/continue"]);
+  assert.deepEqual(rec.paths(), ["/data/tasks", "/data/tasks/one", "/data/tasks/stop", "/data/tasks/continue"]);
   const got = await rec.get("/data/tasks");
   assert.equal(got.status, 200);
   assert.equal(got.body.ok, true);
@@ -326,6 +326,44 @@ test("GET /data/tasks lists the conversation's workers — waiting for you first
 
   const listed = await h.tool("task_list").execute({});
   assert.deepEqual((listed as { tasks: { task: string }[] }).tasks.map((x) => x.task), ["w-waiting", "w-running", "w-done-b", "w-done-a"], "task_list is the same window");
+});
+
+test("GET /data/tasks/one reads a task the rail has let go", async (t) => {
+  const h = await harness();
+  const V = "an-20261110-0a1b2c3d";
+  const text = (callId: string, body: string): Ev => ({ type: "tool/result", data: { turn: 1, step: 2, message: { id: `r-${callId}`, role: "tool", toolCallId: callId, isError: false, content: [{ type: "text", text: body }] } } });
+  h.seed("w-old", [
+    brief("w-old", "Old table", YESTERDAY), start(1, YESTERDAY),
+    { type: "tool/call", data: { turn: 1, step: 2, callId: "e1", name: "analog_events", arguments: "{}" }, time: YESTERDAY },
+    { ...text("e1", JSON.stringify({ ok: true, view: V, digest: "d" })), time: YESTERDAY },
+    ...report(1, "c1", "ready", `the table is ${V}`).map((e) => ({ ...e, time: YESTERDAY })),
+    end(1, "completed", YESTERDAY),
+  ]);
+  const rec = recorder();
+  const tasks = await install(h, rec);
+  t.after(() => tasks.dispose());
+
+  const rail = await rec.get("/data/tasks");
+  assert.deepEqual((rail.body.tasks as { id: string }[]).map((v) => v.id), [], "the rail has let it go");
+  const got = await rec.get("/data/tasks/one?id=w-old");
+  assert.equal(got.status, 200);
+  assert.equal(got.body.ok, true);
+  const task = got.body.task as { id: string; eventViews: string[]; namedViews: string[] };
+  assert.equal(task.id, "w-old");
+  assert.deepEqual(task.eventViews, [V]);
+  assert.deepEqual(task.namedViews, [V]);
+
+  const refused = async (path: string, status: number, error: string, host?: string, method?: string) => {
+    const r = method === undefined ? await rec.get(path, host) : await rec.post(path, {}, host, method);
+    assert.equal(r.status, status, path);
+    assert.deepEqual(r.body, { ok: false, error }, path);
+  };
+  await refused("/data/tasks/one", 400, "id is required once");
+  await refused("/data/tasks/one?id=a&id=b", 400, "id is required once");
+  await refused(`/data/tasks/one?id=${"x".repeat(201)}`, 400, "task is required");
+  await refused("/data/tasks/one?id=w-nope", 404, "no such task");
+  await refused("/data/tasks/one?id=w-old", 403, "forbidden", "evil.example.com");
+  await refused("/data/tasks/one?id=w-old", 405, "method not allowed", undefined, "POST");
 });
 
 test("after a boot, a worker whose turn a restart cut gets one recovery note; a second boot sends none", async () => {

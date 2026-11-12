@@ -418,6 +418,38 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     }),
   });
 
+  /* A task read by id whatever its day, so the browser can draw its tables once the rail has let it go: the fence first,
+   * then GET alone, `id` exactly once; nothing the caller sent is echoed */
+  webServer.register({
+    kind: "exact",
+    path: "/data/tasks/one",
+    handler: async (req, res) => {
+      const send = (status: number, body: unknown): void => {
+        res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+        res.end(JSON.stringify(body));
+      };
+      if (!deps.isTrusted(req)) return send(403, { ok: false, error: "forbidden" });
+      if (req.method !== "GET") return send(405, { ok: false, error: "method not allowed" });
+      try {
+        const rawUrl = req.url ?? "";
+        if (rawUrl.length > 8192 || /%(?![a-f\d]{2})/i.test(rawUrl)) throw new HttpError(400, "invalid task request");
+        const ids = new URL(rawUrl, "http://localhost").searchParams.getAll("id");
+        if (ids.length !== 1) throw new HttpError(400, "id is required once");
+        const id = ids[0]!;
+        if (id === "" || id.length > 200) throw new HttpError(400, "task is required");
+        try {
+          return send(200, { ok: true, task: (await ops.read(id)).view });
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith("no task ")) throw new HttpError(404, "no such task");
+          throw err;
+        }
+      } catch (err) {
+        if (err instanceof HttpError) return send(err.status, { ok: false, error: err.message });
+        return send(500, { ok: false, error: "request failed" });
+      }
+    },
+  });
+
   /* Stop and Continue from the task's page: `body.task` a non-empty string, an unknown id 404, a Stop on an ended task 409 */
   const taskRoute = (act: (id: string) => Promise<TaskView>) => fencedPost(deps.isTrusted, async (body) => {
     const id = body.task;
