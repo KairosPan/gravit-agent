@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import {
-  STALL_MS, STEPS_KEPT, TASK_TEXT_MAX, briefOrigin, cut, relaysOf, stallOf, taskViewOf, type TimedEvent,
+  STALL_MS, STEPS_KEPT, TASK_TEXT_MAX, briefOrigin, cut, namedViews, relaysOf, stallOf, taskViewOf, type TimedEvent,
 } from "../src/task-view.ts";
 import { briefText } from "../src/task-worker.ts";
 
@@ -444,6 +444,50 @@ test("a task's row carries the view an analog_events call answered", () => {
 
 test("a task with no analog call has no views", () => {
   assert.deepEqual(view(new Log().brief().start(1).say(1, "looking")).views, []);
+});
+
+const A = "an-20261112-0a1b2c3d";
+const B = "an-20261112-11111111";
+const C = "an-20261112-50c20b08";
+const okView = (id: string) => JSON.stringify({ ok: true, view: id, digest: "d" });
+
+test("eventViews holds analog_events views alone, namedViews those a report names", () => {
+  const log = new Log().brief().start(1)
+    .call(1, "c1", "analog_chart", { symbol: "NVDA" }).resultText(1, "c1", okView(A))
+    .call(1, "c2", "analog_events", { title: "x" }).resultText(1, "c2", okView(B))
+    .call(1, "c3", "analog_events", { title: "y" }).resultText(1, "c3", okView(C))
+    .report(1, "r1", "ready", `Done: see ${C} and the chart ${A}; ${C} again.`).end(1);
+  const v = view(log);
+  assert.deepEqual(v.views, [A, B, C]);
+  assert.deepEqual(v.eventViews, [B, C]);
+  assert.deepEqual(v.namedViews, [C]);
+  assert.deepEqual(namedViews(`x ${C} ${A} ${B} ${C} an-2026-bad`, [B, C]), [C, B]);
+  assert.deepEqual(namedViews("nothing here", [B, C]), []);
+});
+
+test("a relay carries the event views its whole text names", () => {
+  const words = `${"w".repeat(TASK_TEXT_MAX + 20)} the table is ${C}.`;
+  const log = new Log().brief().start(1)
+    .call(1, "c1", "analog_events", { title: "y" }).resultText(1, "c1", okView(C))
+    .say(1, words).end(1)
+    .user("again").start(2).report(2, "r2", "blocked", "no table named here").end(2);
+  const v = view(log);
+  assert.deepEqual(v.namedViews, [C], "the view reads the whole words too");
+  const relays = relaysOf(v, log.events);
+  assert.equal(relays.length, 2);
+  assert.ok(Array.from(relays[0]!.text).length <= TASK_TEXT_MAX && !relays[0]!.text.includes(C), "the cut text no longer names it");
+  assert.deepEqual(relays[0]!.views, [C]);
+  assert.equal(relays[0]!.phone, undefined);
+  assert.equal("views" in relays[1]!, false);
+
+  const phone = new Log().push("user/message", {
+    id: `task-brief:${ID}`, role: "user", content: [{ type: "text", text: briefText("T", "b") }],
+    source: { kind: "task", form: "brief", conversation: "session-conv", origin: "phone", network: "telegram" },
+  }).start(1).call(1, "c1", "analog_events", { title: "y" }).resultText(1, "c1", okView(C))
+    .report(1, "r1", "ready", `table ${C}`).end(1);
+  const [relay] = relaysOf(view(phone), phone.events);
+  assert.deepEqual(relay!.views, [C]);
+  assert.equal(relay!.phone, true, "a phone task's relay says so");
 });
 
 test("a three-round debate relays once: the concluding turn's words, never the three turns that waited", () => {

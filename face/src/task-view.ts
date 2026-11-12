@@ -59,6 +59,11 @@ export interface TaskView {
   usage?: TurnUsage;
   /** The analog view ids its worker's {@link ANALOG_VIEW_TOOLS} calls answered, in the order answered, each once. */
   views: string[];
+  /** Those of {@link views} an `analog_events` call answered, in the order answered, each once. */
+  eventViews: string[];
+  /** Those of {@link eventViews} named by the whole text of any relayed report or turn's last words ({@link namedViews}),
+   * in the order first named, each once. */
+  namedViews: string[];
   startedAt: number;
   lastEventAt: number;
   lastSeq: number;
@@ -71,6 +76,18 @@ export interface RelayItem {
   title: string;
   status: RelayStatus;
   text: string;
+  /** The task's event views ({@link TaskView.eventViews}) this item's whole text names, read before the
+   * {@link TASK_TEXT_MAX} cut; absent when it names none. */
+  views?: string[];
+  /** Set when the task came from the phone ({@link TaskView.origin}) and the item carries `views`. */
+  phone?: true;
+}
+
+/** The analog view ids `text` names, kept when in `among`: in the order first named, each once. */
+export function namedViews(text: string, among: readonly string[]): string[] {
+  const found: string[] = [];
+  for (const [id] of text.matchAll(/an-\d{8}-[0-9a-f]{8}/g)) if (among.includes(id) && !found.includes(id)) found.push(id);
+  return found;
 }
 
 /** `text` at most `max` characters (code points): cut to `max - 1` and an ellipsis when longer. */
@@ -128,6 +145,8 @@ interface Scan {
   lastStopped: number;
   /** The analog view ids the worker's {@link ANALOG_VIEW_TOOLS} calls answered, in the order answered, each once. */
   views: string[];
+  /** Those of `views` an `analog_events` call answered, in the order answered, each once. */
+  eventViews: string[];
 }
 
 /** Where a task was asked, as its brief's source names it (src/task-worker.ts `TaskMessageSource`): the conversation
@@ -194,7 +213,7 @@ function viewIdOf(content: unknown): string | undefined {
 }
 
 function scan(events: readonly EventLike[]): Scan {
-  const s: Scan = { turns: [], reports: [], gates: [], dispatches: [], lastStart: -1, lastEnd: -1, lastStopped: -1, views: [] };
+  const s: Scan = { turns: [], reports: [], gates: [], dispatches: [], lastStart: -1, lastEnd: -1, lastStopped: -1, views: [], eventViews: [] };
   const openTurns = new Map<number, Turn>();
   const asks = new Map<string, Gate>();
   const approvals = new Map<string, Gate>();
@@ -202,8 +221,8 @@ function scan(events: readonly EventLike[]): Scan {
   const calls = new Map<string, Report>();
   /* dispatch calls waiting for their result: a round runs once its result is logged and is no error */
   const dispatchCalls = new Set<string>();
-  /* analog calls waiting for their result: a view counts once its result is logged, is no error and names one */
-  const analogCalls = new Set<string>();
+  /* analog calls waiting for their result, by tool: a view counts once its result is logged, is no error and names one */
+  const analogCalls = new Map<string, string>();
   events.forEach((event, at) => {
     const data = dataOf(event);
     switch (event.type) {
@@ -251,7 +270,7 @@ function scan(events: readonly EventLike[]): Scan {
         } else if (data.name === "dispatch") {
           dispatchCalls.add(callId);
         } else if (typeof data.name === "string" && ANALOG_VIEW_TOOLS.includes(data.name)) {
-          analogCalls.add(callId);
+          analogCalls.set(callId, data.name);
         } else if (data.name === "ask_user_question") {
           asks.set(callId, { at, id: callId, kind: "question", tool: "ask_user_question", detail: questionsOf(data.arguments) });
         }
@@ -263,9 +282,11 @@ function scan(events: readonly EventLike[]): Scan {
         if (callId === undefined) break;
         asks.delete(callId);
         if (dispatchCalls.delete(callId) && message?.isError !== true) s.dispatches.push(at);
-        if (analogCalls.delete(callId) && message?.isError !== true) {
+        const analogTool = analogCalls.get(callId);
+        if (analogTool !== undefined && analogCalls.delete(callId) && message?.isError !== true) {
           const view = viewIdOf(message?.content);
           if (view !== undefined && !s.views.includes(view)) s.views.push(view);
+          if (view !== undefined && analogTool === "analog_events" && !s.eventViews.includes(view)) s.eventViews.push(view);
         }
         const report = calls.get(callId);
         if (report !== undefined) {
@@ -366,6 +387,24 @@ function usageOf(events: readonly EventLike[], s: Scan): TurnUsage | undefined {
   return sum;
 }
 
+/** What the task relays from its reports and turns ({@link relaysOf}), in log order, each text whole - before the
+ * {@link TASK_TEXT_MAX} cut - so the views it names are read from all of it. Gates are not here. */
+function relayed(events: readonly EventLike[], s: Scan): { at: number; key: string; status: "ready" | "blocked" | "failed"; whole: string }[] {
+  const out: { at: number; key: string; status: "ready" | "blocked" | "failed"; whole: string }[] = [];
+  for (const r of s.reports) {
+    if (r.status === "progress") continue;
+    out.push({ at: r.at, key: r.callId, status: r.status, whole: r.text });
+  }
+  for (const turn of s.turns) {
+    if (turn.end === undefined || settledBy(s, turn, turn.end) !== undefined) continue;
+    const outcome = turnOutcome(events, turn, Number.POSITIVE_INFINITY);
+    const relay = outcome.relay;
+    if (relay === undefined || (outcome.state === "done" && waitsOnRound(s, turn))) continue;
+    out.push({ at: turn.end, key: `turn-${turn.turn}`, status: relay.status, whole: relay.text });
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
 const GROUP: Record<TaskState, TaskGroup> = {
   waiting: "you", stalled: "you", blocked: "you", failed: "you", running: "running", done: "done", stopped: "done",
 };
@@ -424,6 +463,8 @@ export function taskViewOf(input: { id: string; header: { createdAt: number; cwd
     state = "running";
   }
   const usage = usageOf(events, s);
+  const named: string[] = [];
+  for (const r of relayed(events, s)) for (const id of namedViews(r.whole, s.eventViews)) if (!named.includes(id)) named.push(id);
   const strategy = strategyOf(input.root, input.header.cwd);
   const bot = input.header.agentPreset !== undefined && input.header.agentPreset !== DEFAULT_PRESET ? input.header.agentPreset : undefined;
   return {
@@ -440,6 +481,8 @@ export function taskViewOf(input: { id: string; header: { createdAt: number; cwd
     ...(result === undefined ? {} : { result }),
     ...(usage === undefined ? {} : { usage }),
     views: s.views,
+    eventViews: s.eventViews,
+    namedViews: named,
     startedAt: input.header.createdAt,
     lastEventAt,
     lastSeq: last?.seq ?? 0,
@@ -463,23 +506,18 @@ export function resultTextWhole(events: readonly EventLike[]): string | undefine
  * since it started (`task-report:<id>:turn-<n>`, by its end kind, {@link turnOutcome}; a turn cut by `aborted` or
  * `interrupted` relays nothing, and so does one that ended `done` to wait on a debate's round, {@link waitsOnRound});
  * each gate still pending (`task-wait:<id>:<approval id or callId>`, `waiting`, the tool and the
- * question or reason). Every text is cut at {@link TASK_TEXT_MAX}.
+ * question or reason). Every text is cut at {@link TASK_TEXT_MAX}; a report's or a turn's item carries the event views
+ * its whole text names (`views`, {@link namedViews}), and `phone` with them when the task came from the phone.
  */
 export function relaysOf(view: TaskView, events: readonly TimedEvent[]): RelayItem[] {
   const s = scan(events);
   const items: { at: number; item: RelayItem }[] = [];
-  const item = (id: string, status: RelayStatus, text: string): RelayItem =>
-    ({ id, task: view.id, title: view.title, status, text: cut(text, TASK_TEXT_MAX) });
-  for (const r of s.reports) {
-    if (r.status === "progress") continue;
-    items.push({ at: r.at, item: item(`task-report:${view.id}:${r.callId}`, r.status, r.text) });
-  }
-  for (const turn of s.turns) {
-    if (turn.end === undefined || settledBy(s, turn, turn.end) !== undefined) continue;
-    const outcome = turnOutcome(events, turn);
-    const relay = outcome.relay;
-    if (relay === undefined || (outcome.state === "done" && waitsOnRound(s, turn))) continue;
-    items.push({ at: turn.end, item: item(`task-report:${view.id}:turn-${turn.turn}`, relay.status, relay.text) });
+  const item = (id: string, status: RelayStatus, text: string, views: string[] = []): RelayItem => ({
+    id, task: view.id, title: view.title, status, text: cut(text, TASK_TEXT_MAX),
+    ...(views.length === 0 ? {} : { views, ...(view.origin === "phone" ? { phone: true as const } : {}) }),
+  });
+  for (const r of relayed(events, s)) {
+    items.push({ at: r.at, item: item(`task-report:${view.id}:${r.key}`, r.status, r.whole, namedViews(r.whole, s.eventViews)) });
   }
   for (const gate of s.gates) {
     const text = gate.detail === "" ? gate.tool : `${gate.tool}: ${gate.detail}`;

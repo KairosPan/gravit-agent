@@ -29,13 +29,29 @@ export function fenceTaskData(text: string, nonce?: string): string {
   return fenceData(text, { tag: "task-data", heads: ["[task ·"], ...(nonce === undefined ? {} : { nonce }) });
 }
 
+/** The face's line naming a report's event tables, group 1 its ids joined with `, `: the client reads it only from the
+ * lines after a relay's closing fence. */
+export const TABLE_LINE_RE = /^\[face · event table: (an-\d{8}-[0-9a-f]{8}(?:, an-\d{8}-[0-9a-f]{8})*)\] /;
+
+/** The face's line after a relay whose report names event views (`RelayItem.views`): it tells Gravit the face draws
+ * their table under the report - or, for a task from the phone, where no table is shown, to give the figures that
+ * matter and point to the task's page. */
+export function tableLine(ids: readonly string[], phone = false): string {
+  const sentence = phone
+    ? "The operator is on the phone, where the table is not shown: give the few figures that matter, each labelled with its %, and say the table is on the task's page in the face."
+    : "The face draws this report's event table under it: answer in two or three sentences and do not retype its figures.";
+  return `[face · event table: ${ids.join(", ")}] ${sentence}`;
+}
+
 /** The relay's message text: the bracketed head `[task · <title> · <status>]` - every `]` and line break in the title
  * a space, so the head stays one line and one bracket - then the text, cut at {@link TASK_TEXT_MAX} characters and
- * quoted as data ({@link fenceTaskData}).
+ * quoted as data ({@link fenceTaskData}), then, when the item carries `views`, the face's {@link tableLine} on its own
+ * line after the closing fence.
  * @param nonce - the fence's nonce; a fresh 16-hex-digit one when omitted (tests pass their own). */
 export function relayText(item: RelayItem, nonce?: string): string {
   const title = item.title.replace(/\r\n|[\]\r\n\u2028\u2029]/g, " ");
-  return `[task · ${title} · ${item.status}]\n${fenceTaskData(cut(item.text, TASK_TEXT_MAX), nonce)}`;
+  const text = `[task · ${title} · ${item.status}]\n${fenceTaskData(cut(item.text, TASK_TEXT_MAX), nonce)}`;
+  return item.views === undefined || item.views.length === 0 ? text : `${text}\n${tableLine(item.views, item.phone === true)}`;
 }
 
 /** The relays waiting for the conversation, and the pump that delivers them. */

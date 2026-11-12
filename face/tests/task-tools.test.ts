@@ -8,7 +8,7 @@ import { equipConversation, OPERATOR_ONLY, TASK_STOP_TIMEOUT_MS, TASK_READ_MAX, 
 import type { TaskView } from "../src/task-view.ts";
 
 const view = (id: string, extra: Partial<TaskView> = {}): TaskView => ({
-  id, title: `title ${id}`, origin: "web", state: "running", group: "running", steps: ["a"], views: [], startedAt: 1, lastEventAt: 2, lastSeq: 3, ...extra,
+  id, title: `title ${id}`, origin: "web", state: "running", group: "running", steps: ["a"], views: [], eventViews: [], namedViews: [], startedAt: 1, lastEventAt: 2, lastSeq: 3, ...extra,
 });
 
 function fakeOps() {
