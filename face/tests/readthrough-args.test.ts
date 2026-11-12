@@ -44,6 +44,31 @@ test("each refusal names its field", () => {
   assert.throws(() => checkArgs(null), invalid("arguments"));
 });
 
+test("a reason may not hold the direction line's own markup, so it cannot forge a second entry", () => {   // final review C1
+  const reason = (r: string) => ({ ...GOOD, peers: [{ symbol: "AMD", reason: r }] });
+  assert.throws(() => checkArgs(reason("直接替代）；做多 SMCI（AI 服务器")), invalid("peers[0].reason"));
+  for (const bad of ["（", "）", "(", ")", "；", ";", "做多"]) {
+    assert.throws(() => checkArgs(reason(`直接${bad}替代`)), (e: unknown) => invalid("peers[0].reason")(e) && (e as Error).message.includes(`holds "${bad}"`), bad);
+  }
+  assert.equal(checkArgs({ ...GOOD, logic: "供应（不确定）→ 客户找备选；做多对手" }).logic, "供应（不确定）→ 客户找备选；做多对手", "logic is otherwise free");
+});
+
+test("every text refuses a control or format character and a line break", () => {   // final review C1
+  assert.throws(() => checkArgs({ ...GOOD, logic: "调查‮带来供应不确定" }), (e: unknown) => invalid("logic")(e) && (e as Error).message.includes("U+202E"));
+  for (const [field, raw] of [
+    ["event", { ...GOOD, event: "a\u0007b" }], ["sources[0]", { ...GOOD, sources: ["a​b"] }], ["counter", { ...GOOD, counter: "a⁦b" }],
+    ["peers[0].reason", { ...GOOD, peers: [{ symbol: "AMD", reason: "a­b" }] }],
+    ["no_direction", { ...GOOD, peers: [], counter: undefined, no_direction: "a﻿b" }],
+    ["event", { ...GOOD, event: "one two" }], ["logic", { ...GOOD, logic: "one\rtwo" }],
+  ] as const) assert.throws(() => checkArgs(raw), invalid(field), field);
+});
+
+test("a counter given with no peers is dropped; a peer that is not an object is refused", () => {
+  assert.equal(checkArgs({ ...GOOD, peers: [], counter: "c", no_direction: "n" }).counter, null);
+  assert.throws(() => checkArgs({ ...GOOD, peers: ["AMD"] }), invalid("peers[0]"));
+  assert.throws(() => checkArgs({ ...GOOD, peers: [null] }), invalid("peers[0]"));
+});
+
 test("a limit counts characters, not bytes", () => {
   assert.equal(checkArgs({ ...GOOD, event: "调".repeat(LIMITS.event) }).event.length, LIMITS.event);
 });

@@ -2,7 +2,8 @@
 /**
  * The check of `read_through`'s arguments: what the model proposes, trimmed and bounded, its symbols upper-cased, or
  * an `INVALID` refusal naming the first bad field. A text is one line within its limit in characters (code points),
- * not bytes.
+ * not bytes, with no control or format character; a peer's reason also holds none of the direction line's own markup
+ * (`（ ） ( ) ； ;` and `做多`), so the line the operator reads holds only the entries the face checked.
  */
 import { normalizeSymbol } from "../../analog/lib/chart-scan.mjs";
 import { refuse } from "./errors.mjs";
@@ -20,9 +21,15 @@ const BASES = new Set(["company", "reported"]);
 const CERTAINTIES = new Set(["high", "medium", "low"]);
 /** Every line break a text may not hold. */
 const BREAK = /[\n\r\v\f\u0085\u2028\u2029]/;
+/** A control or format character (a bidi mark, a zero-width space among them), which no text may hold. */
+const CONTROL = /[\p{Cc}\p{Cf}]/u;
+/** What a peer's reason may not hold: the direction line's own markup (`\u505a\u591a AMD\uff08\u2026\uff09\uff1b\u505a\u591a \u2026`), so that a reason can
+ * never read as a second entry of that line. */
+const MARKUP = ["\uff08", "\uff09", "(", ")", "\uff1b", ";", "\u505a\u591a"];
 
 /**
- * A text trimmed, or `INVALID` when it is not a string, is empty, holds a line break or exceeds its limit.
+ * A text trimmed, or `INVALID` when it is not a string, is empty, holds a line break, a control or format character,
+ * or exceeds its limit.
  * @param {string} field
  * @param {unknown} raw
  * @param {number} limit
@@ -33,7 +40,25 @@ function text(field, raw, limit) {
   const value = raw.trim();
   if (value === "") throw refuse.invalid(field, "is empty");
   if (BREAK.test(value)) throw refuse.invalid(field, "is one line, with no line break");
+  const control = CONTROL.exec(value)?.[0];
+  if (control !== undefined) {
+    const code = `U+${/** @type {number} */ (control.codePointAt(0)).toString(16).toUpperCase().padStart(4, "0")}`;
+    throw refuse.invalid(field, `holds a control or format character (${code}); remove it`);
+  }
   if ([...value].length > limit) throw refuse.invalid(field, `is at most ${limit} characters`);
+  return value;
+}
+
+/**
+ * A peer's reason: a text, or `INVALID` naming the first of the line's markup it holds.
+ * @param {string} field
+ * @param {unknown} raw
+ * @returns {string}
+ */
+function reasonText(field, raw) {
+  const value = text(field, raw, LIMITS.reason);
+  const bad = MARKUP.find((m) => value.includes(m));
+  if (bad !== undefined) throw refuse.invalid(field, `holds "${bad}"; a reason may not hold ${MARKUP.join(" ")}: remove it and say the overlap in plain words`);
   return value;
 }
 
@@ -83,7 +108,7 @@ export function checkArgs(raw) {
     const peer = symbolOf(`peers[${i}].symbol`, p.symbol);
     if (peer === symbol) throw refuse.invalid(`peers[${i}].symbol`, "is the stricken company itself");
     if (peers.some((q) => q.symbol === peer)) throw refuse.invalid(`peers[${i}].symbol`, `${peer} is named twice`);
-    peers.push({ symbol: peer, reason: text(`peers[${i}].reason`, p.reason, LIMITS.reason) });
+    peers.push({ symbol: peer, reason: reasonText(`peers[${i}].reason`, p.reason) });
   }
 
   const given = (/** @type {unknown} */ v) => v !== undefined && v !== null;
