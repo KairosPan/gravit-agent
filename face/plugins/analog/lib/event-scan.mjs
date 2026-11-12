@@ -4,9 +4,12 @@
  * the keep, each event measured from its day 0 against the market, and the view that holds what was measured, what
  * could not be, and why.
  *
- * The input is refused at its first bad field, named by its path. Every history is read in one call to the keep under
- * the scan's deadline; the market's (`SPY`) is always read fresh, and so is the present case's company (`query`) when
- * there is one, so a new session drops what the keep held; the past events' companies may come from the keep. A market that does not answer with nothing read is a refusal; a company the market
+ * The input is refused at its first bad field, named by its path. Each text (the title, a label, a group, a note) is
+ * put on one line before it is measured, every run of whitespace and control characters one space, so a text from a
+ * page cannot start a line of the digest; a source URL that carries a username or a password is refused. Every history
+ * is read in one call to the keep under the scan's deadline; the market's (`SPY`) is always read fresh, and so is the
+ * present case's company (`query`) when there is one, so a new session drops what the keep held; the past events'
+ * companies may come from the keep. A market that does not answer with nothing read is a refusal; a company the market
  * refuses, one not read before the deadline, an event whose day 0 has not traded, and one with fewer than 20 sessions
  * before day 0 are kept as unmeasured cases with the words that say why, never left out. Without the market's own bars
  * the raw changes stay and every change against the market is null.
@@ -77,13 +80,22 @@ const ANCHOR_SHAPE = "an object with label, date and timing";
 /** @param {unknown} raw @returns {raw is Record<string, unknown>} */
 const isObject = (raw) => typeof raw === "object" && raw !== null && !Array.isArray(raw);
 
+/** Every run of whitespace and control characters (U+0000 to U+001F, U+007F, U+2028, U+2029). */
+const BREAKS = /[\s\u0000-\u001f\u007f\u2028\u2029]+/gu;
+
 /**
- * A trimmed text of 1 to `max` characters, or the refusal of `field`.
+ * `text` on one line: every run of whitespace and control characters one space, then trimmed.
+ * @param {string} text
+ */
+const oneLine = (text) => text.replace(BREAKS, " ").trim();
+
+/**
+ * A text of 1 to `max` characters on one line ({@link oneLine}), or the refusal of `field`.
  * @param {unknown} raw @param {string} field @param {number} max
  * @returns {string}
  */
 function textOf(raw, field, max) {
-  const text = typeof raw === "string" ? raw.trim() : "";
+  const text = typeof raw === "string" ? oneLine(raw) : "";
   if (text === "" || text.length > max) throw refuse.invalidEvents(field, `text of 1 to ${max} characters`);
   return text;
 }
@@ -127,7 +139,8 @@ function symbolIn(raw, field) {
 }
 
 /**
- * An `http:` or `https:` URL of at most 500 characters, as written but trimmed, or the refusal of `field`.
+ * An `http:` or `https:` URL of at most 500 characters with no username or password, as written but trimmed, or the
+ * refusal of `field`.
  * @param {unknown} raw @param {string} field
  * @returns {string}
  */
@@ -136,13 +149,13 @@ function sourceIn(raw, field) {
   let ok = source.length <= LIMITS.source;
   if (ok) {
     try {
-      const { protocol } = new URL(source);
-      ok = protocol === "http:" || protocol === "https:";
+      const { protocol, username, password } = new URL(source);
+      ok = (protocol === "http:" || protocol === "https:") && username === "" && password === "";
     } catch {
       ok = false;
     }
   }
-  if (!ok) throw refuse.invalidEvents(field, `an http or https URL of at most ${LIMITS.source} characters`);
+  if (!ok) throw refuse.invalidEvents(field, `an http(s) URL without credentials, at most ${LIMITS.source} characters`);
   return source;
 }
 
@@ -165,7 +178,7 @@ function eventIn(raw, i) {
   let note = null;
   if (raw.note !== null && raw.note !== undefined) {
     if (typeof raw.note !== "string") throw refuse.invalidEvents(`${at}.note`, `text of at most ${LIMITS.note} characters, or left out`);
-    note = raw.note.trim();
+    note = oneLine(raw.note);
     if (note.length > LIMITS.note) throw refuse.invalidEvents(`${at}.note`, `text of at most ${LIMITS.note} characters, or left out`);
     if (note === "") note = null;
   }

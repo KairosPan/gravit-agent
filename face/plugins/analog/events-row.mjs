@@ -34,7 +34,7 @@ const PARAMETERS = {
         group: { type: "string", description: `the event's group, at most ${LIMITS.group} characters`, required: true },
         date: { type: "string", description: "YYYY-MM-DD, the date the news first became public", required: true },
         timing: { type: "string", enum: [...TIMINGS], description: "when on that date, New York time", required: true },
-        source: { type: "string", description: `the source's http or https URL, at most ${LIMITS.source} characters`, required: true },
+        source: { type: "string", description: `the source's http(s) URL without credentials, at most ${LIMITS.source} characters`, required: true },
         verified: { type: "boolean", description: "whether the source reader verified the date at the source", required: true },
         note: { type: "string", description: `optional, at most ${LIMITS.note} characters` },
       },

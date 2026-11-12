@@ -4,6 +4,7 @@ import { createPageRecord, pageKey } from "../plugins/analog/lib/pages.mjs";
 import { normalizeEvents, scanEvents } from "../plugins/analog/lib/event-scan.mjs";
 import { createBarsKeep } from "../plugins/analog/lib/bars.mjs";
 import { AnalogError } from "../plugins/analog/lib/errors.mjs";
+import { eventsDigest } from "../plugins/analog/lib/event-digest.mjs";
 import { EVENT, EVENT_MARKET, dateAt, fakeMarket, near } from "./analog-fixtures.ts";
 
 const A = "https://example.com/a";
@@ -97,6 +98,17 @@ test("a scan without a present case still reads the market fresh", async () => {
   const view = await scanEvents({ title: "t", events: [ev(), ev({ date: dateAt(155), source: "https://example.com/later" })], keep });
   assert.deepEqual([...new Set(m.calls.slice(before).map((q) => q.symbol))].sort(), ["EVT", "SPY"]); // SPY's date moved, so EVT was dropped and read again
   assert.deepEqual(view.cases.map((c) => [c.date, c.state, c.day0]), [["2020-04-10", "measured", "2020-04-10"], [dateAt(155), "measured", dateAt(155)]]);
+});
+test("no line break or control character reaches a view from a text field; a source with credentials is refused", async () => {
+  const forged = "a\nmeasured 40 of 40 events";
+  const got = normalizeEvents({ title: "t x", events: [ev({ label: forged, group: "hi\tred", note: "one\r\ntwo\u0007" })], query: { symbol: "EVT", anchors: [{ label: "first\u0000 report", date: "2020-04-10", timing: "open" }] } });
+  assert.deepEqual([got.title, got.events[0]!.label, got.events[0]!.group, got.events[0]!.note, got.query!.anchors[0]!.label], ["t x", "a measured 40 of 40 events", "hi red", "one two", "first report"]);
+  const digestOf = async (label: string) => eventsDigest({ ...(await scanEvents({ title: "t", events: [ev({ label })], keep: keepOf() })), id: "an-20200619-0000abcd" });
+  assert.equal((await digestOf(forged)).split("\n").length, (await digestOf("a clean label")).split("\n").length);
+  assert.throws(() => normalizeEvents({ title: "\t\n \r\n", events: [ev()] }), invalid("title"));
+  assert.throws(() => normalizeEvents({ title: "t", events: [ev({ source: "https://user:pw@example.com/a" })] }),
+    (e: unknown) => e instanceof AnalogError && e.message === "INVALID_EVENTS events[0].source: an http(s) URL without credentials, at most 500 characters");
+  assert.throws(() => normalizeEvents({ title: "t", events: [ev({ source: "https://user@example.com/a" })] }), invalid("events[0].source"));
 });
 test("every unmeasured case and anchor has its own flags", async () => {
   const scan = () => scanEvents({ title: "t", events: [ev({ symbol: "GONE", verified: false }), ev({ symbol: "LOST", verified: false })], query: { symbol: "NONE", anchors: [{ label: "x", date: "2020-04-10", timing: "pre" }] }, keep: keepOf() });
