@@ -40,6 +40,7 @@ import { rosterBots } from "./task-worker.ts";
 import { createPhoneClient, type PhoneClient } from "./phone.ts";
 import { announceCard } from "./card-notice.ts";
 import { marketQuotes } from "./market-quotes.ts";
+import { wireReadThrough } from "./readthrough.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { readMeta, registerSessionRoutes } from "./sessions.ts";
 import { openSearchIndexOrFresh, type SearchIndex } from "./search-index.ts";
@@ -478,11 +479,15 @@ cardPhone = phone;
 const deskRoute = deskEnabled
   ? await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_DESK_MODEL, console.log)
   : undefined;
+/* The Market's quotes, the desk's and the read-through's: read-through (src/readthrough.ts) is wired with them, the
+ * desk's own symbols and the XNYS clock whether the desk is on or off, so a task's `read_through` works either way. */
+const quotes = marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes });
+wireReadThrough(booted.ctx, { quotes, root: process.cwd() });
 desk = installDesk(booted.ctx.webServer, {
   home: dshHome,
   enabled: deskEnabled,
   ctx: booted.ctx,
-  quotes: marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes }),
+  quotes,
   root: process.cwd(),
   route: deskRoute,
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,

@@ -12,10 +12,21 @@
  * and `readThrough`, which registers `read_through`. The tool is registered
  * tree-wide, as dsh's own are; no bot's allow list names it
  * (`tests/bots.test.ts`), the desk's mask does (src/desk-preset.ts), and the
- * row refuses a desk agent's call outside an annotation run. */
+ * row refuses a desk agent's call outside an annotation run.
+ *
+ * The face's half is here too: {@link wireReadThrough}, which main.ts calls with the Market's quotes whether the
+ * desk is on or off, wires the service with the prices, the desk's own symbols and the XNYS clock, and
+ * {@link readThroughLane} is the service as the annotator and the watch call it. src/ reaches the service through
+ * the context alone, never by importing anything under plugins/. */
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { FacePatchList } from "./boot.ts";
+import { loadHoldings, loadLevels, loadRules } from "./desk-book.ts";
+import { etDate } from "./et.ts";
+import { nyInstant, sessionFor, xnysWindow, type MarketSession } from "./market-clock.ts";
+import type { MarketQuoteSource } from "./market-quotes.ts";
+import { idOf, marketOf } from "./symbols.ts";
+import { AFTER_HOURS_MS } from "./watch-eval.ts";
 
 export const READ_THROUGH_ROW_IDS = ["read-through-service", "read-through-tool"] as const;
 
@@ -36,4 +47,132 @@ export function readThroughPatches(home: string): FacePatchList {
       config: id === "read-through-service" ? { recordDir: join(home, "face", "readthrough") } : {},
     })),
   }];
+}
+
+/* ---------- the face's half ---------- */
+
+/** One print as the service reads it: the Market's price, its change from the previous close in percent, its feed
+ * and when it traded; `price` and `changePct` are `null` when the Market has none. */
+export interface ReadThroughPrint { symbol: string; price: number | null; changePct: number | null; feed: string; asOf: string | null }
+
+/** One event an annotation run may give a direction for: the stricken symbol and its reference date, `YYYY-MM-DD`. */
+export interface ReadThroughAsk { symbol: string; ref: string }
+
+/** The service's calls the annotator and the watch use, inert while the row is not mounted. */
+export interface ReadThroughLane {
+  ready(): boolean;
+  open(sessionId: string, run: { pass: string; asks: ReadThroughAsk[] }): void;
+  close(sessionId: string): { id: string; text: string }[];
+  given(symbol: string, ref: string): Promise<boolean>;
+  later(items: ReadThroughAsk[]): Promise<string[]>;
+  sent(ids: string[], sent: boolean): Promise<void>;
+}
+
+/** The `readThrough` service as this file calls it (plugins/readthrough/service-row.mjs). */
+type ReadThroughService = ReadThroughLane & { wire(deps: ReadThroughWiring): void };
+
+/** The face's half the service is wired with. */
+interface ReadThroughWiring {
+  prices(symbols: string[]): Promise<ReadThroughPrint[]>;
+  deskSymbols(): Promise<string[]>;
+  usSessionOn(): boolean;
+  refClose(date: string): string | undefined;
+}
+
+/** The lane over `ctx.get("readThrough")`, read afresh at every call, so a reloaded row is the one called. With no
+ * service: `ready` is false, `close` gives nothing, `given` false, `later` nothing, and `open` and `sent` do nothing. */
+export function readThroughLane(ctx: { get(key: string): unknown }): ReadThroughLane {
+  const service = () => ctx.get("readThrough") as ReadThroughService | undefined;
+  return {
+    ready: () => service()?.ready() ?? false,
+    open: (sessionId, run) => service()?.open(sessionId, run),
+    close: (sessionId) => service()?.close(sessionId) ?? [],
+    given: async (symbol, ref) => (await service()?.given(symbol, ref)) ?? false,
+    later: async (items) => (await service()?.later(items)) ?? [],
+    sent: async (ids, sent) => { await service()?.sent(ids, sent); },
+  };
+}
+
+/** The service's prices: each symbol asked of `quotes` as a US share, the prints in the order asked. Rejects with
+ * the source's `unavailable` when it has no price at all, and with the snapshot's rejection. */
+export function readThroughPrices(quotes: Pick<MarketQuoteSource, "snapshot" | "unavailable">): (symbols: string[]) => Promise<ReadThroughPrint[]> {
+  return async (symbols) => {
+    if (quotes.unavailable !== undefined) throw new Error(quotes.unavailable);
+    const payload = await quotes.snapshot(symbols.map((symbol) => ({ id: idOf("us", symbol), market: "us", symbol })));
+    return symbols.map((symbol, i) => {
+      const q = payload.quotes[i];
+      return { symbol, price: q?.price ?? null, changePct: q?.change_pct ?? null, feed: q?.feed ?? "", asOf: q?.as_of ?? null };
+    });
+  };
+}
+
+/**
+ * The desk's own US symbols, which the fence admits beside the universe: those of `desk/rules.yml`,
+ * `desk/holdings.yml` and `desk/levels.yml` under `root`, sorted, each once. A strategy's levels are not the
+ * desk's; a missing or refused file adds nothing, and a refused entry is left out.
+ * @param root - the repository root.
+ * @param today - the ET date, `YYYY-MM-DD`, a level's expiry is judged against.
+ */
+export async function deskFenceSymbols(root: string, today: string): Promise<string[]> {
+  const [rules, holdings, levels] = await Promise.all([
+    loadRules(join(root, "desk", "rules.yml"), "desk/rules.yml"),
+    loadHoldings(join(root, "desk", "holdings.yml"), "desk/holdings.yml"),
+    loadLevels(join(root, "desk", "levels.yml"), "desk/levels.yml", today),
+  ]);
+  const symbols = [
+    ...rules.entries.flatMap((rule) => rule.symbols.symbols),
+    ...holdings.entries.map((holding) => holding.symbol),
+    ...levels.entries.map((level) => level.symbol),
+  ];
+  return [...new Set(symbols.filter((symbol) => marketOf(symbol) === "us"))].sort();
+}
+
+/** That New York date's XNYS session by the builtin rules, or `undefined` for a closed day or no date. */
+function xnysSessionOn(date: string): MarketSession | undefined {
+  let session: ReturnType<typeof sessionFor>;
+  try {
+    session = sessionFor(xnysWindow(date, 1), date);
+  } catch {
+    return undefined;
+  }
+  return typeof session === "object" ? session : undefined;
+}
+
+/** Whether `now` lies in a US session as the watch polls it: from 04:00 ET of a session day to its close plus
+ * after-hours, 20:00 ET, or 17:00 on an early close (src/watch-eval.ts `AFTER_HOURS_MS`), on the builtin XNYS rules. */
+export function usSessionOn(now: number): boolean {
+  const date = etDate(new Date(now));
+  const session = xnysSessionOn(date);
+  return session !== undefined && now >= Date.parse(nyInstant(date, 4, 0)) && now < Date.parse(session.close) + AFTER_HOURS_MS;
+}
+
+/** A session's regular close as an ISO instant - 16:00 ET, 13:00 on an early close - on the builtin XNYS rules;
+ * `undefined` for a closed day or anything that is no `YYYY-MM-DD` date. The close a run's print must be after to
+ * count as traded on the news. */
+export function refClose(date: string): string | undefined {
+  const session = xnysSessionOn(date);
+  return session === undefined ? undefined : new Date(session.close).toISOString();
+}
+
+/**
+ * Wire the face's half into the `readThrough` service through `ctx.inject(["readThrough"], …)`, so a reloaded row
+ * is wired again: the Market's prices from `quotes`, the desk's symbols under `root` on the ET date of the moment
+ * asked, and the XNYS clock at `now`.
+ * @param ctx - the root context.
+ * @param deps - the quote source, the repository root, and the clock (the wall clock by default).
+ */
+export function wireReadThrough(
+  ctx: { inject(deps: string[], callback: (layer: any) => void): unknown },
+  deps: { quotes: Pick<MarketQuoteSource, "snapshot" | "unavailable">; root: string; now?: () => number },
+): void {
+  const now = deps.now ?? Date.now;
+  const wiring: ReadThroughWiring = {
+    prices: readThroughPrices(deps.quotes),
+    deskSymbols: () => deskFenceSymbols(deps.root, etDate(new Date(now()))),
+    usSessionOn: () => usSessionOn(now()),
+    refClose,
+  };
+  ctx.inject(["readThrough"], (layer: { readThrough?: ReadThroughService }) => {
+    layer.readThrough?.wire(wiring);
+  });
 }
