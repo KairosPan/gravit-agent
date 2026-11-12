@@ -65,6 +65,12 @@ export const refuse = {
     ),
   badViewId: () => new AnalogError("BAD_VIEW_ID", "a view id is an- followed by a date YYYYMMDD, a dash and 8 hex digits"),
   noSuchView: () => new AnalogError("NO_SUCH_VIEW", "no view is kept under this id"),
+  /** An event digest that no cut brings within its bound: the texts the caller gave are too long to retry as they are. */
+  digestOverBound: () =>
+    new AnalogError(
+      "INTERNAL",
+      "the answer does not fit the 2,048 bytes a digest may hold; shorten the title, the labels or the group names and call again",
+    ),
   internal: () =>
     new AnalogError("INTERNAL", "an internal error; its detail goes to the face's log only. Retry once; if it fails again, tell the operator"),
 };

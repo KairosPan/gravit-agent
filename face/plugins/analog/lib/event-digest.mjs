@@ -5,14 +5,18 @@
  * per group and `all` against the market, the measured cases in the view's order, the unmeasured ones with the words
  * that say why, what the flags mean, and the fixed sentences.
  *
- * When it does not fit, in this order until it does: every note goes; the unmeasured line is cut from its end to
- * `+N more`; case lines leave from the middle of the order, so the first and the last stay longest, with `… and N more
- * in the view` where they left; the flags' line goes; then, all at once, texts are clipped by code point with `…` where
- * they were clipped (the title to 20 characters, each anchor's label to 12, each group's name to 8 wherever it is
- * printed, the market's words on an anchor's line or the SPY line to 80); then each measured anchor's line takes a
- * short form without its gap, its +1 and its volume. A digest still over the bound is refused (`INTERNAL`), never
- * returned. Line 1, the header, each row's numbers and the fixed sentences are never cut. Numbers are written as the
- * chart digest writes them. The view is not changed.
+ * When it is over the bound, each step below is taken in turn while it still is: (1) every note goes; (2) every
+ * unmeasured entry loses its words and reads `<SYMBOL> <date>`; (3) case lines leave from the middle of the order, so
+ * the first and the last stay longest, with `… and N more in the view` where they left; (4) the unmeasured line is cut
+ * from its end to `+N more`; (5) the line that explains `quiet` and `elsewhere` goes; (6) texts are clipped, all at
+ * once, by code point with `…` where they were clipped (the title to 20 characters, each anchor's label to 12, each
+ * group's name to 8 wherever it is printed, the market's words on an anchor's line or the SPY line to 80); (7) each
+ * measured anchor's line takes a short form without its gap, its +1 and its volume. (8) Whenever step 6 or 7 was taken,
+ * the case lines that left come back while the digest stays within the bound, the earliest and the latest of them in
+ * turn, so the kept ones are still the two ends of the order; the `… and N more` line says how many are still out and
+ * goes when none is. (9) A digest still over the bound is refused (`INTERNAL`), never returned. Line 1, the header,
+ * each row's numbers and the fixed sentences are never cut. Numbers are written as the chart digest writes them. The
+ * view is not changed.
  */
 import { DIGEST_MAX, pct, ratio, whole } from "./digest.mjs";
 import { refuse } from "./errors.mjs";
@@ -100,10 +104,11 @@ export function eventsDigest(view) {
     ` · view ${view.id}${c.deadline ? " · stopped at the deadline" : ""}`;
 
   const measured = view.cases.filter((k) => k.state === "measured" && k.measure !== null);
-  const unmeasured = view.cases.filter((k) => k.state === "unmeasured").map((k) => `${k.symbol} ${k.date} (${k.words})`);
+  const unmeasured = view.cases.filter((k) => k.state === "unmeasured");
   const flagged = measured.some((k) => k.flags.includes("quiet") || k.flags.includes("elsewhere"));
 
   let notes = true;
+  let unmeasuredWords = true;
   let unmeasuredShown = unmeasured.length;
   // The case lines shown are the first `head` and the last `tail` of the order; the ones between have left.
   let head = Math.ceil(measured.length / 2);
@@ -125,9 +130,10 @@ export function eventsDigest(view) {
     const cases = measured.length === 0 ? [] : [
       CASES, ...lines.slice(0, head), ...(cut > 0 ? [`… and ${cut} more in the view`] : []), ...lines.slice(lines.length - tail),
     ];
+    const entries = unmeasured.map((k) => (unmeasuredWords ? `${k.symbol} ${k.date} (${k.words})` : `${k.symbol} ${k.date}`));
     const more = unmeasured.length - unmeasuredShown;
     const unmeasuredLine = unmeasured.length === 0 ? [] : [
-      `unmeasured: ${[...unmeasured.slice(0, unmeasuredShown), ...(more > 0 ? [`+${more} more`] : [])].join("; ")}`,
+      `unmeasured: ${[...entries.slice(0, unmeasuredShown), ...(more > 0 ? [`+${more} more`] : [])].join("; ")}`,
     ];
     return [
       first, clipped ? clip(view.title, CLIP.title) : view.title, ...anchors, ...spy, HEADER, ...rows, ...cases,
@@ -137,14 +143,24 @@ export function eventsDigest(view) {
   let text = compose();
   const over = () => Buffer.byteLength(text) > DIGEST_MAX;
   if (over()) { notes = false; text = compose(); }
-  while (over() && unmeasuredShown > 0) { unmeasuredShown--; text = compose(); }
+  if (over()) { unmeasuredWords = false; text = compose(); }
   while (over() && head + tail > 0) {
     if (head > tail) head--; else tail--;
     text = compose();
   }
+  while (over() && unmeasuredShown > 0) { unmeasuredShown--; text = compose(); }
   if (over() && flagsShown) { flagsShown = false; text = compose(); }
   if (over()) { clipped = true; text = compose(); }
   if (over()) { short = true; text = compose(); }
-  if (over()) throw refuse.internal();
+  if (clipped && !over()) {
+    // Clipping made room: the cases that left come back, the earliest and the latest of them in turn, while they fit.
+    for (let earliest = true; head + tail < measured.length; earliest = !earliest) {
+      const before = { head, tail, text };
+      if (earliest) head++; else tail++;
+      text = compose();
+      if (over()) { ({ head, tail, text } = before); break; }
+    }
+  }
+  if (over()) throw refuse.digestOverBound();
   return text;
 }

@@ -106,7 +106,124 @@ test("Chinese text at the limits still fits", () => {
 });
 
 test("a view no cut can fit is refused, not returned", () => {
-  assert.throws(() => eventsDigest(fullView({ symbol: "S".repeat(600) })), (e: unknown) => e instanceof AnalogError && e.code === "INTERNAL");
+  assert.throws(() => eventsDigest(fullView({ symbol: "S".repeat(600) })), (e: unknown) => e instanceof AnalogError && e.code === "INTERNAL" &&
+    e.message === "INTERNAL the answer does not fit the 2,048 bytes a digest may hold; shorten the title, the labels or the group names and call again");
+});
+
+test("an ordinary list still names the company that could not be measured", async () => {
+  const view = await scanEvents({
+    title: "CEO scandals",
+    events: [
+      ...Array.from({ length: 22 }, (_, i) => ev({ date: dateAt(30 + i), label: `CEO left after board inquiry no. ${i}`, source: `https://example.com/${i}` })),
+      ev({ symbol: "GONE", date: "2018-07-27", source: "https://example.com/gone", verified: false }),
+    ],
+    keep: keepOf(),
+  });
+  const text = eventsDigest({ ...view, id: ID });
+  assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
+  const lines = text.split("\n");
+  assert.ok(lines.some((l) => l.startsWith("unmeasured: GONE 2018-07-27")), text);
+  const measured = view.cases.filter((c) => c.state === "measured");
+  assert.ok(text.includes(`hired: EVT ${measured[0]!.day0} ${measured[0]!.label} `), text);
+  assert.ok(text.includes(`hired: EVT ${measured.at(-1)!.day0} ${measured.at(-1)!.label} `), text);
+  assert.match(text, /^… and \d+ more in the view$/m);
+});
+
+test("case lines come back when clipping makes room", () => {
+  const text = eventsDigest(fullView());
+  assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
+  assert.ok(text.split("\n").some((l) => l.startsWith(`${"g".repeat(8)}…: ABCDEFGHIJ ${dateAt(30)} `)), text);
+});
+
+// A seeded generator of views (an LCG, no dependency): every text of random length up to its limit, in ASCII or
+// Chinese, random flags, anchors, unmeasured cases, the market refused or not, the deadline or not.
+function lcg(seed: number) {
+  let s = seed >>> 0;
+  return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 2 ** 32; };
+}
+const clipTo = (text: string, max: number) => (Array.from(text).length <= max ? text : `${Array.from(text).slice(0, max).join("")}…`);
+const pctOf = (v: number | null) => {
+  if (v === null) return "n/a";
+  const s = (v * 100).toFixed(1);
+  return s === "0.0" || s === "-0.0" ? "0.0%" : s.startsWith("-") ? `−${s.slice(1)}%` : `+${s}%`;
+};
+/** A case's line after its group's name, as an uncut digest writes it, without its note. */
+const caseTail = (c: any) => `${c.symbol} ${c.day0} ${Array.from(c.label as string).slice(0, 40).join("")} day 0 ${pctOf(c.measure.x0)}; +5 ${pctOf(c.measure.x5)}; +60 ${pctOf(c.measure.x60)}` +
+  (c.measure.x0 === null ? ` · raw ${pctOf(c.measure.r0)}` : "") + (c.flags.includes("quiet") ? " · quiet" : "") +
+  (c.flags.includes("elsewhere") ? " · elsewhere" : "") + (c.verified ? "" : " · unverified") + (c.flags.includes("unopened") ? " · source not opened" : "");
+function randomView(seed: number) {
+  const r = lcg(seed);
+  const pick = <T,>(xs: readonly T[]) => xs[Math.floor(r() * xs.length)]!;
+  const chinese = r() < 0.5;
+  const full = r() < 0.4;
+  const text = (max: number) => {
+    const n = full ? max : 1 + Math.floor(r() * max);
+    return Array.from({ length: n }, () => (chinese ? String.fromCodePoint(0x4e00 + Math.floor(r() * 2000)) : String.fromCharCode(97 + Math.floor(r() * 26)))).join("");
+  };
+  const num = () => (r() < 0.1 ? null : (r() - 0.6) * 0.8);
+  const symbol = () => Array.from({ length: 1 + Math.floor(r() * 10) }, () => String.fromCharCode(65 + Math.floor(r() * 26))).join("");
+  const groupNames = Array.from({ length: 1 + Math.floor(r() * 4) }, (_, i) => `${i}${text(23)}`);
+  const measureOf = () => ({ base: 50, gap: num(), r0: num() ?? 0, r1: num(), r5: num(), r20: num(), r60: num(), x0: num(), x1: num(), x5: num(), x20: num(), x60: num(), low60: -0.2, lowAt: 3, sessionsAfter: Math.floor(r() * 3000) });
+  const summary = () => {
+    const n = Math.floor(r() * 41);
+    if (r() < 0.3) return { ...SUM, n, x0: null };
+    return { ...SUM, n, x0: num(), x1: num(), x5: num(), x20: num(), x60: num(), x60q1: num(), x60q3: num(), down0: r(), down60: r() };
+  };
+  const measured = Array.from({ length: 1 + Math.floor(r() * 40) }, (_, i) => {
+    const flags = ["quiet", "elsewhere", "unopened"].filter(() => r() < 0.3);
+    return { id: `c${i}`, symbol: symbol(), label: text(80), group: pick(groupNames), date: dateAt(30 + i), timing: "pre", source: A, note: r() < 0.6 ? text(160) : null, claimed: true, opened: false, verified: r() < 0.5, state: "measured", words: null, day0: dateAt(30 + i), measure: measureOf(), tape: { vol0: 1, busiest: null, flags: [] }, flags, window: null, rel: null };
+  });
+  const gone = Array.from({ length: Math.floor(r() * 6) }, (_, i) => ({ id: `u${i}`, symbol: symbol(), label: text(80), group: pick(groupNames), date: "2018-07-27", timing: "pre", source: A, note: null, claimed: false, opened: false, verified: false, state: "unmeasured", words: `Nasdaq keeps no daily bars of this one: ${"w".repeat(Math.floor(r() * 160))}`, day0: null, measure: null, tape: null, flags: [], window: null, rel: null }));
+  const anchors = Array.from({ length: Math.floor(r() * 4) }, (_, i) => r() < 0.3
+    ? { id: `q-${i + 1}`, label: text(80), date: "2020-06-19", timing: "post", state: "unmeasured", words: `no session after 2020-06-19 in its bars ${"w".repeat(Math.floor(r() * 120))}`, day0: null, measure: null, tape: null, flags: [], window: null, rel: null }
+    : { id: `q-${i + 1}`, label: text(80), date: "2020-06-19", timing: "pre", state: "measured", words: null, day0: "2020-06-19", measure: measureOf(), tape: { vol0: 3.2, busiest: null, flags: [] }, flags: [], window: null, rel: null });
+  const cases = [...measured, ...gone];
+  const verified = cases.filter((c) => c.verified).length;
+  const marketRefused = r() < 0.3;
+  return {
+    kind: "events", version: 1, at: "2020-06-19T15:00:00.000Z", title: `T${text(119)}`, id: ID,
+    query: anchors.length === 0 ? null : { symbol: symbol(), readDate: "2020-06-19", latest: "2020-06-19", today: null, sessionOpen: r() < 0.5, words: null, anchors },
+    coverage: { asked: cases.length, measured: measured.length, unmeasured: gone.map((g) => ({ id: g.id, symbol: g.symbol, words: g.words })), verified, unverified: cases.length - verified, unopened: measured.filter((c) => c.flags.includes("unopened")).length, quiet: 0, elsewhere: 0, noContext: 0, companies: { asked: 1, read: 1 }, sources: {}, short: [], adjustment: [], market: { source: marketRefused ? null : "Nasdaq · SPY", words: marketRefused ? `Nasdaq keeps no daily bars of SPY ${"w".repeat(Math.floor(r() * 200))}` : null }, readFrom: null, deadline: r() < 0.3 },
+    groups: { all: summary(), named: groupNames.map((name) => ({ name, summary: summary(), paths: null })) },
+    cases, windowsDropped: 0,
+  } as any;
+}
+
+test("the bound holds for any view", () => {
+  let refusedCount = 0;
+  for (let seed = 1; seed <= 300; seed++) {
+    const view = randomView(seed);
+    let text: string;
+    try {
+      text = eventsDigest(view);
+    } catch (e) {
+      assert.ok(e instanceof AnalogError && e.message === "INTERNAL the answer does not fit the 2,048 bytes a digest may hold; shorten the title, the labels or the group names and call again", `seed ${seed}: ${e}`);
+      refusedCount++;
+      continue;
+    }
+    const c = view.coverage;
+    const first = `measured ${c.measured} of ${c.asked} events (${c.unmeasured.length} unmeasured) · ${c.verified} verified, ${c.unverified} unverified` +
+      (c.unopened > 0 ? `, ${c.unopened} marked verified without an opened source` : "") + ` · view ${ID}${c.deadline ? " · stopped at the deadline" : ""}`;
+    assert.ok(Buffer.byteLength(text) <= 2048, `seed ${seed}: ${Buffer.byteLength(text)} bytes`);
+    const lines = text.split("\n");
+    assert.equal(lines[0], first, `seed ${seed}`);
+    assert.ok(text.endsWith(`\n${EVENT_SENTENCES}`), `seed ${seed}`);
+    const shown = (name: string) => [name, clipTo(name, 8)];
+    for (const g of view.groups.named) {
+      assert.ok(lines.some((l) => shown(g.name).some((s) => l.startsWith(`${s}  ${g.summary.n}  `))), `seed ${seed}: no row for ${g.name}`);
+    }
+    assert.ok(lines.some((l) => l.startsWith(`all  ${view.groups.all.n}  `)), `seed ${seed}: no all row`);
+    const tails = new Set(view.cases.filter((k: any) => k.state === "measured").map(caseTail));
+    const notes = new Map(view.cases.filter((k: any) => k.note !== null).map((k: any) => [caseTail(k), ` · note: ${k.note}`]));
+    for (const l of lines) {
+      const prefix = view.groups.named.flatMap((g: any) => shown(g.name)).find((s: string) => l.startsWith(`${s}: `));
+      if (prefix === undefined) continue;
+      const tail = l.slice(prefix.length + 2);
+      const bare = [...notes].find(([t, note]) => tail === `${t}${note}`)?.[0] ?? tail;
+      assert.ok(tails.has(bare), `seed ${seed}: a case line no uncut digest gives: ${l}`);
+    }
+  }
+  assert.ok(refusedCount < 300);
 });
 
 test("SPY refused is said", async () => {
