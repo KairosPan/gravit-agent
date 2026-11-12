@@ -98,6 +98,17 @@ test("a scan without a present case still reads the market fresh", async () => {
   assert.deepEqual([...new Set(m.calls.slice(before).map((q) => q.symbol))].sort(), ["EVT", "SPY"]); // SPY's date moved, so EVT was dropped and read again
   assert.deepEqual(view.cases.map((c) => [c.date, c.state, c.day0]), [["2020-04-10", "measured", "2020-04-10"], [dateAt(155), "measured", dateAt(155)]]);
 });
+test("every unmeasured case and anchor has its own flags", async () => {
+  const scan = () => scanEvents({ title: "t", events: [ev({ symbol: "GONE", verified: false }), ev({ symbol: "LOST", verified: false })], query: { symbol: "NONE", anchors: [{ label: "x", date: "2020-04-10", timing: "pre" }] }, keep: keepOf() });
+  const view = await scan();
+  const [one, two] = view.cases;
+  assert.deepEqual([one!.state, two!.state], ["unmeasured", "unmeasured"]);
+  one!.flags.push("touched");
+  assert.deepEqual(two!.flags, []);
+  assert.deepEqual(view.query!.anchors[0]!.flags, []);
+  const again = await scan();
+  assert.ok(again.cases.every((c) => c.flags.length === 0) && again.query!.anchors[0]!.flags.length === 0);
+});
 test("without the market's own bars the raw changes stay and nothing is summarized against it", async () => {
   const view = await scanEvents({ title: "t", events: Array.from({ length: 8 }, (_, i) => ev({ date: dateAt(92 + i) })), keep: keepOf(fakeMarket({ EVT: { bars: EVENT } })) });
   assert.equal(view.coverage.measured, 8); assert.equal(view.coverage.noContext, 8);

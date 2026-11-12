@@ -218,8 +218,12 @@ export function normalizeEvents({ title: rawTitle, events: rawEvents, query: raw
   return { title, events, query: queryIn(rawQuery) };
 }
 
-/** @type {Measured} */
-const NOTHING = { state: "unmeasured", words: null, day0: null, measure: null, tape: null, flags: [], window: null, rel: null };
+/**
+ * An unmeasured case and the words that say why, with a `flags` array of its own.
+ * @param {string} words
+ * @returns {Measured}
+ */
+const unmeasured = (words) => ({ state: "unmeasured", words, day0: null, measure: null, tape: null, flags: [], window: null, rel: null });
 
 /**
  * An event measured on its company's history, or the words that say why it cannot be.
@@ -231,10 +235,10 @@ function measureOn(history, when, marketBars) {
   const i0 = dayZero(bars, when);
   if (i0 === null) {
     const after = when.timing === "post" || when.timing === "closed" ? "after" : "on or after";
-    return { ...NOTHING, words: `no session ${after} ${when.date} in its bars, which end ${dateOf(bars[bars.length - 1].t)}` };
+    return unmeasured(`no session ${after} ${when.date} in its bars, which end ${dateOf(bars[bars.length - 1].t)}`);
   }
   if (i0 < MIN_BEFORE) {
-    return { ...NOTHING, words: `only ${i0} sessions before day 0; its bars start ${history.firstBar} (${history.source})` };
+    return unmeasured(`only ${i0} sessions before day 0; its bars start ${history.firstBar} (${history.source})`);
   }
   const tape = tapeCheck(bars, i0);
   const { window, rel } = eventWindow(bars, i0, marketBars);
@@ -268,7 +272,7 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
   /** @param {string} symbol @param {When} when @returns {Measured} */
   const measure = (symbol, when) => {
     const history = got.read.get(symbol);
-    return history === undefined ? { ...NOTHING, words: wordsOf(symbol) } : measureOn(history, when, marketBars);
+    return history === undefined ? unmeasured(wordsOf(symbol)) : measureOn(history, when, marketBars);
   };
 
   /** @type {EventCase[]} */
