@@ -598,6 +598,17 @@ test("task_read's text is the task's report when it has one, over its closing wo
   assert.equal((await tasks.ops.read("w-bare")).text, "only closing words");
 });
 
+test("task_read's text for a task with no report is its closing words whole up to its own bound, not the relay's 600-character cut", async (t) => {
+  const h = await harness();
+  const words = `${"x".repeat(700)} the event half`;
+  h.seed("w-long", [brief("w-long", "Long", AT - 60_000), start(1), said(1, words), end(1)]);
+  const tasks = await install(h);
+  t.after(() => tasks.dispose());
+  const read = await tasks.ops.read("w-long");
+  assert.equal(Array.from(read.view.result?.text ?? "").length, 600, "the relay's result stays cut at 600");
+  assert.equal(read.text, words);
+});
+
 test("installRouter checks the conversation's fence once: a violation is one loud line naming it, and the face still starts", async () => {
   const handle = (): ConversationHandle => ({
     ensure: async () => ({ agent: {} as AgentLike, sessionId: "session-c" }), current: () => undefined, operatorTurn: () => false,

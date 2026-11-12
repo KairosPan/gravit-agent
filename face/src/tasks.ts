@@ -35,7 +35,7 @@ import type { RouteRegistrar } from "./static.ts";
 import { recoverWorkers } from "./task-recovery.ts";
 import { createRelay } from "./task-relay.ts";
 import { TASK_READ_MAX, equipConversation, taskToolDefinitions, type TaskOps } from "./task-tools.ts";
-import { relaysOf, stallOf, taskViewOf, cut, type RelayItem, type TaskGroup, type TaskView, type TimedEvent } from "./task-view.ts";
+import { relaysOf, resultTextWhole, stallOf, taskViewOf, cut, type RelayItem, type TaskGroup, type TaskView, type TimedEvent } from "./task-view.ts";
 import {
   equipWorkers, startWorker, strategyDir, workerSetup,
   type WorkerCtxLike, type WorkerDeps, type WorkerToolsCtxLike,
@@ -387,8 +387,9 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
       const { row } = await find(id);
       const events = await eventsOf(row);
       const view = viewOf(row, events);
-      /* the task's report first, when it has one: what it was asked for; else its closing words */
-      const reported = view.result?.text ?? "";
+      /* the task's report first, when it has one: what it was asked for; else its closing words - the result's text
+       * whole up to TASK_READ_MAX, not the relay's 600-character cut of it */
+      const reported = view.result === undefined ? "" : resultTextWhole(events) ?? view.result.text;
       return { view, text: cut(reported !== "" ? reported : lastAssistantText(events), TASK_READ_MAX) };
     },
     async list() {

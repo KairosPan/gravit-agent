@@ -322,12 +322,12 @@ function settledBy(s: Scan, turn: Turn, until = Number.POSITIVE_INFINITY): Repor
  * `error` → `failed` with its error line; `blocked` and `max-tokens` → `blocked`; `aborted` and `interrupted` → the
  * task is `stalled` (cut, not finished) and relays nothing; `completed`, `forked` and any other kind → `done`, relayed
  * `ready`. A text is the turn's last words, or `the turn ended (<kind>) with no closing words` when it has none. */
-function turnOutcome(events: readonly EventLike[], turn: Turn): { state: TaskState; relay?: { status: "ready" | "blocked" | "failed"; text: string } } {
+function turnOutcome(events: readonly EventLike[], turn: Turn, max = TASK_TEXT_MAX): { state: TaskState; relay?: { status: "ready" | "blocked" | "failed"; text: string } } {
   const kind = kindOf(turn.reason);
   if (kind === "aborted" || kind === "interrupted") return { state: "stalled" };
-  if (kind === "error") return { state: "failed", relay: { status: "failed", text: cut(errorLine(turn.reason), TASK_TEXT_MAX) } };
+  if (kind === "error") return { state: "failed", relay: { status: "failed", text: cut(errorLine(turn.reason), max) } };
   const words = finalTextOf(events, turn.turn);
-  const text = cut(words === "" ? `the turn ended (${kind}) with no closing words` : words, TASK_TEXT_MAX);
+  const text = cut(words === "" ? `the turn ended (${kind}) with no closing words` : words, max);
   if (kind === "blocked" || kind === "max-tokens") return { state: "blocked", relay: { status: "blocked", text } };
   return { state: "done", relay: { status: "ready", text } };
 }
@@ -444,6 +444,17 @@ export function taskViewOf(input: { id: string; header: { createdAt: number; cwd
     lastEventAt,
     lastSeq: last?.seq ?? 0,
   };
+}
+
+/** The last ended turn's result text uncut: the report that settled it - its last `ready`, `blocked` or `failed`
+ * `task_report` since it started - else its end kind's text ({@link turnOutcome}) without the relay's
+ * {@link TASK_TEXT_MAX} cut; `undefined` when no turn has ended or the last one relays nothing. `task_read` reads it,
+ * so closing words longer than a relay are not lost to the router. */
+export function resultTextWhole(events: readonly EventLike[]): string | undefined {
+  const s = scan(events);
+  const last = s.turns.at(-1);
+  if (last === undefined || last.end === undefined) return undefined;
+  return settledBy(s, last)?.text ?? turnOutcome(events, last, Number.POSITIVE_INFINITY).relay?.text;
 }
 
 /**
