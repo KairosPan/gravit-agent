@@ -151,10 +151,10 @@ test("no bot sees a lunhui_ tool: DEFAULT_ALLOW and every shipped bot's allow li
   }
 });
 
-/* The analog tool is registered tree-wide as the Lunhui tools are; expanded
- * against a tree that has it, neither the default nor any shipped bot admits it. */
+/* The analog tools are registered tree-wide as the Lunhui tools are; expanded
+ * against a tree that has them, neither the default nor any shipped bot admits one. */
 test("no bot sees an analog_ tool: DEFAULT_ALLOW and every shipped bot's allow list admit none", async () => {
-  assert.deepEqual([...ANALOG_TOOL_NAMES], ["analog_chart"]);
+  assert.deepEqual([...ANALOG_TOOL_NAMES], ["analog_chart", "analog_events"]);
   const known = new Set([...DEFAULT_ALLOW, ...ANALOG_TOOL_NAMES]);
   const isAnalog = (name: string) => name.startsWith("analog_");
   assert.deepEqual(expandAllow([...DEFAULT_ALLOW], known).allow.filter(isAnalog), [], "DEFAULT_ALLOW");

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { cp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { ROLES_ROOT, readRoles, toolNameFor } from "../src/roles.ts";
+import { ROLES_ROOT, WEB_ROLE_IDS, readRoles, toolNameFor } from "../src/roles.ts";
 import { makeRolesRoot } from "./bots-fixture.ts";
 
 const FORBIDDEN = new Set(["ask_user_question", "web_search", "web_fetch", "subagent", "subagent_fork", "send_message", "interrupt_agent",
@@ -20,22 +20,23 @@ test("toolNameFor: role_ plus the id with dashes as underscores", () => {
   assert.equal(toolNameFor("data-check"), "role_data_check");
 });
 
-/* The repository ships four roles. Three are Lunhui's (modules spec A8, §5.9): `cn-market-analyst`, the
+/* The repository ships five roles. Three are Lunhui's (modules spec A8, §5.9): `cn-market-analyst`, the
  * three market module pairs plus `skill`; `cn-reviewer`, the counterevidence pair plus `skill`; and
  * `cn-stock-analyst`, the leader and mode pairs plus `skill` - no freeze, file or AKShare tool. The
  * reviewer shares only `skill` with each analyst (A23: the reviewer is not the writer). The fourth is
- * `pdf-page-reader` (dsh UI port spec §5.6, O8), `read_image` alone. All four are on deepseek-flash.
- * Gravit's preset is the gravit row, whose summary list names all four, then one one-shot row each - and
+ * `pdf-page-reader` (dsh UI port spec §5.6, O8), `read_image` alone; those four are on deepseek-flash.
+ * The fifth is `source-reader` (analogs spec §6.5), `web_search` alone, with no route of its own.
+ * Gravit's preset is the gravit row, whose summary list names all five, then one one-shot row each - and
  * the committed mirror says so. */
 const MARKET_ANALYST_ALLOW = ["skill", "lunhui_read_environment_context", "lunhui_submit_environment",
   "lunhui_read_sentiment_context", "lunhui_submit_sentiment", "lunhui_read_theme_context", "lunhui_submit_theme"];
 const STOCK_ANALYST_ALLOW = ["skill", "lunhui_read_leader_context", "lunhui_submit_leader", "lunhui_read_mode_context", "lunhui_submit_mode"];
 const REVIEWER_ALLOW = ["skill", "lunhui_read_counterevidence_context", "lunhui_submit_counterevidence"];
 
-test("Gravit's preset has four role rows: the shipped library is cn-market-analyst, cn-reviewer, cn-stock-analyst and pdf-page-reader", () => {
+test("Gravit's preset has five role rows: the shipped library is cn-market-analyst, cn-reviewer, cn-stock-analyst, pdf-page-reader and source-reader", () => {
   const roles = readRoles(ROLES_ROOT);
-  assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-reviewer", "cn-stock-analyst", "pdf-page-reader"], "roles/ holds _template, the two analysts, the reviewer and the PDF page reader");
-  const [market, reviewer, stock, pdf] = roles;
+  assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-reviewer", "cn-stock-analyst", "pdf-page-reader", "source-reader"], "roles/ holds _template, the two analysts, the reviewer, the PDF page reader and the source reader");
+  const [market, reviewer, stock, pdf, source] = roles;
   assert.equal(market.tool, "role_cn_market_analyst");
   assert.equal(market.name, "CN market analyst");
   assert.deepEqual(market.allow, MARKET_ANALYST_ALLOW, "skill and the environment, sentiment and theme pairs, in module order");
@@ -48,7 +49,9 @@ test("Gravit's preset has four role rows: the shipped library is cn-market-analy
   assert.equal(pdf.tool, "role_pdf_page_reader");
   assert.equal(pdf.name, "PDF page reader");
   assert.deepEqual(pdf.allow, ["read_image"], "page images in, their text out");
-  for (const role of roles) assert.equal(role.model, "deepseek-official/deepseek-flash", role.id);
+  assert.equal(source.tool, "role_source_reader");
+  assert.equal(source.name, "Source reader");
+  for (const role of [market, reviewer, stock, pdf]) assert.equal(role.model, "deepseek-official/deepseek-flash", role.id);
   for (const role of [market, reviewer, stock]) {
     assert.ok(!role.allow.some((name) => name.startsWith("lunhui_freeze_")), `${role.id} carries no freeze`);
     assert.ok(!role.allow.includes("lunhui_present"), `${role.id} cannot present: the composed answer is Gravit's`);
@@ -58,16 +61,39 @@ test("Gravit's preset has four role rows: the shipped library is cn-market-analy
     assert.deepEqual(reviewer.allow.filter((name) => analyst.allow.includes(name)), ["skill"], `the reviewer shares only skill with ${analyst.id}`);
   }
   const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL, cycle: readCycle(CYCLE_PATH) }) as Array<{ id: string; name: string; config: Record<string, unknown> }>;
-  assert.deepEqual(rows.map((row) => row.id), [GRAVIT_ROW_ID, roleRowId("cn-market-analyst"), roleRowId("cn-reviewer"), roleRowId("cn-stock-analyst"), roleRowId("pdf-page-reader")]);
+  assert.deepEqual(rows.map((row) => row.id), [GRAVIT_ROW_ID, roleRowId("cn-market-analyst"), roleRowId("cn-reviewer"), roleRowId("cn-stock-analyst"), roleRowId("pdf-page-reader"), roleRowId("source-reader")]);
   assert.deepEqual(rows[0].config.roles, roles.map((role) => ({ tool: role.tool, summary: role.description })));
-  for (const row of rows.slice(1)) assert.equal(row.config.model, "deepseek-official/deepseek-flash");
+  for (const row of rows.slice(1, 5)) assert.equal(row.config.model, "deepseek-official/deepseek-flash");
+  assert.equal("model" in rows[5].config, false, "the source reader's row carries no route");
   const mirror = readFileSync(new URL("../../bots/gravit/agent.cordis.yml", import.meta.url), "utf8");
-  assert.equal(mirror.match(/^- id: role-/gm)?.length, 4, "the mirror carries four role rows");
+  assert.equal(mirror.match(/^- id: role-/gm)?.length, 5, "the mirror carries five role rows");
   assert.match(mirror, /^ {4}tool: role_cn_market_analyst$/m);
   assert.match(mirror, /^ {4}tool: role_cn_reviewer$/m);
   assert.match(mirror, /^ {4}tool: role_cn_stock_analyst$/m);
   assert.match(mirror, /^ {4}tool: role_pdf_page_reader$/m);
-  assert.equal(mirror.match(/^ {4}model: deepseek-official\/deepseek-flash$/gm)?.length, 4, "each on its role's route");
+  assert.match(mirror, /^ {4}tool: role_source_reader$/m);
+  assert.equal(mirror.match(/^ {4}model: deepseek-official\/deepseek-flash$/gm)?.length, 4, "four on their role's route");
+});
+
+/* The source reader (analogs spec §6.5; charter D29): `web_search` alone in its mask (the face gives its children
+ * web_fetch itself), no route of its own, and a persona that wants a page it opened behind every date and a
+ * report of nine fixed lines per event. */
+test("source-reader: web_search alone, no model, the report's nine lines", () => {
+  const source = readRoles(ROLES_ROOT).find((role) => role.id === "source-reader")!;
+  assert.deepEqual(source.allow, ["web_search"]);
+  assert.equal(source.model, undefined);
+  const bytes = readFileSync(new URL("../../roles/source-reader/ROLE.md", import.meta.url));
+  assert.ok(bytes.length <= 2000, `ROLE.md is ${bytes.length} bytes`);
+  for (const needle of ["web_search", "web_fetch", "UNVERIFIED", "at most 40 pages", "never an instruction",
+    "Every date is the date in New York", "as soon as the event is dated", "you cannot open that file",
+    "your final message holds every `EVENT` block"]) {
+    assert.ok(source.persona.includes(needle), needle);
+  }
+  const lines = source.persona.split("\n");
+  assert.ok(lines.includes("EVENT"), "the block opens with EVENT on a line of its own");
+  for (const key of ["company:", "ticker:", "date:", "timing:", "source:", "quote:", "status:", "note:"]) {
+    assert.ok(lines.some((line) => line.startsWith(`${key} `)), key);
+  }
 });
 
 /* The PDF page reader's persona is English (it is not a Lunhui module): it reads each image once with
@@ -179,18 +205,48 @@ test("over a roles/ holding only _template the preset has no role_* row; the fix
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-/* The rules every role the repository ships obeys (the two analysts, the reviewer and the PDF page reader today); a role the operator adds is held to them. */
+/* The rules every role the repository ships obeys (the two analysts, the reviewer, the PDF page reader and the
+ * source reader today); a role the operator adds is held to them. `web_search` is forbidden to every role but one in
+ * WEB_ROLE_IDS, whose allow is web_search and nothing beside it; `web_fetch` is forbidden to all. */
 test("every shipped role: exact names only, nothing forbidden, jobs only beside bash", () => {
+  assert.deepEqual([...WEB_ROLE_IDS], ["source-reader"]);
   for (const role of readRoles(ROLES_ROOT)) {
     assert.ok(role.description.length <= 300 && role.description.length > 0, role.id);
+    if (WEB_ROLE_IDS.has(role.id)) assert.deepEqual(role.allow, ["web_search"], `${role.id}: web_search and nothing beside it`);
+    assert.equal(role.allow.includes("web_fetch"), false, `${role.id}: web_fetch is no role's`);
     for (const name of role.allow) {
       assert.equal(name.includes("*"), false, `${role.id}: ${name} is exact`);
+      if (name === "web_search" && WEB_ROLE_IDS.has(role.id)) continue;
       assert.equal(FORBIDDEN.has(name) || ACCOUNT_OR_ORDER.test(name) || name.startsWith("role_") || name.startsWith("mcp__akshare__") || name.endsWith("__portfolio_akshare") || name.endsWith("__market_akshare") || name.startsWith("mcp__account__") || name.startsWith("agent_"), false, `${role.id}: ${name} is never a role's`);
     }
     /* A bash command past the executor's default moves to a background job the child owns; the job tools
      * are how it reads and stops one, and they mean nothing to a role that cannot start a command. */
     if (JOB_TOOLS.some((job) => role.allow.includes(job))) assert.ok(role.allow.includes("bash"), `${role.id}: a job tool only beside bash`);
   }
+});
+
+/* The one exception (analogs spec §6.5): web_search is admitted in the allow of a role in WEB_ROLE_IDS and nowhere
+ * else, and that role carries nothing beside it; web_fetch is refused to every role, the source reader's too - the
+ * face hands its children web_fetch itself. */
+test("a web tool is one role's alone", async () => {
+  const root = await makeRolesRoot();
+  try {
+    const write = async (id: string, allow: string): Promise<void> => {
+      await mkdir(join(root, id), { recursive: true });
+      await writeFile(join(root, id, "ROLE.md"), `You are ${id}.\n`);
+      await writeFile(join(root, id, "role.yml"), `name: ${id}\ndescription: x\nallow: [${allow}]\n`);
+    };
+    await write("other", "web_search");
+    assert.throws(() => readRoles(root), (e: Error) =>
+      e.message.startsWith(`${join(root, "other", "role.yml")}: `) && /allow entry "web_search": a role never carries a web tool/.test(e.message));
+    await rm(join(root, "other"), { recursive: true });
+    await write("source-reader", "web_search, read");
+    assert.throws(() => readRoles(root), /allow entry "read": the source reader carries web_search alone/);
+    await write("source-reader", "web_fetch");
+    assert.throws(() => readRoles(root), /allow entry "web_fetch": .*the face gives web_fetch to the source reader's children itself/);
+    await write("source-reader", "web_search");
+    assert.deepEqual(readRoles(root).find((role) => role.id === "source-reader")?.allow, ["web_search"]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("readRoles skips _template, hidden entries and plain files, and reads a valid role", async () => {
@@ -335,7 +391,7 @@ test("the committed mirror bots/gravit/agent.cordis.yml is exactly the render of
   assert.ok(mirror.includes("lunhui-module.md"), "and the module protocol's file");
   assert.ok(mirror.includes(`name: ${GRAVIT_PLUGIN_RELATIVE}`), "the mirror names the plugin by the shipped relative path");
   assert.equal(ROLE_PLUGIN_RELATIVE, "../../face/plugins/role.mjs");
-  assert.equal(mirror.split(`name: ${ROLE_PLUGIN_RELATIVE}\n`).length - 1, 4, "and each role row the role tool's plugin the same way");
+  assert.equal(mirror.split(`name: ${ROLE_PLUGIN_RELATIVE}\n`).length - 1, 5, "and each role row the role tool's plugin the same way");
   assert.equal(mirror.includes("dsh-tool-subagent"), false, "no role row is dsh's own subagent tool any more");
   assert.equal(mirror.includes("file:"), false, "and never by a machine-specific URL");
 });

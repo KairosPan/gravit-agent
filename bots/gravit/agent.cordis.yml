@@ -13,6 +13,8 @@
         summary: Reads one strategy run's leader or mode context, citing a sealed cn-market run, and submits that module's validated artifact through its submit tool; a mode is a daily registration, WAIT when its preconditions lack a source.
       - tool: role_pdf_page_reader
         summary: Reads page images Gravit rendered from a PDF with pdftoppm and returns their tables, figures and layout as text, quoting what it reads and naming what it cannot read; the brief gives the PNG paths and the question.
+      - tool: role_source_reader
+        summary: Finds past events of the kind a brief names and dates each from a page it opens - the company, its current US ticker, when the news first became public and at what point of the session, the URL and the page's own words; marks UNVERIFIED what no page confirmed.
     cycle: |-
       # The research cycle
 
@@ -160,3 +162,12 @@
     allow:
       - read_image
     model: deepseek-official/deepseek-flash
+- id: role-source-reader
+  name: ../../face/plugins/role.mjs
+  config:
+    tool: role_source_reader
+    name: Source reader
+    summary: Finds past events of the kind a brief names and dates each from a page it opens - the company, its current US ticker, when the news first became public and at what point of the session, the URL and the page's own words; marks UNVERIFIED what no page confirmed.
+    agentPreset: role-source-reader
+    allow:
+      - web_search

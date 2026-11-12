@@ -1,5 +1,5 @@
-/** `analog_chart`'s rows on a real boot against a stub market: the running registry lists the tool and
- * `/data/plugins.json`'s listing shows both rows active; the booted `analogViews` service scans `QRY` over a
+/** The analog rows on a real boot against a stub market: the running registry lists `analog_chart` and
+ * `analog_events`, and `/data/plugins.json`'s listing shows the three rows active; the booted `analogViews` service scans `QRY` over a
  * universe of `PAST`, reading every history from the stub, and stores the view; the view route serves it with the
  * signed-in cookie, refuses with 403 a request that fails the fence (from another site's page), and answers 404 for
  * an unknown id; the stub saw only `/api/candles` on the
@@ -83,13 +83,15 @@ test("analog smoke: analog_chart's rows on a real boot scan a stub market, store
     const base = `http://127.0.0.1:${ctx.webServer.port}`;
     const cookie = await signIn(ctx, base);
 
-    // 1. the tool registered, both rows listed active and enabled
+    // 1. both tools registered, the three rows listed active and enabled
     const tools = ctx.get("tools") as { schemas(): { name: string }[] } | undefined;
     assert.ok(tools !== undefined, "the tools service must be in the composed tree");
     const toolNames = tools.schemas().map((schema) => schema.name);
-    assert.ok(toolNames.includes("analog_chart"), `analog_chart must be registered; saw ${toolNames.join(", ")}`);
+    for (const name of ["analog_chart", "analog_events"]) {
+      assert.ok(toolNames.includes(name), `${name} must be registered; saw ${toolNames.join(", ")}`);
+    }
     const listedRows = pluginListing(panelDeps(ctx, process.cwd(), home)).rows;
-    for (const id of ["analog-views", "analog-chart"]) {
+    for (const id of ["analog-views", "analog-chart", "analog-events"]) {
       const row = listedRows.find((r) => r.id.endsWith(`:${id}`));
       assert.ok(row, `${id} must be listed; saw ${listedRows.map((r) => r.id).join(", ")}`);
       assert.equal(row.phase, "active", id);

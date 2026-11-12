@@ -103,9 +103,9 @@ preceded by `gravit-face: order gate armed for …` when the Account seat's writ
 registered ("The Account seat" below). A bot the face could not declare
 is reported on stderr (`gravit-face: bot "<id>" is not declared - <reason>`),
 and the `agent presets` line then ends `; N bot(s) not declared, see above`.
-The sample's presets line is abridged: a real one also lists `kairos`, `gravit-desk` and the four
+The sample's presets line is abridged: a real one also lists `kairos`, `gravit-desk` and the five
 role presets (`role-cn-market-analyst`, `role-cn-reviewer`, `role-cn-stock-analyst`,
-`role-pdf-page-reader`). A global
+`role-pdf-page-reader`, `role-source-reader`). A global
 `AGENTS.md` (`$DSH_HOME/AGENTS.md`, or `AGENTS.md` under `DSH_AGENTS_HOME` or `~/.agents`) adds
 one stderr line each, saying it would enter every agent's instruction chain (D25).
 
@@ -866,7 +866,7 @@ run is `MISSING_EVIDENCE` at the read. Each item is against a module whose artif
 shows — never the mode — and cites at least one `ev_` evidence id of its own (`REFERENCE`
 otherwise); an empty `items` is a review that found nothing, a result.
 
-**The roles and the protocol.** Three Lunhui roles ship (the fourth role, `pdf-page-reader`, is not Lunhui's: "Roles" below). `../roles/cn-market-analyst/`: its tools are
+**The roles and the protocol.** Three Lunhui roles ship (the PDF page reader and the source reader are not Lunhui's: "Roles" below). `../roles/cn-market-analyst/`: its tools are
 `skill` and the six market module tools, its model `deepseek-official/deepseek-flash`, its Chinese
 persona the three modules in order — environment, sentiment, theme — each read once and submitted
 once, the artifact only in `analysis`, a stop after a failed read, a module's third rejection
@@ -1404,7 +1404,7 @@ operator row wins). Every row is an upgrade decision, named by its id:
 | D3 session telemetry | `session-telemetry-otel` | disabled | `FEEDBACK_ONLY`: after a `/feedback`, a session-log prefix goes to `dsh-otel-collector.deepseeksvc.com` with the home's `.anonymous-user-id` | `- { id: session-telemetry-otel, disabled: false }` (D15; `DSH_TELEMETRY_DISABLED`, when set, still wins) |
 | D4 session-log upload | `session-log-deepseek` | disabled | up to 8 MiB of session events in every official DeepSeek request (`dsh_session_log`) | `- { id: session-log-deepseek, disabled: false }` |
 | D5 package inventory | `plugin-package-inventory-deepseek` | disabled | the active plugin-package list in every DeepSeek request | `- { id: plugin-package-inventory-deepseek, disabled: false }` |
-| D6 `web_fetch` | `tool-web`, `web` | `tool-web: {fetch: false, searchTimeoutMs: 60000}` — no global `web_fetch` — and `web: {searchProvider: deepseek-official, fetchProvider: http}`, `web-fetch-http` left on, so the desk's own `web_fetch`, which the face gives each desk agent alone ("The desk opens web pages" below), can fetch; until the why-it-moved plan (2026-11-07) a third row disabled `web-fetch-http` | `web_fetch` on for every agent, served by `web-fetch-http` | `- { id: tool-web, config: { fetch: true, searchTimeoutMs: 60000 } }` |
+| D6 `web_fetch` | `tool-web`, `web` | `tool-web: {fetch: false, searchTimeoutMs: 60000}` — no global `web_fetch` — and `web: {searchProvider: deepseek-official, fetchProvider: http}`, `web-fetch-http` left on, so the `web_fetch` the face gives each desk agent ("The desk opens web pages" below) and each source reader's child (`src/source-reader.ts`) alone can fetch; until the why-it-moved plan (2026-11-07) a third row disabled `web-fetch-http` | `web_fetch` on for every agent, served by `web-fetch-http` | `- { id: tool-web, config: { fetch: true, searchTimeoutMs: 60000 } }` |
 | D7 MCP resource tools | `mcp-resources` | disabled | `list_mcp_resources`, `list_mcp_resource_templates`, `read_mcp_resource` and a prompt section, once any MCP server registers | `- { id: mcp-resources, disabled: false }` |
 | D9 `ralph` | `tool-ralph` — dropped from dsh-base at 0.2.1; the face declares `@deepseek-ai/dsh-tool-ralph` and inserts it with `{subagentProvider: spawn, maxRounds: 64}`, the config dsh-base's row carried (the standalone default is 256 rounds) | mounted | 0.2.0: disabled; 0.2.1: absent | `- { id: tool-ralph, disabled: true }` |
 | D9 `str_replace_editor` | `tool-str-replace-editor` — dropped from dsh-base; the face inserts it, configless (`maxOutputChars` now defaults to 0.1.1's 16000) | mounted | absent | `- { id: tool-str-replace-editor, disabled: true }` |
@@ -1419,7 +1419,7 @@ policy D…: dsh-base composes no "<id>" row …`), never skipped silently.
 The effect is measured, not assumed: on a profile with no MCP server the live
 tool roster equals 0.1.1's name for name (26 tools), and the smoke asserts that
 `str_replace_editor` and `ralph` are registered while `web_fetch`, the three
-MCP resource tools and `working_directory` are not — `web_fetch` only in a desk agent's own layer (at 0.2.1-rc.5 the count of 26
+MCP resource tools and `working_directory` are not — `web_fetch` only in a desk agent's or a source reader's child's own layer (at 0.2.1-rc.5 the count of 26
 holds by the row diff, not re-measured). dsh-base 0.2.1 also mounts
 `web-deepseek-api` (two more providers on the same key, unselected, no request
 of their own: D22) and `remote-access` (the gateway's access control, which the
@@ -2321,8 +2321,9 @@ the retired alpaca-kit's `earnings`, `daily_bars`, `calendar` and `corp_actions`
 tool since `alpaca_kit` left the tree). No shell and no
 background jobs: an unattended turn on untrusted text — a forwarded message, a web page, a
 filing — must not read the key files. No order or account tool, no
-question tool, no goals, no delegation, no AKShare. Three tools are the desk's own, given to each
-desk agent and to no other session — `web_fetch` (below, "The desk opens web pages"), and:
+question tool, no goals, no delegation, no AKShare. Each desk agent is given three tools in its
+own layer: dsh's `web_fetch` (below, "The desk opens web pages"), which a source reader's child is
+also given, and two that no other session has:
 `desk_quotes`, the price now for 1 to 20 symbols — US tickers or six-digit A shares (`600519`) —
 each with its feed and its exchange's time (`ROBINHOOD 10:21:03 ET`, `TENCENT 14:03:12 Beijing`),
 from the market's reads (`src/market-quotes.ts`: a US share's `explore` row, A shares' `quotes`
@@ -2337,8 +2338,9 @@ you accepted, read first in the charter). Each desk agent — the phone's conver
 order's firing, an alert's annotation (the one conversation the phone reaches since plan 3 has
 none: it reads no web page) — has dsh's own `web_fetch`, so a turn can read the page
 behind a headline: any public page, no allow-list of sites, 30 s and 200,000 characters at most.
-No other session has it: the tree turns `web_fetch` off for Gravit, the bots and the roles (D6
-above), and the face registers it in each desk agent's own layer. What still holds: no shell;
+No other session has it but a source reader's child ("The event analog drill"): the tree turns
+`web_fetch` off for Gravit, the bots and the roles (D6 above), and the face registers it in each
+desk agent's own layer and each source reader's child's. What still holds: no shell;
 reads inside the repository only and never a dot-file; no call that carries a key of the face's
 environment — so no URL carries one; writes only in `desk/journal/`; no order tool; and the fetch's
 own refusal of a loopback, private or other non-public address (the face, the account and the
@@ -3921,7 +3923,7 @@ A role is a prebuilt delegated task. Gravit calls it by tool name, `role_<id>`; 
 child runs the brief on the role's own preset — its persona and exactly its tools — and the call
 blocks until the child's report comes back as the tool's result. It is not a bot — no journal, no home session, no seat in a
 room, never listed among `bots/` — and not a bare `subagent` call, where the model picks the
-persona and the tools on every call: here both are fixed on disk. Four ship: `cn-market-analyst`,
+persona and the tools on every call: here both are fixed on disk. Five ship: `cn-market-analyst`,
 the Lunhui market modules' analyst, which writes the one module a brief names and all three when
 none is named (spec 2026-10-28 F6), `cn-reviewer`, the counterevidence reviewer,
 `cn-stock-analyst`, the leader and mode modules' analyst ("Lunhui analysis"), and, since the dsh UI
@@ -3931,11 +3933,15 @@ deepseek-v4-pro takes text only), an English persona that reads each page image 
 with `pdftoppm` once and returns its tables, figures and layout as text — a table as a Markdown
 table, figures quoted as printed, `[unreadable]` for what it cannot read — under **status**,
 **pages**, **transcription** and **limits**. Gravit calls it as `GRAVIT.md`'s `## PDFs` says, with
-the PNG paths under `${TMPDIR:-/tmp}` and the question. The three that shipped before (a screener, a backtester and a reviewer, whose
+the PNG paths under `${TMPDIR:-/tmp}` and the question. Since the analogs' plan 3, `source-reader`,
+the one role with the web: `web_search` alone by its mask, no route of its own, and dsh's
+`web_fetch`, which the face gives each of its children (`src/source-reader.ts`, "The event analog
+drill" below); it finds past events of the kind a brief names and dates each from a page it opened,
+nine lines per event, and Gravit calls it as the `analog-guide` skill says. The three that shipped before (a screener, a backtester and a reviewer, whose
 allow lists were the removed Python package's tools) retired with their tools on 2026-10-24, and
 new roles are the operator's to design; `roles/_template` is the copy source and never a role, so
 Gravit's preset today is the `gravit` row, `role-cn-market-analyst`, `role-cn-reviewer`,
-`role-cn-stock-analyst` and `role-pdf-page-reader`.
+`role-cn-stock-analyst`, `role-pdf-page-reader` and `role-source-reader`.
 
 One directory per role under `roles/<id>/`:
 
@@ -4022,7 +4028,7 @@ preset is broken and the boot refuses.
 **What a role never carries.** `readRoles` refuses an `allow` entry that is: a tool that needs a
 human (`ask_user_question`, `exit_plan_mode` — a delegated child has no one to ask, and dsh
 refuses `ask_user_question` to it with `DELEGATED_CALLER`); a web tool (`web_search`,
-`web_fetch`); a delegation tool (`subagent`, `subagent_fork`, `send_message`, `interrupt_agent`,
+`web_fetch` — but `web_search` in `source-reader`'s, which may carry nothing beside it, `WEB_ROLE_IDS`); a delegation tool (`subagent`, `subagent_fork`, `send_message`, `interrupt_agent`,
 `list_agents`, `workflow`, `ralph`, `dispatch`, any `role_*` or `agent_*` name); a goal or todo
 tool; `run_code`, the reserved PTC transport, which `tools.restrict()` refuses to name; an account
 or order tool under any server name (anything under `mcp__account__`, the seat's twelve writes,
@@ -4491,11 +4497,11 @@ fresh one will not open the face runs without search. Node prints its `node:sqli
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 32 smoke files (38 real boots), isolated; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 34 smoke files (40 real boots), isolated; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 32 smoke files (38 real boots) listed below; `FACE_SMOKE=1` runs
-them too (3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+Offline, `npm test` skips the 34 smoke files (40 real boots) listed below; `FACE_SMOKE=1` runs
+them too (4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -4550,6 +4556,8 @@ and `node --test` gives each file its own:
 | `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder. Then (P4) the strategies' book on 2026-11-30, a fake XSHG calendar beside the XNYS one and one fake quote source, in clock order: an A-share report on its Beijing date naming the screen that ran and its `TENCENT` close print; the canary in a strategy (five calls: it reads and rewrites `STANDING.md` and `levels.yml`, then tries the desk's `STANDING.md`), named by one outside-reports line and holding the next order by each pin in turn; two US reports at one anchor in file order; the fence in a strategy; a producer-only strategy order; the abort last |
 | `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`), a stub headline read: the boot's tick at 09:15 ET inside the US window (04:00–20:00 ET) polling the US market alone, its pre-market prints making no record, and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply, run in a session of its own (never the desk conversation's, which reaches the model for none of it) and recorded `annotated`; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card |
 | `desk-carry-smoke.test.ts` | a graceful stop and a fresh boot, two real boots on one home, each in a child process of its own (the file runs itself as `one`, then `two`): the first face, the desk as `main.ts` installs it on the stub, posts `LONG` (`telegram:1`), whose model call hangs until its abort, and `QUEUED` (`telegram:2`) behind it, then shuts down as `main.ts` does - `desk.dispose(0)`, then the tree's; the ledger holds one `desk-carry` - `QUEUED`'s key, words and time, and `LONG`'s turn 1 as `cut` - before its `shutdown`; the second face's boot posts `QUEUED` again, its provenance line ending `(carried over a restart)`, the model answers it once and `LONG` not at all, the phone gets the restart line and then `echo QUEUED`, and `desk-carried` says `posted: 1, skipped: 0` (spec §16 H3, R93; the guard across dsh upgrades for `.superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md`) |
+| `analog-smoke.test.ts` | the analog rows against a stub market (`fakeMarket` on port 0; `analog-views` over a scratch views directory and a one-company universe): `analog_chart` and `analog_events` registered and the three rows active in `/data/plugins.json`'s listing; the booted `analogViews` scanning `QRY` and storing the view; `GET /data/analog/view` serving it with the cookie, 403 from another site's page, 404 for an unknown id; the stub asked only `/api/candles` on `cboe`; no `analog_` tool in the conversation's or the desk's preset |
+| `analog-events-smoke.test.ts` | the event analogs on the same stub: `role-source-reader` listed whole; a session created on it sees exactly `web_fetch` and `web_search`, the first in its own layer (`src/source-reader.ts`); a Gravit session, a PDF page reader's and a bot's see no `web_fetch`, the last two no analog tool; the reader's `web_fetch` of a loopback URL refused by dsh's provider until the fortieth page, the next refused by the guard; `analog_events` for Gravit measuring one event and storing the view, its source verified only once the page record holds it; the view served with the cookie, 403 from another site's page; the reader refused `analog_events` |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
 `observed:` line each (S4, S7), the measurements the bots spec's amendments were
@@ -5609,14 +5617,16 @@ Account). Open the printed `?token=` URL and hard-reload.
 
 ## The role drill (run after any face or dsh change)
 
-A role that was never delegated to is presumed decorative. **Four roles ship**,
+A role that was never delegated to is presumed decorative. **Five roles ship**,
 `cn-market-analyst`, `cn-reviewer` and `cn-stock-analyst` (all since 2026-10-26; the three before
-them retired with the Python package's tools on 2026-10-24) and `pdf-page-reader` (since
-2026-11-04). The first works only on a `cn-market` run, the third only on a strategy run citing
+them retired with the Python package's tools on 2026-10-24), `pdf-page-reader` (since
+2026-11-04) and `source-reader` (since 2026-11-11). The first works only on a `cn-market` run, the third only on a strategy run citing
 one, and the reviewer on either: their live halves are the live market and strategy runs ("Lunhui
 analysis"), with the steps below read for each. `pdf-page-reader`'s bounded task is the dsh UI port
 drill's step 12 (a page rendered from a PDF), read with steps 1, 2 and 5 below; it names no MCP
-tool and has no `bash`, so steps 3 and 4 skip it.
+tool and has no `bash`, so steps 3 and 4 skip it. `source-reader`'s is the event analog drill
+below, read with steps 1, 2 and 5; step 2's list for it is `web_search` and `web_fetch`, the second
+given by the face in the child's own layer, and steps 3 and 4 skip it as well.
 
 **Step 0, no model, no key.** `FACE_SMOKE=1 npm test` boots `roles-smoke.test.ts` over two
 fixture roles copied from `roles/_template` under the test's own roles root: `role_auditor` and
@@ -5675,7 +5685,7 @@ FACE_PORT=3091 npm start`, real keys) — never the operator's own home:
 5. In Gravit's own log (step 2's recipe on the parent session) the first `request/header` lists
    `role_<id>` beside the host's tools, and the first `system/message` carries the `Roles.`
    paragraph with each role's one-line summary; the boot line `agent presets: …` shows `gravit`
-   and the four `role-*` presets without a `(broken)` mark (a role row that fails to mount lists
+   and the five `role-*` presets without a `(broken)` mark (a role row that fails to mount lists
    the default broken, a role preset missing or broken refuses the boot). PASS, part five.
 6. Clean up whatever the role wrote under `strategies/room-drill/` (for `cn-market-analyst` and
    `cn-reviewer`, the run under `strategies/cn-market/analysis/`, for `cn-stock-analyst` the one
@@ -5689,6 +5699,59 @@ analysts since 2026-10-26 and with the reviewer since plan 4 the same day, and o
 and the face's role tool at dsh 0.2.1-rc.5 since 2026-11-02; steps 1, 2, 4 and 5 are owed with
 each, and step 3 waits for a role with `bash`. A renamed or removed role leaves its old children
 unresumable (they resume through their `role-<id>` preset), so rename on a scratch copy first.
+
+## The event analog drill (run after the analogs' plan 3 lands, and after any change to plugins/analog/, src/source-reader.ts, roles/source-reader/ or ../dsh/skills/mechanics/analog-guide/)
+
+PASS is the analogs spec's acceptance for events (`docs/superpowers/specs/2026-11-10-analogs-design.md`
+§11, its last sentences): the CEO question asked of Gravit is answered from precedents a source
+reader found and dated; the reader's trace shows the pages it opened; every case has a source;
+unverified dates are shown as unverified; and a company whose stock is gone is listed as unmeasured.
+
+**The automated half, no network.** `npm test` runs `analog-events`, `analog-event-summary`,
+`analog-event-scan`, `analog-event-digest`, `analog-views`, `analog-rows`, `analog-skill`,
+`source-reader`, `roles`, `task-view` and the desk's `desk-tools`; `FACE_SMOKE=1 npm test` boots
+`analog-events-smoke`, whose reader session sees exactly `web_search` and `web_fetch`, whose
+`web_fetch` of a loopback URL dsh's provider refuses until the fortieth, the guard the next, and
+whose `analog_events` counts a source verified only once a reader's page is on the record. No test
+reaches a web page, a model or the market. What only this drill checks: a real model's research,
+the reader's real pages, and the market's real bars.
+
+**Before the drill**, once: restart the market and the face on this code (the role's preset and
+its `web_fetch` are installed at boot, and only when `roles/` holds `source-reader`); the skill
+catalog lists `analog-guide` (the profile's `mechanics` root; Discover's skills). No `HTTP_PROXY` or
+`HTTPS_PROXY` in the face's environment (charter D29). The page draws no event view yet: the
+answer is the text, and the view is the stored file.
+
+1. **The question.** In Messages: `黄仁勋这件事，对标别的公司 CEO 出事之后的股价`. PASS: a task
+   starts on the rail; its worker says back the facets the words name (who, what, how it ended)
+   before it researches, then makes one `role_source_reader` call per facet, each brief carrying
+   nothing of your book, files or keys.
+2. **The reader's trace.** In each reader child's log (the role drill's step 2 recipe; the child's
+   directory sits beside its parent's, the task's worker's): the first `request/header`'s tools are
+   `web_search` and `web_fetch`, its header names `agentPreset: role-source-reader`, and its
+   `web_fetch` calls name the pages it asked for, at most 40 let through. PASS: every `source:` line of its report
+   is a URL it fetched, or the event is marked UNVERIFIED.
+3. **Every case has a source.** The worker's `analog_events` answer names a view, `an-<date>-<hex>`;
+   the task's line in `GET /data/tasks` carries it in `views`. In
+   `$DSH_HOME/face/analog/views/<id>.json` every case has its `source`. PASS: each opens, and says
+   the date the case gives.
+4. **Unverified shown as unverified.** The digest's first line counts `verified` and `unverified`,
+   and `marked verified without an opened source` when the worker claimed a source no reader opened;
+   each such measured case's line carries ` · unverified` (and ` · source not opened`); an unmeasured
+   case has no case line, so read its `verified` and `flags` in the view. PASS: Gravit's report
+   names them as unverified, and no date the reader did not verify is told as checked.
+5. **A company gone is unmeasured.** PASS: a precedent whose stock no longer trades is in the
+   list, under its last ticker, on the digest's `unmeasured:` line (its ticker and date, with the
+   market's words when the digest has room: they go before any case line does, and the company itself
+   only once every case line has left) and in the view's `coverage.unmeasured` with the market's words,
+   and Gravit's report says the list leans favourable for it.
+6. **The answer.** PASS: the report gives the counts by group, how the present case differs, the
+   digest's caveats and its flags, and recommends no trade.
+
+**PASS is steps 1–6.** Record the date, the commit, the question, the view id, the counts of the
+first line and the unmeasured companies in `DEVELOPMENT.md` §7.4's manual analogs plan 3 row.
+
+**Not yet run.** The automated half passes 2026-11-11; the live half is the operator's.
 
 ## The cycle drill (run after any change to cycle.md, roles/ or the dsh pins)
 

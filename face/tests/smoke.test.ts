@@ -266,9 +266,10 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
       assert.equal(row.phase, "active", id);
       assert.equal(row.enabled, true, id);
     }
-    /* The analog rows (src/analog.ts), live the same way: `analog_chart`
-     * registered, and both rows enabled and ACTIVE - the tool row mounts only
-     * once the backbone has provided `analogViews`. */
+    /* The analog rows (src/analog.ts), live the same way: `analog_chart` and
+     * `analog_events` registered, and the three rows enabled and ACTIVE - the
+     * tool rows mount only once the backbone has provided `analogViews`. */
+    assert.deepEqual([...ANALOG_ROW_IDS], ["analog-views", "analog-chart", "analog-events"]);
     for (const name of ANALOG_TOOL_NAMES) {
       assert.ok(toolNames.includes(name), `${name} must be registered; saw ${toolNames.join(", ")}`);
     }

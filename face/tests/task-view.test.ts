@@ -434,6 +434,14 @@ test("a task's views are the ids its analog tools answered, in order, once each"
   assert.deepEqual(view(log).views, ["an-20261110-0a1b2c3d", "an-20261110-ffffffff"]);
 });
 
+test("a task's row carries the view an analog_events call answered", () => {
+  const ok = (view: string) => JSON.stringify({ ok: true, view, digest: "measured 1 of 1 events · 1 verified, 0 unverified" });
+  const log = new Log().brief().start(1)
+    .call(1, "c1", "analog_events", { title: "CEO scandals", events: [] }).resultText(1, "c1", ok("an-20261110-0a1b2c3d"))
+    .call(1, "c2", "analog_events", { title: "x", events: [] }).resultText(1, "c2", "Error: INVALID_EVENTS events: none given", true);
+  assert.deepEqual(view(log).views, ["an-20261110-0a1b2c3d"]);
+});
+
 test("a task with no analog call has no views", () => {
   assert.deepEqual(view(new Log().brief().start(1).say(1, "looking")).views, []);
 });

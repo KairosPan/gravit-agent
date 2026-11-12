@@ -4,11 +4,12 @@
  * (`$DSH_HOME/face/analog/views/`). A view is written to `<id>.json.tmp` (flag `wx`, mode 0o600) and renamed into
  * place, in a directory made 0o700; the newest `kept` views stay, the older ones are removed by modification time.
  *
- * A view over `maxBytes` is trimmed before it is written, in this order: windows go from the case of largest
- * `distance` that still has one, the cases named in `view.leading` passed over; then whole cases leave, largest
- * `distance` first, the leading ones again passed over; then the leading cases lose their windows and then
- * themselves, largest `distance` first. A view still over the cap with no case left is refused `INTERNAL`. The
- * trimming is decided from each case's own serialized size, with and without its window, and the size of the rest
+ * A view over `maxBytes` is trimmed before it is written, in this order: windows go from the farthest case that still
+ * has one, the cases named in `view.leading` passed over; then whole cases leave, farthest first, the leading ones
+ * again passed over; then the leading cases lose their windows and then themselves, farthest first. A case is as far
+ * as its `distance` where that is a number, else as its position, a later case farther: an events view, whose cases
+ * have no distance, is trimmed from its last case backwards. Of equal distances, the later case is the farther. A
+ * view still over the cap with no case left is refused `INTERNAL`. The trimming is decided from each case's own serialized size, with and without its window, and the size of the rest
  * of the view, so a view of thousands of cases is serialized a handful of times, not once per drop. The stored view
  * carries its `id`, `windowsDropped` (the listed cases whose window the store removed) and `casesDropped` (the cases
  * it removed); the cases keep their given order, and the view given to `write` is never changed.
@@ -70,8 +71,10 @@ function trim(view, id, maxBytes) {
   const total = () =>
     rest + sum + Math.max(0, count - 1) + String(windowsDropped).length - 1 + String(casesDropped).length - 1;
 
-  // Farthest first; of equal distances, the later case first.
-  const order = cases.map((_, i) => i).sort((a, b) => (cases[b].distance - cases[a].distance) || b - a);
+  // Farthest first: by distance where it is a number, else by position, the later case first.
+  /** @param {number} i */
+  const far = (i) => (typeof cases[i]?.distance === "number" ? cases[i].distance : i);
+  const order = cases.map((_, i) => i).sort((a, b) => (far(b) - far(a)) || b - a);
   const others = order.filter((i) => !leading.has(cases[i]?.id));
   const named = order.filter((i) => leading.has(cases[i]?.id));
 
