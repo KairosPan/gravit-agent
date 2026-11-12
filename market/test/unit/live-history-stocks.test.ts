@@ -327,6 +327,32 @@ describe("daily and weekly: Robinhood's year or five, Nasdaq's by dates for all 
     expect([first.bars, first.more, first.ends]).toEqual([[], false, "Nasdaq keeps no daily bars of AAPL before Mon 3 Jan 2000"]);
   });
 
+  it("a dated window (since and until, an event's): Nasdaq asked only to until's date, and no session's minutes asked for a window that ends before it", async () => {
+    // older than Robinhood's five years: Nasdaq alone, from since's date to until's, never to today
+    const s = history();
+    const since = fromEt(2017, 11, 27, 0, 0);
+    const until = fromEt(2018, 5, 6, 0, 0);
+    const p = page(await s.h("AAPL", "1d", { since, until, limit: 200 }));
+    expect(s.nq.asked).toEqual([["AAPL", "2017-11-27", "2018-05-06"]]);
+    expect(s.rh.sent).toEqual([]);
+    expect([nyDay(p.bars[0]!.t), nyDay(p.bars.at(-1)!.t), p.source, p.today]).toEqual(["Mon 27 Nov 2017", "Fri 4 May 2018", "Nasdaq · AAPL", undefined]);
+    // inside Robinhood's year, ending before today's session: Robinhood's days, no minutes
+    const r = history();
+    const recent = page(await r.h("AAPL", "1d", { since: NOW - 100 * DAY, until: NOW - 30 * DAY, limit: 200 }));
+    expect(r.rh.sent.map(asked)).toEqual(["day/year/regular"]);
+    expect(recent.bars.at(-1)!.t).toBeLessThan(NOW - 30 * DAY);
+    expect(recent.today).toBeUndefined();
+    // a window reaching past now: today's bar from the session's minutes, as before
+    const live = history();
+    const reaching = page(await live.h("AAPL", "1d", { since: NOW - 100 * DAY, until: NOW + 60 * DAY, limit: 200 }));
+    expect(live.rh.sent.map(asked)).toEqual(["day/year/regular", "minute/day/extended"]);
+    expect(reaching.today).toEqual({ t: fromEt(2026, 10, 13, 9, 30), words: "Today so far" });
+    // older than five years and reaching past now: Nasdaq to today, as before
+    const both = history();
+    await both.h("AAPL", "1d", { since: fromEt(2017, 11, 27, 0, 0), until: NOW + DAY, limit: 5_000 });
+    expect(both.nq.asked).toEqual([["AAPL", "2017-11-27", "2026-10-13"]]);
+  });
+
   it("where Robinhood and Nasdaq both refuse, Cboe's days — their short volume from 2021-10-15 to 2022-06-17 left unsaid where Nasdaq gives none", async () => {
     const cboe: Candle[] = [fromEt(2021, 10, 14, 9, 30), fromEt(2021, 10, 15, 9, 30), fromEt(2022, 6, 17, 9, 30), fromEt(2022, 6, 21, 9, 30), fromEt(2026, 10, 12, 9, 30)].map((t) => ({ t, o: 10, h: 11, l: 9, c: 10.5, v: 777 }));
     const refuse = no("E_VENUE_GEOBLOCKED", { venue: "nasdaq", message: "Nasdaq does not serve this location: that is its own rule, and the market does not look for a way around it" });

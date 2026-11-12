@@ -6,7 +6,7 @@
  *
  *   GET  /api/explore   ?scope= &source= &tab= &q= &key= &sort= &limit=  Exploration
  *   GET  /api/quotes    ?pairs=<venue>|<symbol>,… (or ?pair= each)  {quotes: [{venue, symbol, market? | refusal?}]}: A shares only
- *   GET  /api/candles   ?venue= &symbol= &interval= &range= &before= &limit=   CandlesView, or an A share's ChinaHistory
+ *   GET  /api/candles   ?venue= &symbol= &interval= &range= &since= &before= &limit=   CandlesView, or an A share's ChinaHistory
  *   GET  /api/book      ?venue= &symbol= &depth=                  BookView
  *   GET  /api/trades    ?venue= &symbol= &limit=                  TradesView
  *   GET  /api/news      ?symbols=<A,B> &since=<ISO time>          {news: {<SYM>: Headline[]}, unavailable?: {<SYM>: reason}}: US shares

@@ -95,6 +95,15 @@ const ymd = (ms: number): string => {
   return `${e.y}-${String(e.m).padStart(2, "0")}-${String(e.d).padStart(2, "0")}`;
 };
 const sameNyDate = (a: number, b: number): boolean => ymd(a) === ymd(b);
+/** the open, 09:30 New York, of the latest market day whose open is at or before `now`: the session todayFrom's minutes are of */
+const latestOpen = (now: number): number => {
+  for (let back = 0; back < 15; back++) {
+    const e = et(now - back * DAY);
+    const open = fromEt(e.y, e.m, e.d, 9, 30);
+    if (open <= now && isMarketDay(open)) return open;
+  }
+  return Number.NEGATIVE_INFINITY;
+};
 
 /** A US STOCK'S HISTORY (see the top of this file): `symbol` a plain ticker the caller has checked (AAPL, BRK.B) */
 export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: string, interval: CandleInterval, w: CandleWindow) => Promise<CandlePage | Refusal> {
@@ -239,8 +248,11 @@ export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: strin
       const bars = cb.filter((b) => b.t < until).slice(-(weekly ? n * 5 : n));
       return label(bars, "Cboe", bars.length && bars.length >= (weekly ? n * 5 : n) ? { more: true } : { ends: bars.length ? `Cboe's daily history of ${sym} starts ${nyDay(bars[0]!.t)}` : `Cboe keeps no daily bars of ${sym} before ${nyDay(until)}` });
     }
-    // A FIRST VIEW: Robinhood's year or five years where they reach the start, Nasdaq's by dates for anything older (MAX: all of it)
+    // A FIRST VIEW: Robinhood's year or five years where they reach the start, Nasdaq's by dates for anything older (MAX: all of it).
+    // A dated window (an event's: since and until both) asks Nasdaq only to until's date, and the session's minutes only where it
+    // reaches past the latest session's open — pageOf keeps the bars before until either way
     const since = w.since;
+    const end = w.until !== undefined && w.until < now ? w.until : now;
     let days: Candle[] | undefined;
     let source = "Robinhood";
     let ends: string | undefined;
@@ -252,7 +264,7 @@ export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: strin
       else days = rh.map(({ session: _s, ...b }) => b);
     }
     if (!days) {
-      const nq = await nasdaqDays(sym, since <= 0 ? "1970-01-01" : ymd(since), ymd(now));
+      const nq = await nasdaqDays(sym, since <= 0 ? "1970-01-01" : ymd(since), ymd(end));
       // Nasdaq answering no days at all for dates the market traded is no answer: Cboe's are asked
       if (nq === null || (!isRefusal(nq) && !nq.bars.length)) refused ??= no("E_VENUE_REJECTED", { venue, message: `Nasdaq keeps no daily bars of ${sym}` });
       else if (isRefusal(nq)) refused ??= nq;
@@ -275,7 +287,7 @@ export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: strin
     // held to the calendar's market days, as Cboe's rows are when they are read (public-stocks.ts): a day the calendar wrongly called closed
     // would lose its real bar here — calendar.ts says how far back its rules hold
     days = days.filter((b) => b.t >= since && isMarketDay(b.t));
-    const today = await todayFrom(sym, days, now);
+    const today = w.until !== undefined && w.until <= latestOpen(now) ? undefined : await todayFrom(sym, days, now);
     if (today) days = [...days, today.bar];
     const page = label(days, source, { more: !ends, ...(ends ? { ends } : {}), ...(noOpen ? { note: noOpen } : {}) });
     const lastBar = page.bars[page.bars.length - 1];
