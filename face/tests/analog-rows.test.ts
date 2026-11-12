@@ -117,6 +117,15 @@ test("analog_events answers a digest and the id of a stored view", async (t) => 
   assert.equal(service.pageOpened("https://example.com/b"), false);
 });
 
+test("the events schema says what each timing means and requires a query's anchors", async (t) => {
+  const { tools } = await mountedEvents(t);
+  const schema = tools.find((tool) => tool.name === "analog_events")!.parameters as any;
+  assert.deepEqual(schema.properties.query.required, ["symbol", "anchors"]);
+  for (const timing of [schema.properties.events.items.properties.timing, schema.properties.query.properties.anchors.items.properties.timing]) {
+    for (const word of ["09:30", "16:00", "weekend or a market holiday", "New York"]) assert.ok(timing.description.includes(word), `${word}: ${timing.description}`);
+  }
+});
+
 test("the events description says what the tool is and is not", () => {
   for (const word of ["Past events like this one, measured.", "role_source_reader", "analog-guide", "never verified", "against SPY", "quote numbers from the digest only", "never evidence for a trade"]) assert.ok(eventsRow.EVENTS_DESCRIPTION.includes(word), word);
 });

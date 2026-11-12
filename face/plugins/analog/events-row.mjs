@@ -18,6 +18,10 @@ export const inject = ["tools", "analogViews"];
 export const EVENTS_DESCRIPTION =
   "Past events like this one, measured. Give the precedents you researched: for each, the company's current US ticker, a short label, a group, the date the news first became public and its timing (pre, open, post or closed, New York), the source URL and whether the source reader verified it; optionally the present case, with up to three anchors. Answers what each stock did from the close before the first session that could react, against SPY, as a digest and the id of a view; the page draws the charts from the view, so quote numbers from the digest only. Research first: load the analog-guide skill and hand the finding and dating to role_source_reader. A date typed from memory is never verified, and the face shows as unverified any source the reader did not open. A reading of the past with no lookahead guard: never evidence for a trade, never a forecast, never a recommendation.";
 
+/** What each timing means, as the source reader's persona defines it; the date is New York's. */
+const TIMING_WORDS =
+  "when on that date the news came out, New York time: pre before 09:30, open during the session, post after 16:00, closed a weekend or a market holiday; the date is New York's";
+
 /** The parameters, in the dsh DSL. Their checks are the scan's. */
 const PARAMETERS = {
   title: { type: "string", description: `what the events have in common, at most ${LIMITS.title} characters`, required: true },
@@ -33,7 +37,7 @@ const PARAMETERS = {
         label: { type: "string", description: `a short label, at most ${LIMITS.label} characters`, required: true },
         group: { type: "string", description: `the event's group, at most ${LIMITS.group} characters`, required: true },
         date: { type: "string", description: "YYYY-MM-DD, the date the news first became public", required: true },
-        timing: { type: "string", enum: [...TIMINGS], description: "when on that date, New York time", required: true },
+        timing: { type: "string", enum: [...TIMINGS], description: TIMING_WORDS, required: true },
         source: { type: "string", description: `the source's http(s) URL without credentials, at most ${LIMITS.source} characters`, required: true },
         verified: { type: "boolean", description: "whether the source reader verified the date at the source", required: true },
         note: { type: "string", description: `optional, at most ${LIMITS.note} characters` },
@@ -49,13 +53,14 @@ const PARAMETERS = {
       anchors: {
         type: "array",
         description: `1 to ${ANCHORS_MAX} dates of the present case's news`,
+        required: true,
         items: {
           type: "object",
           additionalProperties: false,
           properties: {
             label: { type: "string", description: `a short label, at most ${LIMITS.label} characters`, required: true },
             date: { type: "string", description: "YYYY-MM-DD", required: true },
-            timing: { type: "string", enum: [...TIMINGS], description: "when on that date, New York time", required: true },
+            timing: { type: "string", enum: [...TIMINGS], description: TIMING_WORDS, required: true },
           },
         },
       },
