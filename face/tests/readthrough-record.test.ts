@@ -42,6 +42,18 @@ test("given matches the symbol and the reference of an annotation's direction on
   assert.deepEqual((await record.all()).map((e) => e.kind), ["direction", "direction", "direction", "sent"]);
 });
 
+test("a direction left unsent is not given; a later one, or one sent, is", async (t) => {
+  const record = createRecord(await scratch(t));
+  await record.append(entry("rt-20261109-0000aaaa"));
+  await record.sent("rt-20261109-0000aaaa", false, "2026-11-09T09:05:00.000Z");
+  assert.equal(await record.given("NVDA", "2026-11-06"), undefined, "its message never went out");
+  await record.append(entry("rt-20261109-0000bbbb"));
+  assert.equal((await record.given("NVDA", "2026-11-06"))?.id, "rt-20261109-0000bbbb", "no sent line yet still counts");
+  await record.append(entry("rt-20261109-0000cccc", { symbol: "INTC" }));
+  await record.sent("rt-20261109-0000cccc", true, "2026-11-09T09:06:00.000Z");
+  assert.equal((await record.given("INTC", "2026-11-06"))?.id, "rt-20261109-0000cccc");
+});
+
 test("a no-direction counts as given", async (t) => {
   const record = createRecord(await scratch(t));
   await record.append(entry("rt-20261109-0000dddd", { peers: [], counter: null, noDirection: "n" }));

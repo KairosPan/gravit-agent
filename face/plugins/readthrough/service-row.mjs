@@ -123,7 +123,15 @@ export function apply(ctx, config) {
       certainty: d.certainty,
       shut,
     };
+    // A run closed while its prices were read is over: nothing is recorded for it. One closed while the line was
+    // being written gets the line's `sent: false`, so the record says it never went out.
+    const gone = () => run !== undefined && runs.get(sessionId) !== run;
+    if (gone()) throw refuse.alertOnly();
     await record.append(entry);
+    if (gone()) {
+      await record.sent(id, false, now().toISOString());
+      throw refuse.alertOnly();
+    }
     const block = renderBlock({ direction: d, tape: [stricken, ...rest, spy], shut, forTask: !forRun });
     run?.blocks.push({ id, text: block });
     return { id, block };

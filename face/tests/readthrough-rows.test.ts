@@ -146,9 +146,42 @@ test("later re-prices a recorded direction; a no-direction, an unknown event and
 });
 
 test("sent writes one line an id", async (t) => {
-  const { service } = await mounted(t);
+  const { service, recordDir } = await mounted(t);
   service.open("s-1", RUN);
   const { id } = await service.propose(ARGS, { sessionId: "s-1", desk: true });
   await service.sent([id], true);
   assert.equal(await service.given("NVDA", "2026-11-06"), true);
+  assert.ok((await createRecord(recordDir).all()).some((e: any) => e.kind === "sent" && e.id === id && e.sent === true));
+});
+
+test("a direction sent false is not given: later is silent and a new run may give one", async (t) => {
+  const { service } = await mounted(t);
+  service.open("s-1", RUN);
+  const { id } = await service.propose(ARGS, { sessionId: "s-1", desk: true });
+  service.close("s-1");
+  await service.sent([id], false);
+  assert.equal(await service.given("NVDA", "2026-11-06"), false);
+  assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), []);
+  service.open("s-2", RUN);
+  assert.match((await service.propose(ARGS, { sessionId: "s-2", desk: true })).id, ID_RE);
+});
+
+test("a run closed while its prices are read: ALERT_ONLY, nothing kept, nothing given", async (t) => {   // review fix
+  const { service, recordDir } = await mounted(t);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let asked = () => {};
+  const reading = new Promise<void>((resolve) => { asked = resolve; });
+  service.wire({
+    prices: async (symbols: string[]) => { asked(); await held; return symbols.map((symbol) => ({ symbol, price: 100, changePct: -1, feed: "robinhood", asOf: AT })); },
+    deskSymbols: async () => [], usSessionOn: () => true, refClose: () => FRIDAY_CLOSE,
+  });
+  service.open("s-1", RUN);
+  const call = service.propose(ARGS, { sessionId: "s-1", desk: true });
+  await reading;
+  assert.deepEqual(service.close("s-1"), []);
+  release();
+  await assert.rejects(call, code("ALERT_ONLY"));
+  assert.equal(await service.given("NVDA", "2026-11-06"), false);
+  assert.equal((await createRecord(recordDir).given("NVDA", "2026-11-06")), undefined);
 });

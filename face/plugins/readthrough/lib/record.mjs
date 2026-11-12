@@ -130,16 +130,21 @@ export function createRecord(dir) {
      */
     sent: (id, sent, t) => write({ kind: "sent", id, t, sent }),
     /**
-     * The latest direction an annotation gave for `symbol` against the reference close `ref`, if any.
+     * The latest direction an annotation gave for `symbol` against the reference close `ref` that was not left unsent,
+     * if any: a direction whose latest `sent` line says false never reached the operator, so it is not given; one with
+     * no `sent` line yet still is.
      * @param {string} symbol
      * @param {string} ref
      * @returns {Promise<DirectionEntry | undefined>}
      */
     async given(symbol, ref) {
       const entries = await all();
+      /** @type {Map<string, boolean>} */
+      const sent = new Map();
+      for (const e of entries) if (e.kind === "sent") sent.set(e.id, e.sent);
       for (let i = entries.length - 1; i >= 0; i--) {
         const e = entries[i];
-        if (e.kind === "direction" && e.symbol === symbol && e.caller?.kind === "annotation" && e.caller.ref === ref) {
+        if (e.kind === "direction" && e.symbol === symbol && e.caller?.kind === "annotation" && e.caller.ref === ref && sent.get(e.id) !== false) {
           return e;
         }
       }
