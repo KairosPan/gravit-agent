@@ -360,6 +360,18 @@ export const ZH = Object.freeze({
   'lunhui.view.failed': '无法读取该视图',
   'lunhui.view.noView': '回答中没有视图',
 
+  // an event analog view and its task (reducers/analog.js, host/analog.js), and the table's labelled figures
+  // (host/event-table.js): every figure is a percentage against the market, under one of these labels
+  'analog.view.failed': '无法读取对标视图',
+  'analog.view.noView': '回答中没有对标视图',
+  'analog.task.failed': '无法读取该任务',
+  'analog.task.noTask': '回答中没有任务',
+  'analog.chip.day0': '当天',
+  'analog.chip.next': '次日',
+  'analog.chip.d5': '5 天',
+  'analog.chip.d60': '60 天',
+  'analog.none': '尚无',
+
   // the operator's own browser wallet (wire/wallet.js, render/wallet-row.js, host/wallet-send.js): its refusals and its row
   'money.wallet.browser': '浏览器钱包',
   'money.wallet.refused': '钱包已拒绝',

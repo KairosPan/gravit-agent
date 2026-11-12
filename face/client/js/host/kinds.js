@@ -3,6 +3,7 @@
 // carries every tool call's arguments because the mapper's card keeps only a title.
 import { roundEndLine } from '../wire/room.js';
 import { t, tn } from '../i18n/words.js';
+import { tableLineViews } from './analog.js';
 
 // the Account seat's twelve write tools (spec 2026-10-20 §6.1): what the host's Gate 2 cards under any server name
 export const SEAT_TOOLS = Object.freeze(['portfolio_live_order', 'portfolio_live_batch', 'portfolio_live_amend', 'portfolio_live_cancel',
@@ -228,16 +229,32 @@ function relayParts(text) {
   const head = lines[0] ?? '';
   // the title runs to the head's last ' · ' (ruling R9): a Run task's title holds one (`<Title> · MM-DD`), a status never
   const end = head.startsWith(RELAY_HEAD) ? head.lastIndexOf(' · ') : -1;
-  if (end < RELAY_HEAD.length) return { title: null, status: null, body: text };
+  if (end < RELAY_HEAD.length) return { title: null, status: null, body: text, views: null };
   const status = head.endsWith(']') ? head.slice(end + 3, -1) : null;
-  return { title: head.slice(RELAY_HEAD.length, end), status, body: unfenced(lines.slice(1), 'task-data', '[task ·').join('\n') };
+  const rest = lines.slice(1);
+  return { title: head.slice(RELAY_HEAD.length, end), status, body: unfenced(rest, 'task-data', '[task ·').join('\n'), views: tableViews(rest) };
+}
+// the event views the face's line names (host/analog.js TABLE_LINE_RE), read only from the lines after the relay's closing
+// fence, where no worker's words reach; null when there is none
+function tableViews(rest) {
+  const close = closingFence(rest, 'task-data');
+  if (close <= 0) return null;
+  for (const line of rest.slice(close + 1)) {
+    const views = tableLineViews(line);
+    if (views) return views;
+  }
+  return null;
+}
+// the index of the last `<<<end NONCE>>>` line of the fence `rest` opens with `<<<tag NONCE>>>`, -1 when there is none
+function closingFence(rest, tag) {
+  const open = new RegExp(`^<<<${tag} (\\S+)>>>$`).exec(rest[0] ?? '');
+  return open ? rest.lastIndexOf(`<<<end ${open[1]}>>>`) : -1;
 }
 // the lines after a head, out of the face's data fence (src/task-relay.ts fenceData): between `<<<tag NONCE>>>` and the last
 // `<<<end NONCE>>>`, a line the face quoted - one that would read as a head (`quoted`) or a fence, one space before it - given
 // back as it was; lines in no fence as they came
 function unfenced(rest, tag, quoted) {
-  const open = new RegExp(`^<<<${tag} (\\S+)>>>$`).exec(rest[0] ?? '');
-  const close = open ? rest.lastIndexOf(`<<<end ${open[1]}>>>`) : -1;
+  const close = closingFence(rest, tag);
   if (close <= 0) return rest;
   return rest.slice(1, close).map(l => (l.startsWith(` ${quoted}`) || l.startsWith(' <<<') ? l.slice(1) : l));
 }
@@ -250,8 +267,8 @@ function taskMessage(b, view) {
   const text = view.text ?? '';
   const ids = { ...(typeof view.task === 'string' ? { task: view.task } : {}) };
   if (view.form !== 'report') return { ...b, from: 'system', kind: 'task', text: view.form === 'brief' ? withoutFooter(text) : text, data: { form: view.form, ...ids } };
-  const { title, status, body } = relayParts(text);
-  return { ...b, from: 'system', kind: 'task', text, data: { form: 'report', ...ids, status: typeof view.status === 'string' ? view.status : status, title, body } };
+  const { title, status, body, views } = relayParts(text);
+  return { ...b, from: 'system', kind: 'task', text, data: { form: 'report', ...ids, status: typeof view.status === 'string' ? view.status : status, title, body, ...(views ? { views } : {}) } };
 }
 
 // the desk folded into the conversation (one-entry plan 3): a text from the operator's phone is the operator's own words,

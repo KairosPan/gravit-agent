@@ -132,6 +132,8 @@ export function emptyState() {
     // Gravit's composed answers (host/lunhui.js): each run view by its key, each answer's own picks by its id, the stock drawer
     // open ({ key, code }: the opening answer's view key and the stock's code) or null
     lunhui: { views: {}, ui: {}, stock: null },
+    // the event analog tables (host/analog.js): each task read by its id and each event view by its id
+    analog: { tasks: {}, views: {} },
     edit: null,
     confirm: null,
   };

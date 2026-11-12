@@ -358,6 +358,18 @@ export const EN = Object.freeze({
   'lunhui.view.failed': 'the view could not be read',
   'lunhui.view.noView': 'the answer held no view',
 
+  // an event analog view and its task (reducers/analog.js, host/analog.js), and the table's labelled figures
+  // (host/event-table.js): every figure is a percentage against the market, under one of these labels
+  'analog.view.failed': 'the analog view could not be read',
+  'analog.view.noView': 'the answer held no analog view',
+  'analog.task.failed': 'the task could not be read',
+  'analog.task.noTask': 'the answer held no task',
+  'analog.chip.day0': 'Day 0',
+  'analog.chip.next': 'Next day',
+  'analog.chip.d5': '5 days',
+  'analog.chip.d60': '60 days',
+  'analog.none': '—',
+
   // the operator's own browser wallet (wire/wallet.js, render/wallet-row.js, host/wallet-send.js): its refusals and its row
   'money.wallet.browser': 'Browser wallet',
   'money.wallet.refused': 'the wallet refused',
