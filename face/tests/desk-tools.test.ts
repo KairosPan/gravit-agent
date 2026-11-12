@@ -420,7 +420,7 @@ test("desk_quotes on an unwired source answers NO_QUOTES for every symbol", asyn
     { error: "unavailable: no quote source is wired: this face has no Market read to ask" });
 });
 
-/* ---------- web_fetch: the desk's alone, and on the record (spec 2026-11-07 §5.6, charter A1 and D29) ---------- */
+/* ---------- web_fetch: the desk's own, and on the record (spec 2026-11-07 §5.6, charter A1 and D29) ---------- */
 
 test("a desk agent's own layer offers web_fetch beside desk_quotes and desk_state; another agent's offers none of them", async () => {
   const root = fakeRoot();

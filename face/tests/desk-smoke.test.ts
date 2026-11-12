@@ -335,7 +335,8 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
 
     /* 1. THE ROSTER: DESK_ALLOW against this tree, plus the two desk tools and dsh's own web_fetch from the desk
      * agent's own layer - on the agent and in the very first request, so their registration did not race the first
-     * turn. web_fetch is the desk's alone (spec 2026-11-07 §5.6): the tree registers none. */
+     * turn. web_fetch is in no layer but its agents' own - the desk's here, the source reader's children's
+     * (src/source-reader.ts) - since the tree registers none (spec 2026-11-07 §5.6). */
     const roster = await turn("ROSTER_PROBE");
     const known = new Set(tools.schemas().map((s) => s.name));
     const expanded = expandAllow([...DESK_ALLOW], known);

@@ -3,8 +3,9 @@
  * (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.3, §8). Every agent on the `gravit-desk`
  * preset has them; no other agent does. Beside them each desk agent gets dsh's own `web_fetch`
  * (`@deepseek-ai/dsh-tool-web` `applyWebFetchTool`; spec 2026-11-07 §5.6, charter A1 and D29): the tree registers
- * none (src/policy.ts D6 keeps `tool-web`'s `fetch` off) but leaves the http fetch provider on, so the desk alone
- * opens pages - Gravit's other sessions, the bots and the roles never see the tool.
+ * none (src/policy.ts D6 keeps `tool-web`'s `fetch` off) but leaves the http fetch provider on, so the desk and the
+ * source reader's children (src/source-reader.ts, which equips them through {@link equipAgents}) alone open pages -
+ * Gravit's other sessions, the bots and every other role never see the tool.
  *
  * WHERE THEY REGISTER: into each desk agent's OWN tool layer, from one root `agent/created` listener and
  * one sweep of the agents already live ({@link installDeskTools}). The desk's preset carries an allow mask
