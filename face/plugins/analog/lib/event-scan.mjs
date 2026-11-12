@@ -12,7 +12,9 @@
  * companies may come from the keep. A market that does not answer with nothing read is a refusal; a company the market
  * refuses, one not read before the deadline, an event whose day 0 has not traded, and one with fewer than 20 sessions
  * before day 0 are kept as unmeasured cases with the words that say why, never left out. Without the market's own bars
- * the raw changes stay and every change against the market is null.
+ * the raw changes stay and every change against the market is null. The view says where the present case's and the
+ * market's bars came from, where they start and whether they were read short, and how many of the companies' histories
+ * end on a bar built from the session's minutes.
  *
  * `verified` is the reader's claim checked by the face: an event marked verified whose source no reader opened is
  * stored unverified and flagged `unopened`. The present case's anchors are measured like the events, and are in no
@@ -48,14 +50,16 @@ import { refuse } from "./errors.mjs";
  * @typedef {{ id: string, label: string, date: string, timing: string } & Measured} Anchor
  * @typedef {{ kind: "events", version: 1, at: string, title: string,
  *   query: null | { symbol: string, readDate: string, latest: string | null, today: string | null,
- *     sessionOpen: boolean, words: string | null, anchors: Anchor[] },
+ *     sessionOpen: boolean, words: string | null, source: string | null, short: boolean, firstBar: string | null,
+ *     anchors: Anchor[] },
  *   parameters: { minBefore: number, volumeBase: number, minVolumes: number, quiet: number, elsewhere: number,
  *     elsewhereOver: number, neighbours: number, minGroup: number, pre: number, post: number },
  *   coverage: { asked: number, measured: number, unmeasured: Array<{ id: string, symbol: string, words: string }>,
  *     verified: number, unverified: number, unopened: number, quiet: number, elsewhere: number, noContext: number,
  *     companies: { asked: number, read: number }, sources: Record<string, number>,
  *     short: Array<{ symbol: string, source: string, firstBar: string }>, adjustment: string[],
- *     market: { source: string | null, words: string | null }, readFrom: string | null, deadline: boolean },
+ *     market: { source: string | null, words: string | null, firstBar: string | null, short: boolean },
+ *     sessionBars: number, readFrom: string | null, deadline: boolean },
  *   groups: { all: EventSummary, named: Array<{ name: string, summary: EventSummary, paths: Paths | null }> },
  *   cases: EventCase[], windowsDropped: 0 }} EventsView
  */
@@ -309,10 +313,12 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
   /** @type {EventsView["coverage"]["short"]} */
   const short = [];
   let read = 0;
+  let sessionBars = 0;
   for (const symbol of companies) {
     const h = got.read.get(symbol);
     if (h === undefined) continue;
     read++;
+    if (h.today !== null) sessionBars++;
     used.push(h);
     const name = h.source.split(" · ")[0];
     sources[name] = (sources[name] ?? 0) + 1;
@@ -329,6 +335,8 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
       latest: h === undefined ? null : dateOf(h.bars[h.bars.length - 1].t),
       today: h === undefined ? null : h.today, sessionOpen: h === undefined ? false : h.sessionOpen,
       words: h === undefined ? wordsOf(query.symbol) : null,
+      source: h === undefined ? null : h.source, short: h === undefined ? false : h.short,
+      firstBar: h === undefined ? null : h.firstBar,
       anchors: query.anchors.map((a, i) => ({ id: `q-${i + 1}`, label: a.label, date: a.date, timing: a.timing, ...measure(query.symbol, a) })),
     };
   }
@@ -362,7 +370,11 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
       sources,
       short,
       adjustment: /** @type {string[]} */ (adjustment),
-      market: { source: spy === undefined ? null : spy.source, words: spy === undefined ? wordsOf(MARKET_SYMBOL) : null },
+      market: {
+        source: spy === undefined ? null : spy.source, words: spy === undefined ? wordsOf(MARKET_SYMBOL) : null,
+        firstBar: spy === undefined ? null : spy.firstBar, short: spy === undefined ? false : spy.short,
+      },
+      sessionBars,
       readFrom,
       deadline: timedOut.size > 0,
     },

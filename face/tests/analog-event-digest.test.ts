@@ -65,14 +65,14 @@ test("forty long cases still fit", async () => {
 const MEAS = { base: 50, gap: -0.1234, r0: -0.1234, r1: -0.1234, r5: -0.1234, r20: -0.1234, r60: -0.1234, x0: -0.1234, x1: -0.1234, x5: -0.1234, x20: -0.1234, x60: -0.1234, low60: -0.2, lowAt: 3, sessionsAfter: 1234 };
 const SUM = { n: 40, n0: 40, n1: 40, n5: 40, n20: 40, n60: 40, x0: -0.1234, x1: -0.1234, x5: -0.1234, x20: -0.1234, x60: -0.1234, x60q1: -0.1234, x60q3: -0.1234, down0: 1, down1: 1, down5: 1, down20: 1, down60: 1, worst0: null };
 const FIRST = `measured 40 of 42 events (2 unmeasured) · 0 verified, 42 unverified, 40 marked verified without an opened source · view ${ID} · stopped at the deadline`;
-function fullView({ title = "T".repeat(120), anchorLabel = "a".repeat(80), groupName = (i: number) => `${"g".repeat(23)}${i}`, symbol = "ABCDEFGHIJ", marketWords = "Nasdaq keeps no daily bars of SPY" } = {}) {
+function fullView({ title = "T".repeat(120), anchorLabel = "a".repeat(80), groupName = (i: number) => `${"g".repeat(23)}${i}`, symbol = "ABCDEFGHIJ", marketWords = "Nasdaq keeps no daily bars of SPY" as string | null, marketSource = null as string | null } = {}) {
   const anchor = (i: number) => ({ id: `q-${i + 1}`, label: anchorLabel, date: "2020-06-19", timing: "pre", state: "measured", words: null, day0: "2020-06-19", measure: MEAS, tape: { vol0: 12.3, busiest: null, flags: [] }, flags: [], window: null, rel: null });
   const measured = Array.from({ length: 40 }, (_, i) => ({ id: `c${i}`, symbol: "ABCDEFGHIJ", label: "l".repeat(80), group: groupName(i % 4), date: dateAt(30 + i), timing: "pre", source: A, note: "n".repeat(160), claimed: true, opened: false, verified: false, state: "measured", words: null, day0: dateAt(30 + i), measure: MEAS, tape: { vol0: 1, busiest: null, flags: ["quiet", "elsewhere"] }, flags: ["quiet", "elsewhere", "unopened"], window: null, rel: null }));
   const gone = ["GONEA", "GONEB"].map((s) => ({ id: `ev-${s}`, symbol: s, label: "x", group: groupName(0), date: "2018-07-27", timing: "pre", source: A, note: null, claimed: false, opened: false, verified: false, state: "unmeasured", words: `Nasdaq keeps no daily bars of ${s}`, day0: null, measure: null, tape: null, flags: [], window: null, rel: null }));
   return {
     kind: "events", version: 1, at: "2020-06-19T15:00:00.000Z", title, id: ID,
     query: { symbol, readDate: "2020-06-19", latest: "2020-06-19", today: "Today so far", sessionOpen: true, words: null, anchors: [0, 1, 2].map(anchor) },
-    coverage: { asked: 42, measured: 40, unmeasured: gone.map((g) => ({ id: g.id, symbol: g.symbol, words: g.words })), verified: 0, unverified: 42, unopened: 40, quiet: 40, elsewhere: 40, noContext: 0, companies: { asked: 3, read: 1 }, sources: {}, short: [], adjustment: [], market: { source: null, words: marketWords }, readFrom: null, deadline: true },
+    coverage: { asked: 42, measured: 40, unmeasured: gone.map((g) => ({ id: g.id, symbol: g.symbol, words: g.words })), verified: 0, unverified: 42, unopened: 40, quiet: 40, elsewhere: 40, noContext: 0, companies: { asked: 3, read: 1 }, sources: {}, short: [], adjustment: [], market: { source: marketSource, words: marketWords, firstBar: marketSource === null ? null : "2019-03-04", short: marketSource !== null }, sessionBars: 0, readFrom: null, deadline: true },
     groups: { all: SUM, named: [0, 1, 2, 3].map((i) => ({ name: groupName(i), summary: SUM, paths: null })) },
     cases: [...measured, ...gone], windowsDropped: 0,
   } as unknown as Parameters<typeof eventsDigest>[0];
@@ -103,6 +103,15 @@ test("Chinese text at the limits still fits", () => {
     assert.ok(l.includes(`${"锚".repeat(12)}…`), l);
     assert.ok(!l.includes("gap ") && !l.includes("volume "), l);
   }
+});
+
+test("the market's bars read short are said, their source clipped with the market's words", () => {
+  const source = `Cboe · SPY ${"s".repeat(200)}`;
+  const text = eventsDigest(fullView({ marketWords: null, marketSource: source }));
+  assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
+  const lines = text.split("\n");
+  const afterAnchors = lines.filter((l) => l.startsWith("ABCDEFGHIJ ")).length + 2; // the first line, the title, the anchors
+  assert.equal(lines[afterAnchors],`SPY's bars start 2019-03-04 (${Array.from(source).slice(0, 80).join("")}…): events before it have nothing to compare with`);
 });
 
 test("a view no cut can fit is refused, not returned", () => {
@@ -179,11 +188,13 @@ function randomView(seed: number) {
     : { id: `q-${i + 1}`, label: text(80), date: "2020-06-19", timing: "pre", state: "measured", words: null, day0: "2020-06-19", measure: measureOf(), tape: { vol0: 3.2, busiest: null, flags: [] }, flags: [], window: null, rel: null });
   const cases = [...measured, ...gone];
   const verified = cases.filter((c) => c.verified).length;
-  const marketRefused = r() < 0.3;
+  const market = r();
+  const marketRefused = market < 0.3;
+  const marketShort = market >= 0.3 && market < 0.6;
   return {
     kind: "events", version: 1, at: "2020-06-19T15:00:00.000Z", title: `T${text(119)}`, id: ID,
     query: anchors.length === 0 ? null : { symbol: symbol(), readDate: "2020-06-19", latest: "2020-06-19", today: null, sessionOpen: r() < 0.5, words: null, anchors },
-    coverage: { asked: cases.length, measured: measured.length, unmeasured: gone.map((g) => ({ id: g.id, symbol: g.symbol, words: g.words })), verified, unverified: cases.length - verified, unopened: measured.filter((c) => c.flags.includes("unopened")).length, quiet: 0, elsewhere: 0, noContext: 0, companies: { asked: 1, read: 1 }, sources: {}, short: [], adjustment: [], market: { source: marketRefused ? null : "Nasdaq · SPY", words: marketRefused ? `Nasdaq keeps no daily bars of SPY ${"w".repeat(Math.floor(r() * 200))}` : null }, readFrom: null, deadline: r() < 0.3 },
+    coverage: { asked: cases.length, measured: measured.length, unmeasured: gone.map((g) => ({ id: g.id, symbol: g.symbol, words: g.words })), verified, unverified: cases.length - verified, unopened: measured.filter((c) => c.flags.includes("unopened")).length, quiet: 0, elsewhere: 0, noContext: 0, companies: { asked: 1, read: 1 }, sources: {}, short: [], adjustment: [], market: { source: marketRefused ? null : marketShort ? `Cboe · SPY ${"s".repeat(Math.floor(r() * 200))}` : "Nasdaq · SPY", words: marketRefused ? `Nasdaq keeps no daily bars of SPY ${"w".repeat(Math.floor(r() * 200))}` : null, firstBar: marketRefused ? null : "2019-03-04", short: marketShort }, sessionBars: 0, readFrom: null, deadline: r() < 0.3 },
     groups: { all: summary(), named: groupNames.map((name) => ({ name, summary: summary(), paths: null })) },
     cases, windowsDropped: 0,
   } as any;

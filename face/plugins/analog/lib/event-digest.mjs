@@ -1,22 +1,22 @@
 // face/plugins/analog/lib/event-digest.mjs
 /**
  * The digest of an event view: the few lines the model reads instead of the view, at most 2,048 bytes. Coverage first,
- * then the title, one line per anchor of the present case, the market's refusal when its bars were not read, one row
- * per group and `all` against the market, the measured cases in the view's order, the unmeasured ones with the words
- * that say why, what the flags mean, and the fixed sentences.
+ * then the title, one line per anchor of the present case, the market's refusal when its bars were not read or where
+ * they start when they were read short, one row per group and `all` against the market, the measured cases in the
+ * view's order, the unmeasured ones with the words that say why, what the flags mean, and the fixed sentences.
  *
  * When it is over the bound, each step below is taken in turn while it still is: (1) every note goes; (2) every
  * unmeasured entry loses its words and reads `<SYMBOL> <date>`; (3) case lines leave from the middle of the order, so
  * the first and the last stay longest, with `… and N more in the view` where they left; (4) the unmeasured line is cut
  * from its end to `+N more`; (5) the line that explains `quiet` and `elsewhere` goes; (6) texts are clipped, all at
  * once, by code point with `…` where they were clipped (the title to 20 characters, each anchor's label to 12, each
- * group's name to 8 wherever it is printed, the market's words on an anchor's line or the SPY line to 80); (7) each
- * measured anchor's line takes a short form without its gap, its +1 and its volume. (8) Whenever step 6 or 7 was taken,
- * the case lines that left come back while the digest stays within the bound, the earliest and the latest of them in
- * turn, so the kept ones are still the two ends of the order; the `… and N more` line says how many are still out and
- * goes when none is. (9) A digest still over the bound is refused (`INTERNAL`), never returned. Line 1, the header,
- * each row's numbers and the fixed sentences are never cut. Numbers are written as the chart digest writes them. The
- * view is not changed.
+ * group's name to 8 wherever it is printed, the market's words on an anchor's line or the SPY line, and the source on
+ * the SPY line, to 80); (7) each measured anchor's line takes a short form without its gap, its +1 and its volume. (8)
+ * Whenever step 6 or 7 was taken, the case lines that left come back while the digest stays within the bound, the
+ * earliest and the latest of them in turn, so the kept ones are still the two ends of the order; the `… and N more`
+ * line says how many are still out and goes when none is. (9) A digest still over the bound is refused (`INTERNAL`),
+ * never returned. Line 1, the header, each row's numbers and the fixed sentences are never cut. Numbers are written as
+ * the chart digest writes them. The view is not changed.
  */
 import { DIGEST_MAX, pct, ratio, whole } from "./digest.mjs";
 import { refuse } from "./errors.mjs";
@@ -121,9 +121,13 @@ export function eventsDigest(view) {
     /** @param {string} name */
     const group = (name) => (clipped ? clip(name, CLIP.group) : name);
     const anchors = q === null ? [] : q.anchors.map((a) => anchorLine(q.symbol, a, q, { clipped, short }));
+    /** @param {string} text */
+    const words = (text) => (clipped ? clip(text, CLIP.words) : text);
     const spy = c.market.words !== null
-      ? [`SPY could not be read: ${clipped ? clip(c.market.words, CLIP.words) : c.market.words}`]
-      : [];
+      ? [`SPY could not be read: ${words(c.market.words)}`]
+      : c.market.short && c.market.source !== null
+        ? [`SPY's bars start ${c.market.firstBar} (${words(c.market.source)}): events before it have nothing to compare with`]
+        : [];
     const rows = [...view.groups.named.map((g) => groupRow(group(g.name), g.summary)), groupRow("all", view.groups.all)];
     const lines = measured.map((k) => caseLine(k, group(k.group), notes));
     const cut = measured.length - head - tail;

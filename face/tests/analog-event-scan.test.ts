@@ -71,7 +71,7 @@ test("a scan measures what it can and keeps what it cannot", async () => {
   assert.deepEqual([view.cases[2]!.claimed, view.cases[2]!.opened, view.cases[2]!.verified], [true, false, false]);
   const c = view.coverage;
   assert.deepEqual([c.asked, c.measured, c.unmeasured.length, c.verified, c.unverified, c.unopened, c.noContext], [4, 1, 3, 1, 3, 1, 0]);
-  assert.deepEqual([c.companies, c.sources, c.adjustment, c.market, c.deadline], [{ asked: 2, read: 1 }, { Nasdaq: 1 }, ["Split-adjusted only"], { source: "Nasdaq · SPY", words: null }, false]);
+  assert.deepEqual([c.companies, c.sources, c.adjustment, c.market, c.deadline], [{ asked: 2, read: 1 }, { Nasdaq: 1 }, ["Split-adjusted only"], { source: "Nasdaq · SPY", words: null, firstBar: "2020-01-01", short: false }, false]);
   assert.deepEqual(view.groups.named.map((g) => [g.name, g.summary.n, g.summary.x0, g.paths]), [["hired", 1, null, null]]);
   assert.equal(view.parameters.minBefore, 20);
 });
@@ -110,6 +110,26 @@ test("no line break or control character reaches a view from a text field; a sou
     (e: unknown) => e instanceof AnalogError && e.message === "INVALID_EVENTS events[0].source: an http(s) URL without credentials, at most 500 characters");
   assert.throws(() => normalizeEvents({ title: "t", events: [ev({ source: "https://user@example.com/a" })] }), invalid("events[0].source"));
 });
+test("the view says where the present case's and the market's bars came from, and how many end on a session-so-far bar", async () => {
+  const anchors = [{ label: "x", date: "2020-04-10", timing: "pre" }];
+  const short = await scanEvents({
+    title: "t", events: [ev({ symbol: "OLD" }), ev({ symbol: "NOW" })], query: { symbol: "EVT", anchors },
+    keep: keepOf(fakeMarket({ EVT: { bars: EVENT.slice(20), source: "Cboe · EVT" }, OLD: { bars: EVENT }, NOW: { bars: EVENT, today: true }, SPY: { bars: EVENT_MARKET.slice(30), source: "Cboe · SPY" } })),
+  });
+  assert.deepEqual([short.query!.source, short.query!.short, short.query!.firstBar], ["Cboe · EVT", true, dateAt(20)]);
+  assert.deepEqual(short.coverage.market, { source: "Cboe · SPY", words: null, firstBar: dateAt(30), short: true });
+  assert.equal(short.coverage.sessionBars, 1);
+  const text = eventsDigest({ ...short, id: "an-20200619-0000abcd" });
+  assert.ok(text.includes(`\nSPY's bars start ${dateAt(30)} (Cboe · SPY): events before it have nothing to compare with\n`), text);
+
+  const whole = await scanEvents({ title: "t", events: [ev()], query: { symbol: "EVT", anchors }, keep: keepOf() });
+  assert.deepEqual([whole.query!.source, whole.query!.short, whole.query!.firstBar], ["Nasdaq · EVT", false, dateAt(0)]);
+  assert.deepEqual([whole.coverage.market.short, whole.coverage.market.firstBar, whole.coverage.sessionBars], [false, dateAt(0), 0]);
+  assert.ok(!eventsDigest({ ...whole, id: "an-20200619-0000abcd" }).includes("SPY's bars start"));
+
+  const refused = await scanEvents({ title: "t", events: [ev()], query: { symbol: "NONE", anchors }, keep: keepOf() });
+  assert.deepEqual([refused.query!.source, refused.query!.short, refused.query!.firstBar], [null, false, null]);
+});
 test("every unmeasured case and anchor has its own flags", async () => {
   const scan = () => scanEvents({ title: "t", events: [ev({ symbol: "GONE", verified: false }), ev({ symbol: "LOST", verified: false })], query: { symbol: "NONE", anchors: [{ label: "x", date: "2020-04-10", timing: "pre" }] }, keep: keepOf() });
   const view = await scan();
@@ -124,7 +144,7 @@ test("every unmeasured case and anchor has its own flags", async () => {
 test("without the market's own bars the raw changes stay and nothing is summarized against it", async () => {
   const view = await scanEvents({ title: "t", events: Array.from({ length: 8 }, (_, i) => ev({ date: dateAt(92 + i) })), keep: keepOf(fakeMarket({ EVT: { bars: EVENT } })) });
   assert.equal(view.coverage.measured, 8); assert.equal(view.coverage.noContext, 8);
-  assert.deepEqual(view.coverage.market, { source: null, words: "Nasdaq keeps no daily bars of SPY" });
+  assert.deepEqual(view.coverage.market, { source: null, words: "Nasdaq keeps no daily bars of SPY", firstBar: null, short: false });
   assert.ok(view.cases.every((c) => c.measure!.x0 === null && typeof c.measure!.r0 === "number" && c.rel!.length === 0));
   assert.deepEqual([view.groups.all.n, view.groups.all.n0, view.groups.all.x0, view.groups.named[0]!.paths], [8, 0, null, null]);
 });
