@@ -16,7 +16,9 @@
  * THE RUN. A fresh desk agent (src/desk-session.ts `createDeskAgent`) in `desk/journal`, on the desk's route - no
  * `desk-session` record, so it never becomes the phone's conversation; its turns supervised with the alert deadline
  * (src/desk.ts `ALERT_DEADLINE_MS`, 240 s from its own `turn/start`) and the fence; the alerts' text sent once, under
- * its provenance line, with the alert's message as its source. The post resolves `opened` there and the run goes on:
+ * its provenance line, with the alert's message as its source - and, right before it, for a post whose `readThrough`
+ * asks for directions and a lane given, the read-through run opened on the session for the pass and its asks
+ * (src/readthrough.ts `ReadThroughLane`). The post resolves `opened` there and the run goes on:
  * - the watchdog: no turn's end by the deadline plus src/firing.ts `FIRING_SLACK_MS` from the followup - a turn that
  *   never started, or one that hung past the supervisor's cut - cancels it (`desk deadline`), and the run ends without
  *   it: the timed-out line for a turn that started, the no-text line for one that never did;
@@ -26,9 +28,15 @@
  * - the reply, after its record, through the conversation's `deliver` (so the pause holds it) - `urgent` for a post
  *   marked `urgent`, else `alert` - as a reply to the first delivered alert's message: the turn's final text - with
  *   the cut line after an answer a cut interrupted - or the line for why there is none: the fence's refusal, the
- *   timed-out line, {@link notAnnotatedLine} for a failed model call, {@link NO_CHECK} for no text at all;
- * - the note: `onAnnotated` with the pass, the session, the outcome, the ids `deliver` sent and the reply, cut at
- *   {@link ANNOTATED_TEXT_MAX} - the watch's `annotated` record in `alerts.jsonl`;
+ *   timed-out line, {@link notAnnotatedLine} for a failed model call, {@link NO_CHECK} for no text at all; a run opened
+ *   is closed before it, however the turn ended, and on a normal end - a turn that ended uncut with a final text -
+ *   the reply is that text, then each block the run closed with, then each of the lane's lines for the post's `later`,
+ *   one blank line between; after it, the blocks closed are marked sent, or not sent - any other end, or a reply not
+ *   delivered - so a later alert of the event asks again; every lane call guarded, a failure one `desk: read-through`
+ *   line and the run going on as if the lane had answered nothing;
+ * - the note: `onAnnotated` with the pass, the session, the outcome, the ids `deliver` sent, the reply, cut at
+ *   {@link ANNOTATED_TEXT_MAX}, and the ids of the blocks appended to it, when any - the watch's `annotated` record in
+ *   `alerts.jsonl`;
  * - letting go: the agent's dispose, then the supervision's end, so a turn the dispose drains is still recorded; the
  *   dispose is awaited at most src/firing.ts `FIRING_DISPOSE_MS`, past which one line and it goes on alone.
  *
@@ -57,6 +65,7 @@ import type { BudgetState, OffState } from "./desk.ts";
 import type { DeskLine } from "./conversation.ts";
 import type { DeskConversation, PostResult } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionDeps, DeskTurnRecord, SessionEventsOn } from "./desk-session.ts";
+import type { ReadThroughAsk, ReadThroughLane } from "./readthrough.ts";
 import type { AgentLike } from "./room.ts";
 import type { MessageLike } from "./room-rules.ts";
 import type { AnnotatedRecord } from "./watch.ts";
@@ -92,8 +101,9 @@ type MadeAgent = { agent: AgentLike; sessionId: string; dispose(): Promise<void>
  * its `route` the desk's; `home` the ledger's, `root` the repository the journal is in; `on` the root bus; `deliver` the
  * desk conversation's; `budget` the day's, as a post reads it - none, no check; `deadlineMs` the annotation's turn
  * deadline, src/desk.ts `ALERT_DEADLINE_MS` when absent; `onAnnotated` where each run's note goes (the watch's
- * `noteAnnotated`); `clock` the timers and stamps; `log` where a line goes (stderr); `createAgent`, a test seam for
- * src/desk-session.ts `createDeskAgent` over `session`. */
+ * `noteAnnotated`); `readThrough` the read-through lane a post's directions run on - none, no run; `clock` the timers
+ * and stamps; `log` where a line goes (stderr); `createAgent`, a test seam for src/desk-session.ts `createDeskAgent`
+ * over `session`. */
 export interface AnnotatorDeps {
   session: DeskSessionDeps;
   home: string;
@@ -106,10 +116,16 @@ export interface AnnotatorDeps {
   budget?: () => Promise<BudgetState>;
   deadlineMs?: number;
   onAnnotated?: (r: AnnotatedRecord) => void;
+  readThrough?: ReadThroughLane;
   clock?: DeskClock;
   log?: (line: string) => void;
   createAgent?: (opts: { cwd: string; route: { provider: string; model: string } }) => Promise<MadeAgent>;
 }
+
+/** The watch's annotation post: the conversation's post, and the read-through it asks for - `asks`, the events a
+ * direction may be given for, the run opened only when it is not empty; `later`, the events one was already given for,
+ * each a line of the lane's under the reply. */
+export type AnnotationPost = Parameters<DeskConversation["post"]>[0] & { readThrough?: { asks: ReadThroughAsk[]; later: ReadThroughAsk[] } };
 
 /** The lane. `post` takes the watch's annotation post - `message.pass`, else `message.alert`, names the pass - and
  * answers `opened` once its agent has the message, or why not (the module header); it never rejects. `dispose` shuts it
@@ -117,7 +133,7 @@ export interface AnnotatorDeps {
  * reply delivered and noted (the module header's ONE AT A TIME) - at once when the lane is idle, and at once once the
  * dispose has begun; it never rejects. */
 export interface Annotator {
-  post: DeskConversation["post"];
+  post(input: AnnotationPost): Promise<PostResult>;
   idle(): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -236,7 +252,7 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
 
   /** One post: the checks, the agent, the message - `open` answered there - then the turn's end, the record, the reply,
    * the note, and the agent let go (see the module header). Never rejects. */
-  const annotate = async (input: Parameters<Annotator["post"]>[0], open: (r: PostResult) => void): Promise<void> => {
+  const annotate = async (input: AnnotationPost, open: (r: PostResult) => void): Promise<void> => {
     if (disposed) return open(shutDown());
     let m: Machinery;
     try {
@@ -287,6 +303,54 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
     }
     const { agent, sessionId } = made;
     const where = `annotation session ${sessionId}`;
+    const pass = typeof input.message.pass === "string" ? input.message.pass : typeof input.message.alert === "string" ? input.message.alert : "";
+
+    /* the read-through run: every lane call guarded - a failure is one line, and the run goes on as if the lane had
+     * answered nothing */
+    const lane = deps.readThrough;
+    const asks = input.readThrough?.asks ?? [];
+    const later = input.readThrough?.later ?? [];
+    let runOpened = false;
+    const laneFailed = (what: string, err: unknown): void => {
+      log(`${BIN}: desk: read-through ${what} of ${where} failed: ${errText(err)}; the reply goes on without it`);
+    };
+    const openRun = (): void => {
+      if (lane === undefined || asks.length === 0) return;
+      runOpened = true;
+      try {
+        lane.open(sessionId, { pass, asks });
+      } catch (err) {
+        laneFailed("open", err);
+      }
+    };
+    /** The blocks the run closed with - none when no run was opened, or the close failed. */
+    const closeRun = (): { id: string; text: string }[] => {
+      if (lane === undefined || !runOpened) return [];
+      runOpened = false;
+      try {
+        return lane.close(sessionId);
+      } catch (err) {
+        laneFailed("close", err);
+        return [];
+      }
+    };
+    const markSent = async (blocks: { id: string }[], sent: boolean): Promise<void> => {
+      if (lane === undefined || blocks.length === 0) return;
+      try {
+        await lane.sent(blocks.map((b) => b.id), sent);
+      } catch (err) {
+        laneFailed("sent", err);
+      }
+    };
+    const laterLines = async (): Promise<string[]> => {
+      if (lane === undefined || later.length === 0) return [];
+      try {
+        return await lane.later(later);
+      } catch (err) {
+        laneFailed("later", err);
+        return [];
+      }
+    };
 
     /* the wait for the run's turn: its record, the watchdog or the shutdown; `closed` once the supervision has ended */
     let waiting = true;
@@ -359,8 +423,10 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
       });
       const text = `${m.session.provenanceLine(input.source, new Date(clock.now()))}\n${input.text}`;
       const message = m.createUserMessage({ content: [{ type: "text", text }], source: input.message as MessageSource });
+      openRun();
       agent.followup(message as unknown as MessageLike);
     } catch (err) {
+      await markSent(closeRun(), false);
       await letGo();
       return open(failed(err));
     }
@@ -386,16 +452,24 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
         clock.clearTimeout(watchdog);
         watchdog = undefined;
       }
+      /* the run closed however the turn ended, before the reply is made */
+      const blocks = closeRun();
       if (ending.kind === "shutdown") {
+        await markSent(blocks, false);
         await letGo();
         return;
       }
       let outcome: DeskTurnRecord["outcome"];
       let reply: string;
+      /* a normal end: the turn ended uncut with a final text - the only reply a block or a later line goes under */
+      let normal = false;
       if (ending.kind === "turn") {
         await recorded;
-        outcome = ending.record.outcome;
-        reply = replyOf(ending.record, m);
+        const r = ending.record;
+        outcome = r.outcome;
+        reply = replyOf(r, m);
+        normal = r.outcome === "ended" && r.interrupted !== true && r.finalText !== "";
+        if (normal) reply = [reply, ...blocks.map((b) => b.text), ...(await laterLines())].join("\n\n");
       } else {
         outcome = "timed-out";
         reply = ending.started ? m.conversation.timedOutLine(deadlineMs, m.session.formatDuration) : NO_CHECK;
@@ -411,7 +485,8 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
       } catch (err) {
         log(`${BIN}: desk: the reply of ${where} could not be delivered: ${errText(err)}`);
       }
-      const pass = typeof input.message.pass === "string" ? input.message.pass : typeof input.message.alert === "string" ? input.message.alert : "";
+      /* a block that did not reach the phone is not given: a later alert of its event asks again */
+      await markSent(blocks, normal && delivered);
       /* the reply the phone got, a line in the conversation under its pass: the first alert's id and symbol (the
        * pass's id and the symbols, for several - src/alert-text.ts annotationPost) */
       const alert = input.message.alert;
@@ -424,7 +499,8 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
         }
       }
       try {
-        deps.onAnnotated?.({ t: stamp(), kind: "annotated", pass, sessionId, outcome, sent, text: reply.slice(0, ANNOTATED_TEXT_MAX) });
+        const directions = normal && blocks.length > 0 ? { directions: blocks.map((b) => b.id) } : {};
+        deps.onAnnotated?.({ t: stamp(), kind: "annotated", pass, sessionId, outcome, sent, text: reply.slice(0, ANNOTATED_TEXT_MAX), ...directions });
       } catch (err) {
         log(`${BIN}: desk: the annotation of ${where} could not be noted: ${errText(err)}`);
       }

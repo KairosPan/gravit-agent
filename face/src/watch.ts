@@ -241,7 +241,8 @@ export interface WatchStatus {
 /** One annotation run's end, as the annotation lane (src/annotator.ts) reports it and `alerts.jsonl` keeps it (spec §16
  * H1): the pass it checked, its session, its turn's outcome, the ids of the messages its reply went out as
  * (`<network>:<id>`; an older record's numbers read as `telegram:<n>`) - none when the reply was held back or queued -
- * and the reply, at most 2,000 characters. */
+ * the reply, at most 2,000 characters, and `directions`, the ids of the read-through blocks appended to it - absent when
+ * none. */
 export type AnnotatedRecord = {
   t: string;
   kind: "annotated";
@@ -250,6 +251,7 @@ export type AnnotatedRecord = {
   outcome: DeskTurnRecord["outcome"];
   sent: string[];
   text: string;
+  directions?: string[];
 };
 
 /** A message id as the watch keeps it, `<network>:<the network's own id>`. */
@@ -272,7 +274,12 @@ function idsOf(sent: unknown): string[] | undefined {
 /** `r` with the message ids it holds as strings: an older record's numbers become `telegram:<n>`. A `sent` that is not
  * a list of ids is left as it is - {@link WatchHandle.contextFor} reads no id from it. */
 function withStringIds<R extends WatchRecord>(r: R): R {
-  if (r.kind === "annotated") return { ...r, sent: idsOf(r.sent) ?? [] };
+  if (r.kind === "annotated") {
+    /* `directions` kept only as a list of ids; anything else is dropped */
+    const { directions, ...rest } = r;
+    const kept = Array.isArray(directions) && directions.every((d) => typeof d === "string") ? { directions } : {};
+    return { ...rest, sent: idsOf(r.sent) ?? [], ...kept } as R;
+  }
   if (r.kind !== "delivered" && r.kind !== "batch") return r;
   const delivery = (r as { delivery?: unknown }).delivery;
   if (typeof delivery !== "object" || delivery === null || !("sent" in delivery)) return r;
