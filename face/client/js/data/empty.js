@@ -59,6 +59,8 @@ export function emptyState() {
       explore: {}, results: { status: 'idle', data: null, at: null },
       located: {},
       accountQuotes: {}, candles: {}, compare: {},
+      // a stock page's event window by `<id>@<at>` (host/event-window.js): { status, data, at, message }
+      event: {},
       watch: [], watchError: null, asked: {},
       watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
       // the China tab's ranking read (the Account's explore?tab=china), with the sort it was read for

@@ -131,6 +131,10 @@ export const reducers = {
   candlesLoaded: (s, { id, range, data, at } = {}) => (charted(id, range) ? keyed(s, 'candles', id, { status: 'ready', data, at, range, message: null }) : s),
   candlesFailed: (s, { id, range, at, message = null } = {}) => (charted(id, range) ? keyed(s, 'candles', id, { status: 'error', at, range, message }) : s),
   // the range a page's chart is drawn at, one of the Account's: kept by the page's key, 1D until one is chosen
+  // a stock page's event window (host/event-window.js), by `<id>@<at>`, read once: the market's answer as it came, or its words
+  eventBarsLoading: (s, { key } = {}) => (named(key) ? keyed(s, 'event', key, { status: 'loading', message: null }) : s),
+  eventBarsLoaded: (s, { key, data, at } = {}) => (named(key) ? keyed(s, 'event', key, { status: 'ready', data, at, message: null }) : s),
+  eventBarsFailed: (s, { key, at, message = null } = {}) => (named(key) ? keyed(s, 'event', key, { status: 'error', at, message }) : s),
   setRange: (s, { id, range } = {}) => (charted(id, range) && own(s.markets.candles, id)?.range !== range ? keyed(s, 'candles', id, { range }) : s),
   compareLoading: (s, { base } = {}) => (named(base) ? keyed(s, 'compare', base, { status: 'loading' }) : s),
   compareLoaded: (s, { base, data, at } = {}) => (named(base) ? keyed(s, 'compare', base, { status: 'ready', data, at }) : s),

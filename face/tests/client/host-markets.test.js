@@ -15,6 +15,7 @@ import { STORAGE_KEY, ACCOUNT_WATCH_KEY, readAccountWatch, saveAccountWatch } fr
 import { setTable } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
 import { spoken } from './helpers/spoken.js';
+import { windowAsk, windowPath } from '../../client/js/host/event-window.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 8; i++) await tick(); };
@@ -118,7 +119,7 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
     scope: 'hyperliquid', source: '', sources: IDLE, tab: 'all', sort: 'volume', q: '',
     explore: {}, located: {}, results: IDLE, accountQuotes: {}, candles: {}, compare: {}, watch: [], watchError: null, asked: {},
     watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
-    rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null }, depth: {},
+    rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null }, depth: {}, event: {},
   }, 'the slice the host starts from');
   // two quiet stocks past the fixture's twelve rows: Most traded puts them last, so the first twelve rows leave them out
   const quiet = (symbol, usd) => ({
@@ -1982,4 +1983,49 @@ test('changing scope aborts old explore requests and their deadlines without abo
   assert.deepEqual(rowsOf(r.m(), NOW).map(row => row.id), ['perp:xyz:NVDA']);
   r.markets.close();
   assert.equal(r.due().length, 0);
+});
+
+test("a stock page at an event reads its window once from the US stocks line, beside the page's own reads", async () => {
+  const path = windowPath('WYNN', windowAsk('2018-01-26', NOW));
+  assert.equal(path, '/data/market/candles?venue=cboe&symbol=WYNN&interval=1d&since=1511740800000&before=1525564800000&limit=200');
+  const answer = { ok: true, candles: [{ t: Date.parse('2018-01-26T14:30:00Z'), o: 100.69, h: 100.69, l: 88.75, c: 89.88 }], source: 'Nasdaq', more: true, since: 1511740800000, before: 1525564800000 };
+  const late = deferred();
+  const r = rig({ answer: p => (p === path ? late.promise : undefined) });
+  const route = { screen: 'markets', id: 'stock:WYNN', event: { at: '2018-01-26', view: 'an-20261112-50c20b08', case: 'ev-WYNN-2018-01-26' } };
+  r.store.dispatch('nav', route);
+  assert.deepEqual(r.store.get().route, route, 'nav keeps the event');
+  r.markets.page('stock:WYNN');
+  r.store.dispatch('nav', route);
+  assert.deepEqual(r.reads.filter(p => p.includes('venue=cboe')), [path], 'read once, while in the air');
+  assert.equal(r.m().event['stock:WYNN@2018-01-26'].status, 'loading');
+  late.resolve(answer);
+  await settle();
+  const kept = r.m().event['stock:WYNN@2018-01-26'];
+  assert.equal(kept.status, 'ready');
+  assert.deepEqual(kept.data, answer, 'the answer as it came; more: true is never paged from');
+  r.store.dispatch('nav', { screen: 'markets', id: 'stock:WYNN' });
+  r.store.dispatch('nav', route);
+  await settle();
+  assert.deepEqual(r.reads.filter(p => p.includes('since=')), [path], 'once per stock and day, landed');
+  // another day of the same stock is another window; a coin with an event reads none
+  r.store.dispatch('nav', { ...route, event: { at: '2018-02-07' } });
+  await settle();
+  assert.equal(r.reads.filter(p => p.includes('since=')).length, 2);
+  r.store.dispatch('nav', { screen: 'markets', id: 'coin:BTC', event: { at: '2018-01-26' } });
+  await settle();
+  assert.equal(r.reads.filter(p => p.includes('since=')).length, 2);
+  r.markets.close();
+});
+
+test("an event window's refusal lands failed with the market's words, and is not read again", async () => {
+  const r = rig({ answer: p => (p.includes('since=') ? refused(400, { ok: false, error: 'since must be before before' }) : undefined) });
+  const route = { screen: 'markets', id: 'stock:WYNN', event: { at: '2018-01-26' } };
+  r.store.dispatch('nav', route);
+  await settle();
+  assert.deepEqual(r.m().event['stock:WYNN@2018-01-26'], { status: 'error', data: null, at: NOW, message: 'since must be before before' });
+  r.store.dispatch('nav', { screen: 'markets', id: null });
+  r.store.dispatch('nav', route);
+  await settle();
+  assert.equal(r.reads.filter(p => p.includes('since=')).length, 1);
+  r.markets.close();
 });

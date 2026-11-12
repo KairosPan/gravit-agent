@@ -50,7 +50,11 @@ export const reducers = {
     route = landingOf(state, route);
     // a market id is the Account's key as it is (coin:BTC, event:predict:…), or an A share's or an old face id (cn:600519 from
     // cn:sh600519, us:AAPL, crypto:BTC/USD) canonicalised; one that is neither opens Markets
-    if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: !String(route.id).startsWith('cn:') && isAccountKey(route.id) ? route.id : canonicalId(route.id) };
+    // — a stock's page keeps its event (router.js: a stock's id alone carries one)
+    if (route.screen === 'markets' && route.id) {
+      const id = !String(route.id).startsWith('cn:') && isAccountKey(route.id) ? route.id : canonicalId(route.id);
+      route = { screen: 'markets', id, ...(route.event && String(id).startsWith('stock:') ? { event: route.event } : {}) };
+    }
     // (and the lightbox: an image belongs to the conversation it was opened in; and the shortcut sheet)
     const changedRoute = state.route.screen !== route.screen || state.route.id !== route.id;
     let s = { ...state, route, listOpen: changedRoute ? false : state.listOpen, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, lightbox: null, shortcuts: null, ...stockClosed(state) };

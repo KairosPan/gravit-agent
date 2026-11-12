@@ -29,6 +29,7 @@ import { venuesOf } from './account-view.js';
 import { joinExplore } from './explore-join.js';
 import { exploreHalves, joinOptsOf, orderOf, MARKET_EXPLORE as EXPLORE, CONNECTED_EXPLORE } from './explore-halves.js';
 import { said, isSaid } from '../i18n/words.js';
+import { windowAsk, windowPath } from './event-window.js';
 
 // China's state while the proxy re-serves the market's last read: the market is not answering — flagged, so recheckChina knows it
 // by the flag, never by the table's words for it
@@ -563,8 +564,23 @@ export function startMarkets({
     if (full) store.dispatch('accountWatchLoaded', { items: store.get().markets.watch, error: 'full' });
   }
 
+  // A stock page at an event (spec 2026-11-12 §4.3): its window's daily bars read once per `<id>@<at>` from the US stocks line,
+  // beside the page's own reads, whatever line the page follows; the answer kept as it came (its `more` is never paged from)
+  function readEvent() {
+    const s = store.get();
+    const { screen, id, event } = s.route ?? {};
+    if (screen !== 'markets' || typeof id !== 'string' || !id.startsWith('stock:') || typeof event?.at !== 'string') return;
+    const key = `${id}@${event.at}`;
+    if (Object.hasOwn(s.markets.event ?? {}, key)) return;
+    fly(`event:${key}`, windowPath(id.slice('stock:'.length), windowAsk(event.at, now())), (body, refused) => {
+      if (!refused && answered(body, 'candles')) store.dispatch('eventBarsLoaded', { key, data: body, at: now() });
+      else store.dispatch('eventBarsFailed', { key, at: now(), message: messageOf(body) });
+    }, ['eventBarsLoading', { key }]);
+  }
+
   function onStore() {
     if (closed) return;
+    readEvent();
     const selection = scopeQuery(store.get().markets);
     if (selection !== readSelection) {
       readSelection = selection;
