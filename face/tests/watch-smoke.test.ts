@@ -24,7 +24,11 @@
  *    accepted 07:02:12 ET; the A share is never fetched; and then the pre-close brief's order, fired by the clock
  *    row on the same home, reads both of the watch's ledgers (no `no ledger`);
  * 10. THE CANARY's annotation half: a poisoned annotation turn writes nothing but its journal - not the rules, not
- *     the levels, not the mute - raises no card, and its answer still comes back under its alert.
+ *     the levels, not the mute - raises no card, and its answer still comes back under its alert;
+ * 11. THE READ-THROUGH: AVGO, held flat by its one `move_pct` rule until now, falls past it; its why post asks for a
+ *     read-through, the model calls `read_through` with AMD as the one rival, and the reply under the alert is its
+ *     reason with the block below it - one `direction` line in the record, the annotation's, and one `sent` line; a
+ *     second crossing of the rule under the same close, past the cooldown, gets the face's one line instead.
  *
  * WHAT STANDS IN. The model is a stub on `stub/echo`, the tree's default route, every reply reporting all four token
  * buckets as in tests/desk-smoke.test.ts; it answers by the bracketed first line of the message it is answering. The
@@ -32,7 +36,9 @@
  * watch's, the brief's and the desk state's. Both market calendars are fakes holding 2026-11-30 and 2026-12-01; the
  * watch and the clock row run on one WallClock (tests/desk-fakes.ts) that moves only when told, each with a day-long
  * tick, so only the test's own `tick()` calls tick. SEC is a fake `EdgarFetch` serving a ticker map and NVDA's
- * submissions. The phone is a recorder set as the conversation's outlet. A long tool is `mcp__smoke__daily_bars`, a
+ * submissions. The read-through is wired as main.ts wires it, over the same source and the fixture's root, its
+ * record under the harness home, and the re-installed watch of case 3 is given its lane as installDesk gives it. The
+ * phone is a recorder set as the conversation's outlet. A long tool is `mcp__smoke__daily_bars`, a
  * global stand-in the desk's `mcp__*__daily_bars` admits, which answers nothing but its call's abort. AKShare is off,
  * the Account URL points at a closed port, `ALPHA_EDGAR_USER_AGENT` is unset. Nothing leaves the machine.
  *
@@ -76,8 +82,10 @@ import type { MarketQuote, MarketQuoteIdentity, MarketQuoteSource } from "../src
 import { setupFaceProfile } from "../src/setup.ts";
 import { renderOrder, writeStanding, type ArmEntry } from "../src/standing.ts";
 import type { Market } from "../src/symbols.ts";
+import { readThroughLane, wireReadThrough } from "../src/readthrough.ts";
 import { installWatch, isAnnotatedRecord, type AnnotatedRecord, type WatchHandle } from "../src/watch.ts";
 import { isAlertRecord, type AlertDelivered, type AlertHit, type AlertRecord } from "../src/watch-eval.ts";
+import { createRecord } from "../plugins/readthrough/lib/record.mjs";
 import { GRAVIT_PLUGIN_ABS, populateBotsRoot } from "./bots-fixture.ts";
 import { fakeCalendar, WallClock } from "./desk-fakes.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
@@ -124,6 +132,10 @@ const SLOW = "000001";
 const CRSH = "000002";
 /** The levels that fill the hour's cap: watch levels with no annotation. */
 const BS = ["B1", "B2", "B3", "B4", "B5", "B6"];
+/** Case 11's company, flat until then, and its one rule; the rival its read-through names, on the face's list. */
+const RT = "AVGO";
+const RT_RULE = "avgo-move";
+const RIVAL = "AMD";
 
 const HOLDINGS_YML = [
   "- symbol: NVDA",
@@ -154,6 +166,10 @@ const RULES_YML = [
   "- id: filing",
   "  kind: filing",
   "  symbols: holdings",
+  `- id: ${RT_RULE}`,
+  "  kind: move_pct",
+  `  symbols: [${RT}]`,
+  "  move_pct: 5",
   "",
 ].join("\n");
 
@@ -177,6 +193,15 @@ const CANARY_STEPS: readonly StubReply[] = [
   { kind: "tool", name: "write", args: { file_path: join(deskDir(HOME), MUTE_FILE), content: "{\"by\":\"canary\"}\n" } },
   { kind: "tool", name: "write", args: { file_path: "notes2.md", content: "the canary's own note\n" } },
 ];
+
+/* ---------- the read-through ---------- */
+
+/** Case 11's reason, and the direction its model gives: AMD the one rival, certainty medium. */
+const RT_REASON = "AVGO：公司公布 · 确定 —— 最大客户转单";
+const RT_ARGS = {
+  symbol: RT, basis: "company", event: "最大客户把定制芯片订单转走", sources: ["Broadcom 8-K 12-01"], logic: "订单外流 → 替代供应商受益",
+  peers: [{ symbol: RIVAL, reason: "数据中心加速器的直接替代" }], counter: "转单可能只是一部分", certainty: "medium",
+};
 
 /** The long tool: a global stand-in that the desk's `mcp__*__daily_bars` admits. */
 const BARS = "mcp__smoke__daily_bars";
@@ -246,14 +271,15 @@ async function walk(dir: string): Promise<Map<string, string>> {
 
 /* ---------- the Market's read: one source over two tables ---------- */
 
-interface Row { price: number; prevClose: number; asOf: string; phase?: "trading" | "midday" | "closed" }
+/** One print; `changePct`, the Market's own change from the previous close, only where case 11 sets one. */
+interface Row { price: number; prevClose: number; asOf: string; phase?: "trading" | "midday" | "closed"; changePct?: number }
 
 interface Ev { type: string; data?: Record<string, unknown> }
 type DeskTurnEvent = Extract<DeskEvent, { kind: "desk-turn" }>;
 /** One phone text: what the outlet was sent, and the message it replies to. */
 interface PhoneText { text: string; replyTo?: string }
 
-test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a cut and a failed annotation, the phone's state, a filing, the canary's annotation half", {
+test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a cut and a failed annotation, the phone's state, a filing, the canary's annotation half, a read-through", {
   skip: gated && "set FACE_SMOKE=1", timeout: 240_000,
 }, async () => {
   let booted: BootedFace | undefined;
@@ -328,6 +354,9 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
       if (symbol === SLOW) return posted.tools === 0 ? { kind: "tool", name: BARS, args: { symbol: SLOW } } : { kind: "text", text: "the bars came back" };
       if (symbol === CRSH) return { kind: "error", message: "429 rate limit" };
       if (symbol === "CNRY") return CANARY_STEPS[posted.tools] ?? { kind: "text", text: CANARY_DONE };
+      if (symbol === RT && posted.text.endsWith(`It may be called for: ${RT}.`)) {
+        return posted.tools === 0 ? { kind: "tool", name: "read_through", args: RT_ARGS } : { kind: "text", text: RT_REASON };
+      }
       return { kind: "text", text: `${symbol ?? "?"}: annotated` };
     };
     ctx.llm.registerAdapter([STUB.provider], new MeteredStub(script));
@@ -365,7 +394,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     };
     /* Every watched symbol priced from the first poll, before the open (nothing judged), so no symbol is unpriced. */
     const preOpen = "2026-11-30T14:00:00Z";
-    for (const [symbol, price, prevClose] of [["NVDA", 172, 175], ["AAPL", 230, 231], ["MSFT", 390, 389], ["SPY", 600, 600], ["CNRY", 45, 45], ...BS.map((s): [string, number, number] => [s, 45, 45])] as [string, number, number][]) {
+    for (const [symbol, price, prevClose] of [["NVDA", 172, 175], ["AAPL", 230, 231], ["MSFT", 390, 389], ["SPY", 600, 600], ["CNRY", 45, 45], [RT, 100, 100], ...BS.map((s): [string, number, number] => [s, 45, 45])] as [string, number, number][]) {
       tables.us.set(symbol, { price, prevClose, asOf: preOpen });
     }
     for (const [symbol, price, prevClose] of [["600519", 1450, 1460], [SLOW, 9.5, 9.5], [CRSH, 9.5, 9.5]] as const) {
@@ -385,7 +414,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
         };
       }
       return {
-        ...base, price: row.price, prev_close: row.prevClose, change_pct: null, as_of: new Date(row.asOf).toISOString(),
+        ...base, price: row.price, prev_close: row.prevClose, change_pct: row.changePct ?? null, as_of: new Date(row.asOf).toISOString(),
         received_at: new Date(wall.now()).toISOString(), quote_status: "live",
         market_status: a.market === "cn" ? (row.phase === "trading" ? "open" : "closed") : "unknown", message: "",
       };
@@ -423,6 +452,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
       watchRow: { calendars, clock: wall, tickMs: TICK_MS, edgar: { fetch: fakeEdgar, userAgent: UA }, news: async (symbols) => new Map(symbols.map((s) => [s, { headlines: [] }] as const)) },
       log: (line) => { faceLog.push(line); },
     });
+    wireReadThrough(ctx, { quotes, root: ROOT });
     const conversation = desk.conversation;
     assert.ok(conversation !== undefined, "an enabled desk with a root, a route and the root context has a conversation");
     const annotator = desk.annotator;
@@ -495,7 +525,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.equal(watch.status().markets.us.state, "polling", "09:15 ET is inside the US window, which opens at 04:00 ET");
     assert.equal(watch.status().markets.cn.state, "after-close", "22:15 Beijing: the A-share session is over");
     assert.equal(usAsked(), 1, "the boot's tick polled the US market once");
-    assert.deepEqual(asked[0].symbols, ["NVDA", "AAPL", "MSFT", ...BS, "CNRY", "SPY"], "the held symbol first, then the levels', then the rules'");
+    assert.deepEqual(asked[0].symbols, ["NVDA", "AAPL", "MSFT", ...BS, "CNRY", RT, "SPY"], "the held symbol first, then the levels', then the rules'");
     assert.equal(cnAsked(), 0, "and not the A shares");
     assert.deepEqual(await hits(), [], "the pre-market prints make no record: no level judges them, and SPY has not moved");
     /* the filing rule on holdings: 09:15 ET on a session day is inside the filings window, so the boot's tick polls SEC,
@@ -555,6 +585,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
       home: HOME, root: ROOT, quotes, calendars, clock: wall,
       deliver: (text, opts) => conversation.deliver(text, opts),
       post: (input) => annotator.post(input),
+      readThrough: readThroughLane(ctx),
       budget: () => readBudget(HOME, wall.now()),
       edgar: { fetch: fakeEdgar, userAgent: UA },
       tickMs: TICK_MS,
@@ -775,6 +806,57 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.equal([...logs.values()].flat().some((e) => e.type === "approval/asked"), false, "no card was raised on any session");
     assert.deepEqual(outsideJournal(rootAfter), outsideJournal(rootBefore), "a walk of root/ differs only under desk/journal/");
     assert.equal(await readFile(join(JOURNAL, "notes2.md"), "utf8"), "the canary's own note\n", "where the canary's note landed");
+
+    /* ---------- 11. THE READ-THROUGH ---------- */
+    const record = createRecord(join(HOME, "face", "readthrough"));
+    type Line = { kind: string; id: string; sent?: boolean; caller?: { kind: string; pass?: string; sessionId?: string; ref?: string } };
+    const lines = async (): Promise<Line[]> => (await record.all()) as Line[];
+    assert.deepEqual(await lines(), [], "no direction before the case: the rule never fired");
+    /* the rival and SPY trade first, then AVGO falls 6% past its 5% rule - the session's first judged print of it */
+    tables.us.set(RIVAL, { price: 480, prevClose: 470, asOf: "2026-12-01T14:45:00Z", changePct: 2.1 });
+    tables.us.set("SPY", { price: 597.6, prevClose: 600, asOf: "2026-12-01T14:45:00Z", changePct: -0.4 });
+    tables.us.set(RT, { price: 94, prevClose: 100, asOf: "2026-12-01T14:45:02Z", changePct: -6 });
+    await tickAt("2026-12-01T14:45:05Z");
+    const rt = (await hitsSettled(13))[12];
+    assert.deepEqual([rt.symbol, rt.label, rt.decision, rt.ref], [RT, RT_RULE, "send", "2026-11-30"], "AVGO's rule fires, sent, against Monday's close");
+    const rtAt = `telegram:${expected.length + 1}`;
+    await phoneAt(expected.length + 2);
+    assert.ok(phone[expected.length].text.startsWith(`${RT} 94 · ROBINHOOD 09:45:02 ET\n`), `its alert; saw ${JSON.stringify(phone[expected.length].text)}`);
+    const rtReply = phone[expected.length + 1];
+    const [reason, blank, ...block] = rtReply.text.split("\n");
+    assert.deepEqual([rtReply.replyTo, reason, blank], [rtAt, RT_REASON, ""], `a reply under the alert: the reason, a blank line; saw ${JSON.stringify(rtReply.text)}`);
+    assert.equal(block[0], "推演 · Gravit 的推断，不是下单 · 确定度 中", "then the block's head");
+    assert.equal(block.find((l) => l.startsWith("· 盘面：")), `· 盘面：${RT} −6.0% · ${RIVAL} +2.1% · SPY −0.4%（ROBINHOOD 09:45 ET）`,
+      "its tape names the company, the rival and SPY");
+    heard([phone[expected.length], rtReply], "the alert, then the reason with its block");
+    const rtSession = await annotationSession(rt.id);
+    await waitFor("the direction's sent line", async () => (await lines()).some((l) => l.kind === "sent"));
+    const [direction, ...rest] = await lines();
+    assert.deepEqual([direction.kind, direction.caller], ["direction", { kind: "annotation", pass: rt.pass, sessionId: rtSession, ref: "2026-11-30" }],
+      "one direction line, the annotation's: its pass, its session, its close");
+    assert.deepEqual(rest.map((l) => [l.kind, l.id, l.sent]), [["sent", direction.id, true]], "and one sent line: it went out");
+    await waitFor("the annotated record of the pass", async () => (await annotated()).some((r) => r.pass === rt.pass));
+    assert.deepEqual((await annotated()).find((r) => r.pass === rt.pass)?.directions, [direction.id], "the annotated record names the block it carried");
+
+    /* back inside the rule, then past it again after the 30-minute cooldown, under the same close */
+    tables.us.set(RT, { price: 97, prevClose: 100, asOf: "2026-12-01T15:00:02Z", changePct: -3 });
+    await tickAt("2026-12-01T15:00:05Z");
+    tables.us.set(RIVAL, { price: 484.8, prevClose: 470, asOf: "2026-12-01T15:20:00Z", changePct: 3.1 });
+    tables.us.set(RT, { price: 93.5, prevClose: 100, asOf: "2026-12-01T15:20:02Z", changePct: -6.5 });
+    await tickAt("2026-12-01T15:20:05Z");
+    const again = (await hitsSettled(14))[13];
+    assert.deepEqual([again.symbol, again.decision, again.ref], [RT, "send", "2026-11-30"], "the second crossing is sent, under the same close");
+    const againAt = `telegram:${expected.length + 1}`;
+    await phoneAt(expected.length + 2);
+    const againReply = phone[expected.length + 1];
+    assert.equal(againReply.replyTo, againAt, "its reply is under its alert");
+    const last = againReply.text.split("\n").at(-1)!;
+    assert.ok(last.startsWith("推演（") && last.includes("已给）：做多"), `it ends with the face's line for the direction given; saw ${JSON.stringify(againReply.text)}`);
+    assert.match(last, new RegExp(`^推演（\\d{2}:\\d{2} ET 已给）：做多 ${RIVAL}，此后 \\+1\\.0%$`), "the rival re-priced from its recorded print");
+    heard([phone[expected.length], againReply], "the alert, then the reply with the face's line");
+    await waitFor("the second annotated record", async () => (await annotated()).some((r) => r.pass === again.pass));
+    assert.equal((await annotated()).find((r) => r.pass === again.pass)?.directions, undefined, "it carried no block");
+    assert.deepEqual((await lines()).filter((l) => l.kind === "direction").map((l) => l.id), [direction.id], "and the record holds no second direction");
 
     /* ---------- ACROSS THE FILE ---------- */
     assert.deepEqual(phone, expected, "every text the desk sent went through the recorder, in order, and nothing else did");
