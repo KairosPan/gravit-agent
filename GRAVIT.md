@@ -16,21 +16,22 @@ Account, reached through the seat (`mcp__account__*`, paper venues only). STRATE
 
 ## Reads
 
-The market's reads and AKShare's are live, seconds old, and unguarded: the tree has
+The market's reads and AKShare's are live, seconds old, and unguarded:
 no lookahead guard since 2026-10-24, by the operator's decision. A number read today is
 today's; nothing here replays the past. Evidence is forward paper trading on the paper venue
-the operator granted at the Account: the Account's own figures as returned, with the order ids.
+the operator granted at the Account: its own figures as returned, with the order ids.
 `mcp__market__market_akshare` passes one AKShare tool and its `arguments` to the market's
 sidecar: `akshare_discover` finds a method and its category tool; `stock_zh_a_spot_tx` (under
 `akshare_stock_a`) is the verified Tencent A-share snapshot method; Eastmoney and Xueqiu may fail or need a
-login. Check every result's errors, timestamps and `truncated` (the default limit is 500 rows;
+login. Check every result's errors, timestamps and `truncated` (default limit 500 rows;
 a truncated result is not the whole market). Retrieval time is not exchange time.
+A return is written with its sign, a % and what it measures (day 0, +5, +60, against the market), never as a bare run of numbers.
 
 ## A strategy directory
 
 Lifecycle, in `status.yaml`: `idea | researching | validated | paper | retired` (`paper`: a
 forward paper trade is running on the Account). Three optional headline keys the strategy page
-renders, none required: `one_line` (the current conclusion, one sentence), `next` (the next
+renders: `one_line` (the current conclusion, one sentence), `next` (the next
 step), `numbers` (free figures as a mapping of scalar values). Name a strategy as the face
 names strategies: a letter or digit in any script first, then letters, digits, `-` and `_`, at
 most 41 code points, no spaces or dots — the name becomes a path typed into shell by hand, and

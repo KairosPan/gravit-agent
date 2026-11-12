@@ -68,3 +68,10 @@ test("GRAVIT.md states debates, not rooms", () => {
   assert.match(text, /read-only/);
   assert.equal(text.includes("@<bot>"), false, "the operator's @ in a room has no surface left");
 });
+
+/* Analog event table, task 3: a return Gravit writes carries its sign, a % and what it measures. */
+test("GRAVIT.md says a return is never a bare run of numbers", () => {
+  const text = readFileSync(GRAVIT_MD, "utf8");
+  assert.ok(text.includes("never as a bare run of numbers"));
+  assert.ok(Buffer.byteLength(text, "utf8") <= BUDGET_BYTES);
+});
