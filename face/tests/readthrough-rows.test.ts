@@ -77,7 +77,7 @@ test("under an alert: the call is priced, recorded and kept for the run's close"
   assert.deepEqual(asked, [["NVDA", "AMD", "SPY"]]);
   assert.equal(block.split("\n")[3], "· 盘面：NVDA −7.3% · AMD +5.4% · SPY −0.4%（ROBINHOOD 04:03 ET）");
   assert.equal(block.includes("· 事件："), false, "the reason above the block names the event");
-  assert.equal(await service.given("NVDA", "2026-11-06"), true);
+  assert.equal(await service.given("NVDA", "2026-11-06"), false, "not given until the record says it was sent");
   const [line] = (await createRecord(recordDir).all()) as any[];
   assert.deepEqual([line.kind, line.id, line.t], ["direction", id, AT]);
   assert.deepEqual(line.caller, { kind: "annotation", pass: "p-1", sessionId: "s-1", ref: "2026-11-06" });
@@ -95,14 +95,38 @@ test("a run's refusals: another company, the same event twice, a desk agent with
   rows.NVDA = { price: 173.07, changePct: null };
   await assert.rejects(service.propose(ARGS, { sessionId: "s-1", desk: true }), code("NO_TAPE"));
   rows.NVDA = { price: 173.07, changePct: -7.27 };
-  await service.propose(ARGS, { sessionId: "s-1", desk: true });
-  await assert.rejects(service.propose(ARGS, { sessionId: "s-1", desk: true }), code("ALREADY_GIVEN"));
+  const { id } = await service.propose(ARGS, { sessionId: "s-1", desk: true });
+  await assert.rejects(service.propose(ARGS, { sessionId: "s-1", desk: true }), code("ALREADY_GIVEN"), "the same run: caught in memory");
   service.close("s-1");
+  await service.sent([id], true);
   service.open("s-2", RUN);   // a later alert's run, the same reference close
   await assert.rejects(service.propose(ARGS, { sessionId: "s-2", desk: true }), code("ALREADY_GIVEN"));
+});
+
+test("across a restart: a bare direction line is not given; one marked sent is", async (t) => {   // final review I2
+  const { service, recordDir } = await mounted(t);
+  service.open("s-1", RUN);
+  await service.propose(ARGS, { sessionId: "s-1", desk: true });   // the face stops before the reply goes out
   const again = await mounted(t, true, recordDir);   // the face restarted: a new service over the same record
-  again.service.open("s-3", RUN);
-  await assert.rejects(again.service.propose(ARGS, { sessionId: "s-3", desk: true }), code("ALREADY_GIVEN"));
+  assert.equal(await again.service.given("NVDA", "2026-11-06"), false);
+  assert.deepEqual(await again.service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), []);
+  again.service.open("s-2", RUN);
+  const { id } = await again.service.propose(ARGS, { sessionId: "s-2", desk: true });
+  assert.match(id, ID_RE, "a new run's call is accepted");
+  again.service.close("s-2");
+  await again.service.sent([id], true);
+  const third = await mounted(t, true, recordDir);
+  assert.equal(await third.service.given("NVDA", "2026-11-06"), true);
+  third.service.open("s-3", RUN);
+  await assert.rejects(third.service.propose(ARGS, { sessionId: "s-3", desk: true }), code("ALREADY_GIVEN"));
+  assert.deepEqual(await third.service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), ["推演（04:03 ET 已给）：做多 AMD，此后 0.0%"]);
+});
+
+test("a block that cannot be rendered records nothing", async (t) => {   // final review I2
+  const { service, rows, recordDir } = await mounted(t);
+  rows.AMD = { price: 473.39, changePct: 5.42, asOf: "not a time" };
+  await assert.rejects(service.propose(ARGS, { sessionId: "s-task", desk: false }), RangeError);
+  assert.deepEqual(await createRecord(recordDir).all(), []);
 });
 
 test("two calls arriving together for one company: one is accepted", async (t) => {   // Review Focus 1
@@ -173,7 +197,8 @@ test("the Market down is a refusal by name, and nothing is recorded", async (t) 
 test("later re-prices a recorded direction; a no-direction, an unknown event and a failed read give no line", async (t) => {
   const { service, rows, state } = await mounted(t);
   service.open("s-1", RUN);
-  await service.propose(ARGS, { sessionId: "s-1", desk: true });
+  const { id } = await service.propose(ARGS, { sessionId: "s-1", desk: true });
+  await service.sent([id], true);
   rows.AMD = { price: 502.8, changePct: 12 };
   assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }, { symbol: "INTC", ref: "2026-11-06" }]), ["推演（04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
   state.now = "2026-11-10T15:00:00.000Z";   // the next day
@@ -220,7 +245,7 @@ test("a run closed while its prices are read: ALERT_ONLY, nothing kept, nothing 
   release();
   await assert.rejects(call, code("ALERT_ONLY"));
   assert.equal(await service.given("NVDA", "2026-11-06"), false);
-  assert.equal((await createRecord(recordDir).given("NVDA", "2026-11-06")), undefined);
+  assert.deepEqual((await createRecord(recordDir).all()).filter((e: any) => e.kind === "direction"), [], "no direction line at all");
 });
 
 const ROOT = (id: string, agentPreset?: string) => ({ agent: { session: { header: { id, ...(agentPreset === undefined ? {} : { agentPreset }) } } } });

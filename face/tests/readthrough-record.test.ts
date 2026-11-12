@@ -27,6 +27,8 @@ test("with no file, given answers undefined and all answers none; the first appe
   const record = createRecord(await scratch(t));
   assert.deepEqual([await record.given("NVDA", "2026-11-06"), await record.all()], [undefined, []]);
   await record.append(entry("rt-20261109-0000aaaa"));
+  assert.equal((await record.all()).length, 1);
+  await record.sent("rt-20261109-0000aaaa", true, "2026-11-09T09:05:00.000Z");
   assert.equal((await record.given("NVDA", "2026-11-06"))?.id, "rt-20261109-0000aaaa");
 });
 
@@ -42,21 +44,23 @@ test("given matches the symbol and the reference of an annotation's direction on
   assert.deepEqual((await record.all()).map((e) => e.kind), ["direction", "direction", "direction", "sent"]);
 });
 
-test("a direction left unsent is not given; a later one, or one sent, is", async (t) => {
+test("given is a direction whose latest sent line says true: none, or false, is not given", async (t) => {   // final review I2
   const record = createRecord(await scratch(t));
   await record.append(entry("rt-20261109-0000aaaa"));
   await record.sent("rt-20261109-0000aaaa", false, "2026-11-09T09:05:00.000Z");
   assert.equal(await record.given("NVDA", "2026-11-06"), undefined, "its message never went out");
   await record.append(entry("rt-20261109-0000bbbb"));
-  assert.equal((await record.given("NVDA", "2026-11-06"))?.id, "rt-20261109-0000bbbb", "no sent line yet still counts");
-  await record.append(entry("rt-20261109-0000cccc", { symbol: "INTC" }));
-  await record.sent("rt-20261109-0000cccc", true, "2026-11-09T09:06:00.000Z");
-  assert.equal((await record.given("INTC", "2026-11-06"))?.id, "rt-20261109-0000cccc");
+  assert.equal(await record.given("NVDA", "2026-11-06"), undefined, "no sent line: the record cannot say it went out");
+  await record.sent("rt-20261109-0000bbbb", true, "2026-11-09T09:06:00.000Z");
+  assert.equal((await record.given("NVDA", "2026-11-06"))?.id, "rt-20261109-0000bbbb");
+  await record.sent("rt-20261109-0000bbbb", false, "2026-11-09T09:07:00.000Z");
+  assert.equal(await record.given("NVDA", "2026-11-06"), undefined, "the latest sent line rules");
 });
 
 test("a no-direction counts as given", async (t) => {
   const record = createRecord(await scratch(t));
   await record.append(entry("rt-20261109-0000dddd", { peers: [], counter: null, noDirection: "n" }));
+  await record.sent("rt-20261109-0000dddd", true, "2026-11-09T09:05:00.000Z");
   assert.equal((await record.given("NVDA", "2026-11-06"))?.noDirection, "n");
 });
 
@@ -67,6 +71,7 @@ test("a torn last line is skipped, and the next append is a whole line of its ow
   await appendFile(join(dir, RECORD_FILE), '{"kind":"direction","id":"rt-2026');   // a crash mid-append
   assert.equal((await record.all()).length, 1);
   await record.append(entry("rt-20261109-0000eeee", { symbol: "INTC" }));
+  await record.sent("rt-20261109-0000eeee", true, "2026-11-09T09:05:00.000Z");
   assert.equal((await record.given("INTC", "2026-11-06"))?.id, "rt-20261109-0000eeee");
   assert.equal((await readFile(join(dir, RECORD_FILE), "utf8")).endsWith("\n"), true);
 });

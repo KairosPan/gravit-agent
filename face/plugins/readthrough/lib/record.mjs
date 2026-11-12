@@ -130,9 +130,9 @@ export function createRecord(dir) {
      */
     sent: (id, sent, t) => write({ kind: "sent", id, t, sent }),
     /**
-     * The latest direction an annotation gave for `symbol` against the reference close `ref` that was not left unsent,
-     * if any: a direction whose latest `sent` line says false never reached the operator, so it is not given; one with
-     * no `sent` line yet still is.
+     * The latest direction an annotation gave for `symbol` against the reference close `ref` that the record says was
+     * sent, if any: given means its latest `sent` line says true. One with no `sent` line - a crash before delivery, a
+     * failed `sent` write - or whose latest says false is not given, so a later alert of its event asks again.
      * @param {string} symbol
      * @param {string} ref
      * @returns {Promise<DirectionEntry | undefined>}
@@ -144,7 +144,7 @@ export function createRecord(dir) {
       for (const e of entries) if (e.kind === "sent") sent.set(e.id, e.sent);
       for (let i = entries.length - 1; i >= 0; i--) {
         const e = entries[i];
-        if (e.kind === "direction" && e.symbol === symbol && e.caller?.kind === "annotation" && e.caller.ref === ref && sent.get(e.id) !== false) {
+        if (e.kind === "direction" && e.symbol === symbol && e.caller?.kind === "annotation" && e.caller.ref === ref && sent.get(e.id) === true) {
           return e;
         }
       }

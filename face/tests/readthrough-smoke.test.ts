@@ -3,8 +3,8 @@
  * `gravit-desk` session sees it, a bot's session and the source reader's do not, and the conversation's allow list
  * does not name it; through the real registry a Gravit root session's call is priced, rendered with its event and
  * recorded as a task's; a desk session with no run open is refused `ALERT_ONLY`, and inside a run opened through
- * `readThroughLane` its call is accepted with no event line, closed with the run, counted as given, and refused
- * `ALREADY_GIVEN` in a later run of the same event; a rival outside the fence is refused by name; and the fake quote
+ * `readThroughLane` its call is accepted with no event line, closed with the run, counted as given once the lane marks
+ * it sent, and refused `ALREADY_GIVEN` in a later run of the same event; a rival outside the fence is refused by name; and the fake quote
  * source was asked for US shares alone, while no request left the process.
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is its own file.
@@ -168,7 +168,7 @@ test("read-through smoke: who sees read_through, the lane, the fence and the rec
     // 4. the desk with no run open
     refusedWith(await run(ARGS, desk), "ALERT_ONLY");
 
-    // 5. inside a run: accepted with no event line, closed with the run, given; a later run of the event refused
+    // 5. inside a run: accepted with no event line, closed with the run, given once sent; a later run of the event refused
     const lane = readThroughLane(ctx);
     const deskId = String(desk.session.header.id);
     lane.open(deskId, { pass: "p-smoke", asks: [{ symbol: "NVDA", ref: REF, since: SINCE }] });
@@ -177,7 +177,9 @@ test("read-through smoke: who sees read_through, the lane, the fence and the rec
     assert.match(alert.id, ID_RE);
     assert.equal(alert.block.split("\n").some((line) => line.startsWith("· 事件：")), false, `an alert's block has no event line; saw ${alert.block}`);
     assert.deepEqual(lane.close(deskId), [{ id: alert.id, text: alert.block }], "the run closes with its one block");
-    assert.equal(await lane.given("NVDA", REF), true, "the event is given");
+    assert.equal(await lane.given("NVDA", REF), false, "not given before the record says it was sent");
+    await lane.sent([alert.id], true);
+    assert.equal(await lane.given("NVDA", REF), true, "the event is given once marked sent");
     lane.open(deskId, { pass: "p-smoke-2", asks: [{ symbol: "NVDA", ref: REF, since: SINCE }] });
     refusedWith(await run(ARGS, desk), "ALREADY_GIVEN");
     assert.deepEqual(lane.close(deskId), [], "the refused call left no block");

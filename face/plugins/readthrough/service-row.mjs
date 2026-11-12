@@ -8,11 +8,12 @@
  * whether it is wired; `open(sessionId, { pass, asks })`, an annotation run that may give a direction for each
  * `{ symbol, ref, since }` it asks - a print at or after `since`, the instant its event's session began, is the
  * market's reaction, one before it reads `未成交`; `close(sessionId)`, the blocks that run accepted, in call order, the
- * run then forgotten; `given(symbol, ref)`, whether a direction is on record for that event; `later(items)`, a
- * re-priced line for each recorded direction that named rivals; `sent(ids, sent)`, one `sent` line an id; and
- * `propose(raw, { sessionId, desk })`, which checks a call, prices it, records it and renders its block. Every
- * `propose` runs on one promise chain for the service, so the second of two calls arriving together sees the first
- * one's line.
+ * run then forgotten; `given(symbol, ref)`, whether a direction for that event is on record as sent (its latest
+ * `sent` line true); `later(items)`, a re-priced line for each such direction that named rivals; `sent(ids, sent)`, one
+ * `sent` line an id; and `propose(raw, { sessionId, desk })`, which checks a call, prices it, renders its block and
+ * then records it, so a render that throws records nothing. Every `propose` runs on one promise chain for the
+ * service; a run keeps the symbols it has accepted, so the second of two calls for one company in a run - arriving
+ * together or not - is `ALREADY_GIVEN` before any line says it was sent.
  *
  * Config: `recordDir`, the absolute record directory. `universe` and `now` are test-only. The service is provided
  * inside `ctx.effect`, so a reload of the row disposes it.
@@ -33,7 +34,7 @@ export const inject = [];
  * @typedef {{ prices: (symbols: string[]) => Promise<Quote[]>, deskSymbols: () => Promise<string[]>,
  *   usSessionOn: () => boolean }} Wiring
  * @typedef {{ symbol: string, ref: string, since: string }} Ask
- * @typedef {{ pass: string, asks: Ask[], blocks: { id: string, text: string }[] }} Run
+ * @typedef {{ pass: string, asks: Ask[], blocks: { id: string, text: string }[], accepted: Set<string> }} Run
  */
 
 /**
@@ -83,7 +84,7 @@ export function apply(ctx, config) {
     if (run !== undefined) {
       ask = run.asks.find((a) => a.symbol === d.symbol);
       if (ask === undefined) throw refuse.notAlerted(d.symbol, run.asks.map((a) => a.symbol));
-      if (await given(d.symbol, ask.ref)) throw refuse.alreadyGiven(d.symbol, ask.ref);
+      if (run.accepted.has(d.symbol) || (await given(d.symbol, ask.ref))) throw refuse.alreadyGiven(d.symbol, ask.ref);
     }
     const fence = fenceOf({ universe, desk: await w.deskSymbols(), stricken: d.symbol });
     for (const p of d.peers) if (!fence.has(p.symbol)) throw refuse.outsideFence(p.symbol, UNIVERSE_AS_OF);
@@ -124,8 +125,10 @@ export function apply(ctx, config) {
       certainty: d.certainty,
       shut,
     };
-    // A run closed while its prices were read is over: nothing is recorded for it. One closed while the line was
-    // being written gets the line's `sent: false`, so the record says it never went out.
+    // The block first: a render that throws records nothing. A run closed while its prices were read is over: nothing
+    // is recorded for it. One closed while the line was being written gets the line's `sent: false`, so the record
+    // says it never went out.
+    const block = renderBlock({ direction: d, tape: [stricken, ...rest, spy], shut, forTask: !forRun, now: at.toISOString() });
     const gone = () => run !== undefined && runs.get(sessionId) !== run;
     if (gone()) throw refuse.alertOnly();
     await record.append(entry);
@@ -133,7 +136,7 @@ export function apply(ctx, config) {
       await record.sent(id, false, now().toISOString());
       throw refuse.alertOnly();
     }
-    const block = renderBlock({ direction: d, tape: [stricken, ...rest, spy], shut, forTask: !forRun, now: at.toISOString() });
+    run?.accepted.add(d.symbol);
     run?.blocks.push({ id, text: block });
     return { id, block };
   }
@@ -157,7 +160,7 @@ export function apply(ctx, config) {
      * @param {{ pass: string, asks: Ask[] }} run
      */
     open(sessionId, { pass, asks }) {
-      runs.set(sessionId, { pass, asks, blocks: [] });
+      runs.set(sessionId, { pass, asks, blocks: [], accepted: new Set() });
     },
     /** @param {string} sessionId */
     close(sessionId) {

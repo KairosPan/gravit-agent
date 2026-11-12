@@ -32,8 +32,9 @@
  *   is closed before it, however the turn ended, and on a normal end - a turn that ended uncut with a final text -
  *   the reply is that text, then each block the run closed with, then each of the lane's lines for the post's `later`,
  *   one blank line between; after it, the blocks closed are marked sent, or not sent - any other end, or a reply not
- *   delivered - so a later alert of the event asks again; every lane call guarded, a failure one `desk: read-through`
- *   line and the run going on as if the lane had answered nothing;
+ *   delivered - so a later alert of the event asks again, as it does for a block whose mark never lands (the lane
+ *   counts a direction given only once the record says it was sent); every lane call guarded, a failure one
+ *   `desk: read-through` line and the run going on as if the lane had answered nothing;
  * - the note: `onAnnotated` with the pass, the session, the outcome, the ids `deliver` sent, the reply, cut at
  *   {@link ANNOTATED_TEXT_MAX}, and the ids of the blocks appended to it, when any - the watch's `annotated` record in
  *   `alerts.jsonl`;
