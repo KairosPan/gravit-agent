@@ -1,4 +1,4 @@
-# Gravit
+# gravit
 
 A personal agent that grows with your investing experience — and connects to a wider world of agents.
 
