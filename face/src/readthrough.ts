@@ -30,7 +30,7 @@ import type { ReadThroughLane } from "./readthrough-lane.ts";
 import { idOf, marketOf } from "./symbols.ts";
 import { AFTER_HOURS_MS } from "./watch-eval.ts";
 
-export { readThroughLane, type ReadThroughAsk, type ReadThroughEvent, type ReadThroughLane } from "./readthrough-lane.ts";
+export { READ_THROUGH_NEVER, readThroughLane, type ReadThroughAsk, type ReadThroughEvent, type ReadThroughLane } from "./readthrough-lane.ts";
 
 export const READ_THROUGH_ROW_IDS = ["read-through-service", "read-through-tool"] as const;
 

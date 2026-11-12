@@ -10,9 +10,9 @@
  * market's reaction, one before it reads `未成交`; `close(sessionId)`, the blocks that run accepted, in call order, the
  * run then forgotten; `given(symbol, ref)`, whether a direction for that event is on record as sent (its latest
  * `sent` line true); `later(items)`, a re-priced line for each such direction that named rivals; `sent(ids, sent)`, one
- * `sent` line an id; and `propose(raw, { sessionId, desk })`, which checks a call, prices it, renders its block and
- * then records it, so a render that throws records nothing. Every `propose` runs on one promise chain for the
- * service; a run keeps the symbols it has accepted, so the second of two calls for one company in a run - arriving
+ * `sent` line an id; and `propose(raw, { sessionId, desk })`, which checks a call (an index fund of `NEVER` is never
+ * the company), prices it, renders its block and then records it, so a render that throws records nothing. Every
+ * `propose` runs on one promise chain for the service; a run keeps the symbols it has accepted, so the second of two calls for one company in a run - arriving
  * together or not - is `ALREADY_GIVEN` before any line says it was sent.
  *
  * Config: `recordDir`, the absolute record directory. `universe` and `now` are test-only. The service is provided
@@ -23,7 +23,7 @@ import { UNIVERSE, UNIVERSE_AS_OF } from "../analog/lib/universe.mjs";
 import { checkArgs } from "./lib/args.mjs";
 import { renderBlock, renderLater } from "./lib/block.mjs";
 import { refuse } from "./lib/errors.mjs";
-import { fenceOf } from "./lib/fence.mjs";
+import { NEVER, fenceOf } from "./lib/fence.mjs";
 import { createRecord, newId } from "./lib/record.mjs";
 
 export const name = "read-through-service";
@@ -77,6 +77,7 @@ export function apply(ctx, config) {
     const w = wiring;
     if (w === undefined) throw refuse.notReady("the face has not wired them yet");
     const d = checkArgs(raw);
+    if (NEVER.includes(d.symbol)) throw refuse.invalid("symbol", `${d.symbol} is an index fund, not a company; a direction is for one company's own event`);
     const run = desk ? runs.get(sessionId) : undefined;
     if (desk && run === undefined) throw refuse.alertOnly();
     /** @type {Ask | undefined} */

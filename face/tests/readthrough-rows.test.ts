@@ -129,6 +129,16 @@ test("a block that cannot be rendered records nothing", async (t) => {   // fina
   assert.deepEqual(await createRecord(recordDir).all(), []);
 });
 
+test("an index fund is never the company: refused in a run and in a task", async (t) => {   // final review I3
+  const { service } = await mounted(t);
+  service.open("s-1", { pass: "p-1", asks: [{ symbol: "SPY", ref: "2026-11-06", since: MONDAY_04 }] });
+  for (const caller of [{ sessionId: "s-1", desk: true }, { sessionId: "s-task", desk: false }]) {
+    await assert.rejects(service.propose({ ...ARGS, symbol: "SPY" }, caller), (e: unknown) => code("INVALID")(e)
+      && (e as Error).message === "INVALID symbol: SPY is an index fund, not a company; a direction is for one company's own event");
+  }
+  await assert.rejects(service.propose({ ...ARGS, symbol: "qqq" }, { sessionId: "s-task", desk: false }), code("INVALID"));
+});
+
 test("two calls arriving together for one company: one is accepted", async (t) => {   // Review Focus 1
   const { service } = await mounted(t);
   service.open("s-1", RUN);

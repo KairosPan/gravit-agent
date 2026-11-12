@@ -3,7 +3,14 @@
  * A LEAF, with no value import at all: src/desk.ts builds the lane, and src/desk.ts is what the pause switch
  * (scripts/desk.ts) and scripts/service.ts load, so its module weight is pinned by tests/desk-weight.test.ts.
  * src/readthrough.ts, the rows and the face's wiring, imports what it needs heavier (desk-book, market-clock,
- * watch-eval, js-yaml through standing) and re-exports everything here, so its importers are unchanged. */
+ * watch-eval, js-yaml through standing) and re-exports everything here, so its importers are unchanged. The one value
+ * it exports is a constant, {@link READ_THROUGH_NEVER}. */
+
+/** The index funds a direction is never for and never names: the watch asks no read-through for them (src/watch.ts
+ * `readThroughOf`), and the service refuses them as the company and as a rival. The plugin's own list,
+ * plugins/readthrough/lib/fence.mjs `NEVER`, which src/ may not import; tests/readthrough-wiring.test.ts holds the two
+ * equal. */
+export const READ_THROUGH_NEVER: readonly string[] = Object.freeze(["SPY", "QQQ"]);
 
 /** One event a direction is recorded under: the stricken symbol and its reference date, `YYYY-MM-DD`. A later alert
  * names the events already given this way. */

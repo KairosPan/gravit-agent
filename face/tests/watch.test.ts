@@ -1724,6 +1724,26 @@ test("an after-hours fall's ask counts prints from the close plus the closing cr
   await h.watch.dispose();
 });
 
+test("an index fund's fall asks no read-through; with a company in the pass, the company alone is asked", async () => {   // final review I3
+  const lane = { ready: () => true, given: async () => false };
+  const spy = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": "- id: index-move\n  kind: move_pct\n  symbols: [SPY, QQQ]\n  move_pct: 1.5\n" }, news: fakeNews().read, readThrough: lane });
+  spy.source.tables.us.set("SPY", us(580, "2026-11-30T15:20:44Z", 600));
+  await spy.wall.advance(0);
+  await until("the post", () => spy.posts.length === 1);
+  assert.equal("readThrough" in spy.posts[0], false);
+  assert.ok(spy.posts[0].text.endsWith(WHY_INSTRUCTIONS), spy.posts[0].text.slice(-200));
+  await spy.watch.dispose();
+
+  const both = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": "- id: fall\n  kind: move_pct\n  symbols: [SPY, NVDA]\n  move_pct: 1.5\n" }, news: fakeNews().read, readThrough: lane });
+  both.source.tables.us.set("SPY", us(580, "2026-11-30T15:20:44Z", 600));
+  both.source.tables.us.set("NVDA", us(94, "2026-11-30T15:20:44Z", 100));
+  await both.wall.advance(0);
+  await until("the post", () => both.posts.length === 1);
+  assert.deepEqual(both.posts[0].readThrough, { asks: [{ symbol: "NVDA", ref: "2026-11-27", since: "2026-11-30T09:00:00.000Z" }], later: [] });
+  assert.ok(both.posts[0].text.endsWith("It may be called for: NVDA."), both.posts[0].text.slice(-200));
+  await both.watch.dispose();
+});
+
 test("a later fall of the same event carries no ask and is listed for the face's line", async () => {
   const h = await harness({ ...FALL_START, news: fakeNews().read, readThrough: { ready: () => true, given: async () => true } });
   await nvdaGap(h);

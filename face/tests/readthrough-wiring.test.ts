@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deskFenceSymbols, readThroughLane, readThroughPrices, usSessionOn, wireReadThrough } from "../src/readthrough.ts";
+import { deskFenceSymbols, READ_THROUGH_NEVER, readThroughLane, readThroughPrices, usSessionOn, wireReadThrough } from "../src/readthrough.ts";
+import { NEVER } from "../plugins/readthrough/lib/fence.mjs";
 
 const at = (iso: string) => Date.parse(iso);
 const quote = (symbol: string, over: object = {}) => ({
@@ -63,4 +64,8 @@ test("wireReadThrough wires the service through inject, each time it is provided
   assert.deepEqual(Object.keys(wired[0]).sort(), ["deskSymbols", "prices", "usSessionOn"]);
   assert.deepEqual([wired[0].usSessionOn(), await wired[0].deskSymbols()], [true, []]);
   assert.equal((await wired[0].prices(["NVDA"]))[0].changePct, -7.3);
+});
+
+test("the face's list of index funds is the plugin's", () => {   // final review I3
+  assert.deepEqual([...READ_THROUGH_NEVER], [...NEVER]);
 });

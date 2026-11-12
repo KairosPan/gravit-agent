@@ -84,7 +84,7 @@ import { HttpError } from "./http.ts";
 import { nyInstant, sessionBefore, sessionFor, xnysPrevious, xnysWindow, type DayAnswer, type DeskCalendars, type MarketSession } from "./market-clock.ts";
 import type { NewsAnswer } from "./market-news.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
-import type { ReadThroughAsk, ReadThroughEvent, ReadThroughLane } from "./readthrough-lane.ts";
+import { READ_THROUGH_NEVER, type ReadThroughAsk, type ReadThroughEvent, type ReadThroughLane } from "./readthrough-lane.ts";
 import { idOf, type Market } from "./symbols.ts";
 import {
   AFTER_HOURS_MS, alertId, batchDue, batchId, CLOSE_PRINT_MS, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, REBUILD_WINDOW_MS, rebuildDay, snapOf,
@@ -1113,7 +1113,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   }
 
   /** A why post's read-through, or none when it has nothing to ask: with `deps.readThrough` ready, each symbol of the
-   * US price moves that fell (`quote.chgPct` below 0), once in the hits' order, as `{ symbol, ref, since }` - the hit's
+   * US price moves that fell (`quote.chgPct` below 0), never an index fund (src/readthrough-lane.ts
+   * `READ_THROUGH_NEVER`: a direction is for one company's own event), once in the hits' order, as
+   * `{ symbol, ref, since }` - the hit's
    * reference close, else its date, and {@link sinceOf} it - asked `given`: false is an ask, true a later alert of an
    * event already given, listed as `{ symbol, ref }`; a `given` that rejects leaves the symbol out of both, with one
    * line. `undefined` with no lane, a lane not ready, or both lists empty. */
@@ -1123,6 +1125,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     const candidates = new Map<string, ReadThroughAsk>();
     for (const hit of hits) {
       if (!whyOf(hit) || hit.quote === null || typeof hit.quote.chgPct !== "number" || !(hit.quote.chgPct < 0)) continue;
+      if (READ_THROUGH_NEVER.includes(hit.symbol)) continue;
       if (!candidates.has(hit.symbol)) candidates.set(hit.symbol, { symbol: hit.symbol, ref: hit.ref ?? hit.date, since: sinceOf(hit, hit.quote.asOf) });
     }
     const asks: ReadThroughAsk[] = [];

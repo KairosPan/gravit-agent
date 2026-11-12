@@ -4,7 +4,8 @@
  * desk's files, less the stricken company itself and the index funds a direction never names.
  */
 
-/** The symbols a direction never carries. */
+/** The index funds a direction never carries and is never for (the service refuses one as the company); the face's
+ * mirror is src/readthrough-lane.ts `READ_THROUGH_NEVER`, held equal by tests/readthrough-wiring.test.ts. */
 export const NEVER = Object.freeze(["SPY", "QQQ"]);
 
 /**
