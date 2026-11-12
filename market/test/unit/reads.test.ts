@@ -417,6 +417,31 @@ describe("a public market's price history: windows and memory", () => {
       expect(src.asked).toEqual([]);
       expect(historyAsk("", { range: "ytd" })).toEqual({ iv: "1d", range: "YTD", limit: 5_000 });
     });
+
+    it("historyAsk reads a dated window", () => {
+      expect(historyAsk("1d", { since: "1514764800000", before: "1525132800000" })).toEqual({ iv: "1d", since: 1514764800000, before: 1525132800000, limit: 5_000 });
+    });
+
+    it("historyAsk refuses a dated window that is not one", () => {
+      const asks = [
+        { since: "1514764800000" },
+        { since: "1", before: "1" },
+        { since: "1514764800000", before: "1525132800000", range: "1Y" },
+        { since: "x", before: "1525132800000" },
+      ];
+      for (const ask of asks) expect(refusal(historyAsk("1d", ask)).code, JSON.stringify(ask)).toBe("E_MARKET_BAD_REQUEST");
+    });
+
+    it("candles hands a dated window to the source whole", async () => {
+      const src = source();
+      const svc = marketReads(createMarketCore({ sources: [{ ...src.s, id: "cboe", name: "US stocks", kind: "stocks" }], clock: () => NOW }));
+      const since = 1514764800000;
+      const before = 1525132800000;
+      const v = view(await svc.candles("cboe", "WYNN", "1d", { since, before }));
+      expect(src.asked).toEqual([{ symbol: "WYNN", interval: "1d", w: { since, until: before, limit: 5_000 } }]);
+      expect([v.since, v.before, v.range]).toEqual([since, before, undefined]);
+      expect(v.candles.length > 0 && v.candles.every((b) => b.t >= since && b.t < before)).toBe(true);
+    });
   });
   
   describe("the memory: the same ask once, keyed by its window, bounded", () => {

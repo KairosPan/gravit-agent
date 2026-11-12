@@ -34,7 +34,7 @@ const LONG_VALUES: Readonly<Partial<Record<MarketReadName, ReadonlyMap<string, n
 export const MARKET_QUERY: Readonly<Record<MarketReadName, readonly string[]>> = {
   explore: ["tab", "q", "key", "sort", "limit", "scope", "source"],
   quotes: ["pairs"],
-  candles: ["venue", "symbol", "interval", "range", "before", "limit"],
+  candles: ["venue", "symbol", "interval", "range", "before", "since", "limit"],
   book: ["venue", "symbol", "depth"],
   trades: ["venue", "symbol", "limit"],
   sources: [],

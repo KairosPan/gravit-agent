@@ -33,7 +33,7 @@ import { wrap } from "./routes-cn.ts";
 export interface MarketReads {
   explore(o: { scope?: string | undefined; source?: string | undefined; tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined }): Promise<Exploration | Refusal>;
   quotes(pairs: Array<{ venue: string; symbol: string }>): Promise<Array<{ venue: string; symbol: string; market?: Market; refusal?: Refusal }> | Refusal>;
-  candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined }): Promise<CandlesView | ChinaHistory | Refusal>;
+  candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; since?: string | number | undefined; limit?: string | number | undefined }): Promise<CandlesView | ChinaHistory | Refusal>;
   book(venue: string, symbol: string, depth?: number): Promise<BookView | Refusal>;
   trades(venue: string, symbol: string, limit?: number): Promise<TradesView | Refusal>;
   /** each US share's latest headlines (at most NEWS_PER_SYMBOL, newest first, none older than `since`), a feed that refuses under
@@ -61,9 +61,11 @@ export interface CandlesView {
   symbol: string;
   /** the bars' size: the one asked, or the coarser one the source drew a range in (`note` says why) */
   interval: CandleInterval;
-  /** the range this first view covers, or the bar a page was asked before (ms) */
+  /** the range this first view covers, or the bar a page was asked before (ms); a dated window: its start (`since`) and its end (`before`),
+   * both ms */
   range?: CandleRange | undefined;
   before?: number | undefined;
+  since?: number | undefined;
   /** oldest first */
   candles: Candle[];
   /** older bars exist: the next page is asked `before` the first bar's start */
@@ -140,23 +142,32 @@ function barsFrom(page: CandlePage, named: string, kind: PublicSource["kind"] | 
   return kind === "exchange" && venue && !page.source!.startsWith(named) ? venue : named;
 }
 
-/** A PRICE HISTORY AS ASKED (GET /api/candles): the bar size (empty: the range's own, else 1h), a range or the bar a page is asked before —
- * never both — and the most bars, held to what can be asked; or why not, in words (service.ts historyAsk) */
-export function historyAsk(interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined }): { iv: CandleInterval; range?: CandleRange | undefined; before?: number | undefined; limit: number } | Refusal {
+/** A PRICE HISTORY AS ASKED (GET /api/candles): the bar size (empty: the range's own, else 1h), a range, the bar a page is asked before, or a
+ * dated window (`since` and `before` together, `since` first) — a range never with either — and the most bars, held to what can be asked; or
+ * why not, in words (service.ts historyAsk) */
+export function historyAsk(interval: string, ask: { range?: string | undefined; before?: string | number | undefined; since?: string | number | undefined; limit?: string | number | undefined }): { iv: CandleInterval; range?: CandleRange | undefined; before?: number | undefined; since?: number | undefined; limit: number } | Refusal {
   const r = String(ask.range ?? "").trim().toUpperCase();
   if (r && !(CANDLE_RANGES as readonly string[]).includes(r)) return no("E_MARKET_BAD_REQUEST", { message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
   const b = String(ask.before ?? "").trim();
   if (b && !/^\d{1,15}$/.test(b)) return no("E_MARKET_BAD_REQUEST", { message: "a page of price history is asked before a bar's start, in milliseconds" });
+  const s = String(ask.since ?? "").trim();
+  if (s && !/^\d{1,15}$/.test(s)) return no("E_MARKET_BAD_REQUEST", { message: "a dated window of price history starts at a time in milliseconds" });
+  if (s && !b) return no("E_MARKET_BAD_REQUEST", { message: "a dated window of price history is asked since a time and before another, both" });
+  if (r && s) return no("E_MARKET_BAD_REQUEST", { message: "price history is asked for a range or for a dated window, not both" });
   if (r && b) return no("E_MARKET_BAD_REQUEST", { message: "price history is asked for a range or for the page before a bar, not both" });
   const range = r ? (r as CandleRange) : undefined;
   const iv = (interval || (range ? RANGE_BAR[range] : "1h")).trim();
   if (!(CANDLE_INTERVALS as readonly string[]).includes(iv)) return no("E_MARKET_BAD_REQUEST", { message: `price history is by ${CANDLE_INTERVALS.join(", ")}` });
-  const most = b ? PAGE_MOST : HISTORY_MOST;
+  // a page: PAGE_MOST bars at most; a first view, a range's or a dated window's: HISTORY_MOST
+  const page = b !== "" && s === "";
+  const most = page ? PAGE_MOST : HISTORY_MOST;
   const l = String(ask.limit ?? "").trim();
-  if (l && !(/^\d{1,6}$/.test(l) && Number(l) >= 1 && Number(l) <= most)) return no("E_MARKET_BAD_REQUEST", { message: `a ${b ? "page" : "view"} of price history holds 1 to ${most.toLocaleString("en-US")} bars` });
+  if (l && !(/^\d{1,6}$/.test(l) && Number(l) >= 1 && Number(l) <= most)) return no("E_MARKET_BAD_REQUEST", { message: `a ${page ? "page" : "view"} of price history holds 1 to ${most.toLocaleString("en-US")} bars` });
   const before = b ? Number(b) : undefined;
   if (before !== undefined && !(before > 0)) return no("E_MARKET_BAD_REQUEST", { message: "a page of price history is asked before a bar's start, in milliseconds" });
-  return { iv: iv as CandleInterval, range: before !== undefined ? undefined : (range ?? INTERVAL_RANGE[iv as CandleInterval]), ...(before !== undefined ? { before } : {}), limit: l ? Number(l) : b ? 300 : HISTORY_MOST };
+  const since = s ? Number(s) : undefined;
+  if (since !== undefined && !(since < before!)) return no("E_MARKET_BAD_REQUEST", { message: "a dated window of price history starts before it ends" });
+  return { iv: iv as CandleInterval, range: before !== undefined ? undefined : (range ?? INTERVAL_RANGE[iv as CandleInterval]), ...(before !== undefined ? { before } : {}), ...(since !== undefined ? { since } : {}), limit: l ? Number(l) : page ? 300 : HISTORY_MOST };
 }
 
 /** why a book is only its best bid and ask (trade.ts OrderBook.topOnly) */
@@ -315,23 +326,24 @@ export function marketReads(core: MarketCore): MarketReads {
       if (id === CHINA_ID) {
         const china = core.china;
         if (!china) return no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: CHINA_NOT_READ });
-        if (ask.before !== undefined && String(ask.before).trim() !== "") return no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: "an A share's history is read by range" });
+        if ([ask.before, ask.since].some((x) => x !== undefined && String(x).trim() !== "")) return no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: "an A share's history is read by range" });
         const range = (ask.range ?? "").trim();
         if (!(CANDLE_RANGES as readonly string[]).includes(range)) return no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
         return china.history(sym, range as ChinaRange);
       }
       const asked = historyAsk(interval, ask);
       if (isRefusal(asked)) return asked;
-      const { iv, range, before, limit } = asked;
+      const { iv, range, before, since, limit } = asked;
       const t = now();
-      const w: CandleWindow = before !== undefined ? { until: before, limit } : { since: rangeSince(range!, t), limit, range };
+      const w: CandleWindow = since !== undefined ? { since, until: before, limit } : before !== undefined ? { until: before, limit } : { since: rangeSince(range!, t), limit, range };
       // the window the answer is held to: a US stock's 1D and 5D are its latest sessions (the source counts them so), which may start earlier
       const held: CandleWindow = w.range !== undefined && w.since !== undefined ? { ...w, since: Math.min(w.since, sessionsSince(w.range, t)) } : w;
-      const wait = before !== undefined ? PAGE_WAIT_MS : HISTORY_WAIT_MS;
+      const wait = before !== undefined && since === undefined ? PAGE_WAIT_MS : HISTORY_WAIT_MS;
       const said = (page: CandlePage, base: { venue: string; venueName: string; public?: true; from?: string }): CandlesView => ({
         ...base,
         symbol: sym,
         interval: page.interval ?? iv,
+        ...(since !== undefined ? { since } : {}),
         ...(before !== undefined ? { before } : { range }),
         candles: page.bars,
         more: page.more,
@@ -458,9 +470,9 @@ export function mountReads(app: express.Express, _core: MarketCore, reads: Marke
   // one market's price history, a public source's without a key. The venue is a source's id and the symbol plain text: neither ever names a
   // host
   app.get("/api/candles", wrap(async (req, res) => {
-    const q = strings(req, res, { venue: 60, symbol: 200, interval: 4, range: 4, before: 16, limit: 6 });
+    const q = strings(req, res, { venue: 60, symbol: 200, interval: 4, range: 4, before: 16, since: 16, limit: 6 });
     if (!q) return;
-    answerOf(res, await reads.candles(q.venue, q.symbol, q.interval, { range: q.range, before: q.before, limit: q.limit }));
+    answerOf(res, await reads.candles(q.venue, q.symbol, q.interval, { range: q.range, before: q.before, since: q.since, limit: q.limit }));
   }));
 
   // one market's order book (best first, `depth` levels a side, 1 to 50) and its latest trades (newest first, `limit`, 1 to 100); a market

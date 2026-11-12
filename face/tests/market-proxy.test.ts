@@ -79,7 +79,7 @@ test("mounts eight routes under /data/market and nothing else", () => {
   }
   /* the market's own tables, the values the account's public reads had before plan A2's Task 7 removed them */
   assert.deepEqual(MARKET_QUERY, {
-    explore: ["tab", "q", "key", "sort", "limit", "scope", "source"], quotes: ["pairs"], candles: ["venue", "symbol", "interval", "range", "before", "limit"],
+    explore: ["tab", "q", "key", "sort", "limit", "scope", "source"], quotes: ["pairs"], candles: ["venue", "symbol", "interval", "range", "before", "since", "limit"],
     book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"], sources: [],
   });
   assert.deepEqual(MARKET_TTL_MS, { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000, sources: 30_000 });
@@ -116,6 +116,21 @@ test("a read goes to the market's own path with its rebuilt query", async () => 
     assert.equal(foreign.status, 403, "the fence");
     assert.equal((await call(routes, "/data/market/explore", HOST, "POST")).status, 405);
     assert.equal(market.seen.length, 5);
+  } finally {
+    await market.close();
+  }
+});
+
+test("a dated window of daily bars reaches the market with since kept", async () => {
+  const market = await stub((_q, res) => json(res, 200, { ok: true }));
+  try {
+    const { routes, registrar } = register();
+    registerMarketProxy(registrar, { url: market.url });
+    const a = await call(routes, "/data/market/candles?venue=cboe&symbol=WYNN&interval=1d&since=1514764800000&before=1525132800000&limit=200");
+    assert.equal(a.status, 200);
+    assert.deepEqual(market.seen.map((s) => s.path), [
+      "/api/candles?venue=cboe&symbol=WYNN&interval=1d&since=1514764800000&before=1525132800000&limit=200",
+    ]);
   } finally {
     await market.close();
   }
