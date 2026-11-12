@@ -11,6 +11,7 @@ import { taskLine } from '../host/rail-view.js';
 import { renderThread } from './thread.js';
 import { earlierKey, headRight, renderDetails } from './messages.js';
 import { stateKeys, dotOf } from './tasks.js';
+import { eventTablesHtml } from './event-table.js';
 
 const back = () => `<a class="task-back" href="#/messages" aria-label="${th('tasks.page.back')}">${icon('chevLeft', 18, 2.2)}</a>`;
 
@@ -26,6 +27,16 @@ function facts(found, state) {
     (keys ? `<span class="task-head-keys">${keys}</span>` : '');
 }
 
+// the event views the page draws (analog event table §4.1): those its reports named, newest first, else its last event view;
+// the task as GET /data/tasks/one read it (the analog slice), so a task off the rail still draws
+function pageViews(state, id) {
+  const entry = state.analog?.tasks?.[id];
+  if (entry?.status !== 'loaded') return [];
+  const strings = v => (Array.isArray(v) ? v.filter(s => typeof s === 'string') : []);
+  const named = strings(entry.task?.namedViews);
+  return named.length ? [...named].reverse() : strings(entry.task?.eventViews).slice(-1);
+}
+
 /** The task's page: Loading… while neither the list nor the tasks carry it, Not found once they are in without it. */
 export function renderTaskScreen(state, now, page = {}) {
   const id = state.route.id;
@@ -38,7 +49,7 @@ export function renderTaskScreen(state, now, page = {}) {
     const word = known && !found ? th('history.notFound') : th('common.loading');
     return `<main class="main chan">${head}<div class="chan-body"><div class="chan-none dim">${word}</div></div></main>`;
   }
-  const thread = `<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div></div>`;
+  const thread = `<div class="thread-box"><div class="thread" id="thread">${eventTablesHtml(state, pageViews(state, id))}${earlierKey(conv)}${renderThread(conv, state, now, page)}</div></div>`;
   const foot = `<div class="task-foot"><a class="task-tell" href="#/messages">${th('tasks.page.tell')}</a></div>`;
   return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${head}${thread}${foot}` +
     `${state.detailsOpen ? renderDetails(conv, state, now, { worker: true, task: found?.line.task ?? null }) : ''}</main>`;

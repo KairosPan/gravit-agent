@@ -640,3 +640,21 @@ test("a desk line's text is escaped and its head left out", async () => {
   assert.match(h, /<span class="desk-text">&lt;script&gt;x&lt;\/script&gt; &amp; y<\/span><\/summary><pre>&lt;script&gt;x&lt;\/script&gt; &amp; y<\/pre>/);
   assert.doesNotMatch(h, /<script>|\[alert ·|desk-data|&lt;&lt;&lt;/);
 });
+
+// ---- the event table under a report line (analog event table, Task 7)
+test('a report line carrying an event view draws its table after the line; one naming no view draws none', async () => {
+  const { EVENT_VIEW, EVENT_VIEW_ID } = await import('./helpers/event-view.js');
+  const withView = { ...state, analog: { tasks: {}, views: { [EVENT_VIEW_ID]: { status: 'loaded', view: EVENT_VIEW } } } };
+  const report = taskMsg({ form: 'report', task: 't1', status: 'ready', title: 'Read the tape', body: `see ${EVENT_VIEW_ID}`, views: [EVENT_VIEW_ID] });
+  const h = renderMessage(report, conv(), withView);
+  assert.match(h, /^<details class="sysline ctx" id="relay-s1-e70">[\s\S]*<\/details><div class="et-list"><section class="et">/, 'the line, then the table');
+  assert.match(h, /本次 · NVDA|This time · NVDA/);
+  // the body names the view but the face line and the task name none: no table
+  const bare = taskMsg({ form: 'report', task: 't1', status: 'ready', title: 'Read the tape', body: `see ${EVENT_VIEW_ID}` });
+  assert.match(renderMessage(bare, conv(), withView), /<\/details>$/);
+  // the task's own event views read: the body's id is one of them, so it draws
+  const known = { ...withView, analog: { ...withView.analog, tasks: { t1: { status: 'loaded', task: { id: 't1', eventViews: [EVENT_VIEW_ID], namedViews: [] } } } } };
+  assert.match(renderMessage(bare, conv(), known), /<\/details><div class="et-list"><section class="et">/);
+  // a view not read yet draws its loading line under the report
+  assert.match(renderMessage(report, conv(), state), /<\/details><div class="et-list"><div class="et-state">/);
+});

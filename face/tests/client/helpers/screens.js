@@ -29,6 +29,7 @@ import { reducers as R } from '../../../client/js/reducers/index.js';
 import { emptyState } from '../../../client/js/data/empty.js';
 import { MIN } from '../../../client/js/time.js';
 import { VIEW_1027 } from './lunhui-view.js';
+import { EVENT_VIEW, EVENT_VIEW_ID } from './event-view.js';
 import { stockDrawerHtml } from '../../../client/js/render/lunhui/stock.js';
 import { deskStatus } from './desk-status.js';
 import { editorHtml, dropOverlay, lightboxHtml } from '../../../client/js/composer/view.js';
@@ -388,6 +389,31 @@ export function everyState() {
     // sign-only-money Task 7: a browser that does not sign with Get a code, then asked with the code box; Settings › Devices with
     // how each signer came in and Remove; the removeDevice sheet
     ...deviceStates(accountRead()),
+  ];
+}
+
+// the event tables (analog event table Task 7), pinned by name: in Messages, a report line carrying the NVDA view under it, one
+// whose view is no longer kept and one whose read failed; on a task's page, its three named views newest first — the newest
+// still being read, then one whose first group has its medians, then the NVDA view
+const GONE_VIEW_ID = 'an-20260801-0000dead';
+const FAILED_VIEW_ID = 'an-20260802-0000fa11';
+const MEDIAN_VIEW_ID = 'an-20261112-0000cafe';
+const NEWER_VIEW_ID = 'an-20261112-0000beef';
+export function namedStates() {
+  const report = (id, views) => m(id, { from: 'system', kind: 'task', text: '[task · CEO analogs · ready]', data: { form: 'report', task: 'wt', status: 'ready', title: 'CEO analogs', body: `Read ${views.join(', ')}`, views } });
+  const named = EVENT_VIEW.groups.named.map((g, i) => (i === 0 ? { ...g, summary: { ...g.summary, x0: -0.0581, x60: 0.0203 } } : g));
+  const median = { ...EVENT_VIEW, id: MEDIAN_VIEW_ID, groups: { ...EVENT_VIEW.groups, named } };
+  const views = { [EVENT_VIEW_ID]: { status: 'loaded', view: EVENT_VIEW }, [GONE_VIEW_ID]: { status: 'failed', error: 'HTTP 404', gone: true },
+    [FAILED_VIEW_ID]: { status: 'failed', error: 'HTTP 500', gone: false }, [MEDIAN_VIEW_ID]: { status: 'loaded', view: median }, [NEWER_VIEW_ID]: { status: 'loading' } };
+  const messages = [report('r1', [EVENT_VIEW_ID]), report('r2', [GONE_VIEW_ID]), report('r3', [FAILED_VIEW_ID])];
+  const thread = onConv(R.hostList(emptyState(), { conversations: [conv('ev', { messages, loaded: true })], channels: [], bots: [] }), 'ev');
+  const task = { id: 'wt', title: 'CEO analogs', origin: 'web', state: 'done', group: 'done', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1 };
+  const worker = conv('wt', { title: 'CEO analogs', loaded: true, messages: [m('wt1', { text: 'Measured the cases' })] });
+  const page = R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('ev'), worker], channels: [], bots: [] }), { conversation: 'ev', tasks: [task], at: NOW }), { screen: 'task', id: 'wt' });
+  const read = { status: 'loaded', task: { ...task, eventViews: [EVENT_VIEW_ID, MEDIAN_VIEW_ID, NEWER_VIEW_ID], namedViews: [EVENT_VIEW_ID, MEDIAN_VIEW_ID, NEWER_VIEW_ID] } };
+  return [
+    ['thread-event-table', { ...thread, analog: { tasks: {}, views } }],
+    ['task-event-table', { ...page, analog: { tasks: { wt: read }, views } }],
   ];
 }
 
@@ -852,7 +878,7 @@ export async function goldenEntries() {
 export function corpus() {
   setMarkdown(null);
   const states = everyState().flatMap((st, i) => [[`state-${i}`, pageHtml(st)], ...(renderSide(st, NOW) ? [[`state-${i}-pc`, pageHtml(st, { mac: false })]] : [])]);
-  return [...states, ...composerPieces().map(([name, html]) => [`composer-${name}`, html])];
+  return [...states, ...namedStates().map(([name, st]) => [name, pageHtml(st)]), ...composerPieces().map(([name, html]) => [`composer-${name}`, html])];
 }
 
 // the fields whose strings are words a screen draws as they come — the operator's, Gravit's, a bot's, a venue's or the
@@ -887,9 +913,10 @@ const CONTENT_FIELDS = new Set([
 // (a metric's name): a run's view and its artifacts (Lunhui's output), a strategy's files (Gravit's) and its paper positions
 // (the venue its status.yaml names and the Account's rows or refusal), What you sign's lines
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
-// order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); `*` is any one key
+// order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); an event analog view and its
+// task as the face read them (the worker's and web pages' words); `*` is any one key
 const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
-  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits']];
+  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 
 // every string, as { text, key }, the corpus' own states, the composer pieces' inputs and the module catalog (its sub-titles,
@@ -914,7 +941,7 @@ export function corpusStrings() {
       walk(x, k, at, inside);
     }
   };
-  for (const st of everyState()) walk(st, null, [], false);
+  for (const st of [...everyState(), ...namedStates().map(([, st]) => st)]) walk(st, null, [], false);
   walk(composerBuild().inputs, null, [], false);
   walk(MODULES, null, [], 'values'); // every value, its keys not
   // iMessage's region list: each region's name as the browser gives it (Intl.DisplayNames), content as a venue's name is

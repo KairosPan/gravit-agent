@@ -299,6 +299,45 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .lh-choice { min-height: 36px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text); font-size: calc(13px * var(--fs)); text-align: left; }
 .lh-open-run { margin-left: 8px; padding: 0; border: 0; background: none; color: var(--primary); font-size: calc(12px * var(--fs)); font-weight: 600; }
 .lh-foot { padding-top: 8px; border-top: 1px solid var(--border); font-size: calc(12px * var(--fs)); color: var(--dim); overflow-wrap: anywhere; }
+/* the event table (render/event-table.js): a white card under a task's report line and at the top of its page — the head, the
+   present case in a tinted block, each group with its rows; a measured row's chips green up, red down, grey flat or none; an
+   unmeasured row muted, dashed; the caveats under the card */
+.et-list { display: flex; flex-direction: column; gap: 14px; margin: 6px 0 4px; }
+.et { display: flex; flex-direction: column; gap: 6px; }
+.et-card { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--surface); box-shadow: var(--shadow-card); overflow-wrap: anywhere; }
+.et-head { display: flex; flex-direction: column; gap: 3px; }
+.et-title { font-size: calc(15px * var(--fs)); font-weight: 700; color: var(--text); }
+.et-counts { font-size: calc(13px * var(--fs)); color: var(--text); }
+.et-basis, .et-caveats, .et-few { font-size: calc(12px * var(--fs)); color: var(--dim); }
+.et-caveats { padding: 0 4px; }
+.et-present { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--radius-s); background: var(--accent-soft); }
+.et-group { display: flex; flex-direction: column; gap: 8px; }
+.et-group-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.et-group-name { font-size: calc(13px * var(--fs)); font-weight: 700; color: var(--text); }
+.et-group-count { font-size: calc(12px * var(--fs)); color: var(--dim); }
+.et-median { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.et-median-label { font-size: calc(12px * var(--fs)); color: var(--dim); }
+.et-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--card-border); border-radius: var(--radius-s); background: var(--surface); }
+.et-row.unmeasured { border-style: dashed; background: transparent; color: var(--dim); }
+.et-row-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+.et-label { font-weight: 700; font-size: calc(13px * var(--fs)); }
+.et-date { font-size: calc(12px * var(--fs)); font-variant-numeric: tabular-nums; color: var(--dim); }
+.et-timing, .et-flag { font-size: calc(11px * var(--fs)); padding: 0 6px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--dim); }
+.et-shift { font-size: calc(12px * var(--fs)); color: var(--dim); }
+.et-badge { font-size: calc(11px * var(--fs)); font-weight: 600; padding: 0 6px; border-radius: var(--radius-pill); }
+.et-badge.ok { background: var(--up-fill); color: var(--up); }
+.et-badge.warn { background: var(--warn-fill); color: var(--warn-text); }
+.et-note, .et-words { font-size: calc(12px * var(--fs)); }
+.et-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.et-chip { display: inline-flex; align-items: baseline; gap: 4px; padding: 1px 8px; border-radius: var(--radius-pill); font-size: calc(12px * var(--fs)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.et-chip-label { font-weight: 400; }
+.et-chip.up { background: var(--up-fill); color: var(--up); }
+.et-chip.down { background: var(--down-fill); color: var(--down); }
+.et-chip.flat, .et-chip.none { background: var(--surface-2); color: var(--dim); }
+.et-links { display: flex; gap: 14px; font-size: calc(12px * var(--fs)); }
+.et-src, .et-market { color: var(--accent-ink); font-weight: 600; }
+.et-state { font-size: calc(12px * var(--fs)); color: var(--dim); text-align: center; padding: 4px 0; }
+.et-state.et-failed { color: var(--warn-text); }
 .lh-ix-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
 .lh-ix { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 8px; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-2); color: var(--text); text-align: left; }
 .lh-ix.pressed { border-color: var(--text); background: var(--surface); }

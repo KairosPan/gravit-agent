@@ -68,3 +68,27 @@ test('a task whose transcript is not listed yet reads Loading…; one nobody kno
   assert.match(renderTaskScreen(on([conv('c')], [], 'gone'), NOW), /Not found/);
   assert.match(renderTaskScreen(R.nav(emptyState(), { screen: 'task', id: 'x' }), NOW), /Loading…/, 'before the list lands');
 });
+
+// ---- the event tables at the top of the task's page (analog event table, Task 7)
+test("the page draws its task's named views' tables, newest first, else its last event view's", async () => {
+  const { EVENT_VIEW, EVENT_VIEW_ID } = await import('./helpers/event-view.js');
+  const OTHER = 'an-20261112-0000aaaa';
+  const OLD = 'an-20261111-0000bbbb';
+  const views = { [EVENT_VIEW_ID]: { status: 'loaded', view: EVENT_VIEW }, [OTHER]: { status: 'loaded', view: { ...EVENT_VIEW, id: OTHER, title: 'The second table' } }, [OLD]: { status: 'loaded', view: { ...EVENT_VIEW, id: OLD, title: 'The old table' } } };
+  const base = on([conv('c'), conv('w', { loaded: true, messages: [{ id: 'm1', from: 'gravit', kind: 'text', text: 'done', seq: 1, at: NOW, data: {} }] })], [task('w')], 'w');
+  const withTask = taskRead => ({ ...base, analog: { tasks: { w: { status: 'loaded', task: taskRead } }, views } });
+  const named = renderTaskScreen(withTask({ id: 'w', eventViews: [OLD, EVENT_VIEW_ID, OTHER], namedViews: [EVENT_VIEW_ID, OTHER] }), NOW);
+  const thread = named.slice(named.indexOf('id="thread"'));
+  assert.match(thread, /^id="thread"><div class="et-list"><section class="et">/, 'at the top of the page');
+  const second = thread.indexOf('The second table');
+  const first = thread.indexOf('CEO 风波');
+  assert.ok(second > 0 && first > second, 'newest first: the last named drawn first');
+  assert.doesNotMatch(named, /The old table/, 'an event view no report named is not drawn');
+  // none named: the last event view alone
+  const last = renderTaskScreen(withTask({ id: 'w', eventViews: [OLD, OTHER], namedViews: [] }), NOW);
+  assert.match(last, /The second table/);
+  assert.doesNotMatch(last, /The old table/);
+  // no event view, or the task not read: no table
+  assert.doesNotMatch(renderTaskScreen(withTask({ id: 'w', eventViews: [], namedViews: [] }), NOW), /et-list/);
+  assert.doesNotMatch(renderTaskScreen(base, NOW), /et-list/);
+});

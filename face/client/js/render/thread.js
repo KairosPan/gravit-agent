@@ -17,6 +17,8 @@ import { chipInner, fileCard } from '../composer/view.js';
 import { metaText, sizeText, isImageSrc } from '../composer/files.js';
 import { maskSpans, maskExcerpt } from '../mask.js';
 import { railView } from '../host/turns-view.js';
+import { reportViews } from '../host/analog.js';
+import { eventTablesHtml } from './event-table.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -221,7 +223,9 @@ function taskMessage(m, conv, state) {
     const status = typeof d.status === 'string' && Object.hasOwn(REPORT_STATUS, d.status) ? REPORT_STATUS[d.status]() : String(d.status ?? '');
     const line = esc(t('thread.task.line', { title, status }));
     const head = typeof d.task === 'string' ? `<a class="task-link" href="#/task/${esc(encodeURIComponent(d.task))}">${line}</a>` : line;
-    return `<details class="sysline ctx" id="relay-${esc(conv.id)}-${esc(m.id)}"><summary>${head}</summary><pre>${esc(maskExcerpt(d.body ?? ''))}</pre></details>`;
+    // the event tables the report carries, drawn open under its line (analog event table §4.1); none draws nothing
+    const tables = eventTablesHtml(state, reportViews(m, typeof d.task === 'string' ? state?.analog?.tasks?.[d.task]?.task?.eventViews ?? null : null));
+    return `<details class="sysline ctx" id="relay-${esc(conv.id)}-${esc(m.id)}"><summary>${head}</summary><pre>${esc(maskExcerpt(d.body ?? ''))}</pre></details>${tables}`;
   }
   if (d.form === 'recovery') return `<div class="sysline">${th('thread.task.recovery')}</div>`;
   if (d.form === 'stopped') return `<div class="sysline">${th('tasks.status.stopped')}</div>`;
