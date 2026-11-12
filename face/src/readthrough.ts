@@ -16,7 +16,8 @@
  *
  * The face's half is here too: {@link wireReadThrough}, which main.ts calls with the Market's quotes whether the
  * desk is on or off, wires the service with the prices, the desk's own symbols and the XNYS clock, and
- * {@link readThroughLane} is the service as the annotator and the watch call it. src/ reaches the service through
+ * {@link readThroughLane} (src/readthrough-lane.ts, a leaf for src/desk.ts's module weight, re-exported here) is
+ * the service as the annotator and the watch call it. src/ reaches the service through
  * the context alone, never by importing anything under plugins/. */
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -25,8 +26,11 @@ import { loadHoldings, loadLevels, loadRules } from "./desk-book.ts";
 import { etDate } from "./et.ts";
 import { nyInstant, sessionFor, xnysWindow, type MarketSession } from "./market-clock.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
+import type { ReadThroughLane } from "./readthrough-lane.ts";
 import { idOf, marketOf } from "./symbols.ts";
 import { AFTER_HOURS_MS } from "./watch-eval.ts";
+
+export { readThroughLane, type ReadThroughAsk, type ReadThroughLane } from "./readthrough-lane.ts";
 
 export const READ_THROUGH_ROW_IDS = ["read-through-service", "read-through-tool"] as const;
 
@@ -55,19 +59,6 @@ export function readThroughPatches(home: string): FacePatchList {
  * and when it traded; `price` and `changePct` are `null` when the Market has none. */
 export interface ReadThroughPrint { symbol: string; price: number | null; changePct: number | null; feed: string; asOf: string | null }
 
-/** One event an annotation run may give a direction for: the stricken symbol and its reference date, `YYYY-MM-DD`. */
-export interface ReadThroughAsk { symbol: string; ref: string }
-
-/** The service's calls the annotator and the watch use, inert while the row is not mounted. */
-export interface ReadThroughLane {
-  ready(): boolean;
-  open(sessionId: string, run: { pass: string; asks: ReadThroughAsk[] }): void;
-  close(sessionId: string): { id: string; text: string }[];
-  given(symbol: string, ref: string): Promise<boolean>;
-  later(items: ReadThroughAsk[]): Promise<string[]>;
-  sent(ids: string[], sent: boolean): Promise<void>;
-}
-
 /** The `readThrough` service as this file calls it (plugins/readthrough/service-row.mjs). */
 type ReadThroughService = ReadThroughLane & { wire(deps: ReadThroughWiring): void };
 
@@ -77,20 +68,6 @@ interface ReadThroughWiring {
   deskSymbols(): Promise<string[]>;
   usSessionOn(): boolean;
   refClose(date: string): string | undefined;
-}
-
-/** The lane over `ctx.get("readThrough")`, read afresh at every call, so a reloaded row is the one called. With no
- * service: `ready` is false, `close` gives nothing, `given` false, `later` nothing, and `open` and `sent` do nothing. */
-export function readThroughLane(ctx: { get(key: string): unknown }): ReadThroughLane {
-  const service = () => ctx.get("readThrough") as ReadThroughService | undefined;
-  return {
-    ready: () => service()?.ready() ?? false,
-    open: (sessionId, run) => service()?.open(sessionId, run),
-    close: (sessionId) => service()?.close(sessionId) ?? [],
-    given: async (symbol, ref) => (await service()?.given(symbol, ref)) ?? false,
-    later: async (items) => (await service()?.later(items)) ?? [],
-    sent: async (ids, sent) => { await service()?.sent(ids, sent); },
-  };
 }
 
 /** The service's prices: each symbol asked of `quotes` as a US share, the prints in the order asked. Rejects with

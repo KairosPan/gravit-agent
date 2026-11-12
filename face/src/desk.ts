@@ -86,7 +86,7 @@ import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskFetch
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
-import { readThroughLane } from "./readthrough.ts";
+import { readThroughLane } from "./readthrough-lane.ts";
 import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts";
 import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
@@ -2000,7 +2000,7 @@ export function installDesk(
   /* The alert annotations' lane (spec §16 H1): each pass's check in a fresh desk agent of its own, never queued behind
    * the conversation's turns; its reply leaves through the conversation's `deliver`, and its run is noted on the watch,
    * read when the run ends - the watch is installed later, after the clock row. Both run on the read-through lane over
-   * the root context's `readThrough` service (src/readthrough.ts), inert while its row is not mounted or with no
+   * the root context's `readThrough` service (src/readthrough-lane.ts), inert while its row is not mounted or with no
    * context. */
   const readThrough = readThroughLane({ get: (key) => deps.ctx?.get?.(key) });
   const annotator = wiring === undefined || conversation === undefined

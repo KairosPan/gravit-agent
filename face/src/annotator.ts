@@ -18,7 +18,7 @@
  * (src/desk.ts `ALERT_DEADLINE_MS`, 240 s from its own `turn/start`) and the fence; the alerts' text sent once, under
  * its provenance line, with the alert's message as its source - and, right before it, for a post whose `readThrough`
  * asks for directions and a lane given, the read-through run opened on the session for the pass and its asks
- * (src/readthrough.ts `ReadThroughLane`). The post resolves `opened` there and the run goes on:
+ * (src/readthrough-lane.ts `ReadThroughLane`). The post resolves `opened` there and the run goes on:
  * - the watchdog: no turn's end by the deadline plus src/firing.ts `FIRING_SLACK_MS` from the followup - a turn that
  *   never started, or one that hung past the supervisor's cut - cancels it (`desk deadline`), and the run ends without
  *   it: the timed-out line for a turn that started, the no-text line for one that never did;
@@ -65,7 +65,7 @@ import type { BudgetState, OffState } from "./desk.ts";
 import type { DeskLine } from "./conversation.ts";
 import type { DeskConversation, PostResult } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionDeps, DeskTurnRecord, SessionEventsOn } from "./desk-session.ts";
-import type { ReadThroughAsk, ReadThroughLane } from "./readthrough.ts";
+import type { ReadThroughAsk, ReadThroughLane } from "./readthrough-lane.ts";
 import type { AgentLike } from "./room.ts";
 import type { MessageLike } from "./room-rules.ts";
 import type { AnnotatedRecord } from "./watch.ts";

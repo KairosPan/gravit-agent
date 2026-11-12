@@ -84,7 +84,7 @@ import { HttpError } from "./http.ts";
 import { nyInstant, sessionBefore, sessionFor, xnysPrevious, xnysWindow, type DayAnswer, type DeskCalendars, type MarketSession } from "./market-clock.ts";
 import type { NewsAnswer } from "./market-news.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
-import type { ReadThroughAsk, ReadThroughLane } from "./readthrough.ts";
+import type { ReadThroughAsk, ReadThroughLane } from "./readthrough-lane.ts";
 import { idOf, type Market } from "./symbols.ts";
 import {
   AFTER_HOURS_MS, alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, REBUILD_WINDOW_MS, rebuildDay, snapOf,
@@ -148,7 +148,7 @@ const MARKETS: readonly Market[] = ["us", "cn"];
  * `deliver` and `budget` the desk conversation's, `post` and `idle` the annotation lane's (src/annotator.ts) - with no
  * `idle` a post waits for nothing but the one before it; `news` the Market's headline read (src/market-news.ts), for
  * a why post - none, each symbol's headlines unavailable; `edgar`, SEC's fetch and contact - none, no filings and a
- * why post's filings unavailable; `readThrough` the read-through lane (src/readthrough.ts), which a why post asks
+ * why post's filings unavailable; `readThrough` the read-through lane (src/readthrough-lane.ts), which a why post asks
  * whether each fallen company's event was given a direction - none, no read-through; `pid` this face's
  * (`process.pid`), `alive` whether a pid lives (`process.kill(pid, 0)`), `tickMs`, `log`. */
 export interface WatchDeps {
