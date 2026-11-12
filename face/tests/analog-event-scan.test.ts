@@ -86,6 +86,18 @@ test("the present case is read fresh, measured by anchor, and in no group", asyn
   near(view.query!.anchors[0]!.measure!.x0, 0.88 / 0.99 - 1);
   assert.equal(view.groups.all.n, 1); assert.deepEqual(view.cases.map((k) => k.symbol), ["OLD"]);
 });
+test("a scan without a present case still reads the market fresh", async () => {
+  const held: Record<string, { bars: typeof EVENT }> = { EVT: { bars: EVENT.slice(0, 151) }, SPY: { bars: EVENT_MARKET.slice(0, 151) } };
+  const m = fakeMarket(held);
+  const keep = createBarsKeep({ ask: m.ask });
+  const first = await scanEvents({ title: "t", events: [ev()], keep });
+  assert.equal(first.coverage.measured, 1);
+  const before = m.calls.length;
+  held.EVT = { bars: EVENT }; held.SPY = { bars: EVENT_MARKET };
+  const view = await scanEvents({ title: "t", events: [ev(), ev({ date: dateAt(155), source: "https://example.com/later" })], keep });
+  assert.deepEqual([...new Set(m.calls.slice(before).map((q) => q.symbol))].sort(), ["EVT", "SPY"]); // SPY's date moved, so EVT was dropped and read again
+  assert.deepEqual(view.cases.map((c) => [c.date, c.state, c.day0]), [["2020-04-10", "measured", "2020-04-10"], [dateAt(155), "measured", dateAt(155)]]);
+});
 test("without the market's own bars the raw changes stay and nothing is summarized against it", async () => {
   const view = await scanEvents({ title: "t", events: Array.from({ length: 8 }, (_, i) => ev({ date: dateAt(92 + i) })), keep: keepOf(fakeMarket({ EVT: { bars: EVENT } })) });
   assert.equal(view.coverage.measured, 8); assert.equal(view.coverage.noContext, 8);

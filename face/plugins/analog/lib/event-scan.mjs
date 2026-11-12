@@ -5,8 +5,8 @@
  * could not be, and why.
  *
  * The input is refused at its first bad field, named by its path. Every history is read in one call to the keep under
- * the scan's deadline; the present case's company (`query`) and the market's (`SPY`) are read fresh, the past events'
- * companies may come from the keep. A market that does not answer with nothing read is a refusal; a company the market
+ * the scan's deadline; the market's (`SPY`) is always read fresh, and so is the present case's company (`query`) when
+ * there is one, so a new session drops what the keep held; the past events' companies may come from the keep. A market that does not answer with nothing read is a refusal; a company the market
  * refuses, one not read before the deadline, an event whose day 0 has not traded, and one with fewer than 20 sessions
  * before day 0 are kept as unmeasured cases with the words that say why, never left out. Without the market's own bars
  * the raw changes stay and every change against the market is null.
@@ -255,7 +255,7 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
   const companies = [...new Set(events.map((e) => e.symbol))];
   const got = await keep.histories(
     [...companies, ...(query === null ? [] : [query.symbol]), MARKET_SYMBOL],
-    { fresh: query === null ? [] : [query.symbol, MARKET_SYMBOL], deadlineMs },
+    { fresh: query === null ? [MARKET_SYMBOL] : [query.symbol, MARKET_SYMBOL], deadlineMs },
   );
   if (got.down && got.read.size === 0) {
     throw refuse.marketUnreachable([...got.refused.values()][0] ?? "the market did not answer");
