@@ -18,6 +18,7 @@ import type { DeliverResult, PostResult } from "../src/desk-conversation.ts";
 import type { DeskLine } from "../src/conversation.ts";
 import type { EdgarFetch } from "../src/edgar.ts";
 import type { NewsAnswer } from "../src/market-news.ts";
+import type { ReadThroughAsk, ReadThroughLane } from "../src/readthrough.ts";
 import { bjDate } from "../src/et.ts";
 import { HttpError } from "../src/http.ts";
 import { deskCalendars, type DeskCalendars, type MarketCalendar, type MarketSession } from "../src/market-clock.ts";
@@ -71,8 +72,11 @@ function quoteOf(a: MarketQuoteIdentity, row: Row | undefined): MarketQuote {
   if (row === undefined) return base;
   if ("unavailable" in row) return { ...base, message: row.unavailable };
   const prev = row.prev ?? null;
+  const change = prev !== null && row.price !== null ? row.price - prev : null;
   return {
-    ...base, price: row.price, prev_close: prev, change: prev !== null && row.price !== null ? row.price - prev : null, as_of: row.asOf, received_at: row.asOf,
+    ...base, price: row.price, prev_close: prev, change, as_of: row.asOf, received_at: row.asOf,
+    /* as the Market's wire has it (src/market-quotes.ts): percent, four places */
+    change_pct: prev === null || change === null ? null : Math.round((change / prev) * 1e6) / 1e4,
     feed: row.feed ?? base.feed, quote_status: "live", message: "", market_status: a.market === "cn" ? (row.phase === "trading" || row.phase === undefined ? "open" : "closed") : "unknown",
     ...(a.market === "cn" ? { cn: { phase: row.phase ?? "trading", lastSession: null } } : {}),
   };
@@ -105,7 +109,8 @@ interface HarnessOpts {
   source?: FakeSource;
   wall?: WallClock;
   deliver?: (text: string, n: number) => DeliverResult | Promise<DeliverResult>;
-  post?: (input: { text: string; source: unknown; message: unknown; replyTo?: string; urgent?: boolean }) => PostResult | Promise<PostResult>;
+  post?: (input: { text: string; source: unknown; message: unknown; replyTo?: string; urgent?: boolean; readThrough?: { asks: ReadThroughAsk[]; later: ReadThroughAsk[] } }) => PostResult | Promise<PostResult>;
+  readThrough?: Pick<ReadThroughLane, "ready" | "given">;
   budget?: BudgetState;
   news?: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>;
   idle?: () => Promise<void>;
@@ -155,6 +160,7 @@ async function harness(o: HarnessOpts): Promise<Harness> {
     ...(o.edgar === undefined ? {} : { edgar: o.edgar }),
     ...(o.news === undefined ? {} : { news: o.news }),
     ...(o.idle === undefined ? {} : { idle: o.idle }),
+    ...(o.readThrough === undefined ? {} : { readThrough: o.readThrough }),
     pid: o.pid ?? 4242,
     alive: o.alive ?? ((p) => p === (o.pid ?? 4242)),
     log: (line) => { logs.push(line); },
@@ -1685,6 +1691,66 @@ test("a US move alert's post is a why post: its alert, its headlines since its r
   assert.equal(post.replyTo, "telegram:100");
   assert.equal(post.urgent, undefined, "an alert of a rule not marked urgent posts no urgent");
   await until("the annotation record", async () => (await h.alertRecords()).some((r) => r.kind === "annotation"));
+  await h.watch.dispose();
+});
+
+const FALL_START = { start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE } };
+const NVDA_EVENT = { symbol: "NVDA", ref: "2026-11-27" };
+
+test("a fall on a company with nothing on record carries the ask and names the company", async () => {
+  const asked: [string, string][] = [];
+  const h = await harness({ ...FALL_START, news: fakeNews().read, readThrough: { ready: () => true, given: async (symbol, ref) => { asked.push([symbol, ref]); return false; } } });
+  await nvdaGap(h);
+  await until("the post", () => h.posts.length === 1);
+  assert.ok(h.posts[0].text.endsWith("It may be called for: NVDA."), h.posts[0].text.slice(-200));
+  assert.deepEqual(h.posts[0].readThrough, { asks: [NVDA_EVENT], later: [] });
+  assert.deepEqual(asked, [["NVDA", "2026-11-27"]]);
+  await h.watch.dispose();
+});
+
+test("a later fall of the same event carries no ask and is listed for the face's line", async () => {
+  const h = await harness({ ...FALL_START, news: fakeNews().read, readThrough: { ready: () => true, given: async () => true } });
+  await nvdaGap(h);
+  await until("the post", () => h.posts.length === 1);
+  assert.ok(h.posts[0].text.endsWith(WHY_INSTRUCTIONS));
+  assert.deepEqual(h.posts[0].readThrough, { asks: [], later: [NVDA_EVENT] });
+  await h.watch.dispose();
+});
+
+test("a rise, a lane that is not ready, and no lane leave the post as it is", async () => {
+  const lane = (ready: boolean) => ({ ready: () => ready, given: async () => false });
+  const rise = await harness({ ...FALL_START, news: fakeNews().read, readThrough: lane(true) });
+  rise.source.tables.us.set("NVDA", us(106, "2026-11-30T15:20:44Z", 100));
+  await rise.wall.advance(0);
+  const notReady = await harness({ ...FALL_START, news: fakeNews().read, readThrough: lane(false) });
+  await nvdaGap(notReady);
+  const none = await harness({ ...FALL_START, news: fakeNews().read });
+  await nvdaGap(none);
+  for (const h of [rise, notReady, none]) {
+    await until("the post", () => h.posts.length === 1);
+    assert.equal("readThrough" in h.posts[0], false);
+    assert.ok(h.posts[0].text.endsWith(WHY_INSTRUCTIONS));
+    await h.watch.dispose();
+  }
+});
+
+test("a record that cannot be read leaves the company out of both lists, with one line", async () => {
+  const h = await harness({ ...FALL_START, news: fakeNews().read, readThrough: { ready: () => true, given: async () => { throw new Error("EIO"); } } });
+  await nvdaGap(h);
+  await until("the post", () => h.posts.length === 1);
+  assert.equal("readThrough" in h.posts[0], false);
+  assert.ok(h.posts[0].text.endsWith(WHY_INSTRUCTIONS));
+  assert.equal(h.logs.filter((line) => line.includes("read-through") && line.includes("EIO")).length, 1);
+  await h.watch.dispose();
+});
+
+test("a lane that fails outright costs the read-through, never the reason: the plain why post goes, with one line", async () => {
+  const h = await harness({ ...FALL_START, news: fakeNews().read, readThrough: { ready: () => { throw new Error("row gone"); }, given: async () => false } });
+  await nvdaGap(h);
+  await until("the post", () => h.posts.length === 1);
+  assert.equal("readThrough" in h.posts[0], false);
+  assert.ok(h.posts[0].text.endsWith(WHY_INSTRUCTIONS));
+  assert.equal(h.logs.filter((line) => line.includes("read-through") && line.includes("row gone")).length, 1);
   await h.watch.dispose();
 });
 

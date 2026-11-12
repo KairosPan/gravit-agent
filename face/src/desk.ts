@@ -86,6 +86,7 @@ import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskFetch
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
+import { readThroughLane } from "./readthrough.ts";
 import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts";
 import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
@@ -1867,7 +1868,8 @@ async function readAlertsCached(home: string): Promise<{ records: (RailAlert | R
  *   `watch`, the sleep watch's clock and timer seams, for tests - not its `append`, which is
  *   always the ledger's; `ctx`, the booted ROOT context, and `quotes`, the Market's quote source main.ts owns
  *   (src/market-quotes.ts), the tools' and the brief's -
- *   which the desk tools need both of - the guard needs `ctx`, and judges below `root`;
+ *   which the desk tools need both of - the guard needs `ctx`, and judges below `root`; the read-through lane the
+ *   annotator and the watch share reads `ctx`'s `readThrough` service;
  *   `root`, the repository whose `desk/journal/` the desk session runs in, `route`, its model route
  *   (src/desk-session.ts `resolveDeskRoute`), `sessionCtx`, the booted ROOT context as the
  *   conversation reads it - and its default model and model calls, which a standing order's route
@@ -1904,7 +1906,7 @@ export function installDesk(
     now?: () => number;
     version?: string;
     watch?: Partial<Omit<AsleepWatchOptions, "append">>;
-    ctx?: DeskGuardCtxLike;
+    ctx?: DeskGuardCtxLike & { get?(key: string): unknown };
     quotes?: MarketQuoteSource;
     root?: string;
     route?: { provider: string; model: string };
@@ -1997,7 +1999,10 @@ export function installDesk(
   };
   /* The alert annotations' lane (spec §16 H1): each pass's check in a fresh desk agent of its own, never queued behind
    * the conversation's turns; its reply leaves through the conversation's `deliver`, and its run is noted on the watch,
-   * read when the run ends - the watch is installed later, after the clock row. */
+   * read when the run ends - the watch is installed later, after the clock row. Both run on the read-through lane over
+   * the root context's `readThrough` service (src/readthrough.ts), inert while its row is not mounted or with no
+   * context. */
+  const readThrough = readThroughLane({ get: (key) => deps.ctx?.get?.(key) });
   const annotator = wiring === undefined || conversation === undefined
     ? undefined
     : createAnnotator({
@@ -2010,6 +2015,7 @@ export function installDesk(
       budget: () => readBudget(home, now(), schedule?.dailyTokens()),
       deadlineMs: deps.alertDeadlineMs ?? ALERT_DEADLINE_MS,
       onAnnotated: (r) => { watch?.noteAnnotated(r); },
+      readThrough,
       clock,
       log,
     });
@@ -2129,6 +2135,7 @@ export function installDesk(
         note,
         post: (input) => annotator.post(input),
         idle: () => annotator.idle(),
+        readThrough,
         budget: () => readBudget(home, now(), schedule?.dailyTokens()),
         ...(edgar === undefined ? {} : { edgar }),
         ...(news === undefined ? {} : { news }),
