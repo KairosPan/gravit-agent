@@ -3037,6 +3037,39 @@ what it checked. For an index the group line names the sectors leading the move.
 desk turn: its tokens count in the day's budget (`standing.yml` `budget.dailyTokens`), several
 times a plan check's — the Desk view's budget line shows what one costs, and you may raise the cap.
 
+**The read-through** (since the read-through plan, 2026-11-12; spec
+`docs/superpowers/specs/2026-11-12-read-through-design.md`; charter A2). When a pass holds a US
+fall on a company with no direction on record under that move's reference close, its why post
+also asks: if the cause is a concrete event at that one company (`公司公布 · 确定` or `媒体报道`)
+and the fall is its own, not its group's or the market's, call `read_through` once, with the
+rivals the event points to or with none. The reason is then capped at 3,000 characters and may
+name no direction in its own words. The tool (`src/readthrough.ts`, the rows under
+`plugins/readthrough/`) admits only the hundred large companies of the analog list and the US
+names in `desk/rules.yml`, `desk/holdings.yml` and `desk/levels.yml` (never a strategy's
+`levels.yml`, SPY, QQQ or the company itself) — add a smaller rival to one of those files to allow
+it; it refuses `high` on an unconfirmed report and any call from a desk turn outside an alert's
+annotation. The face, not the model, writes the block, prices it from the Market and appends it
+under the reason after a blank line, in the same message:
+
+```
+推演 · Gravit 的推断，不是下单 · 确定度 中
+· 逻辑：<the chain from the event to its rivals>
+· 方向：做多 AMD（<the overlap>）；做多 AVGO（<the overlap>）
+· 盘面：NVDA −7.3% · AMD +5.4% · AVGO +1.2% · SPY −0.4%（ROBINHOOD 04:03 ET）
+· 反方：<the strongest reason it is wrong>
+```
+
+or one line, `推演：没有方向 —— <why>`. A block goes only under a turn that ended normally and a
+reply that was delivered; otherwise nothing of it is sent, its record says `sent: false`, and the
+next alert of the same event asks again. A later alert of an event already given carries no ask
+and ends with the face's own line, `推演（<HH:MM ET> 已给）：做多 AMD，此后 +2.1%`, each rival
+re-priced from its recorded print (nothing for a "no direction"). Every accepted call is a
+`direction` line in `$DSH_HOME/face/readthrough/directions.jsonl` — the caller, the arguments and
+the prints of that moment — followed, for an alert's, by a `sent` line; the pass's `annotated`
+record in `alerts.jsonl` names the ids under `directions`. A read-through that fails — the record
+unreadable, the Market down, the lane throwing — costs the block, never the reason. A task's worker
+can call it too: its block, with the event and sources added, is in the task's report.
+
 **`/mute` and `unmute`.** From the phone, `/mute 30m` (`Nm`, `Nh` or `Nd` — a duration is
 required) silences the alerts: `alerts muted until 14:33 ET; detection and the ledger go on. A
 terminal lifts it: npm run desk -- unmute`. While it holds, every alert is recorded
@@ -6598,6 +6631,69 @@ readings in `DEVELOPMENT.md` §7.4's manual why-it-moved **Desk** row.
 
 **Not yet run.** The automated half passes 2026-11-07 (`FACE_SMOKE=1` not run for this round); the
 live feeds, the phone and a real model are the operator's.
+
+### The read-through drill (after the read-through plan; its spec's §7)
+
+PASS is the read-through spec's success (`docs/superpowers/specs/2026-11-12-read-through-design.md`
+§1, §7): on a company's own bad news, a few minutes after the alert, the phone shows the reason and,
+under it in the same message, the read-through block — the logic, the rivals with their prints,
+the counter-case and how sure Gravit is — or one line saying the event points nowhere; never a
+direction in the reason's own words, and every direction on the record with the prints of its
+moment.
+
+**The automated half, no network.** `npm test` runs `readthrough-args`, `readthrough-block`,
+`readthrough-record`, `readthrough-rows`, `readthrough-wiring` and the plan's cases in
+`alert-text`, `annotator`, `watch`, `bots`, `boot`, `desk-preset`, `desk-guard`, `desk-book` and
+`cycle`; `FACE_SMOKE=1 npm test` boots `readthrough-smoke` (who sees `read_through`, the lane, the
+fence, the record) and `watch-smoke`, whose case 11 is the whole chain on a stub model: a fall, the
+call, the block under the reason, one `direction` and one `sent` line, and a second crossing under
+the same close ending with the face's one line. No test reaches the Market, a web page or a model.
+What only this drill checks: a real model's judgement of whose fall it is, its rivals and its
+counter-case, the Market's real prints, and the message on the phone.
+
+**Before the drill**, once: restart the face (`npm run service -- restart`) on this code; keep
+`desk/rules.yml`'s `watch-nvda` (5%), or add a `move_pct` rule with a low threshold on a company
+that is falling that day on its own news. Markets open, the phone at hand.
+
+1. **A company's own fall.** Wait for the rule to fire on a fall with a concrete company event
+   behind it. PASS: the alert ends `reason follows`; the reply under it is the reason in its usual
+   shape, then a blank line, then the block (`推演 · Gravit 的推断，不是下单 · 确定度 …`) or the one
+   line `推演：没有方向 —— …`, all in one message.
+2. **The time.** In `$DSH_HOME/face/desk/alerts.jsonl` read the pass's `annotation` record's `t`
+   and its `annotated` record's `t`. PASS: the seconds between them are recorded beside the 64 to
+   114 s seven why turns took on 2026-11-12, and are inside the 240 s deadline.
+3. **The prints.** PASS: each figure on the `· 盘面：` line matches Markets' row for the same name
+   within the minutes between them (the line names its feed and New York time, once at its end
+   when every figure shares them); a rival that has not traded since the reference close reads
+   `未成交`.
+4. **The words.** PASS: the block has its `· 反方：` line; the reason above it names no rival to
+   buy and no size, price or time; nor do the block's logic, reasons or counter-case (those are the
+   model's words, unchecked — record any you find).
+5. **The record.** In `$DSH_HOME/face/readthrough/directions.jsonl`, PASS: one `direction` line
+   with `caller.kind` `annotation`, the pass, its session and `ref`, each rival's print, the
+   company's and SPY's; then one `sent` line with its id and `sent: true`; and the pass's
+   `annotated` record names that id under `directions`.
+6. **The market's fall.** On a day the index or a whole group falls (`index-move` on SPY or QQQ, or
+   a held name moving with its sector). PASS: the reason says it is the market's or the group's
+   and no block follows it; `directions.jsonl` gains no line for it.
+7. **A second alert of the same event.** When the step-1 rule fires again past its cooldown under
+   the same reference close. PASS: the reply carries no new block and ends with one line,
+   `推演（<HH:MM ET> 已给）：做多 <SYM>，此后 <±x.x%>…`; `directions.jsonl` gains no `direction`
+   line. (After a "no direction" nothing is appended.)
+8. **Asked, with a small company.** In the conversation, ask for a task: what a named company's
+   bad news means for its rivals, naming as one rival a small company on no list and in none of
+   the desk's three files. PASS: no direction names it — the tool answers `OUTSIDE_FENCE <SYM> is
+   not a name a direction may carry …` and records nothing, so the task's report carries no block
+   naming it and `directions.jsonl` has no line naming it; a direction the worker gives without it
+   is a line with `caller.kind` `task` and no `sent` line.
+
+**PASS is steps 1–8**; steps 6, 7 and 8 may land on other days than step 1. Record the date, the
+commit, step 2's seconds, step 1's block or line, and what step 4 found in `DEVELOPMENT.md` §7.4's
+manual read-through **Desk** row. Measure as you go, by hand until scoring exists: how often a
+company's fall gets a direction, a "no direction" or no call, and where each named rival stood one
+and five sessions later against SPY.
+
+**Not yet run.** The live market, the phone and a real model are the operator's.
 
 ## The phone drill (run after plans B1a and B1b land, and after any change to `../account/src/portfolio/identity/`, src/phone.ts, src/phone-bridge.ts, src/card-notice.ts, scripts/watchdog.ts, client/js/host/identity.js, identity-view.js, sheet-identity.js, client/js/render/identity.js or client/js/reducers/identity.js)
 
