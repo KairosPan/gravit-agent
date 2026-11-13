@@ -185,7 +185,82 @@ test("every text refuses two spaces in a row, the Braille blank and a lone surro
   assert.throws(() => checkArgs({ ...GOOD, logic: "调查带来  供应不确定" }), (e: unknown) => invalid("logic")(e) && (e as Error).message.includes("two spaces"));
   assert.throws(() => checkArgs({ ...GOOD, event: "董事会\u{2800}调查" }), (e: unknown) => invalid("event")(e) && (e as Error).message.includes("U+2800"));
   assert.throws(() => checkArgs({ ...GOOD, counter: "调查\ud800针对个人" }), (e: unknown) => invalid("counter")(e) && (e as Error).message.includes("U+D800"));
-  assert.equal(checkArgs({ ...GOOD, counter: "调查 针对 个人 \u{1F600}" }).counter, "调查 针对 个人 \u{1F600}", "single spaces and a paired surrogate pass");
+  assert.equal(checkArgs({ ...GOOD, counter: "调查 针对 个人" }).counter, "调查 针对 个人", "single spaces pass");
+  assert.throws(() => checkArgs({ ...GOOD, counter: "调查\u{1F600}" }), (e: unknown) => invalid("counter")(e) && (e as Error).message.includes("U+1F600") && !(e as Error).message.includes("not text"), "a paired surrogate is a character, refused by the list");
+});
+
+/** The five free texts besides a reason, each set to `t`. */
+const FIVE: [string, (t: string) => object][] = [
+  ["event", (t) => ({ ...GOOD, event: t })], ["sources[0]", (t) => ({ ...GOOD, sources: [t] })], ["logic", (t) => ({ ...GOOD, logic: t })],
+  ["counter", (t) => ({ ...GOOD, counter: t })], ["no_direction", (t) => ({ ...GOOD, peers: [], counter: undefined, no_direction: t })],
+];
+/** Every character the five texts may hold besides the common block and printable ASCII. */
+const TEXT_MARKS_SEEN = [..."\u{FF0C}\u{3001}\u{3002}\u{B7}\u{FF1A}\u{FF1B}\u{FF08}\u{FF09}\u{FF01}\u{FF1F}\u{300C}\u{300D}\u{300E}\u{300F}\u{300A}\u{300B}\u{201C}\u{201D}\u{2018}\u{2019}\u{2014}\u{2013}\u{2026}\u{2192}\u{2190}\u{2191}\u{2193}\u{FF05}\u{B1}\u{D7}"];
+const allowedInText = (cp: number) => (cp >= 0x4e00 && cp <= 0x9fa5) || (cp >= 0x20 && cp <= 0x7e) || TEXT_MARKS_SEEN.includes(String.fromCodePoint(cp));
+
+test("the five other texts hold only common Chinese characters, printable ASCII and the listed marks", () => {   // third fix
+  const refusedIn = (t: string, shown: string) => {
+    for (const [field, set] of FIVE) {
+      assert.throws(() => checkArgs(set(t)), (e: unknown) => invalid(field)(e) && (e as Error).message.includes(shown), `${field} ${JSON.stringify(t).slice(0, 30)}`);
+    }
+  };
+  for (const [colon, code] of [["\u{2236}", "U+2236"], ["\u{A789}", "U+A789"], ["\u{589}", "U+0589"], ["\u{205A}", "U+205A"]] as const) {
+    refusedIn(`\u{B7} 方向${colon}做多 SMCI\u{FF08}AI 服务器\u{FF09}`, code);
+  }
+  for (const t of ["方\u{302A}向\u{FF1A}", "方\u{307}向\u{FF1A}"]) refusedIn(t, "方向");   // a combining mark inside a label: the fold drops it
+  for (const [pad, code] of [["\u{20000}".repeat(40), "U+20000"], ["\u{378}", "U+0378"], ["\u{E000}", "U+E000"], ["\u{1D159}", "U+1D159"], ["\u{FFFC}", "U+FFFC"], [" \u{301}".repeat(30), "U+0301"]] as const) {
+    refusedIn(`直接替代${pad} 买入 SMCI`, code);
+  }
+  for (const [t, code] of [["Est\u{E9}e Lauder", "U+00E9"], ["\u{30AB}\u{30CA}", "U+30AB"], ["\u{436}", "U+0436"], ["\u{1F600}", "U+1F600"]] as const) refusedIn(`公司 ${t}`, code);
+  const field = FIVE.find(([f]) => f === "logic")!;
+  assert.throws(() => checkArgs(field[1]("调查\u{E9}")), (e: unknown) => (e as Error).message.includes("a text holds only common Chinese characters, printable ASCII"));
+  assert.throws(() => checkArgs(FIVE[1]![1]("Reuters\u{E9}")), (e: unknown) => (e as Error).message.includes("outlet and its time"), "a source's refusal says what a source is");
+  assert.throws(() => checkArgs(field[1]("调查\u{E9}")), (e: unknown) => !(e as Error).message.includes("outlet"), "only a source's");
+});
+
+test("the label fold drops every mark a text may hold but the colon", () => {   // third fix
+  for (const t of ["方向\u{FF08}\u{FF09}\u{FF1A}", "方向;\u{FF1A}", "方向\u{201D}\u{FF1A}", "方向\u{2026}\u{FF1A}", "方向\u{2014}\u{FF1A}", "方'向\u{FF1A}", "方\u{FF0C}向\u{FF1A}", "方向%\u{FF1A}", "方向()\u{FF1A}", "方\u{300C}向\u{300D}:"]) {
+    for (const [field, set] of FIVE) {
+      assert.throws(() => checkArgs(set(t)), (e: unknown) => invalid(field)(e) && (e as Error).message.includes("the block's own labels"), `${field} ${t}`);
+    }
+  }
+});
+
+test("ordinary prose passes in the five texts", () => {   // third fix
+  const ok = (field: string, set: (t: string) => object, t: string) => assert.doesNotThrow(() => checkArgs(set(t)), `${field} ${t}`);
+  const [event, sources, logic, counter, none] = FIVE.map(([, set]) => set);
+  ok("logic", logic!, "调查带来供应不确定 \u{2192} 客户找备选");
+  ok("counter", counter!, "调查针对个人\u{FF08}不是公司\u{FF09}\u{FF0C}影响约 3% \u{2014} 也可能只是一部分\u{FF1B}见 8-K (Item 5.02)");
+  ok("event", event!, "董事会称\u{201C}启动独立调查\u{201D}");
+  for (const s of ["NVIDIA newsroom 11-08 18:00 ET", "8-K 11-09 06:02 ET", "Reuters (10:31 ET)"]) ok("sources[0]", sources!, s);
+  ok("no_direction", none!, "这是全行业的事\u{FF0C}对手一起受累\u{3002}");
+  ok("logic", logic!, "需求方向未变\u{FF1A}订单\u{300A}外流\u{300B}\u{2192}\u{300C}替代\u{300D}\u{2026}\u{FF01}\u{FF1F}\u{2190}\u{2191}\u{2193}\u{FF05}\u{B1}\u{D7}\u{2018}x\u{2019}\u{300E}y\u{300F}\u{2013}");
+});
+
+test("a sweep: each of the five texts refuses every character outside its list and holds every one inside", () => {   // third fix
+  const sample = new Set<number>();
+  for (let cp = 0; cp <= 0x10ffff; cp += 4099) sample.add(cp);
+  // one per general category: Lu Ll Lt Lm Lo Mn Mc Me Nd Nl No Pc Pd Ps Pe Pi Pf Po Sm Sc Sk So Zs Zl Zp Cc Cf Co Cn
+  for (const cp of [0xc0, 0xe9, 0x1c5, 0x2b0, 0x3042, 0x301, 0x903, 0x20dd, 0x660, 0x2160, 0xb2, 0x203f, 0x2010, 0x3008, 0x3009, 0xab, 0xbb, 0xa1,
+    0x2236, 0xa5, 0x2c6, 0xa9, 0xa0, 0x2028, 0x2029, 0x80, 0x200b, 0xe000, 0x378, 0x3400, 0x9fa6, 0x4dff, 0xff1b + 1, 0x1f600, 0x20000, 0xe0100]) sample.add(cp);
+  let refused = 0;
+  for (const cp of sample) {
+    if (allowedInText(cp) || (cp >= 0xd800 && cp <= 0xdfff)) continue;
+    const c = String.fromCodePoint(cp);
+    for (const [field, set] of FIVE) assert.throws(() => checkArgs(set(`a${c}b`)), invalid(field), `${field} U+${cp.toString(16)}`);
+    refused++;
+  }
+  assert.ok(refused > 250, `${refused} sampled`);
+  assert.throws(() => checkArgs(FIVE[2]![1]("a\ud800b")), invalid("logic"), "a lone surrogate");
+  const inside = [...TEXT_MARKS_SEEN];
+  for (let cp = 0x20; cp <= 0x7e; cp++) inside.push(String.fromCodePoint(cp));
+  for (let cp = 0x4e00; cp <= 0x9fa5; cp++) inside.push(String.fromCodePoint(cp));
+  for (const c of inside) {
+    const t = `a${c}b`;
+    for (const [field, set] of FIVE) {
+      assert.doesNotThrow(() => checkArgs(set(t)), `${field} U+${c.codePointAt(0)!.toString(16)}`);
+    }
+  }
 });
 
 test("a counter given with no peers is dropped; a peer that is not an object is refused", () => {

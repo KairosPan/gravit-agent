@@ -6,7 +6,7 @@
  * call; then the reply `{ ok, id, block }`. Every refusal throws through `asToolError`.
  */
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { LIMITS } from "./lib/args.mjs";
+import { LIMITS, REASON_MARKS, TEXT_MARKS } from "./lib/args.mjs";
 import { LABELS } from "./lib/block.mjs";
 import { asToolError, callerIsChild, refuse } from "./lib/errors.mjs";
 
@@ -19,6 +19,11 @@ export const READ_THROUGH_DESCRIPTION =
 /** The desk's preset id (src/desk-names.ts `DESK_PRESET`): a session on it is a desk agent. */
 const DESK_PRESET = "gravit-desk";
 
+/** What every text but a reason may hold, as the parameters say it. */
+const HOLDS = `common Chinese characters, printable ASCII and ${TEXT_MARKS} only`;
+/** The block's own labels, which no text may hold. */
+const NO_LABELS = `none of the block's own labels (${Object.entries(LABELS).map(([k, l]) => (k === "head" ? l : `${l}：`)).join(", ")})`;
+
 /** The parameters, in the dsh DSL. Their checks are the service's (`lib/args.mjs`). */
 const PARAMETERS = {
   symbol: { type: "string", description: "the stricken company's US ticker, such as NVDA", required: true },
@@ -28,14 +33,14 @@ const PARAMETERS = {
     description: "company when the company itself said it; reported when it is a report the company has not confirmed",
     required: true,
   },
-  event: { type: "string", description: `what happened, one line, at most ${LIMITS.event} characters`, required: true },
+  event: { type: "string", description: `what happened, one line, at most ${LIMITS.event} characters; ${HOLDS}`, required: true },
   sources: {
     type: "array",
     items: { type: "string" },
-    description: `1 to ${LIMITS.sources} sources the event stands on, each one line of at most ${LIMITS.source} characters: the outlet and its time, with no label before them`,
+    description: `1 to ${LIMITS.sources} sources the event stands on, each one line of at most ${LIMITS.source} characters: the outlet and its time, with no label before them; ${HOLDS}`,
     required: true,
   },
-  logic: { type: "string", description: `the chain from the event to the rivals, one line, at most ${LIMITS.logic} characters`, required: true },
+  logic: { type: "string", description: `the chain from the event to the rivals, one line, at most ${LIMITS.logic} characters; ${HOLDS}; ${NO_LABELS}`, required: true },
   peers: {
     type: "array",
     description: `0 to ${LIMITS.peers} rivals to go long; empty when the event is the industry's`,
@@ -47,14 +52,14 @@ const PARAMETERS = {
         symbol: { type: "string", description: "the rival's US ticker", required: true },
         reason: {
           type: "string",
-          description: `the business overlap, at most ${LIMITS.reason} characters: only common Chinese characters, ASCII letters and digits, single spaces and the marks ，、。·：,.:'’-–—/%+& - no brackets, no double quotes, no semicolon; and, as in every text, none of the block's own labels (${Object.entries(LABELS).map(([k, l]) => (k === "head" ? l : `${l}：`)).join(", ")})`,
+          description: `the business overlap, at most ${LIMITS.reason} characters: only common Chinese characters, ASCII letters and digits, single spaces and the marks ${REASON_MARKS} - no brackets, no double quotes, no semicolon; and, as in every text, ${NO_LABELS}`,
           required: true,
         },
       },
     },
   },
-  no_direction: { type: "string", description: `optional: why no rival is named, at most ${LIMITS.noDirection} characters` },
-  counter: { type: "string", description: `optional: the strongest reason you are wrong, at most ${LIMITS.counter} characters` },
+  no_direction: { type: "string", description: `optional: why no rival is named, at most ${LIMITS.noDirection} characters; ${HOLDS}` },
+  counter: { type: "string", description: `optional: the strongest reason you are wrong, at most ${LIMITS.counter} characters; ${HOLDS}` },
   certainty: { type: "string", enum: ["high", "medium", "low"], description: "how sure the inference is", required: true },
 };
 
