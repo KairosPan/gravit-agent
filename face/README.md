@@ -3054,7 +3054,8 @@ Chinese characters (U+4E00–U+9FA5), ASCII letters and digits, single spaces an
 letter, other script or rare ideograph either) or saying `做多` (whatever space or mark stands
 between, or in a compatibility form), and any text holding a control or format character, an
 invisible character, the Braille blank, a lone surrogate, a space other than the plain one, two
-spaces in a row, or one of the block's own labels (`逻辑：`, `方向：`, `盘面：`, `反方：`, `推演`). The face,
+spaces in a row, or one of the block's own labels (`推演`, `事件：`, `逻辑：`, `方向：`, `盘面：`,
+`反方：`, `来源：` — even split by a space or a mark, so a source is its outlet and time alone). The face,
 not the model, writes the block, prices it from the Market and appends it under the reason after a
 blank line, in the same message:
 
