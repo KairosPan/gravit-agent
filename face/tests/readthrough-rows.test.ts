@@ -253,6 +253,20 @@ test("later measures only from a print the block showed traded, to a print later
   assert.deepEqual(await old.service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), ["推演（04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
 });
 
+test("later compares the instants as times, not as text", async (t) => {   // second fix N2, round 2
+  const { service, rows } = await mounted(t);
+  service.open("s-1", RUN);
+  const { id } = await service.propose(ARGS, { sessionId: "s-1", desk: true });   // given at AT, 09:03:10.000Z
+  await service.sent([id], true);
+  const event = [{ symbol: "NVDA", ref: "2026-11-06" }];
+  for (const asOf of ["2026-11-09T10:03:00+01:00", "2026-11-09T09:03:10Z"]) {   // before, and at, the direction; each sorts after it as text
+    rows.AMD = { price: 502.8, changePct: 12, asOf };
+    assert.deepEqual(await service.later(event), ["推演（04:03 ET 已给）：做多 AMD"], asOf);
+  }
+  rows.AMD = { price: 502.8, changePct: 12, asOf: "2026-11-09T04:03:11-05:00" };   // a second after it, sorting before it as text
+  assert.deepEqual(await service.later(event), ["推演（04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
+});
+
 test("later names only the rivals still inside the fence, and writes no line with none left", async (t) => {   // final review M2
   const { service, rows, state } = await mounted(t);
   service.open("s-1", RUN);
