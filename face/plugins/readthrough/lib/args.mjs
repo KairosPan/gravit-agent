@@ -2,8 +2,10 @@
 /**
  * The check of `read_through`'s arguments: what the model proposes, trimmed and bounded, its symbols upper-cased, or
  * an `INVALID` refusal naming the first bad field. A text is one line within its limit in characters (code points),
- * not bytes, with no control or format character; a peer's reason also holds none of the direction line's own markup
- * (`（ ） ( ) ； ;` and `做多`), so the line the operator reads holds only the entries the face checked.
+ * not bytes, with no control or format character, no invisible (default-ignorable) character and no space but the
+ * plain one. A peer's reason holds only letters and digits of any script, plain spaces and the marks of `REASON_MARKS`,
+ * so no bracket, no semicolon and no combining mark, and it never says `做多`, even spaced out or in a compatibility
+ * form: the direction line the operator reads holds only the entries the face checked.
  */
 import { normalizeSymbol } from "../../analog/lib/chart-scan.mjs";
 import { refuse } from "./errors.mjs";
@@ -23,13 +25,23 @@ const CERTAINTIES = new Set(["high", "medium", "low"]);
 const BREAK = /[\n\r\v\f\u0085\u2028\u2029]/;
 /** A control or format character (a bidi mark, a zero-width space among them), which no text may hold. */
 const CONTROL = /[\p{Cc}\p{Cf}]/u;
-/** What a peer's reason may not hold: the direction line's own markup (`\u505a\u591a AMD\uff08\u2026\uff09\uff1b\u505a\u591a \u2026`), so that a reason can
- * never read as a second entry of that line. */
-const MARKUP = ["\uff08", "\uff09", "(", ")", "\uff1b", ";", "\u505a\u591a"];
+/** An invisible character that is neither control nor format (U+034F, a variation selector, a Hangul filler), which
+ * no text may hold. */
+const IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
+/** A space separator other than the plain space (U+00A0, U+3000, the U+2000 block), which no text may hold. */
+const ODD_SPACE = /[\p{Zs}--[\u0020]]/v;
+/** The marks a peer's reason may hold besides letters, digits and the plain space: `，、。·：,.:'’-–—/%+&`. */
+const REASON_MARKS = "\uff0c\u3001\u3002\u00b7\uff1a,.:'\u2019-\u2013\u2014/%+&";
+/** The first character a reason may not hold: anything but a letter, a digit, the plain space or a mark of
+ * {@link REASON_MARKS}, so that a reason can never read as a second entry of the direction line
+ * (`做多 AMD（…）；做多 …`). */
+const NOT_REASON = new RegExp(`[^\\p{L}\\p{N} ${REASON_MARKS.replace(/[-/]/g, "\\$&")}]`, "u");
+/** What a reason holds, as a refusal says it. */
+const REASON_HOLDS = `a reason holds only letters, digits, plain spaces and ${[...REASON_MARKS].join(" ")}`;
 
 /**
  * A text trimmed, or `INVALID` when it is not a string, is empty, holds a line break, a control or format character,
- * or exceeds its limit.
+ * an invisible character or a space other than U+0020, or exceeds its limit.
  * @param {string} field
  * @param {unknown} raw
  * @param {number} limit
@@ -41,24 +53,41 @@ function text(field, raw, limit) {
   if (value === "") throw refuse.invalid(field, "is empty");
   if (BREAK.test(value)) throw refuse.invalid(field, "is one line, with no line break");
   const control = CONTROL.exec(value)?.[0];
-  if (control !== undefined) {
-    const code = `U+${/** @type {number} */ (control.codePointAt(0)).toString(16).toUpperCase().padStart(4, "0")}`;
-    throw refuse.invalid(field, `holds a control or format character (${code}); remove it`);
-  }
+  if (control !== undefined) throw refuse.invalid(field, `holds a control or format character (${codeOf(control)}); remove it`);
+  const ignorable = IGNORABLE.exec(value)?.[0];
+  if (ignorable !== undefined) throw refuse.invalid(field, `holds an invisible character (${codeOf(ignorable)}); remove it`);
+  const space = ODD_SPACE.exec(value)?.[0];
+  if (space !== undefined) throw refuse.invalid(field, `holds a space other than the plain space (${codeOf(space)}); use a plain space`);
   if ([...value].length > limit) throw refuse.invalid(field, `is at most ${limit} characters`);
   return value;
 }
 
 /**
- * A peer's reason: a text, or `INVALID` naming the first of the line's markup it holds.
+ * A character's code point as `U+XXXX`.
+ * @param {string} c
+ */
+function codeOf(c) {
+  return `U+${/** @type {number} */ (c.codePointAt(0)).toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+/**
+ * A peer's reason: a text, or `INVALID` naming the first character it may not hold - quoted when it is a visible
+ * punctuation mark or symbol, by its code point always - or saying it holds `做多` once compatibility forms are folded
+ * (NFKC) and every space is dropped.
  * @param {string} field
  * @param {unknown} raw
  * @returns {string}
  */
 function reasonText(field, raw) {
   const value = text(field, raw, LIMITS.reason);
-  const bad = MARKUP.find((m) => value.includes(m));
-  if (bad !== undefined) throw refuse.invalid(field, `holds "${bad}"; a reason may not hold ${MARKUP.join(" ")}: remove it and say the overlap in plain words`);
+  const bad = NOT_REASON.exec(value)?.[0];
+  if (bad !== undefined) {
+    const shown = /^[\p{P}\p{S}]$/u.test(bad) ? `"${bad}" (${codeOf(bad)})` : codeOf(bad);
+    throw refuse.invalid(field, `holds ${shown}; ${REASON_HOLDS}: remove it and say the overlap in plain words`);
+  }
+  if (value.normalize("NFKC").replace(/\s/gu, "").includes("做多")) {
+    throw refuse.invalid(field, `holds "做多"; a reason never says 做多, even spaced out: say the overlap in plain words`);
+  }
   return value;
 }
 
