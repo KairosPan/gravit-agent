@@ -3052,10 +3052,15 @@ from a desk turn outside an alert's annotation, a rival's reason holding anythin
 Chinese characters (U+4E00–U+9FA5), ASCII letters and digits, single spaces and the marks
 `，、。·：,.:'’-–—/%+&` (so no bracket, double quotation mark or semicolon of any script, no accented
 letter, other script or rare ideograph either) or saying `做多` (whatever space or mark stands
-between, or in a compatibility form), and any text holding a control or format character, an
-invisible character, the Braille blank, a lone surrogate, a space other than the plain one, two
-spaces in a row, or one of the block's own labels (`推演`, `事件：`, `逻辑：`, `方向：`, `盘面：`,
-`反方：`, `来源：` — even split by a space or a mark, so a source is its outlet and time alone). The face,
+between, or in a compatibility form), the event, a source, the logic, the counter-case or a "no
+direction" holding anything but common Chinese characters, printable ASCII and the marks
+`，、。·：；（）！？「」『』《》“”‘’—–…→←↑↓％±×` (so no other script, accented letter, combining mark,
+colon look-alike or character a phone draws blank), and any text holding a control or format
+character, an invisible character, the Braille blank, a lone surrogate, a space other than the
+plain one, two spaces in a row, or one of the block's own labels (`推演`, `事件：`, `逻辑：`, `方向：`,
+`盘面：`, `反方：`, `来源：` — even split by a space, a bracket, a quote or any other mark, so a source
+is the outlet and its time alone). Sizes, prices, times and names outside the fence written in plain
+words are not caught. The face,
 not the model, writes the block, prices it from the Market and appends it under the reason after a
 blank line, in the same message:
 
@@ -6690,8 +6695,8 @@ that is falling that day on its own news. Markets open, the phone at hand.
    rival, each reason only common Chinese characters, ASCII letters and digits, single spaces
    and `，、。·：,.:'’-–—/%+&`, and no text of the block holds another of its labels; the reason above
    it names no rival to buy and no size, price or time; nor do the block's logic, reasons or
-   counter-case (those are the model's words, checked only for their characters — record any you
-   find).
+   counter-case (those are the model's words, checked for their characters and for the block's
+   labels, not for what they say — record any you find).
 5. **The record.** In `$DSH_HOME/face/readthrough/directions.jsonl`, PASS: one `direction` line
    with `caller.kind` `annotation`, the pass, its session and `ref`, each rival's print, the
    company's and SPY's; then one `sent` line with its id and `sent: true`; and the pass's
