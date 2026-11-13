@@ -10,7 +10,9 @@
  * market's reaction, one before it reads `未成交`; `close(sessionId)`, the blocks that run accepted, in call order, the
  * run then forgotten; `given(symbol, ref)`, whether a direction for that event is on record as sent (its latest
  * `sent` line true); `later(items)`, a re-priced line for each such direction that named rivals, naming only those
- * still inside the fence the call passed, read again now, and no line with none left; `sent(ids, sent)`, one
+ * still inside the fence the call passed, read again now, and no line with none left - a rival's `此后` measured from
+ * its recorded print only when that print traded, to a print read now only when it is later than the direction, and
+ * the rival named with no figure otherwise; `sent(ids, sent)`, one
  * `sent` line an id; and `propose(raw, { sessionId, desk })`, which checks a call (an index fund of `NEVER` is never
  * the company), prices it, renders its block and then records it, so a render that throws records nothing. Every
  * `propose` runs on one promise chain for the service; a run keeps the symbols it has accepted, so the second of two
@@ -193,10 +195,15 @@ export function apply(ctx, config) {
         } catch {
           continue;
         }
+        // from the recorded print only when the block showed it traded; to a print only when it is later than the
+        // direction itself: either side missing, the rival is named with no figure
+        const givenAt = Date.parse(entry.t);
+        /** @param {Quote | undefined} q */
+        const nowOf = (q) => (q !== undefined && q.asOf !== null && Date.parse(q.asOf) > givenAt ? q.price : null);
         const line = renderLater({
           givenAt: entry.t,
           now: now().toISOString(),
-          peers: peers.map((p, i) => ({ symbol: p.symbol, then: p.price, now: quotes[i]?.price ?? null })),
+          peers: peers.map((p, i) => ({ symbol: p.symbol, then: p.traded ? p.price : null, now: nowOf(quotes[i]) })),
         });
         if (line !== null) lines.push(line);
       }

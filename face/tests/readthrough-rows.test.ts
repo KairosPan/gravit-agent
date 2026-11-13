@@ -18,6 +18,8 @@ const ARGS = {
   peers: [{ symbol: "AMD", reason: "数据中心 GPU 的直接替代" }], counter: "调查针对个人", certainty: "medium",
 };
 const RUN = { pass: "p-1", asks: [{ symbol: "NVDA", ref: "2026-11-06", since: MONDAY_04 }] };
+/** A print a minute after the direction was given (`AT`): the "now" a later line measures to. */
+const LATER = "2026-11-09T09:04:10.000Z";
 
 type ToolDef = { name: string; description: string; parameters: unknown; execute(args: unknown, exec: unknown): Promise<string> };
 function fakeScope() {
@@ -117,6 +119,7 @@ test("across a restart: a bare direction line is not given; one marked sent is",
   again.service.close("s-2");
   await again.service.sent([id], true);
   const third = await mounted(t, true, recordDir);
+  third.rows.AMD = { price: 473.39, changePct: 5.42, asOf: LATER };
   assert.equal(await third.service.given("NVDA", "2026-11-06"), true);
   third.service.open("s-3", RUN);
   await assert.rejects(third.service.propose(ARGS, { sessionId: "s-3", desk: true }), code("ALREADY_GIVEN"));
@@ -210,7 +213,7 @@ test("later re-prices a recorded direction; a no-direction, an unknown event and
   service.open("s-1", RUN);
   const { id } = await service.propose(ARGS, { sessionId: "s-1", desk: true });
   await service.sent([id], true);
-  rows.AMD = { price: 502.8, changePct: 12 };
+  rows.AMD = { price: 502.8, changePct: 12, asOf: LATER };
   assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }, { symbol: "INTC", ref: "2026-11-06" }]), ["推演（04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
   state.now = "2026-11-10T15:00:00.000Z";   // the next day
   assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), ["推演（11-09 04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
@@ -218,11 +221,37 @@ test("later re-prices a recorded direction; a no-direction, an unknown event and
   assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), []);
 });
 
+test("later measures only from a print the block showed traded, to a print later than the direction", async (t) => {   // second fix N2
+  const { service, rows } = await mounted(t);
+  rows.AMD = { price: 449.04, changePct: 0.2, asOf: "2026-11-07T00:58:00.000Z" };   // Friday's print: the block read AMD 未成交
+  service.open("s-1", RUN);
+  const { id, block } = await service.propose(ARGS, { sessionId: "s-1", desk: true });
+  assert.ok(block.includes("AMD 未成交"));
+  await service.sent([id], true);
+  rows.AMD = { price: 473.39, changePct: 5.42, asOf: LATER };
+  assert.deepEqual(await service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), ["推演（04:03 ET 已给）：做多 AMD"], "no 此后 from a print never traded");
+
+  const old = await mounted(t);
+  old.service.open("s-1", RUN);
+  const given = await old.service.propose(ARGS, { sessionId: "s-1", desk: true });
+  await old.service.sent([given.id], true);
+  old.rows.AMD = { price: 502.8, changePct: 12, asOf: "2026-11-09T09:02:00.000Z" };   // past since, but before the direction
+  assert.deepEqual(await old.service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), ["推演（04:03 ET 已给）：做多 AMD"], "no figure from a print older than the direction");
+  old.rows.AMD = { price: 502.8, changePct: 12, asOf: AT };
+  assert.deepEqual(await old.service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), ["推演（04:03 ET 已给）：做多 AMD"], "nor from one of its own instant");
+  old.rows.AMD = { price: 502.8, changePct: 12, asOf: null };
+  assert.deepEqual(await old.service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), ["推演（04:03 ET 已给）：做多 AMD"], "nor from one with no time");
+  old.rows.AMD = { price: 502.8, changePct: 12, asOf: LATER };
+  assert.deepEqual(await old.service.later([{ symbol: "NVDA", ref: "2026-11-06" }]), ["推演（04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
+});
+
 test("later names only the rivals still inside the fence, and writes no line with none left", async (t) => {   // final review M2
-  const { service, state } = await mounted(t);
+  const { service, rows, state } = await mounted(t);
   service.open("s-1", RUN);
   const { id } = await service.propose({ ...ARGS, peers: [{ symbol: "AMD", reason: "数据中心 GPU 的直接替代" }, { symbol: "CRWV", reason: "在桌面的文件里" }] }, { sessionId: "s-1", desk: true });
   await service.sent([id], true);
+  rows.AMD = { ...rows.AMD!, asOf: LATER };
+  rows.CRWV = { ...rows.CRWV!, asOf: LATER };
   const event = [{ symbol: "NVDA", ref: "2026-11-06" }];
   assert.deepEqual(await service.later(event), ["推演（04:03 ET 已给）：做多 AMD，此后 0.0%；做多 CRWV，此后 0.0%"]);
   state.desk = [];   // CRWV left the desk's files
