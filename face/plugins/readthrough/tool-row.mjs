@@ -44,7 +44,11 @@ const PARAMETERS = {
       additionalProperties: false,
       properties: {
         symbol: { type: "string", description: "the rival's US ticker", required: true },
-        reason: { type: "string", description: `the business overlap, at most ${LIMITS.reason} characters`, required: true },
+        reason: {
+          type: "string",
+          description: `the business overlap, at most ${LIMITS.reason} characters: only Chinese characters, ASCII letters and digits, single spaces and the marks ，、。·：,.:'’-–—/%+& - no brackets, no quotes, no semicolon`,
+          required: true,
+        },
       },
     },
   },
