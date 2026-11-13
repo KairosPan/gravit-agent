@@ -20,6 +20,7 @@ import { HttpError } from "../src/http.ts";
 import { BOTS_ROOT } from "../src/overlay.ts";
 import { LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
 import { ANALOG_TOOL_NAMES } from "../src/analog.ts";
+import { READ_THROUGH_TOOL_NAMES } from "../src/readthrough.ts";
 import { expandAllow } from "../plugins/bot.js";
 
 const noPresets = async () => [] as { id: string; broken?: string }[];
@@ -159,6 +160,14 @@ test("no bot sees an analog_ tool: DEFAULT_ALLOW and every shipped bot's allow l
   const isAnalog = (name: string) => name.startsWith("analog_");
   assert.deepEqual(expandAllow([...DEFAULT_ALLOW], known).allow.filter(isAnalog), [], "DEFAULT_ALLOW");
   for (const bot of await listBots(BOTS_ROOT, noPresets)) assert.deepEqual(expandAllow(bot.allow, known).allow.filter(isAnalog), [], bot.id);
+});
+
+test("no bot sees read_through: DEFAULT_ALLOW and every shipped bot's allow list admit none", async () => {
+  assert.deepEqual([...READ_THROUGH_TOOL_NAMES], ["read_through"]);
+  const known = new Set([...DEFAULT_ALLOW, ...READ_THROUGH_TOOL_NAMES]);
+  const isIt = (name: string) => name === "read_through";
+  assert.deepEqual(expandAllow([...DEFAULT_ALLOW], known).allow.filter(isIt), [], "DEFAULT_ALLOW");
+  for (const bot of await listBots(BOTS_ROOT, noPresets)) assert.deepEqual(expandAllow(bot.allow, known).allow.filter(isIt), [], bot.id);
 });
 
 test("createBot copies the template, writes the three files, renders the composition, and refuses a second time", async () => {

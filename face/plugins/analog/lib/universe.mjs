@@ -1,8 +1,8 @@
 // face/plugins/analog/lib/universe.mjs
 /**
  * A list of today's large US companies, the date it was drawn and the rule it was drawn by. It was drawn for the
- * chart scan, withdrawn on 2026-11-13, and nothing in this plugin reads it now; it is kept as the fixed list other
- * rows may fence themselves by. Companies that failed or were delisted are missing from it.
+ * chart scan, withdrawn on 2026-11-13; nothing in this plugin reads it now, and the read-through rows
+ * (`face/plugins/readthrough/`) fence their peers by it. Companies that failed or were delisted are missing from it.
  */
 
 /** The list's date. */

@@ -614,7 +614,7 @@ test("the shipped desk/rules.yml loads with no refusal", async () => {
   assert.equal(r.missing, undefined);
   assert.deepEqual(r.refusals, []);
   assert.deepEqual(r.entries.map((e) => [e.id, e.kind]), [
-    ["holding-move", "move_pct"], ["index-move", "move_pct"], ["filing", "filing"], ["watch-crwv", "move_pct"], ["watch-intc", "move_pct"],
+    ["holding-move", "move_pct"], ["index-move", "move_pct"], ["filing", "filing"], ["watch-crwv", "move_pct"], ["watch-intc", "move_pct"], ["watch-nvda", "move_pct"],
   ]);
   assert.deepEqual(r.entries[2].symbols, { holdings: true, levels: true, symbols: [] });
   assert.equal(r.entries[0].annotate, true);
@@ -625,6 +625,7 @@ test("the shipped desk/rules.yml loads with no refusal", async () => {
     { file: RULES, index: 2, id: "filing", symbols: { holdings: true, levels: true, symbols: [] }, annotate: false, urgent: false, kind: "filing", forms: ["8-K", "8-K/A", "4"], cooldownMs: 1_800_000 },
     { file: RULES, index: 3, id: "watch-crwv", symbols: { holdings: false, levels: false, symbols: ["CRWV"] }, annotate: true, urgent: false, kind: "move_pct", movePct: 8, sessions: "all", cooldownMs: 1_800_000 },
     { file: RULES, index: 4, id: "watch-intc", symbols: { holdings: false, levels: false, symbols: ["INTC"] }, annotate: true, urgent: false, kind: "move_pct", movePct: 5, sessions: "all", cooldownMs: 1_800_000 },
+    { file: RULES, index: 5, id: "watch-nvda", symbols: { holdings: false, levels: false, symbols: ["NVDA"] }, annotate: true, urgent: false, kind: "move_pct", movePct: 5, sessions: "all", cooldownMs: 1_800_000 },
   ];
   assert.deepEqual(r.entries, want);
 });

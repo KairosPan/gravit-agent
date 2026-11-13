@@ -32,7 +32,8 @@
  * synchronously and go on the send chain in order: the flags read once (OFF and MUTE, then the budget when an alert
  * would be annotated), each hit recorded with its gate's decision, each send delivered and its delivery recorded, and
  * then its posted alerts - an annotated hit that is a US price move (a why post: its headlines from the Market since
- * its reference close and its 8-K filings of the last 24 h, each read bounded at {@link WHY_READ_MS}) or has a plan to
+ * its reference close and its 8-K filings of the last 24 h, each read bounded at {@link WHY_READ_MS}, and the
+ * read-through it asks for, {@link WatchDeps.readThrough}) or has a plan to
  * check; an A-share move with no plan is posted nothing - on a buffer that a second chain no pass waits on (ruling 5)
  * drains: it waits for the lane to be idle, then posts the whole buffer as one to the annotation lane (src/annotator.ts,
  * spec §16 H1), so passes that come while a turn runs are folded into one post and one `annotation` record; a batch
@@ -70,6 +71,7 @@ import {
   levelDistancePct, loadHoldings, loadLevels, loadRules, resolveSymbols, type Holding, type Level, type LevelKind, type LoadRefusal, type LoadResult, type Rule,
 } from "./desk-book.ts";
 import type { DeliverOpts, DeliverResult, DeskConversation, PostResult } from "./desk-conversation.ts";
+import type { Annotator } from "./annotator.ts";
 import type { DeskClock, DeskTurnRecord } from "./desk-session.ts";
 import type { DeskLine } from "./conversation.ts";
 import { createEdgar, type Edgar, type EdgarFetch, type EdgarResult, type Filing } from "./edgar.ts";
@@ -82,9 +84,10 @@ import { HttpError } from "./http.ts";
 import { nyInstant, sessionBefore, sessionFor, xnysPrevious, xnysWindow, type DayAnswer, type DeskCalendars, type MarketSession } from "./market-clock.ts";
 import type { NewsAnswer } from "./market-news.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
+import { READ_THROUGH_NEVER, type ReadThroughAsk, type ReadThroughEvent, type ReadThroughLane } from "./readthrough-lane.ts";
 import { idOf, type Market } from "./symbols.ts";
 import {
-  AFTER_HOURS_MS, alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, REBUILD_WINDOW_MS, rebuildDay, snapOf,
+  AFTER_HOURS_MS, alertId, batchDue, batchId, CLOSE_PRINT_MS, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, REBUILD_WINDOW_MS, rebuildDay, snapOf,
   takeBatch, watchQuoteOf,
   type AlertAnnotation, type AlertBatch, type AlertDelivered, type AlertHit, type AlertRecord, type Hit, type PriceKey, type WatchDay, type WatchQuote,
 } from "./watch-eval.ts";
@@ -145,8 +148,9 @@ const MARKETS: readonly Market[] = ["us", "cn"];
  * `deliver` and `budget` the desk conversation's, `post` and `idle` the annotation lane's (src/annotator.ts) - with no
  * `idle` a post waits for nothing but the one before it; `news` the Market's headline read (src/market-news.ts), for
  * a why post - none, each symbol's headlines unavailable; `edgar`, SEC's fetch and contact - none, no filings and a
- * why post's filings unavailable; `pid` this face's (`process.pid`), `alive` whether a pid lives
- * (`process.kill(pid, 0)`), `tickMs`, `log`. */
+ * why post's filings unavailable; `readThrough` the read-through lane (src/readthrough-lane.ts), which a why post asks
+ * whether each fallen company's event was given a direction - none, no read-through; `pid` this face's
+ * (`process.pid`), `alive` whether a pid lives (`process.kill(pid, 0)`), `tickMs`, `log`. */
 export interface WatchDeps {
   home: string;
   root: string;
@@ -157,11 +161,12 @@ export interface WatchDeps {
   /** Note an alert or a batch `deliver` did not refuse as a line in Gravit's one conversation (src/conversation.ts
    * `note`, through src/desk.ts); none when absent - and never a late replay or the lost line. */
   note?: (line: DeskLine) => void;
-  post: DeskConversation["post"];
+  post: Annotator["post"];
   budget: () => Promise<BudgetState>;
   edgar?: { fetch: EdgarFetch; userAgent: string };
   news?: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>;
   idle?: () => Promise<void>;
+  readThrough?: Pick<ReadThroughLane, "ready" | "given">;
   pid?: number;
   alive?: (pid: number) => boolean;
   tickMs?: number;
@@ -241,7 +246,8 @@ export interface WatchStatus {
 /** One annotation run's end, as the annotation lane (src/annotator.ts) reports it and `alerts.jsonl` keeps it (spec §16
  * H1): the pass it checked, its session, its turn's outcome, the ids of the messages its reply went out as
  * (`<network>:<id>`; an older record's numbers read as `telegram:<n>`) - none when the reply was held back or queued -
- * and the reply, at most 2,000 characters. */
+ * the reply, at most 2,000 characters, and `directions`, the ids of the read-through blocks appended to it - absent when
+ * none. */
 export type AnnotatedRecord = {
   t: string;
   kind: "annotated";
@@ -250,6 +256,7 @@ export type AnnotatedRecord = {
   outcome: DeskTurnRecord["outcome"];
   sent: string[];
   text: string;
+  directions?: string[];
 };
 
 /** A message id as the watch keeps it, `<network>:<the network's own id>`. */
@@ -272,7 +279,12 @@ function idsOf(sent: unknown): string[] | undefined {
 /** `r` with the message ids it holds as strings: an older record's numbers become `telegram:<n>`. A `sent` that is not
  * a list of ids is left as it is - {@link WatchHandle.contextFor} reads no id from it. */
 function withStringIds<R extends WatchRecord>(r: R): R {
-  if (r.kind === "annotated") return { ...r, sent: idsOf(r.sent) ?? [] };
+  if (r.kind === "annotated") {
+    /* `directions` kept only as a list of ids; anything else is dropped */
+    const { directions, ...rest } = r;
+    const kept = Array.isArray(directions) && directions.every((d) => typeof d === "string") ? { directions } : {};
+    return { ...rest, sent: idsOf(r.sent) ?? [], ...kept } as R;
+  }
   if (r.kind !== "delivered" && r.kind !== "batch") return r;
   const delivery = (r as { delivery?: unknown }).delivery;
   if (typeof delivery !== "object" || delivery === null || !("sent" in delivery)) return r;
@@ -1056,7 +1068,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
 
   /** One post over `entries`' hits, in order: the first entry's pass and reply, `urgent` if any entry's is - a why
    * post when any hit is a US price move, else the plan check; then one annotation record naming every alert, and a
-   * refused post's line as a reply once per ET date. */
+   * refused post's line as a reply once per ET date. A why post asks the read-through ({@link readThroughOf}) for the
+   * fallen companies with no direction on record and lists the others for the face's line; when that variant cannot be
+   * built it is one line and the plain why post goes - a read-through never costs the reason. */
   async function postFolded(entries: readonly PostEntry[]): Promise<void> {
     const hits = entries.flatMap((e) => e.hits);
     const { pass, replyTo } = entries[0]!;
@@ -1065,9 +1079,27 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     try {
       const ctx = hits.some(whyOf) ? await whyContext(hits) : undefined;
       if (stopped) return;
+      let readThrough: { asks: ReadThroughAsk[]; later: ReadThroughEvent[] } | undefined;
+      let body: ReturnType<typeof whyPost> | undefined;
+      if (ctx !== undefined) {
+        try {
+          readThrough = await readThroughOf(hits);
+          if (stopped) return;
+          if (readThrough !== undefined) body = whyPost(hits, pass, clock.now(), ctx, { readThrough: readThrough.asks.map((a) => a.symbol) });
+        } catch (err) {
+          log(`${BIN}: desk: watch read-through: ${errText(err)}; the why post goes without it`);
+          readThrough = undefined;
+          body = undefined;
+        }
+      }
       const at = clock.now();
-      const body = ctx === undefined ? annotationPost(hits, pass, at) : whyPost(hits, pass, at, ctx);
-      r = await deps.post({ ...body, ...(replyTo === undefined ? {} : { replyTo }), ...(urgent ? { urgent: true } : {}) });
+      body ??= ctx === undefined ? annotationPost(hits, pass, at) : whyPost(hits, pass, at, ctx);
+      r = await deps.post({
+        ...body,
+        ...(replyTo === undefined ? {} : { replyTo }),
+        ...(urgent ? { urgent: true } : {}),
+        ...(readThrough === undefined ? {} : { readThrough }),
+      });
     } catch (err) {
       r = { refused: "error", line: `the desk could not annotate this alert: ${errText(err)}` };
     }
@@ -1078,6 +1110,53 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     records.push(rec);
     alerts.append(rec);
     if ("refused" in r) sayOnce(`post:${etDate(new Date(done))}:${r.line}`, r.line, { at: done, ...(replyTo === undefined ? {} : { replyTo }) });
+  }
+
+  /** A why post's read-through, or none when it has nothing to ask: with `deps.readThrough` ready, each symbol of the
+   * US price moves that fell (`quote.chgPct` below 0), never an index fund (src/readthrough-lane.ts
+   * `READ_THROUGH_NEVER`: a direction is for one company's own event), once in the hits' order, as
+   * `{ symbol, ref, since }` - the hit's
+   * reference close, else its date, and {@link sinceOf} it - asked `given`: false is an ask, true a later alert of an
+   * event already given, listed as `{ symbol, ref }`; a `given` that rejects leaves the symbol out of both, with one
+   * line. `undefined` with no lane, a lane not ready, or both lists empty. */
+  async function readThroughOf(hits: readonly AlertHit[]): Promise<{ asks: ReadThroughAsk[]; later: ReadThroughEvent[] } | undefined> {
+    const lane = deps.readThrough;
+    if (lane === undefined || !lane.ready()) return undefined;
+    const candidates = new Map<string, ReadThroughAsk>();
+    for (const hit of hits) {
+      if (!whyOf(hit) || hit.quote === null || typeof hit.quote.chgPct !== "number" || !(hit.quote.chgPct < 0)) continue;
+      if (READ_THROUGH_NEVER.includes(hit.symbol)) continue;
+      if (!candidates.has(hit.symbol)) candidates.set(hit.symbol, { symbol: hit.symbol, ref: hit.ref ?? hit.date, since: sinceOf(hit, hit.quote.asOf) });
+    }
+    const asks: ReadThroughAsk[] = [];
+    const later: ReadThroughEvent[] = [];
+    for (const candidate of candidates.values()) {
+      let given: boolean;
+      try {
+        given = await lane.given(candidate.symbol, candidate.ref);
+      } catch (err) {
+        log(`${BIN}: desk: watch read-through: ${candidate.symbol} ${candidate.ref}: the record could not be read: ${errText(err)}`);
+        continue;
+      }
+      if (given) later.push({ symbol: candidate.symbol, ref: candidate.ref });
+      else asks.push(candidate);
+    }
+    return asks.length === 0 && later.length === 0 ? undefined : { asks, later };
+  }
+
+  /** The instant a US price hit's event's session began, ISO - a print at or after it is the market's reaction to the
+   * event (plugins/readthrough/service-row.mjs): for a hit in after-hours, that session day's regular close plus
+   * {@link CLOSE_PRINT_MS}, past the closing cross, whose change is still the whole day's; for any other, 04:00 ET of
+   * the hit's date, so a print of the evening before is not taken for the reaction. When the close cannot be told,
+   * `printAt`, the alert's own print. */
+  function sinceOf(hit: AlertHit, printAt: string): string {
+    let at: number | undefined;
+    try {
+      at = hit.phase === "after" ? knownCloseOf(hit.date) : Date.parse(nyInstant(hit.date, 4, 0));
+    } catch {
+      at = undefined;   // not a date
+    }
+    return at !== undefined && Number.isFinite(at) ? new Date(hit.phase === "after" ? at + CLOSE_PRINT_MS : at).toISOString() : printAt;
   }
 
   /** `work`, or why not: a rejection's reason, or {@link WHY_READ_MS} on the clock passing - when its signal aborts. */
@@ -1102,8 +1181,8 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     }
   }
 
-  /** The close instant of the US session dated `date`: the calendar's, else the XNYS rules', else 16:00 ET. */
-  function closeOf(date: string): number {
+  /** The close instant of the US session dated `date`: the calendar's, else the XNYS rules', else `undefined`. */
+  function knownCloseOf(date: string): number | undefined {
     const window = deps.calendars.us.window();
     const session = window === undefined ? undefined : sessionFor(window, date);
     if (session !== undefined && session !== "closed") return Date.parse(session.close);
@@ -1111,9 +1190,14 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       const rules = xnysWindow(date, 1).sessions[0];
       if (rules !== undefined) return Date.parse(rules.close);
     } catch {
-      /* not a date: the fallback below */
+      /* not a date */
     }
-    return Date.parse(nyInstant(date, 16, 0));
+    return undefined;
+  }
+
+  /** The close instant of the US session dated `date`: {@link knownCloseOf}, else 16:00 ET. */
+  function closeOf(date: string): number {
+    return knownCloseOf(date) ?? Date.parse(nyInstant(date, 16, 0));
   }
 
   /** What a why post reads besides its alerts (spec §5.3): the US symbols' headlines since the earliest reference

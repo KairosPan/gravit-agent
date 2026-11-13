@@ -16,6 +16,7 @@ import type { DeliverResult, DeskConversation, PostResult } from "../src/desk-co
 import type { DeskSessionCtxLike } from "../src/desk-session.ts";
 import type { DeskLine } from "../src/conversation.ts";
 import type { AnnotatedRecord } from "../src/watch.ts";
+import type { ReadThroughLane } from "../src/readthrough.ts";
 import { fakeAgents, fakeBus, WallClock, type FakeAgents, type FakeBus } from "./desk-fakes.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -493,4 +494,134 @@ test("the annotator imports nothing but types: its machinery loads on first use"
   const imports = source.match(/^import\b.*$/gm) ?? [];
   assert.ok(imports.length > 0);
   for (const line of imports) assert.match(line, /^import type /, `a value edge: ${line}`);
+});
+
+/* ---------- read-through (the read-through plan's Task 7) ---------- */
+
+const BLOCK = { id: "rt-20261109-0000aaaa", text: "推演 · Gravit 的推断，不是下单 · 确定度 中\n· 逻辑：x" };
+const NVDA_EVENT = { symbol: "NVDA", ref: "2026-11-06" };
+const NVDA_ASK = { ...NVDA_EVENT, since: "2026-11-09T09:00:00.000Z" };
+function fakeLane(blocks = [BLOCK], later: string[] = [], broken = false) {
+  const calls: unknown[][] = [];
+  const lane: ReadThroughLane = {
+    ready: () => true,
+    open: (...a) => { calls.push(["open", ...a]); },
+    close: (...a) => { calls.push(["close", ...a]); if (broken) throw new Error("the row was reloaded"); return blocks; },
+    given: async () => false,
+    later: async (...a) => { calls.push(["later", ...a]); return later; },
+    sent: async (...a) => { calls.push(["sent", ...a]); },
+  };
+  return { lane, calls };
+}
+const postWith = (h: Harness, readThrough: { asks: typeof NVDA_ASK[]; later: typeof NVDA_EVENT[] }) =>
+  h.annotator.post({ text: "NVDA fell", source: { kind: "alert", symbol: "NVDA", rule: "watch-nvda" }, message: alertOf("a-000000000001"), replyTo: "telegram:41", readThrough });
+
+test("an accepted block goes under the reason after a blank line, its record is marked sent, and the note names it", async () => {
+  const { lane, calls } = fakeLane();
+  const noteLines: DeskLine[] = [];
+  const h = await harness({ readThrough: lane, note: (line) => { noteLines.push(line); } });
+  const sessionId = sessionOf(await postWith(h, { asks: [NVDA_ASK], later: [] }));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001")); answer(h, sessionId, 1, "NVDA 盘前 −7.3% · 董事会调查"); endTurn(h, sessionId, 1);
+  await waitFor("the note", () => h.noted.length === 1);
+  assert.deepEqual(h.sent, [[`NVDA 盘前 −7.3% · 董事会调查\n\n${BLOCK.text}`, "telegram:41"]]);
+  assert.equal(noteLines[0].text, h.sent[0][0], "the conversation's line is the message the phone got");
+  assert.deepEqual(calls, [["open", sessionId, { pass: "p-000000000001", asks: [NVDA_ASK] }], ["close", sessionId], ["sent", [BLOCK.id], true]]);
+  assert.deepEqual(h.noted[0].directions, [BLOCK.id]);
+  await h.annotator.dispose();
+});
+
+test("a later alert of the same event gets the face's one line and opens no run", async () => {
+  const { lane, calls } = fakeLane([], ["推演（04:03 ET 已给）：做多 AMD，此后 +6.2%"]);
+  const h = await harness({ readThrough: lane });
+  const sessionId = sessionOf(await postWith(h, { asks: [], later: [NVDA_EVENT] }));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001")); answer(h, sessionId, 1, "NVDA 盘中 −9.1%"); endTurn(h, sessionId, 1);
+  await waitFor("the note", () => h.noted.length === 1);
+  assert.equal(h.sent[0][0], "NVDA 盘中 −9.1%\n\n推演（04:03 ET 已给）：做多 AMD，此后 +6.2%");
+  assert.deepEqual(calls, [["later", [NVDA_EVENT]]]);
+  assert.equal("directions" in h.noted[0], false);
+  await h.annotator.dispose();
+});
+
+test("a turn cut after its call sends no block, and the record says it was not sent", async () => {
+  const { lane, calls } = fakeLane();
+  const h = await harness({ readThrough: lane });
+  const sessionId = sessionOf(await postWith(h, { asks: [NVDA_ASK], later: [NVDA_EVENT] }));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001")); answer(h, sessionId, 1, "NVDA 盘前"); endTurn(h, sessionId, 1, ABORTED("desk deadline"));
+  await waitFor("the note", () => h.noted.length === 1);
+  assert.equal(h.sent[0][0].includes("推演"), false);
+  assert.deepEqual(calls.map((c) => c[0]), ["open", "close", "sent"]);
+  assert.deepEqual(calls[2], ["sent", [BLOCK.id], false]);
+  await h.annotator.dispose();
+});
+
+test("an undelivered reply marks its direction unsent", async () => {
+  const { lane, calls } = fakeLane();
+  const h = await harness({ readThrough: lane }, async () => ({ undelivered: "send failed" }));
+  const sessionId = sessionOf(await postWith(h, { asks: [NVDA_ASK], later: [] }));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001")); answer(h, sessionId, 1, "NVDA 盘前"); endTurn(h, sessionId, 1);
+  await waitFor("the note", () => h.noted.length === 1);
+  assert.deepEqual(calls.at(-1), ["sent", [BLOCK.id], false]);
+  await h.annotator.dispose();
+});
+
+test("the watchdog's exit sends no block and marks the direction unsent", async () => {   // final review I4
+  const { lane, calls } = fakeLane();
+  const h = await harness({ readThrough: lane });
+  sessionOf(await postWith(h, { asks: [NVDA_ASK], later: [NVDA_EVENT] }));
+  await h.clock.advance(300_000);   // a turn that never starts: the watchdog's cut at the deadline plus the slack
+  assert.deepEqual(h.agents.agents[0].cancels, [[{ kind: "hook", reason: "desk deadline" }]], "the watchdog cut it");
+  await waitFor("the note", () => h.noted.length === 1);
+  assert.equal(h.noted[0].outcome, "timed-out");
+  assert.deepEqual(h.sent, [["the desk's check of this alert ended with no text", "telegram:41"]], "no block, no later line");
+  assert.deepEqual(calls.map((c) => c[0]), ["open", "close", "sent"]);
+  assert.deepEqual(calls.at(-1), ["sent", [BLOCK.id], false]);
+  await h.annotator.dispose();
+});
+
+test("the shutdown's exit sends nothing and marks the direction unsent", async () => {   // final review I4
+  const { lane, calls } = fakeLane();
+  const h = await harness({ readThrough: lane });
+  const sessionId = sessionOf(await postWith(h, { asks: [NVDA_ASK], later: [] }));
+  const agent = h.agents.agents[0];
+  startTurn(h, sessionId, 1, alertOf("a-000000000001")); answer(h, sessionId, 1, "NVDA 盘前");
+  agent.onCancel = () => endTurn(h, sessionId, 1, ABORTED("shutdown"));
+  await h.annotator.dispose();
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
+  assert.deepEqual([h.sent, h.noted], [[], []]);
+  assert.deepEqual(calls, [["open", sessionId, { pass: "p-000000000001", asks: [NVDA_ASK] }], ["close", sessionId], ["sent", [BLOCK.id], false]]);
+});
+
+test("a failed model call sends no block and marks the direction unsent", async () => {   // final review I4
+  const { lane, calls } = fakeLane();
+  const h = await harness({ readThrough: lane });
+  const sessionId = sessionOf(await postWith(h, { asks: [NVDA_ASK], later: [NVDA_EVENT] }));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001"));
+  endTurn(h, sessionId, 1, { kind: "error", error: { message: "429 rate limit", code: "UNKNOWN" } });
+  await waitFor("the note", () => h.noted.length === 1);
+  assert.equal(h.noted[0].outcome, "failed");
+  assert.deepEqual(h.sent, [["the desk could not annotate this alert: 429 rate limit", "telegram:41"]], "the failure's line alone");
+  assert.deepEqual(calls.map((c) => c[0]), ["open", "close", "sent"]);
+  assert.deepEqual(calls.at(-1), ["sent", [BLOCK.id], false]);
+  await h.annotator.dispose();
+});
+
+test("a lane that throws costs the block, never the reason", async () => {   // Review Focus 4
+  const { lane } = fakeLane([BLOCK], [], true);
+  const h = await harness({ readThrough: lane });
+  const sessionId = sessionOf(await postWith(h, { asks: [NVDA_ASK], later: [] }));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001")); answer(h, sessionId, 1, "NVDA 盘前 −7.3%"); endTurn(h, sessionId, 1);
+  await waitFor("the note", () => h.noted.length === 1);
+  assert.deepEqual(h.sent, [["NVDA 盘前 −7.3%", "telegram:41"]]);
+  assert.ok(h.lines.some((line) => line.includes("desk: read-through") && line.includes("the row was reloaded")));
+  await h.annotator.dispose();
+});
+
+test("with no lane, or a post that asks nothing, the lane is never touched and the reply is today's", async () => {
+  const { lane, calls } = fakeLane();
+  const h = await harness({ readThrough: lane });
+  const sessionId = sessionOf(await annotate(h, "a-000000000001", 41));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001")); answer(h, sessionId, 1, "Stop met."); endTurn(h, sessionId, 1);
+  await waitFor("the note", () => h.noted.length === 1);
+  assert.deepEqual([h.sent, calls], [[["Stop met.", "telegram:41"]], []]);
+  await h.annotator.dispose();
 });
