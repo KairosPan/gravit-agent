@@ -855,7 +855,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.equal(againReply.replyTo, againAt, "its reply is under its alert");
     const last = againReply.text.split("\n").at(-1)!;
     assert.ok(last.startsWith("推演（") && last.includes("已给）：做多"), `it ends with the face's line for the direction given; saw ${JSON.stringify(againReply.text)}`);
-    assert.match(last, new RegExp(`^推演（(\\d{2}-\\d{2} )?\\d{2}:\\d{2} ET 已给）：做多 ${RIVAL}，此后 \\+1\\.0%$`), "the rival re-priced from its recorded print");
+    assert.match(last, new RegExp(`^推演（\\d{2}:\\d{2} ET 已给）：做多 ${RIVAL}，此后 \\+1\\.0%$`), "the rival re-priced from its recorded print");
     heard([phone[expected.length], againReply], "the alert, then the reply with the face's line");
     await waitFor("the second annotated record", async () => (await annotated()).some((r) => r.pass === again.pass));
     assert.equal((await annotated()).find((r) => r.pass === again.pass)?.directions, undefined, "it carried no block");

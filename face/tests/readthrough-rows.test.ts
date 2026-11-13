@@ -182,6 +182,14 @@ test("after an after-hours alert, a rival's closing-cross print reads 未成交;
   assert.equal(block.split("\n")[3], "· 盘面：NVDA −7.5%（ROBINHOOD 16:29 ET） · AMD 未成交 · SPY −0.4%（ROBINHOOD 16:01 ET）");
 });
 
+test("a print exactly at since counts", async (t) => {   // second fix
+  const { service, rows } = await mounted(t);
+  rows.AMD = { price: 473.39, changePct: 5.42, asOf: MONDAY_04 };
+  service.open("s-1", RUN);
+  const { block } = await service.propose(ARGS, { sessionId: "s-1", desk: true });
+  assert.equal(block.split("\n")[3], "· 盘面：NVDA −7.3%（ROBINHOOD 04:03 ET） · AMD +5.4%（ROBINHOOD 04:00 ET） · SPY −0.4%（ROBINHOOD 04:03 ET）");
+});
+
 test("a task's tape dates a print of an earlier day", async (t) => {   // final review I1
   const { service, rows } = await mounted(t);
   rows.AMD = { price: 473.39, changePct: 5.42, asOf: "2026-11-07T00:58:00.000Z" };   // Friday 19:58 ET

@@ -2,7 +2,7 @@
 /**
  * `read-through-tool`: `read_through`, which rivals a company's own bad news points to - Gravit's inference, never an
  * order. `execute`, in order: `NOT_GRAVIT` for a delegated child; then `readThrough.propose`, under the caller's
- * session id and whether it is a desk agent (preset `gravit-desk`), which checks, prices, records and renders the
+ * session id and whether it is a desk agent (preset `gravit-desk`), which checks, prices, renders and then records the
  * call; then the reply `{ ok, id, block }`. Every refusal throws through `asToolError`.
  */
 import { defineTool } from "@deepseek-ai/dsh-tools";

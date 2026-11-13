@@ -1724,6 +1724,36 @@ test("an after-hours fall's ask counts prints from the close plus the closing cr
   await h.watch.dispose();
 });
 
+test("an after-hours fall on an early-close day counts prints from that close plus the closing cross's minute", async () => {   // second fix
+  const calendar = fakeCalendar({ "2026-11-25": { date: "2026-11-25", open: "2026-11-25T14:30:00Z", close: "2026-11-25T21:00:00Z", early: false }, "2026-11-26": "closed", "2026-11-27": US_1127 });
+  const h = await harness({ start: "2026-11-27T18:05:00Z", files: { "desk/rules.yml": INTC_RULE }, calendars: { us: calendar }, news: fakeNews().read,
+    readThrough: { ready: () => true, given: async () => false } });
+  h.source.tables.us.set("INTC", us(70, "2026-11-27T18:04:59Z", 92.07));
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+  h.source.tables.us.set("INTC", us(69.5, "2026-11-27T18:05:19Z", 92.07));
+  await h.wall.advance(20_000);
+  await until("the post", () => h.posts.length === 1);
+  /* 13:00 EST is 18:00Z; the closing cross's minute after it */
+  assert.deepEqual(h.posts[0].readThrough, { asks: [{ symbol: "INTC", ref: "2026-11-27", since: "2026-11-27T18:01:00.000Z" }], later: [] });
+  await h.watch.dispose();
+});
+
+test("an after-hours fall whose close cannot be told counts prints from the alert's own print", async () => {   // second fix
+  /* a session the face's calendar gives for a day the XNYS rules close (Thanksgiving), with no window to read its close from */
+  const calendar = { ...fakeCalendar({ "2026-11-26": { date: "2026-11-26", open: "2026-11-26T14:30:00Z", close: "2026-11-26T21:00:00Z", early: false } }), window: () => undefined };
+  const h = await harness({ start: "2026-11-26T21:05:00Z", files: { "desk/rules.yml": INTC_RULE }, calendars: { us: calendar }, news: fakeNews().read,
+    readThrough: { ready: () => true, given: async () => false } });
+  h.source.tables.us.set("INTC", us(70, "2026-11-26T21:04:59Z", 92.07));
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+  h.source.tables.us.set("INTC", us(69.5, "2026-11-26T21:05:19Z", 92.07));
+  await h.wall.advance(20_000);
+  await until("the post", () => h.posts.length === 1);
+  assert.deepEqual(h.posts[0].readThrough, { asks: [{ symbol: "INTC", ref: "2026-11-26", since: "2026-11-26T21:05:19Z" }], later: [] });
+  await h.watch.dispose();
+});
+
 test("an index fund's fall asks no read-through; with a company in the pass, the company alone is asked", async () => {   // final review I3
   const lane = { ready: () => true, given: async () => false };
   const spy = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": "- id: index-move\n  kind: move_pct\n  symbols: [SPY, QQQ]\n  move_pct: 1.5\n" }, news: fakeNews().read, readThrough: lane });
