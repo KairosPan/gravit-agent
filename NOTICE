@@ -1,0 +1,20 @@
+Gravit
+Copyright 2026 KairosPan
+
+Licensed under the Apache License, Version 2.0 (SPDX-License-Identifier: Apache-2.0).
+The full text is in LICENSE.
+
+Portions come from Linqi Zhe's repository https://github.com/linqizhe07/account
+(formerly linqizhe07/buyer-agent-demo), copied at commit 133b9a7:
+
+  Gravit (linqizhe07/account)
+  Copyright 2026 Linqi Zhe
+  Licensed under the Apache License, Version 2.0.
+
+They are account/ and market/ (account/NOTICE and market/NOTICE say what was copied, moved
+and changed), and parts of face/client adapted and modified in this tree, among them
+face/client/js/market-fmt.js, face/client/js/icons.js, face/client/js/render/trade.js and
+the drawer, Markets and Trade sections of face/client/css/app.css.
+
+《轮回》 is cited in this tree by paragraph id only (docs/research/lunhui/README.md §8). Its
+text is not part of this repository and is not licensed by it.
