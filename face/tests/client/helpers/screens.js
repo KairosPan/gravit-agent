@@ -301,6 +301,26 @@ export function discoverStates() {
   ];
 }
 
+// the abilities (spec 2026-11-13 §4.4), pinned by name after the other named states (discoverStates sits amid the indexed states,
+// so a state put there would move every name after it): the event analog's page with Gravit's conversation known and with
+// none, the read-through's page with its ability off, and the Abilities grid with it off beside the event analog
+function abilityStates() {
+  const base = listings => {
+    let s = emptyState();
+    for (const [shelf, v] of Object.entries(listings)) s = R.shelfLoaded(s, { shelf, data: v.data, at: 1 });
+    return R.shelfLoaded(s, { shelf: 'modules', data: modulesListing(), at: 1 });
+  };
+  const conversing = s => R.tasksLoaded(s, { conversation: 'c-gravit', tasks: [], at: NOW });
+  const off = listings();
+  off.abilities.data.abilities[1] = { ...off.abilities.data.abilities[1], state: 'off', rows: off.abilities.data.abilities[1].rows.map(r => ({ ...r, enabled: false, phase: null })) };
+  return [
+    ['discover-ability-page', conversing(R.nav(base(listings()), { screen: 'plugin', id: 'ability:event-analogs' }))],
+    ['discover-ability-page-no-conversation', R.nav(base(listings()), { screen: 'plugin', id: 'ability:event-analogs' })],
+    ['discover-ability-page-off', conversing(R.nav(base(off), { screen: 'plugin', id: 'ability:read-through' }))],
+    ['discover-abilities-grid', conversing(R.nav(base(off), { screen: 'discover', id: 'abilities' }))],
+  ];
+}
+
 // a Lunhui module's page: its latest artifact read, loading, failed; one with no run; before the listing; an unknown name
 function moduleStates(all) {
   const at = id => R.nav(all, { screen: 'module', id });
@@ -415,6 +435,7 @@ export function namedStates() {
     ['thread-event-table', { ...thread, analog: { tasks: {}, views } }],
     ['task-event-table', { ...page, analog: { tasks: { wt: read }, views } }],
     ['market-event-window', marketEventWindow()],
+    ...abilityStates(),
   ];
 }
 
@@ -914,7 +935,7 @@ const CONTENT_FIELDS = new Set([
   'text', 'title', 'name', 'label', 'note', 'notes', 'message', 'description', 'question', 'header', 'prompt', 'response', 'detail',
   'displayReason', 'reason', 'why', 'whyNot', 'said', 'error', 'words', 'what', 'example', 'via', 'readOnlyBecause', 'noTradeBecause',
   'proven', 'lands', 'guard', 'beast', 'door', 'request', 'plan', 'soul', 'legs', 'line', 'broken', 'setupIssues', 'freezes',
-  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age', 'steps', 'body', 'blurb',
+  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age', 'steps', 'body', 'blurb', 'about', 'asks', 'limits',
   // names: a venue's, a product's, an agent's, an account's, a market's, a network's
   'productName', 'protocol', 'quoteFrom', 'sourceWord', 'venueName', 'accountName', 'agentName', 'byName', 'toName', 'unitWord',
   'network', 'networks', 'chain', 'chains', 'bridgeChains', 'funded', 'exchange', 'feed', 'source', 'model', 'route', 'runtime',
@@ -938,9 +959,11 @@ const CONTENT_FIELDS = new Set([
 // (the venue its status.yaml names and the Account's rows or refusal), What you sign's lines
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); an event analog view and its
-// task as the face read them (the worker's and web pages' words); `*` is any one key
+// task as the face read them (the worker's and web pages' words); an ability's declared row and role ids, which its page draws
+// as they come (its tools' and skills' names are content by `name`); `*` is any one key
 const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
-  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task']];
+  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'],
+  ['discover', 'shelves', 'abilities', 'data', 'abilities', 'rows', 'id'], ['discover', 'shelves', 'abilities', 'data', 'abilities', 'roles', 'id']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 
 // every string, as { text, key }, the corpus' own states, the composer pieces' inputs and the module catalog (its sub-titles,

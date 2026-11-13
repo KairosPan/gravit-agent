@@ -1927,6 +1927,13 @@ export function boot(win, host = {}) {
       go({ screen: 'messages', id: null });
       putWords(asset.name && asset.name !== asset.symbol ? t('markets.lookAt.named', { symbol: asset.symbol, name: asset.name }) : t('markets.lookAt.symbol', { symbol: asset.symbol }));
     },
+    // an ability's ask key (spec 2026-11-13 §4.4): its words in Gravit's composer, as Hand to Gravit puts them; nothing is sent
+    askAbility: el => {
+      const words = el.dataset.text;
+      if (!words) return;
+      go({ screen: 'messages', id: null });
+      putWords(words);
+    },
     // the owner device: Get a code, the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out, Let
     // it sign and Remove
     askCode: () => { void owner.askCode(); },

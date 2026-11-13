@@ -9,7 +9,7 @@ import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
 import { startComposerReads } from '../../client/js/host/composer.js';
 import { valueEditor } from './helpers/value-editor.js';
-import { modulesListing } from './helpers/inventory.js';
+import { modulesListing, abilitiesListing } from './helpers/inventory.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { fakeProvider, ADDRESS as WALLET_ADDRESS, hashOf } from './helpers/fake-wallet.js';
 import { rebuildQuery } from '../../src/account-proxy.ts';
@@ -51,6 +51,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
   };
   const reads = [];
   const inventory = {
+    '/data/abilities.json': { ok: true, ...abilitiesListing() },
     '/data/plugins.json': { ok: true, mcp: [{ server: 'alpaca-kit', phase: 'active', tools: [] }], agentTools: [], rows: [] },
     '/data/agents.json': { ok: true, main: { name: 'Gravit', runtime: 'dsh 0.2.0-rc.2' }, local: [], candidates: [{ bin: 'claude', label: 'Claude Code', version: '2.1' }] },
     '/data/memory.json': { ok: true, groups: [] },
@@ -838,6 +839,48 @@ test('Hand to Gravit while /data/tasks still loads: the words move to the conver
   await settle();
   assert.equal(store.get().tasks.conversation, 's1');
   assert.equal(say.value, 'Look at AAPL (Apple)', 'the words are the conversation\'s draft now');
+  store.timers.clear();
+});
+
+// an ability's ask key (spec 2026-11-13 §4.4): its words in Gravit's composer on Messages, after what it holds; nothing sent
+test("an ability's ask key opens the conversation with its words in the composer, and sends nothing", async () => {
+  const f = fakeWindow({ hash: '#/plugin/ability%3Aevent-analogs' });
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  const h = host({ rows: [row('s1')], conversation: 's1' });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  assert.equal(store.get().route.screen, 'plugin');
+  assert.match(f.html(), /data-action="askAbility" data-text="NVDA&#39;s board/, 'the page draws its keys');
+  const ask = 'Line one\nIs "A&B" <up>?';
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askAbility', text: ask } });
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(say.value, ask, 'exactly its words');
+  assert.equal(f.doc.activeElement, say);
+  f.win.location.hash = '#/discover';
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askAbility', text: 'And another' } });
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(say.value, `${ask}\nAnd another`, 'a second ask after the first, on a new line');
+  assert.deepEqual(h.calls.filter(c => c[0] === 'session/prompt' || c[0] === 'commands/execute' || c[0] === 'session/create'), [], 'nothing sent');
+  store.timers.clear();
+});
+
+test("an ask key with no words does nothing", async () => {
+  const f = fakeWindow({ hash: '#/discover' });
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  const h = host({ rows: [row('s1')], conversation: 's1' });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askAbility', text: '' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askAbility' } });
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'discover', id: null }, 'still on Discover');
+  assert.equal(say.value ?? '', '');
+  assert.deepEqual(h.calls.filter(c => c[0] === 'session/prompt'), []);
   store.timers.clear();
 });
 
@@ -1701,7 +1744,7 @@ test('a list read that fails leaves no strategy page waiting', async () => {
   store.timers.clear();
 });
 
-test('entering Discover reads the five listings once', async () => {
+test('entering Discover reads the six listings once', async () => {
   const f = fakeWindow({ hash: '' });
   const h = host({ rows: [row('s1')] });
   const store = started(f, h);
@@ -1710,8 +1753,9 @@ test('entering Discover reads the five listings once', async () => {
   f.win.location.hash = '#/discover';
   await settle();
   assert.equal(store.get().route.screen, 'discover');
-  assert.deepEqual(h.reads.filter(p => /plugins|agents|memory|bots|modules/.test(p)).sort(), ['/data/agents.json', '/data/bots.json', '/data/memory.json', '/data/modules.json', '/data/plugins.json']);
+  assert.deepEqual(h.reads.filter(p => /abilities|plugins|agents|memory|bots|modules/.test(p)).sort(), ['/data/abilities.json', '/data/agents.json', '/data/bots.json', '/data/memory.json', '/data/modules.json', '/data/plugins.json']);
   assert.match(f.html(), /pcard-name">alpaca-kit</);
+  assert.match(f.html(), /pcard-name">Event analogs</);
   f.win.location.hash = '#/discover/agents';
   await settle();
   assert.equal(h.reads.filter(p => p === '/data/plugins.json').length, 1, 'moving within Discover reads nothing again');

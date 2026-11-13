@@ -761,6 +761,13 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .switch:disabled { color: var(--dim); cursor: default; }
 .switch:disabled .switch-track { opacity: .5; }
 .bot-edit { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+/* an ability's page (spec 2026-11-13 §4.4): an ask key is a question that wraps, read from the left under its section; Made
+   of has the label beside its parts, each part's name beside its note, both read from the left */
+.btn-sm.ask-key { align-self: flex-start; max-width: 100%; padding: 7px 14px; white-space: normal; text-align: left; justify-content: flex-start; line-height: 1.4; font-size: calc(13px * var(--fs)); }
+.made-of .kv { justify-content: flex-start; }
+.made-of .kv-k { flex: 0 0 72px; }
+.made-of .kv-v { flex: 1 1 0; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px 18px; text-align: left; }
+.made-part { display: inline-flex; align-items: baseline; gap: 6px; overflow-wrap: anywhere; }
 /* a Lunhui module's page: the kind beside the chip, the three boxes side by side where they fit, the runs as a table that
    scrolls in its own box, and the legend's label beside its reading, both read from the left */
 .mod-tags { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }

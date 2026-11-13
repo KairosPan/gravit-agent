@@ -3,7 +3,7 @@
 // Skills; ids namespaced.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { itemsOf, searchItems, itemById, SHELF_IDS, SOURCE, shelves } from '../../client/js/host/discover-view.js';
+import { itemsOf, searchItems, itemById, SHELF_IDS, SOURCE, shelves, abilityStateWord } from '../../client/js/host/discover-view.js';
 import { listings, modulesListing, abilitiesListing } from './helpers/inventory.js';
 
 const shelf = data => ({ status: 'ready', data, at: 1 });
@@ -66,8 +66,9 @@ test('an ability not on is dim, with a chip: Off and Starting grey, Failed warn;
   const failed = first({ state: 'failed' });
   assert.equal(failed.dim, true); assert.equal(failed.chip.tone, 'warn'); assert.equal(failed.chip.text, 'Failed');
   const odd = first({ state: 'paused' });
-  assert.equal(odd.dim, true); assert.equal(odd.chip.tone, 'grey');
+  assert.equal(odd.dim, true); assert.equal(odd.chip.tone, 'grey'); assert.equal(odd.chip.text, '—');
   assert.equal(first({ state: undefined }).dim, true);
+  assert.equal(abilityStateWord('on'), 'On');
 });
 
 test('an ability with no icon, or one the client has none of, is marked with bolt', () => {
@@ -80,10 +81,10 @@ test('an abilities listing holding garbage skips it; the other shelves are uncha
   const l = abilitiesListing();
   const items = itemsOf(discover({ abilities: shelf({ abilities: [null, 7, {}, ...l.abilities] }) }));
   assert.deepEqual(items.abilities.map(i => i.id), ['ability:event-analogs', 'ability:read-through']);
-  const { abilities, ...others } = itemsOf(discover());
   const { abilities: none, ...without } = itemsOf(discover({ abilities: undefined }));
-  assert.deepEqual(none, []); assert.equal(abilities.length, 2);
-  assert.deepEqual(others, without, 'the other shelves read as they did');
+  const { abilities: kept, ...others } = items;
+  assert.deepEqual(none, []); assert.equal(kept.length, 2);
+  assert.deepEqual(others, without, 'the other shelves read as they did beside the garbage');
   assert.deepEqual(itemsOf(discover({ abilities: shelf({ abilities: 'x' }) })).abilities, []);
 });
 

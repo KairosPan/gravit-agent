@@ -101,8 +101,12 @@ test('the known words hold no code word and no face word', () => {
     for (const s of KEPT) for (const w of wordsOf(s)) by.set(w, (by.get(w) ?? new Set()).add('en-kept'));
     return by;
   });
+  // an ability's declared prose may hold one of them (the event analog's ask about a trial that just failed): known from that
+  // prose alone, never from a code
+  const DECLARED_PROSE = new Set(['about', 'asks', 'limits']);
   for (const w of ['failed', 'Failed', 'running', 'killed', 'Loading', 'Messages', 'Pending', 'Researching']) {
-    assert.ok(!contributors.has(w), `${w} is not a known word (known from ${[...(contributors.get(w) ?? [])].join(', ')})`);
+    const from = [...(contributors.get(w) ?? [])];
+    assert.deepEqual(from.filter(k => !DECLARED_PROSE.has(k)), [], `${w} is not a known word but from an ability's prose (known from ${from.join(', ')})`);
   }
   const ACCOUNT_PROSE = new Set(['via', 'watchOnly', 'what', 'label']);
   for (const w of ['live', 'Live', 'Markets']) {
