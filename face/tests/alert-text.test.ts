@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   BATCH_ITEMS_MAX, WATCH_LINES, WHY_FIELD_MAX, WHY_INSTRUCTIONS, WHY_OUTSIDE_LINE, WHY_POST_MAX, alertText, annotationPost, batchText, lateAlertText, lostAlertsLine,
-  priceStamp, stateBody, whyPost, type DeskStateView, type WhyContext,
+  priceStamp, stateBody, whyInstructions, whyPost, whyReadThrough, type DeskStateView, type WhyContext,
 } from "../src/alert-text.ts";
 import type { Filing } from "../src/edgar.ts";
 import type { Headline, NewsAnswer } from "../src/market-news.ts";
@@ -489,4 +489,23 @@ test("WATCH_LINES cut the long rows at 500 characters with …", () => {
     assert.ok(line.endsWith("…"));
   }
   assert.equal(WATCH_LINES.overCap("us", 40, symbols.slice(0, 3)).endsWith("…"), false);
+});
+
+test("with read-through symbols the instructions cap the reply at 3,000, forbid a direction in the model's words, and end with the ask", () => {
+  const ask = whyReadThrough(["NVDA", "INTC"]);
+  assert.ok(ask.startsWith("When the cause is a concrete event at one company (your label is 公司公布 · 确定 or 媒体报道)"));
+  assert.ok(ask.endsWith("Never write a direction in your own words. It may be called for: NVDA, INTC."));
+  const text = whyInstructions(["NVDA", "INTC"]);
+  assert.ok(text.includes("at most 3,000 characters") && !text.includes("4,000"));
+  assert.ok(text.includes("and never advise a trade in your own words.") && !text.includes("never advise a trade."));
+  assert.ok(text.endsWith(`\n${ask}`));
+  assert.equal(text.split("\n").length, WHY_VERBATIM.split("\n").length + 1, "one more line, nothing else moved");
+  assert.equal(whyInstructions(), WHY_VERBATIM);
+  assert.equal(whyInstructions([]), WHY_VERBATIM);
+});
+
+test("whyPost carries the ask only when told to", () => {
+  const ctx = { news: new Map(), filings: new Map() };
+  assert.ok(whyPost([NVDA_STOP], "p-aaaaaaaaaaaa", NOW, ctx).text.endsWith(WHY_VERBATIM));
+  assert.ok(whyPost([NVDA_STOP], "p-aaaaaaaaaaaa", NOW, ctx, { readThrough: ["NVDA"] }).text.endsWith("It may be called for: NVDA."));
 });

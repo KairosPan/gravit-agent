@@ -72,10 +72,10 @@ test("DESK_ALLOW names no order, approval, goal, delegation or A-share tool", ()
  * turn, and the desk reads text it does not control, so the list is pinned name for name: a shell (`bash`,
  * or the `job_*` tools that serve its background jobs) beside readable key files and an open network would
  * be an exfiltration path, and a later edit must not add one back quietly. */
-test("DESK_ALLOW is exactly the plan's 14 names, in order - no shell, no job tools - and cannot be changed at run time", () => {
+test("DESK_ALLOW is exactly the plan's 15 names, in order - no shell, no job tools - and cannot be changed at run time", () => {
   assert.deepEqual([...DESK_ALLOW], [
     "read", "write", "edit", "read_image", "glob", "grep", "str_replace_editor", "skill", "web_search", "todo_write",
-    "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions",
+    "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions", "read_through",
   ]);
   assert.equal(Object.isFrozen(DESK_ALLOW), true);
 });

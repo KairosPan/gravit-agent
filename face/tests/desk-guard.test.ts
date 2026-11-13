@@ -112,7 +112,7 @@ test("DESK_WRITE_TOOLS are DESK_ALLOW's writers, each with the path arguments th
    * judged a reader or added to DESK_WRITE_TOOLS before it reaches an unattended desk turn. */
   assert.deepEqual(DESK_ALLOW.filter((name) => !(DESK_WRITE_TOOLS as readonly string[]).includes(name)), [
     "read", "read_image", "glob", "grep", "skill", "web_search", "todo_write",
-    "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions",
+    "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions", "read_through",
   ]);
 });
 
@@ -134,7 +134,7 @@ test("DESK_READ_TOOLS are DESK_ALLOW's readers, each with the path argument the 
    * added to DESK_ALLOW lands here, to be weighed before an unattended desk turn calls it. */
   const judged: readonly string[] = [...DESK_WRITE_TOOLS, ...DESK_READ_TOOLS];
   assert.deepEqual(DESK_ALLOW.filter((name) => !judged.includes(name)), [
-    "skill", "web_search", "todo_write", "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions",
+    "skill", "web_search", "todo_write", "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions", "read_through",
   ]);
 });
 
