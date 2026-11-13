@@ -46,7 +46,7 @@ const PARAMETERS = {
         symbol: { type: "string", description: "the rival's US ticker", required: true },
         reason: {
           type: "string",
-          description: `the business overlap, at most ${LIMITS.reason} characters: only Chinese characters, ASCII letters and digits, single spaces and the marks ，、。·：,.:'’-–—/%+& - no brackets, no quotes, no semicolon`,
+          description: `the business overlap, at most ${LIMITS.reason} characters: only common Chinese characters, ASCII letters and digits, single spaces and the marks ，、。·：,.:'’-–—/%+& - no brackets, no double quotes, no semicolon; and, as in every text, none of the block's own labels (逻辑：, 方向：, 盘面：, 反方：, 推演)`,
           required: true,
         },
       },

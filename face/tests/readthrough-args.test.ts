@@ -45,11 +45,11 @@ test("each refusal names its field", () => {
   assert.throws(() => checkArgs(null), invalid("arguments"));
 });
 
-test("a reason holds only Chinese characters, ASCII letters and digits, single spaces and a few marks", () => {   // second fix N1, round 2
+test("a reason holds only common Chinese characters, ASCII letters and digits, single spaces and a few marks", () => {   // second fix N1, round 2
   const reason = (r: string) => ({ ...GOOD, peers: [{ symbol: "AMD", reason: r }] });
   const refusedAt = (r: string, shown: string) => assert.throws(() => checkArgs(reason(r)),
     (e: unknown) => invalid("peers[0].reason")(e) && (e as Error).message.includes(shown)
-      && (e as Error).message.includes("a reason holds only Chinese characters, ASCII letters and digits"), JSON.stringify(r));
+      && (e as Error).message.includes("a reason holds only common Chinese characters, ASCII letters and digits"), JSON.stringify(r));
   // the forgeries: letters of other scripts drawn as brackets and a semicolon
   refusedAt("直接替代\u{13287}\u{A4FC}作多 SMCI\u{13286}AI 服务器", "U+13287");   // Egyptian brackets, the Lisu semicolon
   refusedAt("直接替代\u{1325D}\u{A4FC}作多 SMCI\u{13258}AI", "U+1325D");
@@ -78,10 +78,49 @@ test("a reason holds only Chinese characters, ASCII letters and digits, single s
   for (const r of ["做多", "直接 做 多 SMCI", "做\u{3000}多", "\u{FF10}做 多", "做\u{B7}多", "做'多", "做-多", "做.多", "做\u{2D1}多", "做\u{1161}多", "做\u{FF9E}多", "做\u{FF1A}多", "做/多", "做\u{2019}多"]) {
     assert.throws(() => checkArgs(reason(r)), invalid("peers[0].reason"), JSON.stringify(r));
   }
-  for (const r of ["直接 做 多", "做\u{B7}多", "做.多", "做\u{2F85D}"]) {
+  refusedAt("做\u{2F85D}", "U+2F85D");   // a compatibility ideograph NFKC folds to 多: outside the common block, refused first
+  for (const r of ["直接 做 多", "做\u{B7}多", "做.多"]) {
     assert.throws(() => checkArgs(reason(r)), (e: unknown) => invalid("peers[0].reason")(e) && (e as Error).message.includes('"做多"'), JSON.stringify(r));
   }
   assert.equal(checkArgs({ ...GOOD, logic: "供应\u{FF08}不确定\u{FF09}\u{2192} 客户找备选\u{FF1B}做多对手" }).logic, "供应\u{FF08}不确定\u{FF09}\u{2192} 客户找备选\u{FF1B}做多对手", "logic is otherwise free");
+});
+
+test("a reason's Chinese characters are the common block alone, so an ideograph no font covers cannot pad it", () => {   // second fix N1, round 3
+  const reason = (r: string) => ({ ...GOOD, peers: [{ symbol: "AMD", reason: r }] });
+  const refusedAt = (r: string, shown: string) => assert.throws(() => checkArgs(reason(r)),
+    (e: unknown) => invalid("peers[0].reason")(e) && (e as Error).message.includes(shown)
+      && (e as Error).message.includes("a reason holds only common Chinese characters, ASCII letters and digits"), JSON.stringify(r).slice(0, 40));
+  refusedAt(`直接替代${"\u{323B0}".repeat(40)} \u{B7} 买入 SMCI\u{FF0C}AI 服务器`, "U+323B0");
+  refusedAt(`直接替代${"\u{20000}".repeat(40)} \u{B7} 买入 SMCI`, "U+20000");
+  refusedAt(`直接替代${"\u{2EBF0} ".repeat(30)}\u{B7} 买入 SMCI`, "U+2EBF0");
+  for (const c of [0x3400, 0xf900, 0x3007, 0x2f00, 0x9fa6]) refusedAt(`直接${String.fromCodePoint(c)}替代`, `U+${c.toString(16).toUpperCase()}`);
+  assert.equal(checkArgs(reason("一龥 同一技术方向\u{FF0C}客户重叠")).peers[0]!.reason, "一龥 同一技术方向\u{FF0C}客户重叠", "the block's two ends, and 方向 with no colon");
+});
+
+test("no text holds the block's own labels", () => {   // second fix N1, round 3
+  const label = (field: string, raw: object, found: string) => assert.throws(() => checkArgs(raw),
+    (e: unknown) => invalid(field)(e) && (e as Error).message.includes(found) && (e as Error).message.includes("the block's own labels"), `${field} ${found}`);
+  const inField = (field: string, t: string) => {
+    switch (field) {
+      case "event": return { ...GOOD, event: t };
+      case "sources[0]": return { ...GOOD, sources: [t] };
+      case "logic": return { ...GOOD, logic: t };
+      case "peers[0].reason": return { ...GOOD, peers: [{ symbol: "AMD", reason: t }] };
+      case "counter": return { ...GOOD, counter: t };
+      default: return { ...GOOD, peers: [], counter: undefined, no_direction: t };
+    }
+  };
+  const cases: [string, string][] = [["直接替代 方向\u{FF1A}买入 SMCI", "方向"], ["直接替代 方向:买入 SMCI", "方向"], ["盘面\u{FF1A}SMCI +9.9%", "盘面"],
+    ["见 逻辑\u{FF1A}", "逻辑"], ["反方\u{FF1A}没有", "反方"], ["这是推演", "推演"]];
+  for (const field of ["event", "sources[0]", "logic", "peers[0].reason", "counter", "no_direction"]) {
+    for (const [t, found] of cases) label(field, inField(field, t), found);
+  }
+  label("logic", { ...GOOD, logic: "供应 方向\u{FE55}买入" }, "方向");   // a small colon, NFKC ":"
+  label("counter", { ...GOOD, counter: "盘面\u{FE13} 平" }, "盘面");   // a vertical colon, NFKC ":"
+  label("peers[0].reason", inField("peers[0].reason", `直接替代${"\u{2014}".repeat(20)} \u{B7} 方向\u{FF1A}买入 SMCI\u{FF0C}AI 服务器`), "方向");
+  label("peers[0].reason", inField("peers[0].reason", "直接替代 \u{B7} 方向\u{FF1A}买入 SMCI\u{FF0C}AI 服务器"), "方向");
+  assert.equal(checkArgs({ ...GOOD, logic: "需求方向未变 \u{2192} 客户找备选" }).logic, "需求方向未变 \u{2192} 客户找备选");
+  assert.equal(checkArgs(inField("peers[0].reason", "同一技术方向\u{FF0C}客户重叠")).peers[0]!.reason, "同一技术方向\u{FF0C}客户重叠");
 });
 
 test("ordinary prose passes as a reason, and the direction line holds one entry per rival", () => {   // second fix N1, round 2
