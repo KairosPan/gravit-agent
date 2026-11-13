@@ -49,6 +49,8 @@ import { makeSearch, readEventsFrom, registerSearchRoutes, unavailableSearch, ty
 import type { StoredEvent } from "./search-text.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
 import { hasExec, lunhuiMounted, panelDeps, readAgentsMeta, registerPanelRoutes } from "./panels.ts";
+import { PLUGINS_ROOT, readAbilities, registerAbilityRoutes } from "./abilities.ts";
+import { ROLES_ROOT, readRoles } from "./roles.ts";
 import { installRoom, placeOf, registerRoomRoutes, type RoomContextLike } from "./room.ts";
 import { ensureRoster } from "./roster.ts";
 import { registerRosterRoutes } from "./roster-routes.ts";
@@ -437,6 +439,17 @@ registerRoomRoutes(booted.ctx.webServer, room);
  * already on the roster is registered as a tool for Gravit before the face
  * reports itself up. */
 await registerPanelRoutes(booted.ctx.webServer, deps);
+/* Discover's abilities (abilities.ts): every `face/plugins/<folder>/ability.json`, read once
+ * here; a refused declaration is one stderr line and left out, never a stopped boot. The
+ * listing reads the same tree as the panels, beside the declarations and the ids of the roles
+ * under roles/ (the library boot.ts read). */
+const declared = readAbilities(PLUGINS_ROOT);
+for (const { file, field, rule } of declared.refused) console.error(`${BIN}: ability left out - ${file}: ${field} - ${rule}`);
+registerAbilityRoutes(booted.ctx.webServer, {
+  ...deps,
+  abilities: declared.abilities,
+  roleIds: new Set(readRoles(ROLES_ROOT).map((role) => role.id)),
+});
 /* The desk (desk.ts): `/data/desk/status`, the Desk panel's
  * `POST /data/desk/pause` (it only pauses; a terminal resumes) and the two
  * desk tools always - every `gravit-desk` agent gets `desk_quotes` over the

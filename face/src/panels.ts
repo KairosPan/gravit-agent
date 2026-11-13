@@ -71,8 +71,9 @@ const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /** Fiber state → phase word, the mirror of dsh-host-plugin-inventory's
  * FIBER_PHASE (NEW packages/host/plugin-inventory/src/index.ts:30-47):
  * PENDING/LOADING/ACTIVE/FAILED/DISPOSED/UNLOADING by ordinal, DISPOSED
- * reading as null like an absent fiber. */
-const FIBER_PHASE: ReadonlyArray<string | null> = [
+ * reading as null like an absent fiber. abilities.ts reads a declared row's
+ * phase by it too. */
+export const FIBER_PHASE: ReadonlyArray<string | null> = [
   "pending", "loading", "active", "failed", null, "unloading",
 ];
 

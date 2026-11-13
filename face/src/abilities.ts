@@ -17,12 +17,21 @@
  * not JSON, breaks a rule, or repeats an id an earlier file took is left out and returned as a
  * refusal that names the file, the field and the rule; the reader itself writes nothing and
  * throws for no declaration, so a bad file never stops a boot.
+ *
+ * {@link abilityListing} answers `GET /data/abilities.json` (§4.3, {@link registerAbilityRoutes}):
+ * each declaration kept at boot, in the order read, with its {@link abilityState} and each
+ * declared row, tool, role and skill beside whether the booted tree has it. A row is read from
+ * its loader entry, a tool by its name alone: nothing of a row's options and no tool's
+ * description is served.
  * @module
  */
 import { readdirSync, readFileSync, statSync, type Dirent } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fencedGet, isTrustedDataRequest } from "./http.ts";
+import { FIBER_PHASE, type PanelDeps } from "./panels.ts";
 import { ROLE_ID_RE, TOOL_NAME_MAX, TOOL_NAME_RE } from "./roles.ts";
+import type { RouteRegistrar } from "./static.ts";
 
 /** The face's own plugin directory - where the face reads the declarations from.
  *  Module-relative, as `ROLES_ROOT` is. */
@@ -307,4 +316,113 @@ export function readAbilities(root: string): { abilities: AbilityFile[]; refused
     abilities.push(result.ability);
   }
   return { abilities, refused };
+}
+
+/* ---------- the listing: GET /data/abilities.json (spec §4.3) ---------- */
+
+/** An ability's state: its own rows' and tools', by {@link abilityState}. It says nothing of
+ *  the desk or of Gravit's conversation. */
+export type AbilityState = "on" | "off" | "starting" | "failed";
+
+/** One ability as the listing serves it, built field by field from its declaration and the
+ *  booted tree: no undeclared key, no path, nothing of a row's options, no tool's description. */
+export interface AbilityRow {
+  id: string; name: string; blurb: string; icon: string | null; about: string; asks: string[]; limits: string[];
+  /** The declaration's `zh` as read, or `null`. */
+  zh: AbilityText | null;
+  state: AbilityState;
+  /** Each declared row: its loader entry's enabled flag and fiber phase ({@link FIBER_PHASE}),
+   *  or `{ enabled: false, phase: null }` when no entry has its id. */
+  rows: { id: string; enabled: boolean; phase: string | null }[];
+  /** Each declared tool, registered when the tool view names it. */
+  tools: { name: string; registered: boolean }[];
+  /** Each declared role, present when the face read it at boot. */
+  roles: { id: string; present: boolean }[];
+  /** Each declared skill, present when the skill registry lists it. */
+  skills: { name: string; present: boolean }[];
+}
+
+/** What {@link abilityListing} reads: the panels' tree reads (src/panels.ts `PanelDeps`), the
+ *  declarations and the role ids, both read once at boot. */
+export interface AbilityDeps extends Pick<PanelDeps, "loaderEntries" | "toolSchemas" | "skills" | "cwd"> {
+  /** The declarations {@link readAbilities} kept, in the order read. */
+  abilities: readonly AbilityFile[];
+  /** The ids of the roles `readRoles` (src/roles.ts) read at boot. */
+  roleIds: ReadonlySet<string>;
+}
+
+/** An ability's state, by the first rule that holds (spec §4.3): `off` when a declared row is
+ *  disabled or has no phase (no entry, no fiber, a disposed one); `failed` when a row's phase is
+ *  `failed`, or every row is `active` and a declared tool is not registered; `on` when every row
+ *  is `active` and every tool registered; `starting` otherwise. Roles and skills do not count. Pure. */
+export function abilityState(rows: AbilityRow["rows"], tools: AbilityRow["tools"]): AbilityState {
+  if (rows.some((row) => !row.enabled || row.phase === null)) return "off";
+  if (rows.some((row) => row.phase === "failed")) return "failed";
+  if (!rows.every((row) => row.phase === "active")) return "starting";
+  return tools.every((tool) => tool.registered) ? "on" : "failed";
+}
+
+/** A declared row as its loader entry has it: the entry whose id ends with `:<id>` (the face's
+ *  rows read `include:<id>`, as `lunhuiMounted` reads `include:lunhui-runs`), the first one. */
+function rowOf(entries: readonly { id: string; disabled?: boolean; fiber?: { state: number } }[], id: string): AbilityRow["rows"][number] {
+  const entry = entries.find((candidate) => candidate.id.endsWith(`:${id}`));
+  if (entry === undefined) return { id, enabled: false, phase: null };
+  return {
+    id,
+    enabled: entry.disabled !== true,
+    phase: entry.fiber === undefined ? null : FIBER_PHASE[entry.fiber.state] ?? null,
+  };
+}
+
+/** The skill registry's names; a registry that fails lists none, so every declared skill reads
+ *  not present and the listing still answers. */
+async function skillNames(deps: Pick<AbilityDeps, "skills" | "cwd">): Promise<ReadonlySet<string>> {
+  try {
+    return new Set((await deps.skills.list({ cwd: deps.cwd })).map((skill) => skill.name));
+  } catch {
+    return new Set();
+  }
+}
+
+/** The listing `GET /data/abilities.json` answers: every declaration in the order given, each an
+ *  {@link AbilityRow}. The loader entries, the tool names and the skill names are read once per
+ *  call; a tool's schema gives its name alone. No declarations is `{ abilities: [] }`. */
+export async function abilityListing(deps: AbilityDeps): Promise<{ abilities: AbilityRow[] }> {
+  const entries = [...deps.loaderEntries()];
+  const registered = new Set(deps.toolSchemas().map((schema) => schema.name));
+  const skills = await skillNames(deps);
+  return {
+    abilities: deps.abilities.map((ability): AbilityRow => {
+      const rows = ability.rows.map((id) => rowOf(entries, id));
+      const tools = ability.tools.map((name) => ({ name, registered: registered.has(name) }));
+      return {
+        id: ability.id,
+        name: ability.name,
+        blurb: ability.blurb,
+        icon: ability.icon,
+        about: ability.about,
+        asks: ability.asks,
+        limits: ability.limits,
+        zh: ability.zh,
+        state: abilityState(rows, tools),
+        rows,
+        tools,
+        roles: ability.roles.map((id) => ({ id, present: deps.roleIds.has(id) })),
+        skills: ability.skills.map((name) => ({ name, present: skills.has(name) })),
+      };
+    }),
+  };
+}
+
+/** Mount `GET /data/abilities.json`, one exact route: `{ ok: true, abilities }` through http.ts's
+ *  `fencedGet` - the GET shell the panel routes use - behind the `/data` fence
+ *  (`isTrustedDataRequest`), a refused request answered `403` with the fixed `FORBIDDEN` body.
+ * @param webServer - the host webserver service, or a test recorder.
+ * @param deps - the tree reads, the declarations and the role ids. */
+export function registerAbilityRoutes(webServer: RouteRegistrar, deps: AbilityDeps): void {
+  webServer.register({
+    kind: "exact",
+    path: "/data/abilities.json",
+    handler: fencedGet(isTrustedDataRequest, () => abilityListing(deps)),
+  });
 }
