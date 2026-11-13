@@ -3048,8 +3048,10 @@ the rows under `plugins/readthrough/`) admits only the hundred large companies o
 and the US names in `desk/rules.yml`, `desk/holdings.yml` and `desk/levels.yml` (never a
 strategy's `levels.yml`, SPY, QQQ or the company itself) — add a smaller rival to one of those
 files to allow it; it refuses SPY or QQQ as the company, `high` on an unconfirmed report, any call
-from a desk turn outside an alert's annotation, a rival's reason holding the direction line's own
-markup (`（ ） ( ) ； ;` or `做多`), and any text holding a control or format character. The face,
+from a desk turn outside an alert's annotation, a rival's reason holding anything but letters and
+digits of any script, plain spaces and the marks `，、。·：,.:'’-–—/%+&` (so no bracket, semicolon or
+combining mark) or saying `做多` (even spaced out or in a compatibility form), and any text holding a
+control or format character, an invisible character or a space other than the plain one. The face,
 not the model, writes the block, prices it from the Market and appends it under the reason after a
 blank line, in the same message:
 
@@ -3072,8 +3074,10 @@ again. A direction counts as given only once its record says it was sent (`sent:
 `sent` line never landed — a crash before delivery, a failed write — is asked again, which may
 send the operator a second block for it. A later alert of an event given carries no ask and ends
 with the face's own line, `推演（<HH:MM ET> 已给）：做多 AMD，此后 +2.1%` (`<MM-DD HH:MM ET>` when given
-on an earlier day), each rival still inside the fence re-priced from its recorded print (nothing
-for a "no direction", or with no rival left). Every accepted call is a `direction` line in
+on an earlier day), each rival still inside the fence re-priced from its recorded print — `此后`
+measured only from a print the block showed traded, not `未成交`, to a print read now that is later
+than the direction, the rival named with no figure otherwise (nothing for a "no direction", or with
+no rival left). Every accepted call is a `direction` line in
 `$DSH_HOME/face/readthrough/directions.jsonl` — the caller, the arguments and the prints of that
 moment — followed, for an alert's, by a `sent` line; the pass's `annotated` record in
 `alerts.jsonl` names the ids under `directions`. A read-through that fails — the record unreadable,
@@ -4541,10 +4545,10 @@ fresh one will not open the face runs without search. Node prints its `node:sqli
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 34 smoke files (40 real boots), isolated; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 34 smoke files (44 real boots), isolated; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 34 smoke files (40 real boots) listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 34 smoke files (44 real boots) listed below; `FACE_SMOKE=1` runs
 them too (4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
@@ -6678,9 +6682,11 @@ that is falling that day on its own news. Markets open, the phone at hand.
    within the minutes between them (the line names its feed and New York time, once at its end
    when every print has a figure and all share feed and minute, with the date when of another
    day); a rival that has not traded since the event's session began reads `未成交`.
-4. **The words.** PASS: the block has its `· 反方：` line; the reason above it names no rival to
-   buy and no size, price or time; nor do the block's logic, reasons or counter-case (those are the
-   model's words, unchecked — record any you find).
+4. **The words.** PASS: the block has its `· 反方：` line; the `· 方向：` line holds one `做多` per
+   rival, each reason only letters, digits, plain spaces and `，、。·：,.:'’-–—/%+&`; the reason above
+   it names no rival to buy and no size, price or time; nor do the block's logic, reasons or
+   counter-case (those are the model's words, checked only for their characters — record any you
+   find).
 5. **The record.** In `$DSH_HOME/face/readthrough/directions.jsonl`, PASS: one `direction` line
    with `caller.kind` `annotation`, the pass, its session and `ref`, each rival's print, the
    company's and SPY's; then one `sent` line with its id and `sent: true`; and the pass's
@@ -6693,7 +6699,9 @@ that is falling that day on its own news. Markets open, the phone at hand.
 7. **A second alert of the same event.** When the step-1 rule fires again past its cooldown under
    the same reference close. PASS: the reply carries no new block and ends with one line,
    `推演（<HH:MM ET> 已给）：做多 <SYM>，此后 <±x.x%>…` (the time dated `<MM-DD HH:MM ET>` when the
-   direction was given on an earlier day); `directions.jsonl` gains no `direction` line. (After a
+   direction was given on an earlier day), its `此后` measured from the rival's print on the
+   step-1 block's `· 盘面：` line — a rival that read `未成交` there, or with no print since the
+   direction, is named with no figure; `directions.jsonl` gains no `direction` line. (After a
    "no direction" nothing is appended.)
 8. **Asked, with a small company.** In the conversation, ask for a task: what a named company's
    bad news means for its rivals, naming as one rival a small company on no list and in none of
