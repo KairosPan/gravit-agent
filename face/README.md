@@ -3048,10 +3048,12 @@ the rows under `plugins/readthrough/`) admits only the hundred large companies o
 and the US names in `desk/rules.yml`, `desk/holdings.yml` and `desk/levels.yml` (never a
 strategy's `levels.yml`, SPY, QQQ or the company itself) — add a smaller rival to one of those
 files to allow it; it refuses SPY or QQQ as the company, `high` on an unconfirmed report, any call
-from a desk turn outside an alert's annotation, a rival's reason holding anything but letters and
-digits of any script, plain spaces and the marks `，、。·：,.:'’-–—/%+&` (so no bracket, semicolon or
-combining mark) or saying `做多` (even spaced out or in a compatibility form), and any text holding a
-control or format character, an invisible character or a space other than the plain one. The face,
+from a desk turn outside an alert's annotation, a rival's reason holding anything but Chinese
+characters, ASCII letters and digits, single spaces and the marks `，、。·：,.:'’-–—/%+&` (so no bracket,
+quotation mark or semicolon of any script, and no accented letter or other script either) or saying
+`做多` (whatever space or mark stands between, or in a compatibility form), and any text holding a
+control or format character, an invisible character, the Braille blank, a lone surrogate, a space
+other than the plain one or two spaces in a row. The face,
 not the model, writes the block, prices it from the Market and appends it under the reason after a
 blank line, in the same message:
 
@@ -6683,7 +6685,8 @@ that is falling that day on its own news. Markets open, the phone at hand.
    when every print has a figure and all share feed and minute, with the date when of another
    day); a rival that has not traded since the event's session began reads `未成交`.
 4. **The words.** PASS: the block has its `· 反方：` line; the `· 方向：` line holds one `做多` per
-   rival, each reason only letters, digits, plain spaces and `，、。·：,.:'’-–—/%+&`; the reason above
+   rival, each reason only Chinese characters, ASCII letters and digits, single spaces and
+   `，、。·：,.:'’-–—/%+&`; the reason above
    it names no rival to buy and no size, price or time; nor do the block's logic, reasons or
    counter-case (those are the model's words, checked only for their characters — record any you
    find).
