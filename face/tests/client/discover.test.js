@@ -1,4 +1,4 @@
-// Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): five shelves
+// Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): six shelves
 // from the face's listings, a grid per shelf, a page per item — and no shop.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -230,13 +230,13 @@ test("an item's line is known by its shelf and a module's unread head by its cod
 });
 
 test("a card's kind is drawn in the table's capitals, never a table word upper-cased", () => {
-  const table = { 'discover.kind.mcpUpper': 'Srv', 'discover.kind.botUpper': 'Bt', 'discover.kind.agentUpper': 'Agt', 'discover.kind.skillUpper': 'Sk', 'discover.kind.moduleUpper': 'Mod',
-    'discover.kind.mcp': 'xmcp', 'discover.kind.bot': 'xbot', 'discover.kind.agent': 'xagent', 'discover.kind.skill': 'xskill', 'discover.kind.module': 'xmodule' };
+  const table = { 'discover.kind.mcpUpper': 'Srv', 'discover.kind.botUpper': 'Bt', 'discover.kind.agentUpper': 'Agt', 'discover.kind.skillUpper': 'Sk', 'discover.kind.moduleUpper': 'Mod', 'discover.kind.abilityUpper': 'Abl',
+    'discover.kind.mcp': 'xmcp', 'discover.kind.bot': 'xbot', 'discover.kind.agent': 'xagent', 'discover.kind.skill': 'xskill', 'discover.kind.module': 'xmodule', 'discover.kind.ability': 'xability' };
   withTable(table, () => {
     const kinds = [...renderDiscover(loaded()).matchAll(/<span class="pcard-kind">([^<]*)<\/span>/g)].map(m => m[1]);
     assert.ok(kinds.length > 0);
-    for (const k of ['Srv', 'Bt', 'Agt', 'Sk', 'Mod']) assert.ok(kinds.includes(k), `${k} drawn: ${kinds}`);
-    assert.deepEqual(kinds.filter(k => !['Srv', 'Bt', 'Agt', 'Sk', 'Mod'].includes(k)), []);
+    for (const k of ['Srv', 'Bt', 'Agt', 'Sk', 'Mod', 'Abl']) assert.ok(kinds.includes(k), `${k} drawn: ${kinds}`);
+    assert.deepEqual(kinds.filter(k => !['Srv', 'Bt', 'Agt', 'Sk', 'Mod', 'Abl'].includes(k)), []);
     assert.match(renderModule(R.nav(emptyState(), { screen: 'module', id: 'sentiment' })), /<span class="pcard-kind">Mod<\/span>/);
   });
 });

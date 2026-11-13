@@ -1,6 +1,22 @@
-// face/tests/client/helpers/inventory.js — the face's listings as Discover reads them (/data/plugins.json,
-// /data/bots.json, /data/agents.json, /data/memory.json), each as a loaded shelf, and /data/modules.json.
+// face/tests/client/helpers/inventory.js — the face's listings as Discover reads them (/data/abilities.json,
+// /data/plugins.json, /data/bots.json, /data/agents.json, /data/memory.json), each as a loaded shelf, and /data/modules.json.
+import { readFileSync } from 'node:fs';
+
 const shelf = data => ({ status: 'ready', data, at: 1 });
+
+// /data/abilities.json as the face answers it on a booted tree (src/abilities.ts abilityListing): the two shipped
+// declarations, read from their files once, in the face's folder order, both on — every row enabled and active, every tool
+// registered, every role and skill present
+const DECLARED = ['analog', 'readthrough'].map(folder => JSON.parse(readFileSync(new URL(`../../../plugins/${folder}/ability.json`, import.meta.url), 'utf8')));
+const served = a => ({
+  id: a.id, name: a.name, blurb: a.blurb, icon: a.icon ?? null, about: a.about, asks: a.asks ?? [], limits: a.limits ?? [], zh: a.zh ?? null,
+  state: 'on',
+  rows: a.rows.map(id => ({ id, enabled: true, phase: 'active' })),
+  tools: a.tools.map(name => ({ name, registered: true })),
+  roles: (a.roles ?? []).map(id => ({ id, present: true })),
+  skills: (a.skills ?? []).map(name => ({ name, present: true })),
+});
+export const abilitiesListing = () => ({ abilities: structuredClone(DECLARED).map(served) });
 
 export const buffett = {
   id: 'buffett', name: 'Buffett Type', description: 'Buys cheap, holds long', dir: '/r/bots/buffett', homeCwd: '/r/bots/buffett/home',
@@ -10,6 +26,7 @@ export const buffett = {
 };
 
 export const listings = () => ({
+  abilities: shelf(abilitiesListing()),
   plugins: shelf({ ok: true, mcp: [
     { server: 'alpaca-kit', phase: 'active', tools: [{ name: 'mcp__alpaca-kit__account', description: 'The paper account' }, { name: 'mcp__alpaca-kit__screen', description: 'Screen' }] },
     { server: 'akshare', phase: 'failed', tools: [] },

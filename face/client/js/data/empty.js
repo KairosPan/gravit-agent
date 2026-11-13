@@ -41,11 +41,11 @@ export function emptyState() {
     status: { line: said('status.connecting'), bad: false, connected: false },
     orphanGates: {},
     lastSeen: {},
-    // Discover from the face (host/discover.js): the five listings, the Gravit item, the skills read, its own line; a module
+    // Discover from the face (host/discover.js): the six listings, the Gravit item, the skills read, its own line; a module
     // page's latest artifact by module (host/modules.js); the one roster its switches draw from (one-entry plan 4)
     discover: {
       query: '',
-      shelves: Object.fromEntries(['plugins', 'modules', 'bots', 'agents', 'memory'].map(k => [k, { status: 'idle', data: null, at: null }])),
+      shelves: Object.fromEntries(['abilities', 'plugins', 'modules', 'bots', 'agents', 'memory'].map(k => [k, { status: 'idle', data: null, at: null }])),
       gravit: { host: null, model: null, keys: null }, skills: {}, status: null, models: null, artifacts: {},
       roster: { status: 'idle', agents: [], bots: [] },
     },

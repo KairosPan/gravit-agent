@@ -1,5 +1,5 @@
-// Discover's host layer (spec 2026-10-19 §7 Stage 3): the five listings each alone, the Gravit item's three reads, a
-// skill's content, and the agent writes.
+// Discover's host layer (spec 2026-10-19 §7 Stage 3): the six listings each alone (the abilities' since spec 2026-11-13
+// §4.4), the Gravit item's three reads, a skill's content, and the agent writes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../../client/js/store.js';
@@ -20,17 +20,17 @@ function rig({ json = {}, calls: answers = {}, posts = {} } = {}) {
   const discover = startDiscover({ store, getJson, postJson, call, now: () => ++t });
   return { store, discover, reads, called, posted, d: () => store.get().discover };
 }
-const ok = { '/data/plugins.json': { ok: true, mcp: [], agentTools: [], rows: [] }, '/data/bots.json': { ok: true, bots: [] }, '/data/agents.json': { ok: true, main: {}, local: [], candidates: [] }, '/data/memory.json': { ok: true, groups: [] }, '/data/modules.json': { ok: true, mounted: true, root: '/r', channels: [] }, '/data/roster.json': { ok: true, agents: [], bots: [] } };
+const ok = { '/data/abilities.json': { abilities: [] }, '/data/plugins.json': { ok: true, mcp: [], agentTools: [], rows: [] }, '/data/bots.json': { ok: true, bots: [] }, '/data/agents.json': { ok: true, main: {}, local: [], candidates: [] }, '/data/memory.json': { ok: true, groups: [] }, '/data/modules.json': { ok: true, mounted: true, root: '/r', channels: [] }, '/data/roster.json': { ok: true, agents: [], bots: [] } };
 
-test('load reads the five listings and the roster once each; one failing marks only its shelf and keeps its data', async () => {
+test('load reads the six listings and the roster once each; one failing marks only its shelf and keeps its data', async () => {
   const r = rig({ json: { ...ok } });
   await Promise.all([r.discover.load(), r.discover.load()]);
-  assert.deepEqual(r.reads.sort(), ['/data/agents.json', '/data/bots.json', '/data/memory.json', '/data/modules.json', '/data/plugins.json', '/data/roster.json']);
-  for (const s of ['plugins', 'bots', 'agents', 'memory', 'modules']) assert.equal(r.d().shelves[s].status, 'ready', s);
+  assert.deepEqual(r.reads.sort(), ['/data/abilities.json', '/data/agents.json', '/data/bots.json', '/data/memory.json', '/data/modules.json', '/data/plugins.json', '/data/roster.json']);
+  for (const s of ['abilities', 'plugins', 'bots', 'agents', 'memory', 'modules']) assert.equal(r.d().shelves[s].status, 'ready', s);
   const bad = rig({ json: { ...ok, '/data/modules.json': { ok: true } } });
   await bad.discover.load();
   assert.equal(bad.d().shelves.modules.status, 'failed', 'a modules answer with no channels is malformed');
-  for (const s of ['plugins', 'bots', 'agents', 'memory']) assert.equal(bad.d().shelves[s].status, 'ready', s);
+  for (const s of ['abilities', 'plugins', 'bots', 'agents', 'memory']) assert.equal(bad.d().shelves[s].status, 'ready', s);
   const one = rig({ json: { ...ok, '/data/bots.json': new Error('HTTP 500') } });
   await one.discover.load();
   assert.equal(one.d().shelves.bots.status, 'failed');
@@ -42,6 +42,23 @@ test('load reads the five listings and the roster once each; one failing marks o
   await keep.discover.load();
   assert.equal(keep.d().shelves.bots.status, 'failed');
   assert.deepEqual(keep.d().shelves.bots.data.bots, [{ id: 'b', name: 'B' }], 'the last good listing stays');
+});
+
+test('load asks /data/abilities.json; an answer with no list of abilities fails that shelf alone', async () => {
+  const listing = { abilities: [{ id: 'event-analogs', name: 'Event analogs', state: 'on' }] };
+  const r = rig({ json: { ...ok, '/data/abilities.json': listing } });
+  await r.discover.load();
+  assert.ok(r.reads.includes('/data/abilities.json'));
+  assert.equal(r.d().shelves.abilities.status, 'ready');
+  assert.deepEqual(r.d().shelves.abilities.data, listing);
+  const bad = rig({ json: { ...ok, '/data/abilities.json': { abilities: 'x' } } });
+  await bad.discover.load();
+  assert.equal(bad.d().shelves.abilities.status, 'failed', 'abilities that are not a list are malformed');
+  for (const s of ['plugins', 'bots', 'agents', 'memory', 'modules']) assert.equal(bad.d().shelves[s].status, 'ready', s);
+  const down = rig({ json: { ...ok, '/data/abilities.json': new Error('HTTP 404') } });
+  await down.discover.load();
+  assert.equal(down.d().shelves.abilities.status, 'failed');
+  assert.equal(down.d().shelves.plugins.status, 'ready');
 });
 
 test('gravit reads the host, the model catalog and the key, each alone', async () => {

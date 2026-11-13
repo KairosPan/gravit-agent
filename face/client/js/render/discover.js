@@ -1,5 +1,5 @@
 // face/client/js/render/discover.js — Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3
-// "Discover = My plugins"): five shelves of cards from the face's listings, a grid per shelf, a page per item. No shop:
+// "Discover = My plugins"): six shelves of cards from the face's listings, a grid per shelf, a page per item. No shop:
 // nothing here installs, buys, publishes or counts installs. Every listed string is the host's or the operator's, through
 // esc.
 import { esc, attrs, cls } from '../html.js';
@@ -42,6 +42,7 @@ function kindUpper(item) {
     case 'agent': return t('discover.kind.agentUpper');
     case 'skill': return t('discover.kind.skillUpper');
     case 'module': return t('discover.kind.moduleUpper');
+    case 'ability': return t('discover.kind.abilityUpper');
     default: return item.kind;
   }
 }
