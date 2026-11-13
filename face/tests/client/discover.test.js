@@ -337,11 +337,12 @@ test("an ability's page draws no section it has nothing for, and says what is no
 test("an ability's listed strings are escaped, and its page never names a tool's description", () => {
   const ask = 'Is "A&B" <up>?';
   const bad = '<img src=x onerror=alert(1)>';
-  const l = withAbility(0, { asks: [ask], about: bad, limits: [bad], name: bad, tools: [{ name: bad, registered: true }], rows: [{ id: bad, enabled: true, phase: 'active' }], roles: [{ id: bad, present: true }], skills: [{ name: bad, present: true }] });
+  const l = withAbility(0, { asks: [ask, 'Line one\nLine two'], about: bad, limits: [bad], name: bad, tools: [{ name: bad, registered: true }], rows: [{ id: bad, enabled: true, phase: 'active' }], roles: [{ id: bad, present: true }], skills: [{ name: bad, present: true }] });
   const h = renderPlugin(conversing(abilityAt('ability:event-analogs', l)));
   assert.ok(h.includes('data-text="Is &quot;A&amp;B&quot; &lt;up&gt;?"'));
   assert.ok(!h.includes(ask), 'the ask nowhere unescaped');
   assert.ok(h.includes('>Is &quot;A&amp;B&quot; &lt;up&gt;?</button>'));
+  assert.ok(h.includes('data-text="Line one\nLine two"'), 'a line break kept in the words the key puts');
   assert.doesNotMatch(h, /<img/);
   assert.match(h, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.doesNotMatch(renderDiscover(loadedFrom(l)), /<img/);

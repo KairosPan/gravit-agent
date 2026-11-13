@@ -929,13 +929,14 @@ export function corpus() {
 // the fields whose strings are words a screen draws as they come — the operator's, Gravit's, a bot's, a venue's or the
 // Account's prose, a name, a ticker, a path — and the only ones corpusStrings counts outside an upstream's content: a code
 // (a status, a screen, a phase, a run's state, an id) is never one, so a code word drawn as a word (failed, running,
-// messages) is the probe's to find
+// messages) is the probe's to find. An ability's about, asks and limits are none of them: their words are known nowhere, and
+// the probe passes each as a whole run (abilityRuns below)
 const CONTENT_FIELDS = new Set([
   // prose
   'text', 'title', 'name', 'label', 'note', 'notes', 'message', 'description', 'question', 'header', 'prompt', 'response', 'detail',
   'displayReason', 'reason', 'why', 'whyNot', 'said', 'error', 'words', 'what', 'example', 'via', 'readOnlyBecause', 'noTradeBecause',
   'proven', 'lands', 'guard', 'beast', 'door', 'request', 'plan', 'soul', 'legs', 'line', 'broken', 'setupIssues', 'freezes',
-  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age', 'steps', 'body', 'blurb', 'about', 'asks', 'limits',
+  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age', 'steps', 'body', 'blurb',
   // names: a venue's, a product's, an agent's, an account's, a market's, a network's
   'productName', 'protocol', 'quoteFrom', 'sourceWord', 'venueName', 'accountName', 'agentName', 'byName', 'toName', 'unitWord',
   'network', 'networks', 'chain', 'chains', 'bridgeChains', 'funded', 'exchange', 'feed', 'source', 'model', 'route', 'runtime',
@@ -960,7 +961,8 @@ const CONTENT_FIELDS = new Set([
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); an event analog view and its
 // task as the face read them (the worker's and web pages' words); an ability's declared row and role ids, which its page draws
-// as they come (its tools' and skills' names are content by `name`); `*` is any one key
+// as they come (its tools' and skills' names are content by `name`) — so their words (analog, views, events, read, through,
+// service, tool, source, reader) are known on every screen, and the key name id with them; `*` is any one key
 const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'],
   ['discover', 'shelves', 'abilities', 'data', 'abilities', 'rows', 'id'], ['discover', 'shelves', 'abilities', 'data', 'abilities', 'roles', 'id']];
@@ -994,4 +996,23 @@ export function corpusStrings() {
   // iMessage's region list: each region's name as the browser gives it (Intl.DisplayNames), content as a venue's name is
   for (const lang of ['en', 'zh-CN']) for (const o of regionOptions(lang)) out.push({ text: o.name, key: null });
   return out;
+}
+
+// an ability's declared prose (spec 2026-11-13 §4.1) in the abilities listings the corpus' states hold, top level and zh overlay:
+// each line of its about, each ask and each limit, trimmed — the runs its page draws each whole, which the words probe passes
+// as they are (words-probe.test.js), never as a source of known words: a code word one holds (the event analog's ask about a
+// trial that just failed) stays unknown everywhere else
+export function abilityRuns() {
+  const runs = new Set();
+  const lines = v => (typeof v === 'string' ? v.split('\n') : Array.isArray(v) ? v.filter(s => typeof s === 'string').flatMap(s => s.split('\n')) : []);
+  for (const st of [...everyState(), ...namedStates().map(([, st]) => st)]) {
+    const listed = st.discover?.shelves?.abilities?.data?.abilities;
+    for (const a of Array.isArray(listed) ? listed : []) {
+      for (const text of [a, a?.zh]) {
+        if (!text || typeof text !== 'object') continue;
+        for (const s of [...lines(text.about), ...lines(text.asks), ...lines(text.limits)]) if (s.trim()) runs.add(s.trim());
+      }
+    }
+  }
+  return runs;
 }
