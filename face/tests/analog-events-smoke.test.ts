@@ -1,17 +1,17 @@
 // face/tests/analog-events-smoke.test.ts
 /** The event analogs on a real boot (analogs spec §5.2, §6.5): the source reader's preset is listed whole, the running
- * registry lists `analog_events` and Gravit's view `role_source_reader`, and the three analog rows are listed active; a
+ * registry lists `analog_events` and Gravit's view `role_source_reader`, and the two analog rows are listed active, with no `analog_chart` in the registry (withdrawn 2026-11-13); a
  * session created on `role-source-reader` sees exactly `web_fetch` and `web_search` - `web_fetch` in its own layer,
  * given by the face (src/source-reader.ts), proved here on the real tree; a Gravit session, a PDF page reader's and a
  * bot's see no `web_fetch`, the last two no analog tool either, and neither the conversation's allow list nor the
  * desk's names the reader's tools; through the real registry the reader's `web_fetch` reaches dsh's http provider,
  * which refuses a loopback address before any socket opens, until the fortieth page, after which the guard refuses
  * the next; `analog_events` for Gravit measures one event on a stub market and stores the view, its source counted
- * as verified only once the page record holds it; the view route serves the stored view with the cookie and refuses
- * another site's page; the reader cannot call `analog_events`; and the stub saw only `/api/candles` on `cboe`.
+ * as verified only once the page record holds it; the view route serves the stored view with the cookie, refuses
+ * another site's page and answers 404 for an id it does not hold; the reader cannot call `analog_events`; and the stub saw only `/api/candles` on `cboe`.
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is its own file.
- * Built as tests/analog-smoke.test.ts is: the scratch home is a `mkdtemp` directory, never `~/.dsh`; the Account seat
+ * The scratch home is a `mkdtemp` directory, never `~/.dsh`; the Account seat
  * is disabled; `analog-views` is replaced by a row over a scratch views directory and the stub's origin; the stub is
  * an `http.createServer` on port 0 answering `/api/candles` from `fakeMarket` (analog-fixtures.ts) with `EVT`
  * (`EVENT`) and `SPY` (`EVENT_MARKET`); the boot's other market readers keep the dead URL `helpers/no-market.ts` sets.
@@ -142,7 +142,8 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
     const gravitTools = names(tools.schemas(gravit));
     assert.ok(gravitTools.includes("role_source_reader"), `Gravit's view lists role_source_reader; saw ${gravitTools.join(", ")}`);
     const listedRows = pluginListing(panelDeps(ctx, process.cwd(), home)).rows;
-    for (const id of ["analog-views", "analog-chart", "analog-events"]) {
+    assert.equal(names(tools.schemas()).includes("analog_chart"), false, "the chart analog is withdrawn: no analog_chart is registered");
+    for (const id of ["analog-views", "analog-events"]) {
       const row = listedRows.find((r) => r.id.endsWith(`:${id}`));
       assert.ok(row, `${id} must be listed; saw ${listedRows.map((r) => r.id).join(", ")}`);
       assert.equal(row.phase, "active", id);
@@ -160,7 +161,7 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
     const pdfTools = names(tools.schemas(await create("role-pdf-page-reader")));
     const botTools = names(tools.schemas(await create("probe")));
     for (const [who, seen] of [["the PDF page reader", pdfTools], ["the fixture bot", botTools]] as const) {
-      for (const name of ["web_fetch", "analog_events", "analog_chart"]) {
+      for (const name of ["web_fetch", "analog_events"]) {
         assert.equal(seen.includes(name), false, `${who} has no ${name}; saw ${seen.join(", ")}`);
       }
     }
@@ -217,6 +218,9 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
     const foreign = await fetch(`${base}/data/analog/view?id=${opened.view}`, { headers: { origin: "http://evil.example.com" } });
     assert.equal(foreign.status, 403, "from another site's page the fence refuses");
     await foreign.arrayBuffer();
+    const unknown = await fetch(`${base}/data/analog/view?id=an-20200101-00000000`, { headers: { cookie } });
+    assert.equal(unknown.status, 404, "an id the store does not hold");
+    await unknown.arrayBuffer();
 
     // 7. the reader cannot call analog_events; the stub saw only GET /api/candles on cboe
     const readerEvents = await run("analog_events", ask, reader);

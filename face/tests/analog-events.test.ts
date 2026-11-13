@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dayZero, eventWindow, measureEvent, tapeCheck } from "../plugins/analog/lib/events.mjs";
-import { barOn, windowOf } from "../plugins/analog/lib/episodes.mjs";
+import { barOn, windowOf } from "../plugins/analog/lib/windows.mjs";
 import { EVENT, EVENT_CLOSES, EVENT_GAPPED, EVENT_MARKET, SELLOFF, barsFrom, dateAt, near } from "./analog-fixtures.ts";
 
 test("day 0 is the first session that could react", () => {
@@ -62,7 +62,7 @@ test("the window is indexed to the close before day 0, and the path against the 
   assert.deepEqual([rel[29], rel[30], rel[31], rel[90]], [[-1, 100], [0, 88.89], [1, 84], [60, 94.12]]);
   assert.deepEqual(eventWindow(EVENT, 100, null).rel, []);
 });
-test("episodes.mjs: barOn finds a date's bar; windowOf keeps its old base by default", () => {
+test("windows.mjs: barOn finds a date's bar; windowOf keeps day 0's close as its base by default", () => {
   assert.equal(barOn(EVENT_MARKET, "2020-04-10")?.c, 396);
   assert.equal(barOn(EVENT_MARKET, "2019-12-31"), undefined);
   assert.deepEqual(windowOf(SELLOFF, 330), windowOf(SELLOFF, 330, SELLOFF[330]!.c));

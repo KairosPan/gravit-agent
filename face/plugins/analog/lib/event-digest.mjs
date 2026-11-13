@@ -16,9 +16,9 @@
  * earliest and the latest of them in turn, so the kept ones are still the two ends of the order; the `… and N more`
  * line says how many are still out and goes when none is. (9) A digest still over the bound is refused (`INTERNAL`),
  * never returned. Line 1, the header, each row's numbers and the fixed sentences are never cut. Numbers are written as
- * the chart digest writes them. The view is not changed.
+ * `format.mjs` writes them. The view is not changed.
  */
-import { DIGEST_MAX, pct, ratio, whole } from "./digest.mjs";
+import { DIGEST_MAX, pct, ratio, whole } from "./format.mjs";
 import { refuse } from "./errors.mjs";
 
 /** @typedef {import("./event-scan.mjs").EventsView} EventsView */

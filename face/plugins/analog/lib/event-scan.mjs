@@ -25,19 +25,19 @@ import {
   dayZero, eventWindow, measureEvent, tapeCheck,
 } from "./events.mjs";
 import { groupPaths, orderCases, summarizeEvents } from "./event-summary.mjs";
-import { SCAN_DEADLINE_MS, normalizeSymbol } from "./chart-scan.mjs";
-import { MIN_GROUP } from "./summary.mjs";
-import { POST, PRE, dateOf } from "./episodes.mjs";
+import { normalizeSymbol } from "./symbols.mjs";
+import { MIN_GROUP } from "./stats.mjs";
+import { POST, PRE, dateOf } from "./windows.mjs";
 import { refuse } from "./errors.mjs";
 
 /**
- * @typedef {import("./selloff.mjs").Bar} Bar
+ * @typedef {import("./bars.mjs").Bar} Bar
  * @typedef {import("./events.mjs").When} When
  * @typedef {import("./events.mjs").Measure} Measure
  * @typedef {import("./events.mjs").Tape} Tape
  * @typedef {import("./event-summary.mjs").EventSummary} EventSummary
  * @typedef {import("./event-summary.mjs").Paths} Paths
- * @typedef {import("./chart-scan.mjs").Path} Path
+ * @typedef {import("./windows.mjs").Path} Path
  * @typedef {import("./bars.mjs").BarsKeep} BarsKeep
  * @typedef {import("./bars.mjs").History} History
  * @typedef {{ symbol: string, label: string, group: string, date: string, timing: When["timing"], source: string,
@@ -79,6 +79,8 @@ export const LIMITS = { title: 120, label: 80, group: 24, note: 160, source: 500
 /** The market's own symbol: the context every change is measured against. */
 const MARKET_SYMBOL = "SPY";
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** How long a scan reads the companies' histories before it answers with what it has. */
+export const SCAN_DEADLINE_MS = 480_000;
 const DEADLINE_WORDS = "not read before the deadline";
 const NEW_YORK = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
 const EVENT_SHAPE = "an object with symbol, label, group, date, timing, source and verified";

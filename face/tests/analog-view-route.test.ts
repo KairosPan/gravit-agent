@@ -28,8 +28,8 @@ const held = (views: Record<string, unknown>): AnalogViewService => ({
 test("the id pattern is the plugin's", () => assert.equal(ANALOG_VIEW_ID_RE.source, VIEW_ID_RE.source));
 
 test("a stored view is served by its id", async () => {
-  const route = routeFor(() => held({ [ID]: { kind: "chart", id: ID } }));
-  assert.deepEqual(await call(route, `/data/analog/view?id=${ID}`), { status: 200, body: { ok: true, view: { kind: "chart", id: ID } } });
+  const route = routeFor(() => held({ [ID]: { kind: "events", id: ID } }));
+  assert.deepEqual(await call(route, `/data/analog/view?id=${ID}`), { status: 200, body: { ok: true, view: { kind: "events", id: ID } } });
 });
 
 test("what the route refuses, in fixed words", async () => {

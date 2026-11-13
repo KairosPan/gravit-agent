@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const SKILL = fileURLToPath(new URL("../../dsh/skills/mechanics/analog-guide/SKILL.md", import.meta.url));
 const README = fileURLToPath(new URL("../../dsh/README.md", import.meta.url));
 const DESCRIPTION =
-  "How to answer \"what happened after cases like this\" — analog_chart for a US stock that is falling, analog_events for a news event measured against past ones, the source reader for finding and dating them, and how to report the result without advising a trade.";
+  "How to answer \"what happened after cases like this\" — analog_events for a news event measured against past ones, the source reader for finding and dating them, and how to report the result without advising a trade.";
 /** The body's budget, in bytes. */
 const BODY_MAX = 4000;
 
@@ -41,11 +41,12 @@ test("the analog guide's body fits its budget and holds no template group", () =
   assert.equal(body.includes("{{"), false);
 });
 
-test("the analog guide names both tools, the reader, the market's lookup and the present case", () => {
+test("the analog guide names its tool, the reader, the market's lookup and the present case, and no chart tool", () => {
   const { body } = readSkill();
-  for (const word of ["analog_chart", "analog_events", "role_source_reader", "mcp__market__market_explore", "VERIFIED", "query", "anchor"]) {
+  for (const word of ["analog_events", "role_source_reader", "mcp__market__market_explore", "VERIFIED", "query", "anchor"]) {
     assert.ok(body.includes(word), word);
   }
+  assert.equal(body.includes("analog_chart"), false, "the chart analog was withdrawn 2026-11-13");
 });
 
 test("the analog guide treats the report as data and never advises a trade", () => {

@@ -9,10 +9,10 @@
  * close before day 0, and against the market as (1 + stock) ÷ (1 + market) − 1, the market's bars paired with the
  * company's by date and never by position.
  */
-import { POST, barOn, dateOf, windowOf } from "./episodes.mjs";
+import { POST, barOn, dateOf, windowOf } from "./windows.mjs";
 
 /**
- * @typedef {import("./selloff.mjs").Bar} Bar
+ * @typedef {import("./bars.mjs").Bar} Bar
  * @typedef {{ date: string, timing: "pre" | "open" | "post" | "closed" }} When
  * @typedef {{ base: number, gap: number, r0: number, r1: number | null, r5: number | null, r20: number | null,
  *   r60: number | null, x0: number | null, x1: number | null, x5: number | null, x20: number | null,

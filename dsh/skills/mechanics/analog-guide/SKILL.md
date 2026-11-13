@@ -1,15 +1,16 @@
 ---
 name: analog-guide
-description: How to answer "what happened after cases like this" — analog_chart for a US stock that is falling, analog_events for a news event measured against past ones, the source reader for finding and dating them, and how to report the result without advising a trade.
+description: How to answer "what happened after cases like this" — analog_events for a news event measured against past ones, the source reader for finding and dating them, and how to report the result without advising a trade.
 ---
 
 # Analog guide (neutral mechanics)
 
-Two tools read the past for a present case. Neither forecasts, and neither guards against lookahead.
+One tool reads the past for a present case: `analog_events`. It does not forecast, and it does not guard against
+lookahead.
 
-- **Which tool.** A US stock's fall, read from its chart, is `analog_chart` (`symbol`, optional `as_of` and `also`);
-  it refuses a stock less than 10% below its 60-session high. A news event measured against past ones is
-  `analog_events`. One ask may use both: "NVDA is falling after its CEO's scandal" is a chart and an event.
+- **What it answers.** A news event at a company, measured against past events of the same kind at other companies:
+  what each stock did after. It matches events, not charts: for a stock that is falling with no event to name there
+  is no analog tool, so say so and do not force an event onto it.
 - **Say back the facets first.** Before researching an event, tell the operator which facets their words name: who
   (a hired chief executive, or a founder the company is identified with), what (an affair, a misconduct allegation,
   a national-security tie), how it ended (left, stayed). Then make one `role_source_reader` call per facet. Each

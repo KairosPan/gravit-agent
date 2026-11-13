@@ -11,7 +11,7 @@
  * A group's path runs from day 0 for as long as 8 or more of its measured cases have the session: at each, the median
  * and the quartiles of their values against the market, indexed to 100 at the close before day 0, to two decimals.
  */
-import { MIN_GROUP, quantile } from "./summary.mjs";
+import { MIN_GROUP, quantile } from "./stats.mjs";
 
 /**
  * @typedef {import("./events.mjs").Measure} Measure

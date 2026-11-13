@@ -1,7 +1,8 @@
 // face/plugins/analog/lib/universe.mjs
 /**
- * The companies a chart scan reads beside the query, the date the list was drawn and the rule it was drawn by. The
- * list is today's large companies, so companies that failed or were delisted are missing; the view says so.
+ * A list of today's large US companies, the date it was drawn and the rule it was drawn by. It was drawn for the
+ * chart scan, withdrawn on 2026-11-13, and nothing in this plugin reads it now; it is kept as the fixed list other
+ * rows may fence themselves by. Companies that failed or were delisted are missing from it.
  */
 
 /** The list's date. */

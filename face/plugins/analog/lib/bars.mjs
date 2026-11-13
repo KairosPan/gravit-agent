@@ -26,10 +26,10 @@
  * - never holds a history read short: the next call that asks for it reads it again.
  */
 import { marketOrigin } from "../../lunhui/lib/market-fetch.mjs";
-import { dateOf } from "./episodes.mjs";
+import { dateOf } from "./windows.mjs";
 
 /**
- * @typedef {import("./selloff.mjs").Bar} Bar
+ * @typedef {{ t: number, o: number, h: number, l: number, c: number, v: number | null }} Bar
  * @typedef {(query: Record<string, string>) => Promise<{ status: number, body: any }>} Ask
  * @typedef {{ symbol: string, bars: Bar[], source: string, firstBar: string, short: boolean, today: string | null,
  *   sessionOpen: boolean, adjustment: string | null, readAt: number }} History

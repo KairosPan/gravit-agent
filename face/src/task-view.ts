@@ -34,8 +34,10 @@ export type TaskGroup = "you" | "running" | "done";
 
 /** The statuses `task_report` takes, in the order its schema lists them. */
 export const REPORT_STATUSES: readonly ReportStatus[] = Object.freeze(["progress", "ready", "blocked", "failed"]);
-/** The tools whose answer names an analog view: `{ "ok": true, "view": "<id>", … }` as a JSON text. */
-export const ANALOG_VIEW_TOOLS: readonly string[] = Object.freeze(["analog_chart", "analog_events"]);
+/** The tools whose answer names an analog view: `{ "ok": true, "view": "<id>", … }` as a JSON text. `analog_events`
+ * alone since the chart analog was withdrawn (2026-11-13), so a task's `views` and its `eventViews` now hold the same
+ * ids; both fields stay, the page reads each. */
+export const ANALOG_VIEW_TOOLS: readonly string[] = Object.freeze(["analog_events"]);
 
 /** A session log event with dsh's own stamp, in ms since the epoch. */
 export type TimedEvent = EventLike & { time?: number };

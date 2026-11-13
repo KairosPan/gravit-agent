@@ -421,16 +421,16 @@ test("a worker that ended its turn after a dispatch is running and relays nothin
   assert.deepEqual(relaysOf(view(log), log.events), []);
 });
 
-test("a task's views are the ids its analog tools answered, in order, once each", () => {
-  const ok = (view: string) => JSON.stringify({ ok: true, view, digest: "read 2 of 2 companies" });
+test("a task's views are the ids its analog tool answered, in order, once each", () => {
+  const ok = (view: string) => JSON.stringify({ ok: true, view, digest: "measured 2 of 2 events" });
   const log = new Log().brief().start(1)
-    .call(1, "c1", "analog_chart", { symbol: "NVDA" }).resultText(1, "c1", ok("an-20261110-0a1b2c3d"))
-    .call(1, "c2", "analog_chart", { symbol: "AMD" }).resultText(1, "c2", "Error: NOT_A_SELLOFF AMD", true)
+    .call(1, "c1", "analog_events", { title: "a" }).resultText(1, "c1", ok("an-20261110-0a1b2c3d"))
+    .call(1, "c2", "analog_events", { title: "b" }).resultText(1, "c2", "Error: INVALID_EVENTS events: 1 to 40 events", true)
     .call(1, "c3", "analog_events", { title: "x" }).resultText(1, "c3", ok("an-20261110-ffffffff"))
     .call(1, "c4", "bash", { command: "echo" }).resultText(1, "c4", ok("an-20261110-00000000"))
-    .call(1, "c5", "analog_chart", { symbol: "NVDA" }).resultText(1, "c5", ok("an-20261110-0a1b2c3d"))
-    .call(1, "c6", "analog_chart", { symbol: "MU" }).resultText(1, "c6", "see an-20261110-11111111")
-    .call(1, "c7", "analog_chart", { symbol: "MU" }).resultText(1, "c7", JSON.stringify({ ok: true, view: "../../etc/passwd" }));
+    .call(1, "c5", "analog_events", { title: "a" }).resultText(1, "c5", ok("an-20261110-0a1b2c3d"))
+    .call(1, "c6", "analog_events", { title: "c" }).resultText(1, "c6", "see an-20261110-11111111")
+    .call(1, "c7", "analog_events", { title: "c" }).resultText(1, "c7", JSON.stringify({ ok: true, view: "../../etc/passwd" }));
   assert.deepEqual(view(log).views, ["an-20261110-0a1b2c3d", "an-20261110-ffffffff"]);
 });
 
@@ -451,14 +451,14 @@ const B = "an-20261112-11111111";
 const C = "an-20261112-50c20b08";
 const okView = (id: string) => JSON.stringify({ ok: true, view: id, digest: "d" });
 
-test("eventViews holds analog_events views alone, namedViews those a report names", () => {
+test("a withdrawn analog_chart call in an older log gives no view; namedViews are the event views a report names", () => {
   const log = new Log().brief().start(1)
     .call(1, "c1", "analog_chart", { symbol: "NVDA" }).resultText(1, "c1", okView(A))
     .call(1, "c2", "analog_events", { title: "x" }).resultText(1, "c2", okView(B))
     .call(1, "c3", "analog_events", { title: "y" }).resultText(1, "c3", okView(C))
     .report(1, "r1", "ready", `Done: see ${C} and the chart ${A}; ${C} again.`).end(1);
   const v = view(log);
-  assert.deepEqual(v.views, [A, B, C]);
+  assert.deepEqual(v.views, [B, C], "the chart analog was withdrawn 2026-11-13: its old answers are no view of the task");
   assert.deepEqual(v.eventViews, [B, C]);
   assert.deepEqual(v.namedViews, [C]);
   assert.deepEqual(namedViews(`x ${C} ${A} ${B} ${C} an-2026-bad`, [B, C]), [C, B]);
