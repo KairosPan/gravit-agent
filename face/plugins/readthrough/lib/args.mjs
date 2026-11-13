@@ -6,11 +6,12 @@
  * lone surrogate, no space but the plain one and never two of those in a row, and none of the block's own labels
  * (`block.mjs` `LABELS`: `推演`, and `事件：`, `逻辑：`, `方向：`, `盘面：`, `反方：`, `来源：`), even split by a mark.
  * Each text is also an allow-list. The event, each source, the logic, the counter-case and no_direction hold only
- * common Chinese characters (U+4E00-U+9FA5), printable ASCII and the Chinese marks of `TEXT_MARKS`; a peer's reason,
- * narrower, only common Chinese characters, ASCII letters and digits, single plain spaces and the marks of
- * `REASON_MARKS` - so no bracket, double quotation mark or semicolon of any script - and it never says `做多`. So no
- * text holds a letter of another script drawn as a bracket or a colon, a combining mark, or a character a phone's font
- * draws as a blank: no line the operator reads can pass for one the face wrote.
+ * common Chinese characters (U+4E00-U+9FA5), printable ASCII and the marks of `TEXT_MARKS` (the tape's own minus
+ * U+2212 among them); a peer's reason, narrower, only common Chinese characters, ASCII letters and digits, single
+ * plain spaces and the marks of `REASON_MARKS` - so no bracket, double quotation mark or semicolon of any script. No
+ * text says `做多`, the direction line's own word, even split by a space or a mark. So no text holds a letter of
+ * another script drawn as a bracket or a colon, a combining mark, or a character a phone's font draws as a blank: no
+ * line the operator reads can pass for one the face wrote.
  */
 import { normalizeSymbol } from "../../analog/lib/chart-scan.mjs";
 import { LABELS } from "./block.mjs";
@@ -65,8 +66,8 @@ function labelFold(value) {
 /** The marks a peer's reason may hold besides letters, digits and the plain space: `，、。·：,.:'’-–—/%+&`. */
 export const REASON_MARKS = "\uff0c\u3001\u3002\u00b7\uff1a,.:'\u2019-\u2013\u2014/%+&";
 /** The marks the other texts may hold besides common Chinese characters and printable ASCII:
- * `，、。·：；（）！？「」『』《》“”‘’—–…→←↑↓％±×`. */
-export const TEXT_MARKS = "\uff0c\u3001\u3002\u00b7\uff1a\uff1b\uff08\uff09\uff01\uff1f\u300c\u300d\u300e\u300f\u300a\u300b\u201c\u201d\u2018\u2019\u2014\u2013\u2026\u2192\u2190\u2191\u2193\uff05\u00b1\u00d7";
+ * `−，、。·：；（）！？「」『』《》“”‘’—–…→←↑↓％±×` - the first, U+2212, the minus the face prints on the tape. */
+export const TEXT_MARKS = "\u2212\uff0c\u3001\u3002\u00b7\uff1a\uff1b\uff08\uff09\uff01\uff1f\u300c\u300d\u300e\u300f\u300a\u300b\u201c\u201d\u2018\u2019\u2014\u2013\u2026\u2192\u2190\u2191\u2193\uff05\u00b1\u00d7";
 /** The first character any text but a reason may not hold. */
 const NOT_TEXT = new RegExp(`[^\u4e00-\u9fa5\u0020-\u007e${TEXT_MARKS}]`, "u");
 /** The first character a reason may not hold: anything but a common Chinese character (the base block, U+4E00 to
@@ -85,7 +86,7 @@ const REASON_LIST = Object.freeze({ not: NOT_REASON, holds: REASON_HOLDS, then: 
 /**
  * A text trimmed, or `INVALID` when it is not a string, is empty, holds a line break, a control or format character,
  * an invisible character, the Braille blank, a lone surrogate, a space other than U+0020, two spaces in a row, one
- * of the block's own labels or a character outside its list, or exceeds its limit.
+ * of the block's own labels, a character outside its list or `做多`, or exceeds its limit.
  * @param {string} field
  * @param {unknown} raw
  * @param {number} limit
@@ -116,6 +117,10 @@ function text(field, raw, limit, list = TEXT_LIST) {
     const shown = /^[\p{P}\p{S}]$/u.test(bad) ? `"${bad}" (${codeOf(bad)})` : codeOf(bad);
     throw refuse.invalid(field, `holds ${shown}; ${list.holds}: ${list.then}${sourceNote(field)}`);
   }
+  // after the list, so a compatibility ideograph is refused by name before NFKC could fold it into 做多
+  if (value.normalize("NFKC").replace(/[^\p{L}\p{N}]/gu, "").includes("做多")) {
+    throw refuse.invalid(field, `holds "做多"; 做多 is the direction line's own word, even split by a space or a mark: say it another way (for example 买盘转向 AMD)`);
+  }
   if ([...value].length > limit) throw refuse.invalid(field, `is at most ${limit} characters`);
   return value;
 }
@@ -137,18 +142,13 @@ function codeOf(c) {
 }
 
 /**
- * A peer's reason: a text on {@link REASON_LIST}, or `INVALID` saying it holds `做多` once compatibility forms are folded
- * (NFKC) and everything but a letter or a digit is dropped.
+ * A peer's reason: a text on {@link REASON_LIST}.
  * @param {string} field
  * @param {unknown} raw
  * @returns {string}
  */
 function reasonText(field, raw) {
-  const value = text(field, raw, LIMITS.reason, REASON_LIST);
-  if (value.normalize("NFKC").replace(/[^\p{L}\p{N}]/gu, "").includes("做多")) {
-    throw refuse.invalid(field, `holds "做多"; a reason never says 做多, even split by a space or a mark: say the overlap in plain words`);
-  }
-  return value;
+  return text(field, raw, LIMITS.reason, REASON_LIST);
 }
 
 /**

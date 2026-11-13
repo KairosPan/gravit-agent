@@ -82,7 +82,7 @@ test("a reason holds only common Chinese characters, ASCII letters and digits, s
   for (const r of ["直接 做 多", "做\u{B7}多", "做.多"]) {
     assert.throws(() => checkArgs(reason(r)), (e: unknown) => invalid("peers[0].reason")(e) && (e as Error).message.includes('"做多"'), JSON.stringify(r));
   }
-  assert.equal(checkArgs({ ...GOOD, logic: "供应\u{FF08}不确定\u{FF09}\u{2192} 客户找备选\u{FF1B}做多对手" }).logic, "供应\u{FF08}不确定\u{FF09}\u{2192} 客户找备选\u{FF1B}做多对手", "logic is otherwise free");
+  assert.equal(checkArgs({ ...GOOD, logic: "供应\u{FF08}不确定\u{FF09}\u{2192} 客户找备选\u{FF1B}买盘转向对手" }).logic, "供应\u{FF08}不确定\u{FF09}\u{2192} 客户找备选\u{FF1B}买盘转向对手", "logic may hold brackets and a semicolon");
 });
 
 test("a reason's Chinese characters are the common block alone, so an ideograph no font covers cannot pad it", () => {   // second fix N1, round 3
@@ -195,7 +195,7 @@ const FIVE: [string, (t: string) => object][] = [
   ["counter", (t) => ({ ...GOOD, counter: t })], ["no_direction", (t) => ({ ...GOOD, peers: [], counter: undefined, no_direction: t })],
 ];
 /** Every character the five texts may hold besides the common block and printable ASCII. */
-const TEXT_MARKS_SEEN = [..."\u{FF0C}\u{3001}\u{3002}\u{B7}\u{FF1A}\u{FF1B}\u{FF08}\u{FF09}\u{FF01}\u{FF1F}\u{300C}\u{300D}\u{300E}\u{300F}\u{300A}\u{300B}\u{201C}\u{201D}\u{2018}\u{2019}\u{2014}\u{2013}\u{2026}\u{2192}\u{2190}\u{2191}\u{2193}\u{FF05}\u{B1}\u{D7}"];
+const TEXT_MARKS_SEEN = [..."\u{2212}\u{FF0C}\u{3001}\u{3002}\u{B7}\u{FF1A}\u{FF1B}\u{FF08}\u{FF09}\u{FF01}\u{FF1F}\u{300C}\u{300D}\u{300E}\u{300F}\u{300A}\u{300B}\u{201C}\u{201D}\u{2018}\u{2019}\u{2014}\u{2013}\u{2026}\u{2192}\u{2190}\u{2191}\u{2193}\u{FF05}\u{B1}\u{D7}"];
 const allowedInText = (cp: number) => (cp >= 0x4e00 && cp <= 0x9fa5) || (cp >= 0x20 && cp <= 0x7e) || TEXT_MARKS_SEEN.includes(String.fromCodePoint(cp));
 
 test("the five other texts hold only common Chinese characters, printable ASCII and the listed marks", () => {   // third fix
@@ -235,6 +235,17 @@ test("ordinary prose passes in the five texts", () => {   // third fix
   for (const s of ["NVIDIA newsroom 11-08 18:00 ET", "8-K 11-09 06:02 ET", "Reuters (10:31 ET)"]) ok("sources[0]", sources!, s);
   ok("no_direction", none!, "这是全行业的事\u{FF0C}对手一起受累\u{3002}");
   ok("logic", logic!, "需求方向未变\u{FF1A}订单\u{300A}外流\u{300B}\u{2192}\u{300C}替代\u{300D}\u{2026}\u{FF01}\u{FF1F}\u{2190}\u{2191}\u{2193}\u{FF05}\u{B1}\u{D7}\u{2018}x\u{2019}\u{300E}y\u{300F}\u{2013}");
+});
+
+test("no text says 做多, and the five texts take the tape's own minus", () => {   // hardening
+  for (const t of ["市场已在做多 AMD", "做 多", "做\u{B7}多", "做\u{FF08}\u{FF09}多"]) {
+    for (const [field, set] of FIVE) {
+      assert.throws(() => checkArgs(set(t)), (e: unknown) => invalid(field)(e) && (e as Error).message.includes('"做多"') && (e as Error).message.includes("买盘转向 AMD"), `${field} ${t}`);
+    }
+  }
+  assert.equal(checkArgs({ ...GOOD, event: "NVDA 盘前 \u{2212}7.3%" }).event, "NVDA 盘前 \u{2212}7.3%");
+  assert.equal(checkArgs({ ...GOOD, logic: "NVDA 盘前 \u{2212}7.3%" }).logic, "NVDA 盘前 \u{2212}7.3%");
+  assert.throws(() => checkArgs({ ...GOOD, peers: [{ symbol: "AMD", reason: "跌了 \u{2212}7.3%" }] }), (e: unknown) => invalid("peers[0].reason")(e) && (e as Error).message.includes("U+2212"));
 });
 
 test("a sweep: each of the five texts refuses every character outside its list and holds every one inside", () => {   // third fix

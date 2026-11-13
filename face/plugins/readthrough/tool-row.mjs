@@ -20,7 +20,7 @@ export const READ_THROUGH_DESCRIPTION =
 const DESK_PRESET = "gravit-desk";
 
 /** What every text but a reason may hold, as the parameters say it. */
-const HOLDS = `common Chinese characters, printable ASCII and ${TEXT_MARKS} only`;
+const HOLDS = `common Chinese characters, printable ASCII and ${TEXT_MARKS} only, and never 做多`;
 /** The block's own labels, which no text may hold. */
 const NO_LABELS = `none of the block's own labels (${Object.entries(LABELS).map(([k, l]) => (k === "head" ? l : `${l}：`)).join(", ")})`;
 
@@ -52,7 +52,7 @@ const PARAMETERS = {
         symbol: { type: "string", description: "the rival's US ticker", required: true },
         reason: {
           type: "string",
-          description: `the business overlap, at most ${LIMITS.reason} characters: only common Chinese characters, ASCII letters and digits, single spaces and the marks ${REASON_MARKS} - no brackets, no double quotes, no semicolon; and, as in every text, ${NO_LABELS}`,
+          description: `the business overlap, at most ${LIMITS.reason} characters: only common Chinese characters, ASCII letters and digits, single spaces and the marks ${REASON_MARKS} - no brackets, no double quotes, no semicolon; and, as in every text, never 做多 and ${NO_LABELS}`,
           required: true,
         },
       },
