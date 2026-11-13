@@ -3168,8 +3168,8 @@ conversation, tasks }`, each task's state (`waiting`, `stalled`, `blocked`, `fai
 every request; `POST /data/tasks/stop` and `/data/tasks/continue` (`{task}`) are the two keys.
 `GET /data/tasks/one?id=<task>` (since 2026-11-12) reads one task by its id whatever its day — `{ ok,
 task }`, 404 `no such task`, 400 without exactly one `id` — so a report's event table still draws
-after the rail has let its task go; a task's `views` are the ids its worker's analog calls
-answered, `eventViews` those `analog_events` answered, and `namedViews` the event views its relayed
+after the rail has let its task go; a task's `views` and `eventViews` are both the ids its worker's `analog_events`
+calls answered (the same list since the chart analog was withdrawn, 2026-11-13), and `namedViews` the event views its relayed
 reports and turn ends name.
 With `FACE_ROUTER=0` Messages says the conversation is off, with no composer and no rail; History
 and the strategy pages still work, and the phone talks to the desk session as before plan 3.
@@ -4484,7 +4484,7 @@ few-cases line in its summary, opened by a click and kept open across renders by
 drawn open; the operator's choice, 2026-11-12), the line itself unchanged: the views the face's line after the
 relay names, or, for a relay without one, the ids its text names that are its task's own event
 views (the task read once through `GET /data/tasks/one`, so a table outlives the rail); a report
-that names none draws none, and a chart view never draws; a task read that failed is read once more
+that names none draws none, and a chart view stored before the chart analog was withdrawn (2026-11-13) never draws; a task read that failed is read once more
 when the conversation or the page is entered again (a 404 never), and until then the report's line
 says its words in one line where its table would be. The task's page — `#/task/<id>`, or, off the
 rail once its New York day is over, the same session at `#/history/<id>` — draws at its top every
@@ -5772,7 +5772,8 @@ table under the report and on the task's page, every figure a labelled %, and ea
 `行情 ›` opens its stock's page on 事件前后.
 
 **The automated half, no network.** `npm test` runs `analog-events`, `analog-event-summary`,
-`analog-event-scan`, `analog-event-digest`, `analog-views`, `analog-rows`, `analog-skill`,
+`analog-event-scan`, `analog-event-digest`, `analog-bars`, `analog-windows`, `analog-symbols`,
+`analog-format`, `analog-views`, `analog-rows`, `analog-skill`,
 `source-reader`, `roles`, `task-view`, `task-relay`, `tasks`, `market-proxy` and the desk's
 `desk-tools`, and the client's `analog-host`, `event-table`, `event-table-render`, `thread`,
 `task-page`, `market-event`, `host-markets`, `markets` and `chart` (the golden screens

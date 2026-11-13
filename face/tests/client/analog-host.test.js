@@ -52,7 +52,7 @@ test("reportViews: the face line's ids when there is one, the body naming others
   assert.deepEqual(reportViews(report('r1', 't1', 'no ids', [V1]), null), [V1], 'the face line needs no task read');
 });
 
-test("reportViews with no face line: the body's ids that are the task's event views, a chart view and another task's dropped (Review Focus 3)", () => {
+test("reportViews with no face line: the body's ids that are the task's event views, an older chart view and another task's dropped (Review Focus 3)", () => {
   const m = report('r1', 't1', `Charted in ${CHART}; events in ${V2} and ${V1}, ${V2} again; compare ${OTHER}.`);
   assert.deepEqual(reportViews(m, [V1, V2]), [V2, V1]);
   assert.deepEqual(reportViews(m, null), [], 'the task not read yet: nothing');

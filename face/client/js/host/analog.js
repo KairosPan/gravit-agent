@@ -1,6 +1,6 @@
 // face/client/js/host/analog.js — the event analog views a screen draws: a report line in the open conversation carries the
 // views the face's line after its relay names, or, for a relay with none, the ids its body names that are its task's own event
-// views (so a chart view or another task's view draws nothing); a task's page — on the rail at #/task/<id>, or off it at
+// views (so another task's view, or a chart view stored before the chart analog was withdrawn, draws nothing); a task's page — on the rail at #/task/<id>, or off it at
 // #/history/<id> once its New York day is over — its task's named views, else its last event view; the market page at an
 // event its route's view. Each task (GET /data/tasks/one) and each view (GET /data/analog/view) is read once into the analog
 // slice; a 404 is `gone` and never asked again, and a task read that failed for another reason is read once more when its

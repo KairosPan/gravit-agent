@@ -169,6 +169,8 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
       assert.equal(ROUTER_ALLOW.includes(name), false, `ROUTER_ALLOW does not name ${name}`);
       assert.equal(DESK_ALLOW.includes(name), false, `DESK_ALLOW does not name ${name}`);
     }
+    assert.deepEqual(ROUTER_ALLOW.filter((name) => name.startsWith("analog_")), [], "no analog tool in the conversation's preset");
+    assert.deepEqual(DESK_ALLOW.filter((name) => name.startsWith("analog_")), [], "no analog tool in the desk's preset");
 
     // 4. the reader's web_fetch through the real registry: the provider's refusal, forty times, then the budget's
     assert.equal(SOURCE_READER_PAGES, 40);

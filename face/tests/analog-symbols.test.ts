@@ -19,6 +19,6 @@ test("the list of large companies: 30 to 100, each once, each as normalizeSymbol
   assert.equal(UNIVERSE.includes("SPY"), false);
   for (const symbol of UNIVERSE) assert.equal(normalizeSymbol(symbol), symbol);
   assert.match(UNIVERSE_AS_OF, /^\d{4}-\d{2}-\d{2}$/);
-  assert.ok(UNIVERSE_RULE.length > 0);
+  assert.ok(UNIVERSE_RULE.length > 20);
   assert.ok(Object.isFrozen(UNIVERSE));
 });
