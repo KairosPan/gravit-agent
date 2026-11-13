@@ -14,6 +14,13 @@
  */
 /** @typedef {{ symbol: string, changePct: number | null, feed: string, asOf: string | null, traded: boolean }} Print */
 
+/**
+ * Every label the block and the later line write: `head`, the word that opens them (`推演`), and the others, each
+ * followed by a full-width colon at a line's start. The one list: `args.mjs` refuses each in every text from it, so a
+ * label added here is refused there with no second edit.
+ */
+export const LABELS = Object.freeze({ head: "推演", event: "事件", logic: "逻辑", direction: "方向", tape: "盘面", counter: "反方", sources: "来源" });
+
 const MINUS = "−";
 /** @type {Readonly<Record<string, string>>} */
 const CERTAINTY = Object.freeze({ high: "高", medium: "中", low: "低" });
@@ -89,19 +96,19 @@ function tapeText(tape, shut, now) {
  * @returns {string}
  */
 export function renderBlock({ direction: d, tape, shut, forTask, now }) {
-  const event = `· 事件：${d.event}`;
-  const sources = `来源：${d.sources.join(" · ")}`;
+  const event = `· ${LABELS.event}：${d.event}`;
+  const sources = `${LABELS.sources}：${d.sources.join(" · ")}`;
   if (d.peers.length === 0) {
-    const line = `推演：没有方向 —— ${d.noDirection}`;
+    const line = `${LABELS.head}：没有方向 —— ${d.noDirection}`;
     return (forTask ? [line, event, sources] : [line]).join("\n");
   }
   const lines = [
-    `推演 · Gravit 的推断，不是下单 · 确定度 ${CERTAINTY[d.certainty]}`,
+    `${LABELS.head} · Gravit 的推断，不是下单 · 确定度 ${CERTAINTY[d.certainty]}`,
     ...(forTask ? [event] : []),
-    `· 逻辑：${d.logic}`,
-    `· 方向：${d.peers.map((p) => `做多 ${p.symbol}（${p.reason}）`).join("；")}`,
-    `· 盘面：${tapeText(tape, shut, now)}`,
-    `· 反方：${d.counter}`,
+    `· ${LABELS.logic}：${d.logic}`,
+    `· ${LABELS.direction}：${d.peers.map((p) => `做多 ${p.symbol}（${p.reason}）`).join("；")}`,
+    `· ${LABELS.tape}：${tapeText(tape, shut, now)}`,
+    `· ${LABELS.counter}：${d.counter}`,
     ...(forTask ? [sources] : []),
   ];
   return lines.join("\n");
@@ -121,5 +128,5 @@ export function renderLater({ givenAt, now: at, peers }) {
       ? `做多 ${symbol}，此后 ${pctText((now / then - 1) * 100)}`
       : `做多 ${symbol}`,
   );
-  return `推演（${etWhen(givenAt, at)} ET 已给）：${parts.join("；")}`;
+  return `${LABELS.head}（${etWhen(givenAt, at)} ET 已给）：${parts.join("；")}`;
 }

@@ -4,13 +4,14 @@
  * an `INVALID` refusal naming the first bad field. A text is one line within its limit in characters (code points),
  * not bytes, with no control or format character, no invisible (default-ignorable) character, no Braille blank, no
  * lone surrogate, no space but the plain one and never two of those in a row, and none of the block's own labels
- * (`逻辑：`, `方向：`, `盘面：`, `反方：`, `推演`). A peer's reason holds only common Chinese characters (U+4E00-U+9FA5),
+ * (`block.mjs` `LABELS`: `推演`, and `事件：`, `逻辑：`, `方向：`, `盘面：`, `反方：`, `来源：`). A peer's reason holds only common Chinese characters (U+4E00-U+9FA5),
  * ASCII letters and digits, single plain spaces and the marks of `REASON_MARKS` - so no bracket, double quotation mark
  * or semicolon of any script, no letter of another script drawn as one, and no ideograph a phone's font may draw as a
  * blank - and it never says `做多`, whatever stands between the two or in whatever compatibility form: the direction
  * line the operator reads holds only the entries the face checked.
  */
 import { normalizeSymbol } from "../../analog/lib/chart-scan.mjs";
+import { LABELS } from "./block.mjs";
 import { refuse } from "./errors.mjs";
 
 /**
@@ -35,9 +36,24 @@ const IGNORABLE = /\p{Default_Ignorable_Code_Point}/u;
 const ODD_SPACE = /[\p{Zs}--[\u0020]]/v;
 /** The Braille blank (U+2800), drawn as a space but no space, and a surrogate standing alone: no text holds either. */
 const BLANK = /[\u2800\p{Cs}]/u;
-/** The block's own labels, matched on a text NFKC-folded with its spaces dropped, so that a full-width, small or
- * vertical colon is a colon too: no text may hold one, or a line of it could pass for one of the block's. */
-const LABEL = /(?:逻辑|方向|盘面|反方):|推演/u;
+const { head: HEAD, ...COLON_LABELS } = LABELS;
+/** The block's own labels (`block.mjs` `LABELS`): its head word, and each other label followed by a colon. No text may
+ * hold one, or a line of it could pass for one of the block's. Matched on {@link labelFold}'s text. */
+const LABEL = new RegExp(`(?:${Object.values(COLON_LABELS).join("|")}):|${HEAD}`, "u");
+/** The block's labels as a refusal names them. */
+const LABEL_LIST = [HEAD, ...Object.values(COLON_LABELS).map((l) => `${l}：`)].join(", ");
+/** What {@link labelFold} drops: every space, and each mark a reason may hold but the colon - so that `方 向：`,
+ * `方·向：`, `方向 ：` and `方向·：` read as `方向:`, while `技术方向，客户重叠` keeps no colon after its `方向`. */
+const LABEL_DROPS = /[\s,\u3001\u3002\u00b7.'\u2019\-\u2013\u2014\/%+&]/gu;
+
+/**
+ * A text as the label check reads it: NFKC-folded, so a full-width, small or vertical colon is `:` and a
+ * compatibility form is its plain one, then with {@link LABEL_DROPS} dropped.
+ * @param {string} value
+ */
+function labelFold(value) {
+  return value.normalize("NFKC").replace(LABEL_DROPS, "");
+}
 /** The marks a peer's reason may hold besides letters, digits and the plain space: `，、。·：,.:'’-–—/%+&`. */
 const REASON_MARKS = "\uff0c\u3001\u3002\u00b7\uff1a,.:'\u2019-\u2013\u2014/%+&";
 /** The first character a reason may not hold: anything but a common Chinese character (the base block, U+4E00 to
@@ -71,8 +87,11 @@ function text(field, raw, limit) {
   const blank = BLANK.exec(value)?.[0];
   if (blank !== undefined) throw refuse.invalid(field, `holds ${codeOf(blank)}, which is not text; remove it`);
   if (value.includes("  ")) throw refuse.invalid(field, "holds two spaces in a row; use one");
-  const label = LABEL.exec(value.normalize("NFKC").replace(/\s/gu, ""))?.[0];
-  if (label !== undefined) throw refuse.invalid(field, `holds "${label}"; the block's own labels (逻辑：, 方向：, 盘面：, 反方：, 推演) may not appear in a text`);
+  const label = LABEL.exec(labelFold(value))?.[0];
+  if (label !== undefined) {
+    const shown = label.endsWith(":") ? `${label.slice(0, -1)}：` : label;
+    throw refuse.invalid(field, `holds "${shown}"; the block's own labels (${LABEL_LIST}) may not appear in a text: write what it says without the label (a source is its outlet and time alone)`);
+  }
   if ([...value].length > limit) throw refuse.invalid(field, `is at most ${limit} characters`);
   return value;
 }

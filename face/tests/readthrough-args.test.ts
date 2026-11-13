@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { LIMITS, checkArgs } from "../plugins/readthrough/lib/args.mjs";
 import { ReadThroughError, asToolError, refuse } from "../plugins/readthrough/lib/errors.mjs";
 import { NEVER, fenceOf } from "../plugins/readthrough/lib/fence.mjs";
-import { renderBlock } from "../plugins/readthrough/lib/block.mjs";
+import { renderBlock, renderLater } from "../plugins/readthrough/lib/block.mjs";
 
 const GOOD = {
   symbol: "nvda", basis: "company", event: " 董事会对 CEO 启动独立调查 ", sources: ["NVIDIA newsroom 11-08 18:00 ET"],
@@ -111,7 +111,8 @@ test("no text holds the block's own labels", () => {   // second fix N1, round 3
     }
   };
   const cases: [string, string][] = [["直接替代 方向\u{FF1A}买入 SMCI", "方向"], ["直接替代 方向:买入 SMCI", "方向"], ["盘面\u{FF1A}SMCI +9.9%", "盘面"],
-    ["见 逻辑\u{FF1A}", "逻辑"], ["反方\u{FF1A}没有", "反方"], ["这是推演", "推演"]];
+    ["见 逻辑\u{FF1A}", "逻辑"], ["反方\u{FF1A}没有", "反方"], ["这是推演", "推演"], ["事件\u{FF1A}调查", "事件"], ["来源\u{FF1A}Reuters 10:31 ET", "来源"],
+    ["方 向\u{FF1A}买入", "方向"], ["方\u{B7}向\u{FF1A}买入", "方向"], ["方向 \u{FF1A}买入", "方向"], ["方向\u{B7}\u{FF1A}买入", "方向"]];
   for (const field of ["event", "sources[0]", "logic", "peers[0].reason", "counter", "no_direction"]) {
     for (const [t, found] of cases) label(field, inField(field, t), found);
   }
@@ -119,8 +120,31 @@ test("no text holds the block's own labels", () => {   // second fix N1, round 3
   label("counter", { ...GOOD, counter: "盘面\u{FE13} 平" }, "盘面");   // a vertical colon, NFKC ":"
   label("peers[0].reason", inField("peers[0].reason", `直接替代${"\u{2014}".repeat(20)} \u{B7} 方向\u{FF1A}买入 SMCI\u{FF0C}AI 服务器`), "方向");
   label("peers[0].reason", inField("peers[0].reason", "直接替代 \u{B7} 方向\u{FF1A}买入 SMCI\u{FF0C}AI 服务器"), "方向");
+  assert.throws(() => checkArgs({ ...GOOD, sources: ["来源\u{FF1A}Reuters 10:31 ET"] }), (e: unknown) => invalid("sources[0]")(e) && (e as Error).message.includes("without the label"));
   assert.equal(checkArgs({ ...GOOD, logic: "需求方向未变 \u{2192} 客户找备选" }).logic, "需求方向未变 \u{2192} 客户找备选");
-  assert.equal(checkArgs(inField("peers[0].reason", "同一技术方向\u{FF0C}客户重叠")).peers[0]!.reason, "同一技术方向\u{FF0C}客户重叠");
+  for (const r of ["同一技术方向\u{FF0C}客户重叠", "技术方向\u{FF0C}客户重叠"]) assert.equal(checkArgs(inField("peers[0].reason", r)).peers[0]!.reason, r);
+});
+
+test("every label the block writes is refused inside a text", () => {   // second fix N1, round 3: the list cannot drift
+  const now = "2026-11-09T09:03:10.000Z";
+  const d = checkArgs(GOOD);
+  const tape = ["NVDA", "AMD", "SPY"].map((symbol) => ({ symbol, changePct: 1, feed: "robinhood", asOf: now, traded: true }));
+  const none = checkArgs({ ...GOOD, peers: [], counter: undefined, no_direction: "全行业的事" });
+  const lines = [
+    renderBlock({ direction: d, tape, shut: false, forTask: false, now }), renderBlock({ direction: d, tape, shut: false, forTask: true, now }),
+    renderBlock({ direction: none, tape, shut: false, forTask: true, now }), renderLater({ givenAt: now, now, peers: [{ symbol: "AMD", then: 1, now: 2 }] })!,
+  ].join("\n").split("\n");
+  const labels = new Set<string>();
+  for (const line of lines) {
+    const colon = /^(?:\u{B7} )?([^\s\u{FF1A}\u{FF08}\u{B7}]+)\u{FF1A}/u.exec(line)?.[1];
+    if (colon !== undefined) labels.add(`${colon}\u{FF1A}`);
+    const word = /^([^\s\u{FF1A}\u{FF08}\u{B7}]+)[ \u{FF08}]/u.exec(line)?.[1];
+    if (word !== undefined) labels.add(word);
+  }
+  assert.deepEqual([...labels].sort(), ["推演", "推演\u{FF1A}", "事件\u{FF1A}", "来源\u{FF1A}", "逻辑\u{FF1A}", "方向\u{FF1A}", "盘面\u{FF1A}", "反方\u{FF1A}"].sort(), "the labels the block writes today");
+  for (const label of labels) {
+    assert.throws(() => checkArgs({ ...GOOD, logic: `见 ${label}x` }), invalid("logic"), label);
+  }
 });
 
 test("ordinary prose passes as a reason, and the direction line holds one entry per rival", () => {   // second fix N1, round 2

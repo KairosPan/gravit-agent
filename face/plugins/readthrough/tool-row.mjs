@@ -7,6 +7,7 @@
  */
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { LIMITS } from "./lib/args.mjs";
+import { LABELS } from "./lib/block.mjs";
 import { asToolError, callerIsChild, refuse } from "./lib/errors.mjs";
 
 export const name = "read-through-tool";
@@ -31,7 +32,7 @@ const PARAMETERS = {
   sources: {
     type: "array",
     items: { type: "string" },
-    description: `1 to ${LIMITS.sources} sources the event stands on, each one line of at most ${LIMITS.source} characters`,
+    description: `1 to ${LIMITS.sources} sources the event stands on, each one line of at most ${LIMITS.source} characters: the outlet and its time, with no label before them`,
     required: true,
   },
   logic: { type: "string", description: `the chain from the event to the rivals, one line, at most ${LIMITS.logic} characters`, required: true },
@@ -46,7 +47,7 @@ const PARAMETERS = {
         symbol: { type: "string", description: "the rival's US ticker", required: true },
         reason: {
           type: "string",
-          description: `the business overlap, at most ${LIMITS.reason} characters: only common Chinese characters, ASCII letters and digits, single spaces and the marks ，、。·：,.:'’-–—/%+& - no brackets, no double quotes, no semicolon; and, as in every text, none of the block's own labels (逻辑：, 方向：, 盘面：, 反方：, 推演)`,
+          description: `the business overlap, at most ${LIMITS.reason} characters: only common Chinese characters, ASCII letters and digits, single spaces and the marks ，、。·：,.:'’-–—/%+& - no brackets, no double quotes, no semicolon; and, as in every text, none of the block's own labels (${Object.entries(LABELS).map(([k, l]) => (k === "head" ? l : `${l}：`)).join(", ")})`,
           required: true,
         },
       },
