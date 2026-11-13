@@ -1,0 +1,32 @@
+{
+  "id": "read-through",
+  "name": "Read-through",
+  "blurb": "Under a company's own bad news, the rivals it points to, with the logic and the tape",
+  "icon": "arrows",
+  "about": "With the desk on, when a US stock it watches falls on its own news, the desk's answer to why it moved may carry a read-through: the event, the logic from it to named rivals, the direction, what those rivals are doing on the tape now, and the case against. It is Gravit's inference from pages it opened.\nIt also runs in a task when you ask for one, desk on or off. The rivals it may name are large US companies and the desk's own symbols.",
+  "asks": [
+    "NVDA fell on its own news today. Which rivals does that point to, and what is the case against?",
+    "Read through LLY's trial failure to its competitors"
+  ],
+  "limits": [
+    "An inference, never an order: nothing here places or proposes a trade",
+    "Only for a company's own event, not a fall of its group or of the market",
+    "A rival outside the large US companies list and the desk's files is not named"
+  ],
+  "tools": ["read_through"],
+  "rows": ["read-through-service", "read-through-tool"],
+  "zh": {
+    "name": "对手推演",
+    "blurb": "一家公司自己出了坏消息时，它指向哪些对手，附逻辑和盘面",
+    "about": "值守台开着的时候，它盯着的美股因为自己的消息下跌，Gravit 在解释“为什么动了”的回复下面可能附一段推演：事件、从事件到具体对手的逻辑、方向、这些对手此刻的盘面，以及反方理由。这是 Gravit 根据它打开的网页做的推断。\n你也可以在对话里让它开一个任务来做，值守台开没开都行。能被点名的对手只限大型美国公司和值守台自己文件里的代码。",
+    "asks": [
+      "NVDA 今天因为自己的消息下跌，这指向哪些对手？反方理由是什么？",
+      "把 LLY 临床试验失败这件事推演到它的竞争对手"
+    ],
+    "limits": [
+      "这是推断，不是指令：不会下单，也不会提出交易",
+      "只针对公司自己的事件，不针对板块或大盘的下跌",
+      "不在大型美国公司名单和值守台文件里的对手不会被点名"
+    ]
+  }
+}
