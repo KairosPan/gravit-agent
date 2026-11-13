@@ -349,7 +349,15 @@ export interface AbilityDeps extends Pick<PanelDeps, "loaderEntries" | "toolSche
   abilities: readonly AbilityFile[];
   /** The ids of the roles `readRoles` (src/roles.ts) read at boot. */
   roleIds: ReadonlySet<string>;
+  /** Where a failed skill registry is written, one line per listing that met it; stderr when
+   *  not given. {@link registerAbilityRoutes} writes a line again only when it changes. */
+  log?: (line: string) => void;
 }
+
+/** The face's stderr, the default {@link AbilityDeps.log}. */
+const writeStderr = (line: string): void => {
+  console.error(line);
+};
 
 /** An ability's state, by the first rule that holds (spec §4.3): `off` when a declared row is
  *  disabled or has no phase (no entry, no fiber, a disposed one); `failed` when a row's phase is
@@ -374,12 +382,15 @@ function rowOf(entries: readonly { id: string; disabled?: boolean; fiber?: { sta
   };
 }
 
-/** The skill registry's names; a registry that fails lists none, so every declared skill reads
- *  not present and the listing still answers. */
-async function skillNames(deps: Pick<AbilityDeps, "skills" | "cwd">): Promise<ReadonlySet<string>> {
+/** The skill registry's names. A registry that fails, by rejecting or by throwing, lists none, so
+ *  every declared skill reads not present and the listing still answers; the failure is one
+ *  `gravit-face: abilities - skill registry failed: <message>` line through `deps.log`, the
+ *  message's first line. */
+async function skillNames(deps: Pick<AbilityDeps, "skills" | "cwd" | "log">): Promise<ReadonlySet<string>> {
   try {
     return new Set((await deps.skills.list({ cwd: deps.cwd })).map((skill) => skill.name));
-  } catch {
+  } catch (error) {
+    (deps.log ?? writeStderr)(`gravit-face: abilities - skill registry failed: ${messageOf(error).split("\n")[0]}`);
     return new Set();
   }
 }
@@ -417,12 +428,25 @@ export async function abilityListing(deps: AbilityDeps): Promise<{ abilities: Ab
 /** Mount `GET /data/abilities.json`, one exact route: `{ ok: true, abilities }` through http.ts's
  *  `fencedGet` - the GET shell the panel routes use - behind the `/data` fence
  *  (`isTrustedDataRequest`), a refused request answered `403` with the fixed `FORBIDDEN` body.
+ *  Discover reads the listing on every visit, so a failed skill registry's line is written
+ *  through `deps.log` only when it differs from the last listing's: the same failure again is
+ *  not repeated, another message is, and so is a failure after a listing that read the registry.
  * @param webServer - the host webserver service, or a test recorder.
- * @param deps - the tree reads, the declarations and the role ids. */
+ * @param deps - the tree reads, the declarations, the role ids and the log. */
 export function registerAbilityRoutes(webServer: RouteRegistrar, deps: AbilityDeps): void {
+  const write = deps.log ?? writeStderr;
+  /** The failure line the last listing met; `undefined` after one that read the registry. */
+  let last: string | undefined;
   webServer.register({
     kind: "exact",
     path: "/data/abilities.json",
-    handler: fencedGet(isTrustedDataRequest, () => abilityListing(deps)),
+    handler: fencedGet(isTrustedDataRequest, async () => {
+      const failures: string[] = [];
+      const listing = await abilityListing({ ...deps, log: (line) => { failures.push(line); } });
+      const failure = failures[0];
+      if (failure !== undefined && failure !== last) write(failure);
+      last = failure;
+      return listing;
+    }),
   });
 }

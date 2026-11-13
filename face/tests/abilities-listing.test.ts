@@ -187,12 +187,27 @@ test("abilityListing: a role the face read is present and another is not; likewi
   assert.equal(listed.state, "on", "a missing role or skill does not change the state");
 });
 
-test("abilityListing: a skill listing that rejects still answers, every skill not present", async () => {
+test("abilityListing: a skill listing that rejects or throws still answers, every skill not present, and writes one line", async () => {
+  const lines: string[] = [];
   const listed = await only(fakeDeps({
-    skills: { list: async () => { throw new Error("skill registry down"); }, get: async () => undefined },
+    skills: { list: async () => { throw new Error("skill registry down\nat a stack frame"); }, get: async () => undefined },
+    log: (line) => { lines.push(line); },
   }));
   assert.deepEqual(listed.skills, [{ name: "analog-guide", present: false }]);
   assert.equal(listed.state, "on");
+  assert.deepEqual(lines, ["gravit-face: abilities - skill registry failed: skill registry down"], "the message's first line");
+
+  const thrown = await only(fakeDeps({
+    skills: { list: () => { throw new TypeError("deps.skills.list is not a function"); }, get: async () => undefined },
+    log: (line) => { lines.push(line); },
+  }));
+  assert.deepEqual(thrown.skills, [{ name: "analog-guide", present: false }]);
+  assert.equal(lines[1], "gravit-face: abilities - skill registry failed: deps.skills.list is not a function",
+    "a synchronous throw is written too");
+
+  const quiet: string[] = [];
+  await abilityListing(fakeDeps({ log: (line) => { quiet.push(line); } }));
+  assert.deepEqual(quiet, [], "a registry that answers writes nothing");
 });
 
 test("abilityListing: nothing of a row's options and no tool's description reaches the answer", async () => {
@@ -281,4 +296,46 @@ test("route: one exact GET /data/abilities.json, fenced as /data/plugins.json is
   assert.equal(body.ok, true);
   assert.deepEqual(body.abilities, (await abilityListing(fakeDeps())).abilities);
   assert.deepEqual(Object.keys(body), ["ok", "abilities"]);
+});
+
+test("route: a failed skill registry is written once while its message stays the same, again when it changes", async () => {
+  let failure: string | null = "skill registry down";
+  const lines: string[] = [];
+  const routes: WebRoute[] = [];
+  registerAbilityRoutes({ register: (route) => routes.push(route) }, fakeDeps({
+    skills: {
+      list: async () => {
+        if (failure !== null) throw new Error(failure);
+        return [{ name: "analog-guide", description: "how to read an analog table" }];
+      },
+      get: async () => undefined,
+    },
+    log: (line) => { lines.push(line); },
+  }));
+  const read = async (): Promise<{ status: number; skills: AbilityRow["skills"] }> => {
+    const served = fakeRes();
+    await routes[0]!.handler(getReq(), served.res);
+    return {
+      status: served.out.status,
+      skills: (JSON.parse(served.out.body) as { abilities: AbilityRow[] }).abilities[0]!.skills,
+    };
+  };
+  const line = (message: string): string => `gravit-face: abilities - skill registry failed: ${message}`;
+
+  for (let visit = 0; visit < 2; visit += 1) {
+    assert.deepEqual(await read(), { status: 200, skills: [{ name: "analog-guide", present: false }] });
+  }
+  assert.deepEqual(lines, [line("skill registry down")], "two visits, the same message: one line");
+
+  failure = "skill registry gone";
+  await read();
+  assert.deepEqual(lines, [line("skill registry down"), line("skill registry gone")], "another message: another line");
+
+  failure = null;
+  assert.deepEqual(await read(), { status: 200, skills: [{ name: "analog-guide", present: true }] });
+  assert.equal(lines.length, 2, "a listing that read the registry writes nothing");
+  failure = "skill registry gone";
+  await read();
+  assert.deepEqual(lines.at(-1), line("skill registry gone"), "the same failure after a recovery is written again");
+  assert.equal(lines.length, 3);
 });
