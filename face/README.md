@@ -4479,7 +4479,9 @@ line and **Retry**. A refused call draws nothing.
 **The event table** (since 2026-11-12, `client/js/render/event-table.js` over
 `client/js/host/analog.js` and `client/js/host/event-table.js`; spec
 `docs/superpowers/specs/2026-11-12-analog-event-table-design.md`) draws an event analog view
-under a task's report line, open, the line itself unchanged: the views the face's line after the
+under a task's report line, folded (each group a closed disclosure, its name, counts and medians or
+few-cases line in its summary, opened by a click and kept open across renders by its id; the present case
+drawn open; the operator's choice, 2026-11-12), the line itself unchanged: the views the face's line after the
 relay names, or, for a relay without one, the ids its text names that are its task's own event
 views (the task read once through `GET /data/tasks/one`, so a table outlives the rail); a report
 that names none draws none, and a chart view never draws; a task read that failed is read once more
@@ -5819,8 +5821,8 @@ catalog lists `analog-guide` (the profile's `mechanics` root; Discover's skills)
    `[face · event table: an-…] The face draws this report's event table under it: …`; Gravit's
    reply is two or three sentences, every return in it with its sign, a % and what it measures —
    never a bare run of numbers — and a follow-up asking for examples is answered the same way.
-7. **The table** ("Chat rendering" above). PASS: under the report line in Messages and at the top
-   of the task's page (`#/task/<id>`) the view draws as one card — the counts, the present case
+7. **The table** ("Chat rendering" above). PASS: under the report line in Messages (each group folded,
+   a click opens it) and at the top of the task's page (`#/task/<id>`, every group open) the view draws as one card — the counts, the present case
    first with a row per anchor (its source, or `未核实`), the groups in the view's order, every
    figure `当天` / `次日` / `5 天` / `60 天` with its sign and %, the caveats under it; every
    unmeasured row has the market's words and no `行情 ›`. On the 2026-11-12 2×2 task (view

@@ -29,6 +29,20 @@ test('a loaded view draws its head: the title, the counts and the against-the-ma
   assert.match(h, /<div class="et-basis">[^<]*SPY[^<]*当天[^<]*<\/div>/);
 });
 
+test('folded, as Messages draws it: each group a closed disclosure keyed by id, its head and its few-or-median line in the summary; the present case stays drawn', () => {
+  const h = withTable(ZH, () => eventTableHtml(loaded(EVENT_VIEW), EVENT_VIEW_ID, { fold: 'm1' }));
+  const ids = [...h.matchAll(/<details class="et-group" id="([^"]+)">/g)].map(m => m[1]);
+  assert.deepEqual(ids, [`et-m1-${EVENT_VIEW_ID}-0`, `et-m1-${EVENT_VIEW_ID}-1`]);
+  assert.doesNotMatch(h, /<details[^>]* open/, 'every group starts closed');
+  assert.match(h, /<summary class="et-group-head"><span class="et-group-name">A 创始人\/被查·在任<\/span><span class="et-group-count">3 例 · 量到 2 例<\/span><div class="et-few">不足 8 例，不给中位数，只看个案<\/div><\/summary>/);
+  // the present case is no disclosure: its rows are drawn before the first group
+  assert.ok(h.indexOf('董事会宣布独立调查') > 0 && h.indexOf('董事会宣布独立调查') < h.indexOf('<details class="et-group"'));
+  // a group's rows are inside its disclosure
+  assert.ok(h.indexOf('Wynn Resorts') > h.indexOf(`id="et-m1-${EVENT_VIEW_ID}-0"`));
+  // unfolded, as the task's page draws it: no disclosure at all
+  assert.doesNotMatch(draw(loaded(EVENT_VIEW)), /<details/);
+});
+
 test('the present case first, then the groups in order, 不足 8 例 under a group with no summary', () => {
   const h = draw(loaded(EVENT_VIEW));
   const present = h.indexOf('本次 · NVDA');

@@ -659,6 +659,15 @@ test('a report line carrying an event view draws its table after the line; one n
   assert.match(renderMessage(report, conv(), state), /<\/details><div class="et-list"><div class="et-state">/);
 });
 
+test('the table under a report line is folded: each group a closed disclosure keyed by the message', async () => {
+  const { EVENT_VIEW, EVENT_VIEW_ID } = await import('./helpers/event-view.js');
+  const withView = { ...state, analog: { tasks: {}, views: { [EVENT_VIEW_ID]: { status: 'loaded', view: EVENT_VIEW } } } };
+  const report = taskMsg({ form: 'report', task: 't1', status: 'ready', title: 'Read the tape', body: `see ${EVENT_VIEW_ID}`, views: [EVENT_VIEW_ID] });
+  const h = renderMessage(report, conv(), withView);
+  assert.match(h, new RegExp(`<details class="et-group" id="et-e70-${EVENT_VIEW_ID}-0">`));
+  assert.doesNotMatch(h, /<details class="et-group"[^>]* open/);
+});
+
 test("a bare report whose task read failed draws the failure's words in one line; one naming no id, or with a face line, does not", async () => {
   const { EVENT_VIEW_ID } = await import('./helpers/event-view.js');
   const failed = { ...state, analog: { tasks: { t1: { status: 'failed', error: 'HTTP 500' } }, views: {} } };

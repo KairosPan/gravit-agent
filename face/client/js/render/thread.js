@@ -223,11 +223,12 @@ function taskMessage(m, conv, state) {
     const status = typeof d.status === 'string' && Object.hasOwn(REPORT_STATUS, d.status) ? REPORT_STATUS[d.status]() : String(d.status ?? '');
     const line = esc(t('thread.task.line', { title, status }));
     const head = typeof d.task === 'string' ? `<a class="task-link" href="#/task/${esc(encodeURIComponent(d.task))}">${line}</a>` : line;
-    // the event tables the report carries, drawn open under its line (analog event table §4.1); none draws nothing
+    // the event tables the report carries, under its line (analog event table §4.1), folded: each group closed, opened by a
+    // click and kept open across renders by its id (the operator's choice, 2026-11-12: folded by default); none draws nothing
     // a task read that failed leaves them undrawable: its words, in one line
     const failed = reportTaskFailure(m, state);
     const tables = failed ? `<div class="et-list"><div class="et-state et-failed">${esc(sayOf(failed.error))}</div></div>`
-      : eventTablesHtml(state, reportViews(m, typeof d.task === 'string' ? state?.analog?.tasks?.[d.task]?.task?.eventViews ?? null : null));
+      : eventTablesHtml(state, reportViews(m, typeof d.task === 'string' ? state?.analog?.tasks?.[d.task]?.task?.eventViews ?? null : null), { fold: m.id });
     return `<details class="sysline ctx" id="relay-${esc(conv.id)}-${esc(m.id)}"><summary>${head}</summary><pre>${esc(maskExcerpt(d.body ?? ''))}</pre></details>${tables}`;
   }
   if (d.form === 'recovery') return `<div class="sysline">${th('thread.task.recovery')}</div>`;

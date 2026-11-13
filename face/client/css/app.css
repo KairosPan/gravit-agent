@@ -313,6 +313,10 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .et-present { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--radius-s); background: var(--accent-soft); }
 .et-group { display: flex; flex-direction: column; gap: 8px; }
 .et-group-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+details.et-group > summary.et-group-head { cursor: pointer; list-style: none; }
+details.et-group > summary.et-group-head::-webkit-details-marker { display: none; }
+details.et-group > summary.et-group-head::before { content: '›'; font-weight: 700; color: var(--dim); }
+details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .et-group-name { font-size: calc(13px * var(--fs)); font-weight: 700; color: var(--text); }
 .et-group-count { font-size: calc(12px * var(--fs)); color: var(--dim); }
 .et-median { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }

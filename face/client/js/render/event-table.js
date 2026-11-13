@@ -43,18 +43,24 @@ function rowHtml(row) {
   return `<div class="${cls('et-row', !row.measured && 'unmeasured')}">${top}${note}${body}${links ? `<div class="et-links">${links}</div>` : ''}</div>`;
 }
 
-function groupHtml(group) {
+// a group: its head (its name and counts), its medians or the few-cases line, its rows. Folded (`foldId`, Messages) it is a
+// closed disclosure whose summary holds the head and that line, kept open across a render by its id (app.js); else drawn open
+function groupHtml(group, foldId) {
   const name = group.name === null ? th('analog.table.ungrouped') : text(group.name);
-  const head = `<div class="et-group-head"><span class="et-group-name">${name}</span><span class="et-group-count">${thn('analog.table.group', group.count, { measured: group.measured })}</span></div>`;
+  const heading = `<span class="et-group-name">${name}</span><span class="et-group-count">${thn('analog.table.group', group.count, { measured: group.measured })}</span>`;
   const s = group.summary;
   const summary = s
     ? `<div class="et-median"><span class="et-median-label">${th('analog.table.median')}</span>${chip({ label: t('analog.chip.day0'), text: pct(s.x0), tone: toneOf(s.x0) })}${chip({ label: t('analog.chip.d60'), text: pct(s.x60), tone: toneOf(s.x60) })}</div>`
     : `<div class="et-few">${th('analog.table.few')}</div>`;
-  return `<div class="et-group">${head}${summary}${group.rows.map(rowHtml).join('')}</div>`;
+  const rows = group.rows.map(rowHtml).join('');
+  if (foldId) return `<details class="et-group" id="${esc(foldId)}"><summary class="et-group-head">${heading}${summary}</summary>${rows}</details>`;
+  return `<div class="et-group"><div class="et-group-head">${heading}</div>${summary}${rows}</div>`;
 }
 
-/** The table of the view `viewId` as its analog entry stands: loading, failed (its words, or gone: one line), or loaded. */
-export function eventTableHtml(entry, viewId) {
+/** The table of the view `viewId` as its analog entry stands: loading, failed (its words, or gone: one line), or loaded.
+ *  `fold`, a key unique on the page (Messages passes the report's message id): every group drawn closed, the present case
+ *  open; left out (a task's page), every group drawn open. */
+export function eventTableHtml(entry, viewId, { fold } = {}) {
   if (entry?.status === 'failed') {
     return entry.gone === true ? `<div class="et-state">${th('analog.table.gone')}</div>` : `<div class="et-state et-failed">${esc(sayOf(entry.error))}</div>`;
   }
@@ -66,12 +72,13 @@ export function eventTableHtml(entry, viewId) {
   const present = table.present
     ? `<div class="et-present"><div class="et-group-head"><span class="et-group-name">${th('analog.table.present', { symbol: maskExcerpt(table.present[0]?.symbol ?? '') })}</span></div>${table.present.map(rowHtml).join('')}</div>`
     : '';
-  return `<section class="et"><div class="et-card">${head}${present}${table.groups.map(groupHtml).join('')}</div><div class="et-caveats">${th('analog.table.caveats')}</div></section>`;
+  const groups = table.groups.map((g, i) => groupHtml(g, fold ? `et-${fold}-${viewId}-${i}` : null)).join('');
+  return `<section class="et"><div class="et-card">${head}${present}${groups}</div><div class="et-caveats">${th('analog.table.caveats')}</div></section>`;
 }
 
-/** The tables of `viewIds` in order, read from the analog slice; none draws nothing. */
-export function eventTablesHtml(state, viewIds) {
+/** The tables of `viewIds` in order, read from the analog slice; none draws nothing. `fold` as eventTableHtml's. */
+export function eventTablesHtml(state, viewIds, { fold } = {}) {
   if (!viewIds.length) return '';
   const views = state?.analog?.views ?? {};
-  return `<div class="et-list">${viewIds.map(id => eventTableHtml(views[id], id)).join('')}</div>`;
+  return `<div class="et-list">${viewIds.map(id => eventTableHtml(views[id], id, { fold })).join('')}</div>`;
 }
