@@ -13,8 +13,8 @@
  * still inside the fence the call passed, read again now, and no line with none left; `sent(ids, sent)`, one
  * `sent` line an id; and `propose(raw, { sessionId, desk })`, which checks a call (an index fund of `NEVER` is never
  * the company), prices it, renders its block and then records it, so a render that throws records nothing. Every
- * `propose` runs on one promise chain for the service; a run keeps the symbols it has accepted, so the second of two calls for one company in a run - arriving
- * together or not - is `ALREADY_GIVEN` before any line says it was sent.
+ * `propose` runs on one promise chain for the service; a run keeps the symbols it has accepted, so the second of two
+ * calls for one company in a run - arriving together or not - is `ALREADY_GIVEN` before any line says it was sent.
  *
  * Config: `recordDir`, the absolute record directory. `universe` and `now` are test-only. The service is provided
  * inside `ctx.effect`, so a reload of the row disposes it.
