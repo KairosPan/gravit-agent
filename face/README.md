@@ -3054,8 +3054,9 @@ Chinese characters (U+4E00–U+9FA5), ASCII letters and digits, single spaces an
 letter, other script or rare ideograph either) or saying `做多` (whatever space or mark stands
 between, or in a compatibility form), the event, a source, the logic, the counter-case or a "no
 direction" holding anything but common Chinese characters, printable ASCII and the marks
-`，、。·：；（）！？「」『』《》“”‘’—–…→←↑↓％±×` (so no other script, accented letter, combining mark,
-colon look-alike or character a phone draws blank), and any text holding a control or format
+`−，、。·：；（）！？「」『』《》“”‘’—–…→←↑↓％±×` (the tape's own minus among them; so no other script,
+accented letter, combining mark, colon look-alike or character a phone draws blank) or saying
+`做多` (the direction line's own word, however split), and any text holding a control or format
 character, an invisible character, the Braille blank, a lone surrogate, a space other than the
 plain one, two spaces in a row, or one of the block's own labels (`推演`, `事件：`, `逻辑：`, `方向：`,
 `盘面：`, `反方：`, `来源：` — even split by a space, a bracket, a quote or any other mark, so a source
