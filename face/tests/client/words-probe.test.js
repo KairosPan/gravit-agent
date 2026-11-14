@@ -5,13 +5,16 @@
 // The known words come from the corpus' content fields only (helpers/screens.js corpusStrings), never from its codes, and
 // from the literals the sources keep on screen on purpose (en-kept, the off-screen ones left out). An accepted limit: a word
 // the fixtures' own prose happens to hold (closed, filled, Paper, in a venue's note or an Account sentence) is known, so the
-// face drawing that same word from outside the table would pass; a sentinel test below holds the codes' words out.
+// face drawing that same word from outside the table would pass; a sentinel test below holds the codes' words out. An ability's
+// declared text (its blurb, its about's lines, its asks, its limits) and its parts' names (its tools', skills', rows' and roles')
+// add no known word: a run drawn that is one of them whole passes as it is (helpers/screens.js abilityRuns), so a code word it
+// holds (an ask about a trial that just failed, a row's tool) stays unknown.
 process.env.TZ = 'America/New_York';
 const { test } = await import('node:test');
 const assert = (await import('node:assert/strict')).default;
 const { EN } = await import('../../client/js/i18n/en.js');
 const { withTable } = await import('../../client/js/i18n/words.js');
-const { corpus, corpusStrings, everyState, NOW } = await import('./helpers/screens.js');
+const { corpus, corpusStrings, abilityRuns, everyState, NOW } = await import('./helpers/screens.js');
 const { renderAccountScreen } = await import('../../client/js/render/account.js');
 const { fmtDate } = await import('../../client/js/time.js');
 const { CANDLE_RANGES } = await import('../../client/js/host/market-view.js');
@@ -74,17 +77,20 @@ function drawnWords({ text, key }) {
   return words;
 }
 const knownWords = () => new Set([...corpusStrings().flatMap(drawnWords), ...KEPT.flatMap(s => wordsOf(s))]);
+// a run's words no known set holds: none when the run is, whole, one of an ability's declared lines (abilityRuns)
+const strayWords = (p, known, runs) => (runs.has(p.trim()) ? [] : wordsOf(p).filter(w => !known.has(w)));
 
 test('no English is drawn outside the table', () => {
   const { pages, known } = withTable(PROBE, () => ({
     pages: corpus(),
     known: knownWords(),
   }));
+  const runs = abilityRuns();
   const report = [];
   for (const [name, html] of pages) {
     const { parts, open } = readable(html);
     if (open) report.push(`${name}: a ⟦ left open`);
-    const stray = [...new Set(parts.flatMap(p => wordsOf(p).filter(w => !known.has(w)).map(w => `${w} (in "${p.trim().slice(0, 60)}")`)))];
+    const stray = [...new Set(parts.flatMap(p => strayWords(p, known, runs).map(w => `${w} (in "${p.trim().slice(0, 60)}")`)))];
     for (const s of stray) report.push(`${name}: ${s}`);
   }
   assert.deepEqual(report, [], 'move these into client/js/i18n/en.js (a word the corpus holds as a code is no excuse: it is drawn as a word)');
@@ -109,6 +115,37 @@ test('the known words hold no code word and no face word', () => {
     const from = [...(contributors.get(w) ?? [])];
     assert.deepEqual(from.filter(k => !ACCOUNT_PROSE.has(k)), [], `${w} is known only from the Account's prose (known from ${from.join(', ')})`);
   }
+});
+
+// the event analog's shipped ask holds a code word (a trial that just failed): drawn whole it passes, and its words are known
+// to no other run
+test("an ability's declared line passes whole and lends its words to no other run", async () => {
+  const { abilitiesListing } = await import('./helpers/inventory.js');
+  const ask = abilitiesListing().abilities[0].asks.find(a => /\bfailed\b/.test(a));
+  assert.ok(ask, 'a shipped ask holds failed');
+  const known = withTable(PROBE, () => knownWords());
+  const runs = abilityRuns();
+  assert.ok(runs.has(ask));
+  assert.deepEqual(strayWords(ask, known, runs), []);
+  assert.deepEqual(strayWords(' failed ', known, runs), ['failed'], 'the word drawn alone is stray');
+  assert.ok(strayWords(`${ask} Again`, known, runs).includes('failed'), 'a run that is no declared line whole is read word by word');
+});
+
+// an ability's blurb and its parts' names (its tools' and skills' names, its rows' and roles' ids) are declared too, each drawn
+// whole: they pass as runs and lend no word, so a word only they hold (tool, views, rivals) drawn anywhere else is stray
+test("an ability's blurb and its parts' names pass whole and lend no word", async () => {
+  const { abilitiesListing } = await import('./helpers/inventory.js');
+  const known = withTable(PROBE, () => knownWords());
+  const runs = abilityRuns();
+  for (const a of abilitiesListing().abilities) {
+    const skills = a.skills.map(k => k.name);
+    const declared = [a.blurb, a.zh.blurb, ...a.tools.map(x => x.name), ...skills, ...skills.map(k => `${k} ›`), ...a.rows.map(r => r.id), ...a.roles.map(r => r.id)];
+    for (const run of declared) assert.ok(runs.has(run), `${run} is a run`);
+  }
+  for (const w of ['Under', 'bad', 'logic', 'past', 'points', 'rivals', 'analog', 'guide', 'reader', 'service', 'tool', 'views']) {
+    assert.ok(!known.has(w), `${w} is not a known word`);
+  }
+  assert.deepEqual(strayWords('tool views', known, runs), ['tool', 'views'], 'the words drawn outside a declared run are stray');
 });
 
 test('a word table read after import follows the table (the Account tabs, the history ranges, the months)', () => {
@@ -153,10 +190,11 @@ test('no English is drawn under ZH outside content', () => {
   const { pages, known } = withTable(ZH, () => ({ pages: corpus(), known: knownWords() }));
   for (const s of GLOSSARY.keep) for (const w of wordsOf(s)) known.add(w);
   for (const k of KEY_NAMES) known.add(k);
+  const runs = abilityRuns();
   const report = [];
   for (const [name, html] of pages) {
     const { parts } = readable(html);
-    const stray = [...new Set(parts.flatMap(p => wordsOf(p).filter(w => !known.has(w)).map(w => `${w} (in "${p.trim().slice(0, 60)}")`)))];
+    const stray = [...new Set(parts.flatMap(p => strayWords(p, known, runs).map(w => `${w} (in "${p.trim().slice(0, 60)}")`)))];
     for (const s of stray) report.push(`${name}: ${s}`);
   }
   assert.deepEqual(report, [], 'word these through the table, in en.js and zh.js at once (a code worded by a key, an unknown one drawn as it came)');

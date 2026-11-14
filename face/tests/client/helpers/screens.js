@@ -301,6 +301,26 @@ export function discoverStates() {
   ];
 }
 
+// the abilities (spec 2026-11-13 §4.4), pinned by name after the other named states (discoverStates sits amid the indexed states,
+// so a state put there would move every name after it): the event analog's page with Gravit's conversation known and with
+// none, the read-through's page with its ability off, and the Abilities grid with it off beside the event analog
+function abilityStates() {
+  const base = listings => {
+    let s = emptyState();
+    for (const [shelf, v] of Object.entries(listings)) s = R.shelfLoaded(s, { shelf, data: v.data, at: 1 });
+    return R.shelfLoaded(s, { shelf: 'modules', data: modulesListing(), at: 1 });
+  };
+  const conversing = s => R.tasksLoaded(s, { conversation: 'c-gravit', tasks: [], at: NOW });
+  const off = listings();
+  off.abilities.data.abilities[1] = { ...off.abilities.data.abilities[1], state: 'off', rows: off.abilities.data.abilities[1].rows.map(r => ({ ...r, enabled: false, phase: null })) };
+  return [
+    ['discover-ability-page', conversing(R.nav(base(listings()), { screen: 'plugin', id: 'ability:event-analogs' }))],
+    ['discover-ability-page-no-conversation', R.nav(base(listings()), { screen: 'plugin', id: 'ability:event-analogs' })],
+    ['discover-ability-page-off', conversing(R.nav(base(off), { screen: 'plugin', id: 'ability:read-through' }))],
+    ['discover-abilities-grid', conversing(R.nav(base(off), { screen: 'discover', id: 'abilities' }))],
+  ];
+}
+
 // a Lunhui module's page: its latest artifact read, loading, failed; one with no run; before the listing; an unknown name
 function moduleStates(all) {
   const at = id => R.nav(all, { screen: 'module', id });
@@ -415,6 +435,7 @@ export function namedStates() {
     ['thread-event-table', { ...thread, analog: { tasks: {}, views } }],
     ['task-event-table', { ...page, analog: { tasks: { wt: read }, views } }],
     ['market-event-window', marketEventWindow()],
+    ...abilityStates(),
   ];
 }
 
@@ -908,7 +929,9 @@ export function corpus() {
 // the fields whose strings are words a screen draws as they come — the operator's, Gravit's, a bot's, a venue's or the
 // Account's prose, a name, a ticker, a path — and the only ones corpusStrings counts outside an upstream's content: a code
 // (a status, a screen, a phase, a run's state, an id) is never one, so a code word drawn as a word (failed, running,
-// messages) is the probe's to find
+// messages) is the probe's to find. An ability's blurb, about, asks and limits are none of them, nor are its parts' names (its
+// tools' and skills', which `name` would make content: DECLARED below): their words are known nowhere, and the probe passes
+// each as a whole run (abilityRuns below)
 const CONTENT_FIELDS = new Set([
   // prose
   'text', 'title', 'name', 'label', 'note', 'notes', 'message', 'description', 'question', 'header', 'prompt', 'response', 'detail',
@@ -942,6 +965,10 @@ const CONTENT_FIELDS = new Set([
 const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
+// the strings a content field holds that are an ability's declared parts, its tools' and skills' names in the abilities listing
+// (an array adds nothing to a path): drawn each whole, they pass as runs (abilityRuns below) and lend no known word
+const DECLARED = [['discover', 'shelves', 'abilities', 'data', 'abilities', 'tools', 'name'], ['discover', 'shelves', 'abilities', 'data', 'abilities', 'skills', 'name']];
+const isDeclared = at => DECLARED.some(c => c.length === at.length && c.every((p, i) => p === at[i]));
 
 // every string, as { text, key }, the corpus' own states, the composer pieces' inputs and the module catalog (its sub-titles,
 // roles, codes and rulings' citations: content, spec §5.10) hold in a content field, or anywhere inside an upstream's content:
@@ -951,7 +978,7 @@ export function corpusStrings() {
   const out = [];
   const seen = new Map();
   const walk = (v, key, path, content) => {
-    if (typeof v === 'string') { if (content || CONTENT_FIELDS.has(key)) out.push({ text: v, key }); return; }
+    if (typeof v === 'string') { if ((content || CONTENT_FIELDS.has(key)) && !isDeclared(path)) out.push({ text: v, key }); return; }
     if (v === null || typeof v !== 'object') return;
     const modes = seen.get(v) ?? new Set();
     if (modes.has(content)) return;
@@ -971,4 +998,29 @@ export function corpusStrings() {
   // iMessage's region list: each region's name as the browser gives it (Intl.DisplayNames), content as a venue's name is
   for (const lang of ['en', 'zh-CN']) for (const o of regionOptions(lang)) out.push({ text: o.name, key: null });
   return out;
+}
+
+// an ability's declared text (spec 2026-11-13 §4.1) in the abilities listings the corpus' states hold — its blurb, each line of
+// its about, each ask and each limit, top level and zh overlay, trimmed — and its parts' names: each tool's and skill's name,
+// a present skill's link (its name and ›), each row's and role's id. These are the runs its card and page draw each whole,
+// which the words probe passes as they are (words-probe.test.js), never as a source of known words: a code word one holds (the
+// event analog's ask about a trial that just failed, a row's `tool`) stays unknown everywhere else
+export function abilityRuns() {
+  const runs = new Set();
+  const lines = v => (typeof v === 'string' ? v.split('\n') : Array.isArray(v) ? v.filter(s => typeof s === 'string').flatMap(s => s.split('\n')) : []);
+  const names = (v, key) => (Array.isArray(v) ? v.filter(x => x && typeof x[key] === 'string').map(x => x[key]) : []);
+  for (const st of [...everyState(), ...namedStates().map(([, st]) => st)]) {
+    const listed = st.discover?.shelves?.abilities?.data?.abilities;
+    for (const a of Array.isArray(listed) ? listed : []) {
+      for (const text of [a, a?.zh]) {
+        if (!text || typeof text !== 'object') continue;
+        for (const s of [...lines(text.blurb), ...lines(text.about), ...lines(text.asks), ...lines(text.limits)]) if (s.trim()) runs.add(s.trim());
+      }
+      const skills = names(a?.skills, 'name');
+      for (const s of [...names(a?.tools, 'name'), ...skills, ...skills.map(k => `${k} ›`), ...names(a?.rows, 'id'), ...names(a?.roles, 'id')]) {
+        if (s.trim()) runs.add(s.trim());
+      }
+    }
+  }
+  return runs;
 }

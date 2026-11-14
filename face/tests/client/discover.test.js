@@ -1,4 +1,4 @@
-// Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): five shelves
+// Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): six shelves
 // from the face's listings, a grid per shelf, a page per item — and no shop.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -120,7 +120,7 @@ test('an unknown id: Loading… while its shelf loads, Not found after', () => {
 
 // a review is a shop's; the Research shelf's CN reviewer role is no review
 test('no Install, Uninstall, Publish, review, installs, price or shop', () => {
-  const html = [renderDiscover(loaded()), ...['mcp:alpaca-kit', 'bot:buffett', 'agent:codex', 'agent:gravit', 'skill:rules'].map(page)].join('');
+  const html = [renderDiscover(loaded()), ...['mcp:alpaca-kit', 'bot:buffett', 'agent:codex', 'agent:gravit', 'skill:rules', 'ability:event-analogs', 'ability:read-through'].map(page)].join('');
   for (const w of [/Install/, /Uninstall/, /Publish/, /\breviews?\b/i, /installs/, /price/i, /shop/i, /What you sign/]) assert.doesNotMatch(html, w, String(w));
 });
 
@@ -230,15 +230,168 @@ test("an item's line is known by its shelf and a module's unread head by its cod
 });
 
 test("a card's kind is drawn in the table's capitals, never a table word upper-cased", () => {
-  const table = { 'discover.kind.mcpUpper': 'Srv', 'discover.kind.botUpper': 'Bt', 'discover.kind.agentUpper': 'Agt', 'discover.kind.skillUpper': 'Sk', 'discover.kind.moduleUpper': 'Mod',
-    'discover.kind.mcp': 'xmcp', 'discover.kind.bot': 'xbot', 'discover.kind.agent': 'xagent', 'discover.kind.skill': 'xskill', 'discover.kind.module': 'xmodule' };
+  const table = { 'discover.kind.mcpUpper': 'Srv', 'discover.kind.botUpper': 'Bt', 'discover.kind.agentUpper': 'Agt', 'discover.kind.skillUpper': 'Sk', 'discover.kind.moduleUpper': 'Mod', 'discover.kind.abilityUpper': 'Abl',
+    'discover.kind.mcp': 'xmcp', 'discover.kind.bot': 'xbot', 'discover.kind.agent': 'xagent', 'discover.kind.skill': 'xskill', 'discover.kind.module': 'xmodule', 'discover.kind.ability': 'xability' };
   withTable(table, () => {
     const kinds = [...renderDiscover(loaded()).matchAll(/<span class="pcard-kind">([^<]*)<\/span>/g)].map(m => m[1]);
     assert.ok(kinds.length > 0);
-    for (const k of ['Srv', 'Bt', 'Agt', 'Sk', 'Mod']) assert.ok(kinds.includes(k), `${k} drawn: ${kinds}`);
-    assert.deepEqual(kinds.filter(k => !['Srv', 'Bt', 'Agt', 'Sk', 'Mod'].includes(k)), []);
+    for (const k of ['Srv', 'Bt', 'Agt', 'Sk', 'Mod', 'Abl']) assert.ok(kinds.includes(k), `${k} drawn: ${kinds}`);
+    assert.deepEqual(kinds.filter(k => !['Srv', 'Bt', 'Agt', 'Sk', 'Mod', 'Abl'].includes(k)), []);
     assert.match(renderModule(R.nav(emptyState(), { screen: 'module', id: 'sentiment' })), /<span class="pcard-kind">Mod<\/span>/);
   });
+});
+
+// the abilities (spec 2026-11-13 §4.4): the first shelf's cards, and an ability's page with its ask keys, which write to
+// Gravit's conversation only when the page knows it
+const conversing = (s, conversation = 'c-gravit') => R.tasksLoaded(s, { conversation, tasks: [], at: 1 });
+// the listings with the ability at index i changed by `over`
+const withAbility = (i, over) => {
+  const l = listings();
+  l.abilities.data.abilities[i] = { ...l.abilities.data.abilities[i], ...over };
+  return l;
+};
+const abilityAt = (id, l = listings()) => loadedFrom(l, { screen: 'plugin', id });
+const askKeys = h => h.match(/<button[^>]*data-action="askAbility"[^>]*>/g) ?? [];
+const labelAt = (h, label) => h.indexOf(`<div class="dsec-label">${label}</div>`);
+
+test("Discover's front draws the Abilities shelf first, a card per ability; one not on is dim with its state", () => {
+  const h = renderDiscover(conversing(loaded()));
+  assert.equal([...h.matchAll(/shelf-title">([^<]*)</g)].map(m => m[1])[0], 'Abilities');
+  const shelf = h.slice(h.indexOf('shelf-title">Abilities'), h.indexOf('shelf-title">Data'));
+  for (const id of ['event-analogs', 'read-through']) assert.match(shelf, new RegExp(`<a class="pcard" href="#/plugin/ability%3A${id}">`), id);
+  assert.equal(shelf.match(/<span class="pcard-kind">ABILITY<\/span><\/span>/g)?.length, 2, 'on: the kind alone');
+  const off = renderDiscover(loadedFrom(withAbility(1, { state: 'off' })));
+  assert.match(off, /<a class="pcard" href="#\/plugin\/ability%3Aevent-analogs">/);
+  assert.match(off, /<a class="pcard dim" href="#\/plugin\/ability%3Aread-through">[\s\S]*?<span class="pcard-side"><span class="pcard-kind">ABILITY<\/span><span class="chip grey">Off<\/span><\/span><\/a>/);
+  assert.match(renderDiscover(loadedFrom(withAbility(0, { state: 'failed' }))), /<a class="pcard dim" href="#\/plugin\/ability%3Aevent-analogs">[\s\S]*?<span class="chip warn">Failed<\/span>/);
+  assert.match(renderDiscover(loadedFrom(withAbility(0, { state: 'off' }), { screen: 'discover', id: 'abilities' })), /<a class="pcard in-grid dim" href="#\/plugin\/ability%3Aevent-analogs">/, 'its grid');
+});
+
+test("the event analog's page: State, About, Ask Gravit with its hint, What it does not tell you, Made of", () => {
+  const h = renderPlugin(conversing(abilityAt('ability:event-analogs')));
+  assert.match(h, /<h1 class="plug-name">Event analogs<\/h1><div class="dim">Ability<\/div>/);
+  assert.match(h, /<span class="kv-k">State<\/span><span class="kv-v">On<\/span>/);
+  const at = ['About', 'Ask Gravit', 'What it does not tell you', 'Made of'].map(label => labelAt(h, label));
+  assert.ok(at.every(i => i > 0), `every section drawn: ${at}`);
+  assert.deepEqual([...at].sort((a, b) => a - b), at, 'in that order');
+  assert.ok(h.indexOf('<span class="kv-k">State</span>') < at[0], 'State first');
+  assert.match(h, /<div class="dsec-line">Give Gravit a stock and what just happened to it\.[^<]*<\/div><div class="dsec-line">The answer is a table/, 'About: a line per paragraph');
+  const keys = askKeys(h);
+  assert.equal(keys.length, 3);
+  assert.ok(keys.every(k => !/disabled/.test(k)), 'none disabled');
+  assert.match(keys[0], /^<button type="button" class="btn-sm ask-key" data-action="askAbility" data-text="NVDA&#39;s board opened an investigation into its CEO\. What did stocks do after events like this\?">$/);
+  assert.match(h, /data-action="askAbility"[^>]*>NVDA&#39;s board opened an investigation into its CEO\. What did stocks do after events like this\?<\/button>/);
+  assert.match(h, /<div class="dsec-line dim">Puts the question in Gravit&#39;s box\. Nothing is sent until you send it\.<\/div>/);
+  assert.doesNotMatch(h, /conversation is not available/);
+  assert.match(h, /<div class="dsec-line">Historical statistics, not a forecast and not a basis for a trade<\/div>/);
+  const made = h.slice(at[3]);
+  assert.match(made, /<span class="kv-k">Tools<\/span><span class="kv-v">[\s\S]*?analog_events/);
+  assert.match(made, /<span class="kv-k">Roles<\/span><span class="kv-v">[\s\S]*?source-reader/);
+  assert.match(made, /<span class="kv-k">Skills<\/span><span class="kv-v">[\s\S]*?<a class="link mono" href="#\/plugin\/skill%3Aanalog-guide">analog-guide ›<\/a>/);
+  assert.match(made, /<span class="kv-k">Rows<\/span><span class="kv-v">[\s\S]*?analog-views<\/span><span class="dim">Active<\/span>/);
+  assert.match(made, /analog-events<\/span><span class="dim">Active<\/span>/);
+  assert.doesNotMatch(made, /not registered|missing|>Off</);
+});
+
+test('the ask keys are disabled without a conversation, saying so; with the ability not on they are disabled and say nothing', () => {
+  for (const s of [abilityAt('ability:event-analogs'), R.tasksOff(abilityAt('ability:event-analogs'), { at: 1 }), conversing(abilityAt('ability:event-analogs'), null)]) {
+    const h = renderPlugin(s);
+    assert.equal(askKeys(h).length, 3);
+    assert.ok(askKeys(h).every(k => / disabled>$/.test(k)), 'every key disabled');
+    assert.match(h, new RegExp(`<div class="dsec-line dim">Gravit${apos}s conversation is not available</div>`));
+    assert.doesNotMatch(h, /Nothing is sent until you send it/);
+  }
+  const off = renderPlugin(conversing(abilityAt('ability:event-analogs', withAbility(0, { state: 'off' }))));
+  assert.match(off, /<span class="kv-k">State<\/span><span class="kv-v">Off<\/span>/);
+  assert.equal(askKeys(off).length, 3);
+  assert.ok(askKeys(off).every(k => / disabled>$/.test(k)));
+  assert.doesNotMatch(off, /Nothing is sent until you send it|conversation is not available/);
+  assert.ok(askKeys(renderPlugin(conversing(abilityAt('ability:event-analogs', withAbility(0, { state: 'starting' }))))).every(k => / disabled>$/.test(k)), 'starting: disabled');
+});
+
+test("an ability's page draws no section it has nothing for, and says what is not there", () => {
+  const bare = renderPlugin(conversing(abilityAt('ability:event-analogs', withAbility(0, { asks: [], limits: [], about: '' }))));
+  for (const label of ['Ask Gravit', 'What it does not tell you', 'About']) assert.equal(labelAt(bare, label), -1, label);
+  assert.equal(askKeys(bare).length, 0);
+  assert.doesNotMatch(bare, /Nothing is sent until you send it/);
+  assert.ok(labelAt(bare, 'Made of') > 0);
+  const parts = withAbility(0, {
+    tools: [{ name: 'analog_events', registered: false }],
+    roles: [{ id: 'source-reader', present: false }],
+    skills: [{ name: 'analog-guide', present: false }],
+    rows: [{ id: 'analog-views', enabled: false, phase: null }, { id: 'analog-events', enabled: true, phase: 'failed' }],
+  });
+  const h = renderPlugin(conversing(abilityAt('ability:event-analogs', parts)));
+  assert.match(h, /analog_events<\/span><span class="dim">not registered<\/span>/);
+  assert.match(h, /source-reader<\/span><span class="dim">missing<\/span>/);
+  assert.match(h, /analog-guide<\/span><span class="dim">missing<\/span>/);
+  assert.doesNotMatch(h, /href="#\/plugin\/skill%3Aanalog-guide"/, 'a missing skill is no link');
+  assert.match(h, /analog-views<\/span><span class="dim">Off<\/span>/);
+  assert.match(h, /analog-events<\/span><span class="dim">Failed<\/span>/);
+  const rt = renderPlugin(conversing(abilityAt('ability:read-through')));
+  assert.ok(labelAt(rt, 'Made of') > 0);
+  assert.doesNotMatch(rt, /kv-k">Roles<|kv-k">Skills</, 'the read-through has no roles and no skills: no such rows');
+  assert.match(rt, /read_through/);
+});
+
+// the server's rule (src/abilities.ts abilityState): a row disabled or with no phase makes the ability off; its line says the
+// State's own word, never a phase's dash
+test("a row's line agrees with the State: Off for a row that is disabled or has no phase", () => {
+  const rows = [{ id: 'analog-views', enabled: true, phase: null }, { id: 'analog-events', enabled: false, phase: null }];
+  const s = conversing(abilityAt('ability:event-analogs', withAbility(0, { state: 'off', rows })));
+  const h = renderPlugin(s);
+  assert.match(h, /<span class="kv-k">State<\/span><span class="kv-v">Off<\/span>/);
+  const made = h.slice(labelAt(h, 'Made of'));
+  assert.match(made, /analog-views<\/span><span class="dim">Off<\/span>/, 'enabled with no phase: Off');
+  assert.match(made, /analog-events<\/span><span class="dim">Off<\/span>/, 'disabled: Off');
+  assert.doesNotMatch(made, /—/, 'no dash');
+  withTable(ZH, () => {
+    const zh = renderPlugin(R.setLang(s, 'zh'));
+    assert.match(zh, /<span class="kv-v">关闭<\/span>/);
+    assert.match(zh, /analog-views<\/span><span class="dim">关闭<\/span>/, 'the same word in Chinese');
+  });
+});
+
+// a listing that did not come through the face's validator may hold a name that is not well formed (a lone surrogate), which
+// encodeURIComponent throws on: the skill is drawn by name with no link, and the page is drawn
+test("a skill whose name is not well formed is drawn without a link, and the page does not throw", () => {
+  const bad = 'analog-guide\uD800';
+  const l = withAbility(0, { skills: [{ name: bad, present: true }, { name: 'analog-guide', present: true }] });
+  let h = '';
+  assert.doesNotThrow(() => { h = renderPlugin(conversing(abilityAt('ability:event-analogs', l))); });
+  assert.ok(h.includes(`<span class="made-part"><span class="mono">${bad}</span></span>`), 'its name alone, no link and no note');
+  assert.match(h, /<a class="link mono" href="#\/plugin\/skill%3Aanalog-guide">analog-guide ›<\/a>/, 'a well-formed name keeps its link');
+  assert.equal(h.match(/href="#\/plugin\/skill%3A/g)?.length, 1, 'one link');
+});
+
+test("an ability's listed strings are escaped, and its page never names a tool's description", () => {
+  const ask = 'Is "A&B" <up>?';
+  const bad = '<img src=x onerror=alert(1)>';
+  const l = withAbility(0, { asks: [ask, 'Line one\nLine two'], about: bad, limits: [bad], name: bad, tools: [{ name: bad, registered: true }], rows: [{ id: bad, enabled: true, phase: 'active' }], roles: [{ id: bad, present: true }], skills: [{ name: bad, present: true }] });
+  const h = renderPlugin(conversing(abilityAt('ability:event-analogs', l)));
+  assert.ok(h.includes('data-text="Is &quot;A&amp;B&quot; &lt;up&gt;?"'));
+  assert.ok(!h.includes(ask), 'the ask nowhere unescaped');
+  assert.ok(h.includes('>Is &quot;A&amp;B&quot; &lt;up&gt;?</button>'));
+  assert.ok(h.includes('data-text="Line one\nLine two"'), 'a line break kept in the words the key puts');
+  assert.doesNotMatch(h, /<img/);
+  assert.match(h, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(renderDiscover(loadedFrom(l)), /<img/);
+  for (const id of ['ability:event-analogs', 'ability:read-through']) assert.doesNotMatch(renderPlugin(conversing(abilityAt(id))), /description/, id);
+});
+
+test("an ability's page in Chinese reads the overlay and the Chinese table", () => {
+  withTable(ZH, () => {
+    const h = renderPlugin(R.setLang(conversing(abilityAt('ability:event-analogs')), 'zh'));
+    for (const w of ['事件对标', '问 Gravit', '它说明不了什么', '组成', '简介']) assert.ok(h.includes(w), w);
+    assert.match(h, /data-text="NVDA 董事会对 CEO 启动调查/);
+    assert.match(renderDiscover(R.setLang(loaded(), 'zh')), /pcard-name">对手推演</);
+  });
+});
+
+test('an unknown ability: Loading… while the abilities shelf is idle, Not found once it is read', () => {
+  assert.match(renderPlugin(R.nav(emptyState(), { screen: 'plugin', id: 'ability:nope' })), /Loading…/);
+  assert.match(page('ability:nope'), /Not found/);
+  assert.match(page('ability:event-analogs'), /plug-name">Event analogs</, 'an ability is no skill page');
 });
 
 // the one roster (one-entry plan 4 Task 5): the Available to Gravit switch on a bot's and a connected CLI agent's page

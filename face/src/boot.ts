@@ -286,6 +286,9 @@ export interface BootedFace {
    * `redeclare(id)` is what a bot save calls (main.ts `onBotChanged`), and
    * `errors` says why a bot is missing from the roster. */
   botPresets: BotPresets;
+  /** The role library `composeFace` read once for this boot (`roles/`, or
+   * {@link FaceBootOptions.rolesRoot}): the roles behind the role rows and presets. */
+  roles: readonly RoleFile[];
   /** Open the browser streams: commit the gateway's `appReady`, which admits
    * `/api/remote.mux` only once it fires (NEW packages/api/gateway/src/
    * index.ts:265-276). Idempotent. Already done by `bootFace` unless
@@ -1190,7 +1193,7 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
       appReady.commit();
     };
     if (opts.deferReady !== true) commitReady();
-    return { ctx, dispose, botPresets, commitReady };
+    return { ctx, dispose, botPresets, roles, commitReady };
   } catch (error) {
     /* Every failure path lands here: the tree is disposed and appReady is never
      * committed. `boot()` disposes its own context before it throws; a repeat

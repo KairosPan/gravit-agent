@@ -1,11 +1,11 @@
 // face/client/js/render/discover.js — Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3
-// "Discover = My plugins"): five shelves of cards from the face's listings, a grid per shelf, a page per item. No shop:
+// "Discover = My plugins"): six shelves of cards from the face's listings, a grid per shelf, a page per item. No shop:
 // nothing here installs, buys, publishes or counts installs. Every listed string is the host's or the operator's, through
 // esc.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { toHash } from '../router.js';
-import { shelves, SOURCE, itemsOf, searchItems, itemById } from '../host/discover-view.js';
+import { shelves, SOURCE, itemsOf, searchItems, itemById, abilityStateWord } from '../host/discover-view.js';
 import { GRAVIT_KEYS } from '../host/discover.js';
 import { avatar, mark } from './avatars.js';
 import { kv } from './controls.js';
@@ -42,15 +42,17 @@ function kindUpper(item) {
     case 'agent': return t('discover.kind.agentUpper');
     case 'skill': return t('discover.kind.skillUpper');
     case 'module': return t('discover.kind.moduleUpper');
+    case 'ability': return t('discover.kind.abilityUpper');
     default: return item.kind;
   }
 }
 
-// a card opens its item's page
+// a card opens its item's page; a dim one (an ability not on) carries its state's chip under the kind
 function card(item, grid = false) {
-  return `<a${attrs({ class: cls('pcard', grid && 'in-grid'), href: `#/plugin/${encodeURIComponent(item.id)}` })}>${markOf(item.mark, 44)}` +
+  const chip = item.dim && item.chip ? `<span${attrs({ class: cls('chip', item.chip.tone) })}>${esc(item.chip.text)}</span>` : '';
+  return `<a${attrs({ class: cls('pcard', grid && 'in-grid', item.dim && 'dim'), href: `#/plugin/${encodeURIComponent(item.id)}` })}>${markOf(item.mark, 44)}` +
     `<span class="pcard-body"><span class="pcard-name">${esc(item.name)}</span><span class="pcard-blurb">${esc(item.line)}</span></span>` +
-    `<span class="pcard-side"><span class="pcard-kind">${esc(kindUpper(item))}</span></span></a>`;
+    `<span class="pcard-side"><span class="pcard-kind">${esc(kindUpper(item))}</span>${chip}</span></a>`;
 }
 
 // a Research card (module cards spec §5.1): the link to the module's page around its mark, name and 副题, its role and
@@ -118,7 +120,7 @@ function createPage(state) {
 export function renderDiscover(state, now = Date.now()) {
   if (state.route.id === 'create') return createPage(state);
   const d = state.discover;
-  const items = itemsOf(d, activeRuns(state.moduleRuns, state.tasks?.items, now));
+  const items = itemsOf(d, activeRuns(state.moduleRuns, state.tasks?.items, now), state.lang);
   let body;
   if (d.query.trim()) {
     const found = searchItems(Object.values(items).flat(), d.query);
@@ -189,8 +191,53 @@ function skillPage(item, state) {
   return kv([[t('discover.key.group'), esc(read?.detail?.group ?? item.group ?? '—')]]) + (item.line ? sec(t('discover.field.description'), line(item.line)) : '') + sec(t('discover.key.content'), content);
 }
 
+// an ability's page (spec 2026-11-13 §4.4): its state, then what it is, the questions to ask Gravit, what it does not tell
+// you and what it is made of, each section drawn only when it has something. Its text is the item's, already in the page's
+// language; a tool is named alone, never with its registered description
+const partsOf = (v, key) => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && typeof x[key] === 'string') : []);
+const part = (name, note) => `<span class="made-part"><span class="mono">${esc(name)}</span>${note ? `<span class="dim">${esc(note)}</span>` : ''}</span>`;
+// a present skill links to its page; one whose name is not well formed (a listing the face's validator did not pass) has no
+// link to build, encodeURIComponent throwing on it, and is drawn by its name alone
+const skillPart = k => (k.present !== true ? part(k.name, t('discover.ability.missing'))
+  : k.name.isWellFormed() ? `<span class="made-part"><a${attrs({ class: 'link mono', href: `#/plugin/${encodeURIComponent(`skill:${k.name}`)}` })}>${esc(k.name)} ›</a></span>`
+    : part(k.name, null));
+// a row's word: its phase while it is enabled and has one; otherwise the State's own Off, the server's rule for an ability off
+const rowWord = r => (r.enabled === true && typeof r.phase === 'string' ? phaseWord(r.phase) : abilityStateWord('off'));
+
+// the ask keys put their words in Gravit's composer: they work while the ability is on and the page knows Gravit's
+// conversation (Messages draws no composer without one), and the line under them says which
+function asksOf(item, state) {
+  if (!item.text.asks.length) return '';
+  const on = item.source.state === 'on';
+  const conversation = typeof state.tasks?.conversation === 'string' && state.tasks.conversation !== '';
+  const keys = item.text.asks.map(ask => `<button${attrs({ type: 'button', class: 'btn-sm ask-key', 'data-action': 'askAbility', 'data-text': ask, disabled: !(on && conversation) })}>${esc(ask)}</button>`).join('');
+  const note = !on ? '' : conversation ? dim(t('discover.ability.askHint')) : dim(t('discover.ability.noConversation'));
+  return sec(t('discover.ability.ask'), keys + note);
+}
+
+function madeOf(a) {
+  const rows = [
+    [t('discover.key.tools'), partsOf(a.tools, 'name').map(x => part(x.name, x.registered === true ? null : t('discover.ability.notRegistered')))],
+    [t('discover.ability.roles'), partsOf(a.roles, 'id').map(r => part(r.id, r.present === true ? null : t('discover.ability.missing')))],
+    [t('discover.shelf.skills'), partsOf(a.skills, 'name').map(skillPart)],
+    [t('discover.ability.rows'), partsOf(a.rows, 'id').map(r => part(r.id, rowWord(r)))],
+  ].filter(([, parts]) => parts.length).map(([k, parts]) => [k, parts.join('')]);
+  return rows.length ? sec(t('discover.ability.madeOf'), `<div class="made-of">${kv(rows)}</div>`) : '';
+}
+
+function abilityPage(item, state) {
+  const { about, limits } = item.text;
+  const paragraphs = about.split('\n').filter(p => p.trim() !== '');
+  return kv([[t('discover.key.state'), esc(abilityStateWord(item.source.state))]]) +
+    (paragraphs.length ? sec(t('discover.ability.about'), paragraphs.map(line).join('')) : '') +
+    asksOf(item, state) +
+    (limits.length ? sec(t('discover.ability.limits'), limits.map(line).join('')) : '') +
+    madeOf(item.source);
+}
+
 // the line under an item's name: what it is, by its shelf; a module's is its kind
 function kindLine(i) {
+  if (i.shelf === 'abilities') return t('discover.kind.ability');
   if (i.shelf === 'data') return t('discover.kindLine.mcp');
   if (i.shelf === 'bots') return t('discover.kind.bot');
   if (i.shelf === 'skills') return t('discover.kindLine.skill', { group: i.group });
@@ -224,6 +271,7 @@ const rosterLine = (item, state) => (switchable(item) && state.discover.roster?.
 
 function bodyOf(item, state) {
   if (item.id === 'agent:gravit') return gravitPage(state);
+  if (item.shelf === 'abilities') return abilityPage(item, state);
   if (item.shelf === 'data') return mcpPage(item.source);
   if (item.shelf === 'bots') return state.edit?.kind === 'bot' && state.edit.id === item.source.id ? botEditor(item.source, state) : botPage(item.source);
   if (item.shelf === 'agents') return agentPage(item.source);
@@ -232,12 +280,12 @@ function bodyOf(item, state) {
 }
 
 // the listing an id is drawn from, so an unknown id waits while that listing is read
-const ID_SOURCE = { mcp: 'plugins', bot: 'bots', agent: 'agents', skill: 'memory', module: 'modules' };
+const ID_SOURCE = { ability: 'abilities', mcp: 'plugins', bot: 'bots', agent: 'agents', skill: 'memory', module: 'modules' };
 
 export function renderPlugin(state) {
   const id = state.route.id ?? '';
   const back = `<a id="page-back" class="back-link page-back" href="${esc(toHash(state.lastDiscover ?? { screen: 'discover', id: null }))}">${th('discover.back')}</a>`;
-  const item = itemById(state.discover, id);
+  const item = itemById(state.discover, id, state.lang);
   if (!item) {
     const source = ID_SOURCE[id.slice(0, id.indexOf(':'))];
     const status = source ? state.discover.shelves?.[source]?.status ?? 'idle' : 'ready';

@@ -1,6 +1,9 @@
 // face/tests/analog-events-smoke.test.ts
 /** The event analogs on a real boot (analogs spec §5.2, §6.5): the source reader's preset is listed whole, the running
- * registry lists `analog_events` and Gravit's view `role_source_reader`, and the two analog rows are listed active, with no `analog_chart` in the registry (withdrawn 2026-11-13); a
+ * registry lists `analog_events` and Gravit's view `role_source_reader`, and the two analog rows are listed active,
+ * with no `analog_chart` in the registry (withdrawn 2026-11-13);
+ * Discover's abilities listing (src/abilities.ts) over the booted tree reads both shipped declarations, the event
+ * analog and the read-through, `on`, every declared tool registered, `source-reader` and `analog-guide` present; a
  * session created on `role-source-reader` sees exactly `web_fetch` and `web_search` - `web_fetch` in its own layer,
  * given by the face (src/source-reader.ts), proved here on the real tree; a Gravit session, a PDF page reader's and a
  * bot's see no `web_fetch`, the last two no analog tool either, and neither the conversation's allow list nor the
@@ -12,7 +15,8 @@
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is its own file.
  * The scratch home is a `mkdtemp` directory, never `~/.dsh`; the Account seat
- * is disabled; `analog-views` is replaced by a row over a scratch views directory and the stub's origin; the stub is
+ * is disabled; the `skill-filesystem` row reads the repo's two skill packs, as the operator's patch has it;
+ * `analog-views` is replaced by a row over a scratch views directory and the stub's origin; the stub is
  * an `http.createServer` on port 0 answering `/api/candles` from `fakeMarket` (analog-fixtures.ts) with `EVT`
  * (`EVENT`) and `SPY` (`EVENT_MARKET`); the boot's other market readers keep the dead URL `helpers/no-market.ts` sets.
  * The view route is registered here as `src/main.ts` registers it, and the page is mounted for the sign-in. The bots
@@ -38,11 +42,13 @@ import { DEFAULT_ALLOW, createBot, renderComposition } from "../src/bots.ts";
 import { isTrustedDataRequest } from "../src/http.ts";
 import { registerAnalogViewRoute, type AnalogViewService } from "../src/analog-view.ts";
 import { panelDeps, pluginListing } from "../src/panels.ts";
+import { PLUGINS_ROOT, abilityListing, readAbilities } from "../src/abilities.ts";
+import { ROLES_ROOT, readRoles } from "../src/roles.ts";
 import { ROUTER_ALLOW } from "../src/router-preset.ts";
 import { DESK_ALLOW } from "../src/desk-preset.ts";
 import { SOURCE_READER_PAGES } from "../src/source-reader.ts";
 import { EVENT, EVENT_MARKET, fakeMarket } from "./analog-fixtures.ts";
-import { makeBotsRoot, PLUGIN_ABS } from "./bots-fixture.ts";
+import { makeBotsRoot, PLUGIN_ABS, REPO } from "./bots-fixture.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
@@ -90,8 +96,11 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
   setupFaceProfile(home);
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
-  // This smoke owns a scratch profile: no seat.
-  writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n`);
+  /* This smoke owns a scratch profile: no seat; and the operator's skill roots (dsh/README.md step 2), the repo's two
+   * group directories, so the skill registry lists `analog-guide` as the operator's face does. */
+  const skillDirs = ["mechanics", "style-gravit"].map((pack) => join(REPO, "dsh", "skills", pack));
+  writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n`
+    + `- id: skill-filesystem\n  config:\n    customSkillDirs: ${JSON.stringify(skillDirs)}\n`);
   /* The fixture bot: the template's allow list, its plugin named by the absolute path a temp root needs. */
   const bots = await makeBotsRoot();
   await createBot(bots, { id: "probe", name: "Probe", soul: "You are Probe, a test voice." });
@@ -148,6 +157,23 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
       assert.ok(row, `${id} must be listed; saw ${listedRows.map((r) => r.id).join(", ")}`);
       assert.equal(row.phase, "active", id);
     }
+    /* Discover's abilities over the booted tree, as main.ts lists them - the role ids from the roles the boot
+     * read, which are the library's: both shipped declarations on, every declared tool registered, the event
+     * analog's role and skill present. */
+    assert.deepEqual(booted.roles.map((role) => role.id), readRoles(ROLES_ROOT).map((role) => role.id), "the boot hands back the role library");
+    const { abilities } = await abilityListing({
+      ...panelDeps(ctx, process.cwd(), home),
+      abilities: readAbilities(PLUGINS_ROOT).abilities,
+      roleIds: new Set(booted.roles.map((role) => role.id)),
+    });
+    assert.deepEqual(abilities.map((a) => [a.id, a.state]), [["event-analogs", "on"], ["read-through", "on"]],
+      `both abilities are on; saw ${JSON.stringify(abilities.map((a) => ({ id: a.id, state: a.state, rows: a.rows })))}`);
+    for (const ability of abilities) {
+      for (const tool of ability.tools) assert.equal(tool.registered, true, `${ability.id}: ${tool.name} is registered`);
+    }
+    const eventAnalogs = abilities.find((a) => a.id === "event-analogs");
+    assert.deepEqual(eventAnalogs?.roles, [{ id: "source-reader", present: true }], "the source reader is present");
+    assert.deepEqual(eventAnalogs?.skills, [{ name: "analog-guide", present: true }], "the analog guide is present");
 
     // 2. a session on the reader's preset sees exactly the two web tools, web_fetch in its own layer
     const reader = await create("role-source-reader");

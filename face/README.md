@@ -3606,19 +3606,40 @@ neighbourhood:
 ## Discover (src/panels.ts + client/js/host/discover.js + client/js/render/discover.js)
 
 **Discover** (`#/discover`, in the rail's first level) is the inventory of what Gravit runs —
-there is no shop: nothing to install, buy, publish or count. Entering it reads five face routes
-(the fifth, Research's, below), each alone — a failed one says `Couldn't read <Shelf>` with Retry beside the others drawn:
-**Data**, the MCP servers and their tools (`GET /data/plugins.json`); **Bots**, the operator's
+there is no shop: nothing to install, buy, publish or count. Entering it reads six face routes,
+each alone — a failed one says `Couldn't read <Shelf>` with Retry beside the others drawn — for
+six shelves in this order: **Abilities**, what Gravit can do (`GET /data/abilities.json`,
+below); **Data**, the MCP servers and their tools (`GET /data/plugins.json`); **Research**, the
+six Lunhui modules (`GET /data/modules.json`, below); **Bots**, the operator's
 voices (`GET /data/bots.json`, never Gravit's own composition); **Agents**, Gravit first, then the
 local CLI agents (`GET /data/agents.json`); **Skills**, Gravit's standing knowledge (`GET
 /data/memory.json`). A search box matches names and lines across the shelves, `See all` opens a
 shelf as a grid, and every card opens its item's page, `#/plugin/<id>`, under a namespaced id
-(`mcp:<server>`, `bot:<id>`, `agent:gravit`, `agent:<bin>`, `skill:<name>`). Discover's refusals
+(`ability:<id>`, `mcp:<server>`, `bot:<id>`, `agent:gravit`, `agent:<bin>`, `skill:<name>`). Discover's refusals
 go to its own status line. (The old chat page's master rail and its four sidebar faces —
 strategy, agent, memory, plugin — are gone with that page; their `/#agent`-style links open
 Messages.)
 
-**Research**, the fifth shelf, drawn second after Data, is the six Lunhui modules in the chain's
+**Abilities** (since 2026-11-13) is one card per plugin that says what Gravit can do with it, in
+its own `ability.json` ("Giving a plugin a card" below), in the order the face read them: today
+**Event analogs** (`face/plugins/analog/`) and **Read-through** (`face/plugins/readthrough/`). A card
+is the declared icon, the name, the blurb and `ABILITY`; an ability that is not On is dim, its
+state on a chip beside the kind. Its page, `#/plugin/ability:<id>`, is its **State** (On, Off,
+Starting or Failed), **About**, **Ask Gravit**, **What it does not tell you** and **Made of** —
+each tool by name (`not registered` when the tree lacks it; never its registered description,
+which is written for the model), each role (`missing` when the face did not read it at boot), each
+skill as a link to its own page (`missing` when the skill registry does not list it), each row
+with its phase (Off, the State's own word, when it is disabled, not composed or has no phase) — a
+section drawn only when it has something. An ask is a key: pressing it goes to Messages and puts
+its words in Gravit's composer, after whatever the composer holds; nothing is sent. The keys work
+only while the ability is On and the page knows Gravit's conversation: with none
+(`FACE_ROUTER=0`, or the tasks not read yet) they are disabled under `Gravit's conversation is not
+available`, and with the ability not On they are disabled with no line. The page's text is the
+declaration's `zh` overlay when the page is in Chinese, its top level otherwise; the search finds
+an ability by its name and blurb. There is no switch: an ability is turned off as any row is,
+`disabled: true` on its rows in `cordis.patch.yml`.
+
+**Research**, drawn third after Abilities and Data, is the six Lunhui modules in the chain's
 order — Environment, Sentiment, Theme, Leader, Mode, Counterevidence — read from `GET
 /data/modules.json` (plan 1 of the module cards, a projection of the runs card's rows) and drawn
 as a grid of six, never a scrolling row, under `Lunhui · 6 modules`. The six cards are always
@@ -3766,6 +3787,77 @@ removed when the run ends. `panelDeps` fails loud at boot when
 `skills`/`tools`/`loader`/`agents` are missing from the
 tree — a dead shelf with nothing on stderr is the failure mode it exists to
 prevent.
+
+### Giving a plugin a card (src/abilities.ts)
+
+A plugin folder under `face/plugins/` gets a card on Abilities by holding an `ability.json`: one
+UTF-8 JSON object, no byte-order mark, at most 8,192 bytes. Its text is for a person on Discover;
+Gravit never reads it, and it changes no prompt, preset, tool or role.
+
+| Field | Rule |
+|---|---|
+| `id` | `^[a-z][a-z0-9-]{1,40}$`; unique among the declarations read |
+| `name` | 1 to 40 characters |
+| `blurb` | 1 to 90 characters, no trailing `.` or `。`; the card's line |
+| `icon` | optional; a name in `face/client/js/icons.js`. Absent or unknown, the card draws `bolt` |
+| `about` | 1 to 600 characters; `\n` separates paragraphs. What it does and how it runs |
+| `asks` | 0 to 4 strings of 1 to 120 characters: questions a person could put to Gravit |
+| `limits` | 0 to 4 strings of 1 to 160 characters: what it does not tell you |
+| `tools` | 1 to 16 tool names (`src/roles.ts` `TOOL_NAME_RE`, at most 64 characters), no repeats |
+| `rows` | 1 to 16 row ids as the face composes them (`analog-views`), `^[a-z0-9][a-z0-9-]{0,63}$`, no repeats |
+| `roles` | optional; 0 to 8 role ids (`ROLE_ID_RE`), no repeats: roles the ability uses |
+| `skills` | optional; 0 to 8 skill names (kebab-case), no repeats: skills that teach Gravit to use it |
+| `zh` | optional object holding any of `name`, `blurb`, `about`, `asks`, `limits`, each under its rule above |
+
+Strings are trimmed and counted in characters; one holding a control character is refused, but
+a line break inside `about`, and so is one that is not well formed (a lone surrogate) or holds an
+invisible character — a line or paragraph separator, a bidi control or a zero-width character —
+anywhere after the trim (one at an edge that the trim removes is dropped). An optional key may be
+absent or `null`. A key the table does not name is ignored and never served, so a Gravit-Field
+manifest's `kind`, `url`, `homepage`, `by`, `needs` and `writes` pass unread. The top-level text
+is English; `zh` overlays it on the Chinese page, a field it lacks read from the top level, and
+its `asks` and `limits` replace their lists whole. `face/tests/abilities-shipped.test.ts` reads
+the repo's declarations as the face does — none refused, the two shipped ones in order, so a
+third plugin's card joins that test with its file — and holds each to its plugin: its tools and
+rows the ones the plugin registers and composes, its roles under `roles/`, its skills under
+`dsh/skills/`, its icon one of the client's, a `zh` with a name, a blurb and an about, and no
+string holding `做多`.
+
+The face reads every `face/plugins/*/ability.json` once at boot, folders in name order. A file
+over the size, not UTF-8, not JSON, breaking a rule, or repeating an id an earlier folder took is
+left out — Discover does not show it — with one stderr line naming the file, the field and the
+rule, `gravit-face: ability left out - <folder>/ability.json: <field> - <rule>`; the boot goes
+on. An edit shows after a restart, as a role's does.
+
+**The state** is the plugin's own, its rows' and its tools', by the first rule that holds:
+
+| State | When |
+|---|---|
+| Off | a declared row has no loader entry (`include:<row id>`), is disabled, or has no phase |
+| Failed | a declared row's phase is `failed`; or every row is active and a declared tool is not registered |
+| On | every row is active and every tool is registered |
+| Starting | otherwise |
+
+A missing role or skill does not change it; the page says `missing`. It says nothing of the desk
+or of Gravit's conversation: the read-through reads On with `FACE_DESK=0` (a task can still use
+it; its `about` says which half is the desk's) and both read On with `FACE_ROUTER=0`. A face that
+booted passed the boot's row audit, which refuses an enabled row that is not active, so a card
+reads On, or Off for a row the operator disabled; Failed and Starting are for a row that changes
+after the boot.
+
+A skill reads present only when dsh's skill registry lists it, and the repo's `dsh/skills` reach
+that registry through the operator's own `skill-filesystem` row (`dsh/README.md` step 2): without
+that row the event analog's page says `analog-guide` is missing, and the ability still reads On.
+A registry that fails leaves the listing answering, every skill missing, and the face writes one
+line, `gravit-face: abilities - skill registry failed: <message>` — not again while the same
+failure repeats, since Discover reads the listing on every visit.
+
+`GET /data/abilities.json` stands behind the `/data` fence and writes nothing (there is no POST):
+`{ok: true, abilities}`, each declaration's text (`icon` and `zh` `null` when the file gives
+none) with its `state` and its parts — `rows` (`{id, enabled, phase}`, a row with no entry
+`{enabled: false, phase: null}`), `tools` (`{name, registered}`), `roles` (`{id, present}`),
+`skills` (`{name, present}`). Nothing of a row's config or module path, no tool's description, no
+file path and no undeclared key is served. No declarations is `"abilities": []`.
 
 ## Bots (src/bots.ts + src/bot-presets.ts + plugins/bot.js + bots/)
 
@@ -4620,7 +4712,7 @@ FACE_SMOKE=1 npm test     # + the 34 smoke files (43 real boots), isolated; loca
 ```
 
 Offline, `npm test` skips the 34 smoke files (43 real boots) listed below; `FACE_SMOKE=1` runs
-them too (4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+them too (4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -4676,7 +4768,7 @@ and `node --test` gives each file its own:
 | `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`), a stub headline read: the boot's tick at 09:15 ET inside the US window (04:00–20:00 ET) polling the US market alone, its pre-market prints making no record, and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply, run in a session of its own (never the desk conversation's, which reaches the model for none of it) and recorded `annotated`; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card; and, appended, the read-through (case 11): a fall on AVGO past its rule, the stub's `read_through` naming AMD inside the annotation's run, the block under the reason in the same reply with its tape, one `direction` line and one `sent: true` line, the `annotated` record naming its id, and a second crossing under the same close ending with the face's one line and recording no second direction |
 | `readthrough-smoke.test.ts` | the read-through rows on a real boot over a fake quote source and a scratch record: `read_through` registered and both rows active; a `gravit-desk` session sees it, a bot's and the source reader's do not, and the conversation's allow list does not name it; a Gravit root session's call priced, its block carrying the event, recorded as a task's; a desk session with no run refused `ALERT_ONLY`; inside a run opened through `readThroughLane`, accepted with no event line and closed with the run, not given until the lane marks it sent, then given and refused `ALREADY_GIVEN` in a later run of the event; a rival outside the fence refused by name; US shares alone asked of the source and no request leaving the process |
 | `desk-carry-smoke.test.ts` | a graceful stop and a fresh boot, two real boots on one home, each in a child process of its own (the file runs itself as `one`, then `two`): the first face, the desk as `main.ts` installs it on the stub, posts `LONG` (`telegram:1`), whose model call hangs until its abort, and `QUEUED` (`telegram:2`) behind it, then shuts down as `main.ts` does - `desk.dispose(0)`, then the tree's; the ledger holds one `desk-carry` - `QUEUED`'s key, words and time, and `LONG`'s turn 1 as `cut` - before its `shutdown`; the second face's boot posts `QUEUED` again, its provenance line ending `(carried over a restart)`, the model answers it once and `LONG` not at all, the phone gets the restart line and then `echo QUEUED`, and `desk-carried` says `posted: 1, skipped: 0` (spec §16 H3, R93; the guard across dsh upgrades for `.superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md`) |
-| `analog-events-smoke.test.ts` | the analog rows against a stub market (`fakeMarket` on port 0; `analog-views` over a scratch views directory): `analog_events` registered, no `analog_chart`, and the two rows active in the plugin listing; `role-source-reader` listed whole; a session created on it sees exactly `web_fetch` and `web_search`, the first in its own layer (`src/source-reader.ts`); a Gravit session, a PDF page reader's and a bot's see no `web_fetch`, the last two no analog tool; the reader's `web_fetch` of a loopback URL refused by dsh's provider until the fortieth page, the next refused by the guard; `analog_events` for Gravit measuring one event and storing the view, its source verified only once the page record holds it, and the present case's anchor citing the same page read back verified too; the view served with the cookie, 403 from another site's page, 404 for an unknown id; the reader refused `analog_events`; the stub asked only `/api/candles` on `cboe` |
+| `analog-events-smoke.test.ts` | the analog rows against a stub market (`fakeMarket` on port 0; `analog-views` over a scratch views directory): `analog_events` registered, no `analog_chart`, and the two rows active in the plugin listing; with the repo's two skill packs on the `skill-filesystem` row as the operator's patch has them, the abilities listing (`src/abilities.ts`) reading both shipped declarations On, every declared tool registered, `source-reader` and `analog-guide` present; `role-source-reader` listed whole; a session created on it sees exactly `web_fetch` and `web_search`, the first in its own layer (`src/source-reader.ts`); a Gravit session, a PDF page reader's and a bot's see no `web_fetch`, the last two no analog tool; the reader's `web_fetch` of a loopback URL refused by dsh's provider until the fortieth page, the next refused by the guard; `analog_events` for Gravit measuring one event and storing the view, its source verified only once the page record holds it, and the present case's anchor citing the same page read back verified too; the view served with the cookie, 403 from another site's page, 404 for an unknown id; the reader refused `analog_events`; the stub asked only `/api/candles` on `cboe` |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
 `observed:` line each (S4, S7), the measurements the bots spec's amendments were

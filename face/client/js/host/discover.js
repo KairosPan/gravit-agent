@@ -1,18 +1,19 @@
 // face/client/js/host/discover.js — Discover from the face (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): the
-// five listings (the Lunhui modules' since the module cards spec §5.1), each alone; the Gravit item's three reads, each
-// alone; a skill's content; the agent writes; the one roster (one-entry plan 4), read with the listings, and its
-// Available to Gravit switch. Impure; nothing here draws. A plain read joins the shelf's flight, a read
-// after a write starts a fresh one, and only the latest-started read of a shelf lands.
+// six listings (the Lunhui modules' since the module cards spec §5.1, the abilities' since spec 2026-11-13 §4.4), each
+// alone; the Gravit item's three reads, each alone; a skill's content; the agent writes; the one roster (one-entry plan 4),
+// read with the listings, and its Available to Gravit switch. Impure; nothing here draws. A plain read joins the shelf's
+// flight, a read after a write starts a fresh one, and only the latest-started read of a shelf lands.
 import { botSettingsPayload, botModelChoices, normalizeBotModel } from '../wire/botSettings.js';
 import { proposeBotId } from '../wire/botId.js';
 import { said } from '../i18n/words.js';
 
-export const SHELF_PATHS = Object.freeze({ plugins: '/data/plugins.json', bots: '/data/bots.json', agents: '/data/agents.json', memory: '/data/memory.json', modules: '/data/modules.json' });
+export const SHELF_PATHS = Object.freeze({ abilities: '/data/abilities.json', plugins: '/data/plugins.json', bots: '/data/bots.json', agents: '/data/agents.json', memory: '/data/memory.json', modules: '/data/modules.json' });
 export const ROSTER_PATH = '/data/roster.json';
 const ROSTER_SWITCH = '/data/roster';
 export const GRAVIT_KEYS = Object.freeze(['DEEPSEEK_API_KEY']); // en-kept: an environment variable's name
 
 const VALID = {
+  abilities: d => Array.isArray(d?.abilities),
   plugins: d => Array.isArray(d?.mcp),
   bots: d => Array.isArray(d?.bots),
   agents: d => Array.isArray(d?.local),

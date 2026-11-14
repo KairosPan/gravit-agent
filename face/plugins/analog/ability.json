@@ -1,0 +1,38 @@
+{
+  "id": "event-analogs",
+  "name": "Event analogs",
+  "blurb": "What stocks did after past events like this one, measured against the market",
+  "icon": "rewind",
+  "about": "Give Gravit a stock and what just happened to it. In a task, a source reader looks for past events of the same kind at other companies and dates each from a page it opens. Every dated event is then measured on daily bars against the market (SPY): the first day that could react, then 1, 5, 20 and 60 sessions on.\nThe answer is a table of the cases, with a median where a group has 8 or more, and a chart for each case. A run takes several minutes.",
+  "asks": [
+    "NVDA's board opened an investigation into its CEO. What did stocks do after events like this?",
+    "A drug maker's lead trial just failed. How did past cases trade over the next 60 days?",
+    "TSLA announced a large recall. Find past events like it and measure them"
+  ],
+  "limits": [
+    "Historical statistics, not a forecast and not a basis for a trade",
+    "Survivorship leans the numbers: companies that are gone cannot be measured",
+    "The cases are the ones one search found, and they are not independent",
+    "US shares on daily bars only, and nothing guards against lookahead"
+  ],
+  "tools": ["analog_events"],
+  "rows": ["analog-views", "analog-events"],
+  "roles": ["source-reader"],
+  "skills": ["analog-guide"],
+  "zh": {
+    "name": "事件对标",
+    "blurb": "一件事发生后，历史上同类事件之后股价怎么走，对比大盘来量",
+    "about": "告诉 Gravit 一只股票和它刚发生的事。Gravit 会开一个任务：先由来源阅读员去找其他公司发生过的同类事件，并从它打开的网页里核对每件事的日期；再用日线把每件事对比大盘（SPY）量一遍：第一个能反应的交易日，以及之后第 1、5、20、60 个交易日。\n结果是一张案例表，同组满 8 例才给中位数，每个案例都能点开看当时的 K 线。一次大约要几分钟。",
+    "asks": [
+      "NVDA 董事会对 CEO 启动调查，历史上类似的事发生后股价怎么走？",
+      "一家药企的核心临床试验刚失败，过去的同类案例之后 60 天怎么走？",
+      "TSLA 宣布大规模召回，帮我找历史上类似的事件并量一下"
+    ],
+    "limits": [
+      "这是历史统计，不是预测，也不是交易依据",
+      "有幸存者偏差：已经退市的公司量不到",
+      "案例是一次搜索找到的那些，彼此也不独立",
+      "只覆盖美股日线，没有防止用到事后信息的机制"
+    ]
+  }
+}
