@@ -453,7 +453,7 @@ test("the desk contract names every fence name and the provenance forms the code
 test("the desk contract says how a routine's message reads, inside its 3,200 bytes", () => {
   const contract = readDesk(DESK_PATH);
   const lines = contract.split("\n");
-  assert.ok(lines.includes("- [routine · <name> · <time>] is a routine the operator confirmed: its text and how to answer are in the message."), "the routine's source line");
+  assert.ok(lines.includes("- [routine · <name> · <time>] is a routine the operator confirmed: its text and how to answer are in it."), "the routine's source line");
   assert.ok(Buffer.byteLength(contract, "utf8") <= 3_200);
 });
 

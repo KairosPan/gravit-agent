@@ -12,6 +12,7 @@
  * whose HOME and DSH_HOME both point into a temp directory.
  * @module
  */
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -25,6 +26,7 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { composeFace } from "../src/boot.ts";
 import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
 import { MARKET_ROW_ID } from "../src/market-row.ts";
+import { MEMORY_ROW_ID } from "../src/memory-row.ts";
 import {
   EXIT_REFUSED, MARKER_FILE, MCP_CLIENT_PACKAGE, checkTarget, classifyRefusal, describeChanges, diffInventory, findPatchRow,
   inventory, liveHomeCandidates, mcpRowIdsToDisable, mcpRowsIn, readLogText, reportPathFor, scanRawSessions, summarize, zstdFrames,
@@ -289,10 +291,10 @@ test("inventory/diffInventory tell added, removed, modified and rewritten apart,
   ]);
 });
 
-test("mcpRowIdsToDisable: every MCP row the composition names, and the face's seat row by id - no alpaca row id expected", () => {
-  assert.deepEqual(mcpRowIdsToDisable([]), [ACCOUNT_SEAT_ROW_ID, MARKET_ROW_ID]);
+test("mcpRowIdsToDisable: every MCP row the composition names, and the face's seat, market and memory rows by id - no alpaca row id expected", () => {
+  assert.deepEqual(mcpRowIdsToDisable([]), [ACCOUNT_SEAT_ROW_ID, MARKET_ROW_ID, MEMORY_ROW_ID]);
   const rows: Array<{ id?: string; serverName?: string }> = [{ id: "mcp-account", serverName: "account" }, { id: "mcp-mine" }];
-  assert.deepEqual(mcpRowIdsToDisable(rows), ["mcp-account", "mcp-mine", "mcp-market"]);
+  assert.deepEqual(mcpRowIdsToDisable(rows), ["mcp-account", "mcp-mine", "mcp-market", "mcp-memory"]);
   assert.equal(mcpRowIdsToDisable([{ id: "mcp-x" }]).includes("mcp-alpaca-kit"), false);
 });
 

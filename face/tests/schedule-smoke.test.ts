@@ -52,6 +52,7 @@
  * @module
  */
 import "./helpers/no-market.ts";
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

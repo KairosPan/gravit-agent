@@ -1,12 +1,15 @@
 /** Gravit's run protocols - prose files under `dsh/profile/` that tell Gravit how to drive a set of
- * tools, each mounted as a section of its own (modules spec A9, §5.10). Two ship, both gated on
+ * tools, each mounted as a section of its own (modules spec A9, §5.10). Three ship. Two are gated on
  * `lunhui_read_run`, so they are in the prompt only when the Lunhui rows mounted:
  * `lunhui-run.md`, the order of an A-share research run, mounted as `lunhui:run`, and
  * `lunhui-module.md`, how to run one module on a module card's message (modules-cards spec G4),
  * mounted as `lunhui:module` one order step after it and held to its own
- * {@link LUNHUI_MODULE_MAX_BYTES}. {@link readProtocols} reads them where `composeFace` renders Gravit's default preset
+ * {@link LUNHUI_MODULE_MAX_BYTES}. The third, `memory.md`, mounted as `gravit:memory`, says what only
+ * this host knows about the memory's tools; it is gated on {@link MEMORY_PROBE}, the recall tool, and
+ * held to {@link MEMORY_MAX_BYTES} by its reader. {@link readProtocols} reads all three where `composeFace` renders Gravit's default preset
  * (src/boot.ts), beside the cycle, and hands them to `gravitRows` (src/roles.ts) as the `gravit`
- * row's `protocols` key; `plugins/gravit.js` registers each as a section a ROOT or FORK session
+ * row's `protocols` key; `bootFace` hands the memory's alone ({@link readMemoryProtocol}) to the
+ * conversation's preset (src/router-preset.ts). `plugins/gravit.js` registers each as a section a ROOT or FORK session
  * that can call the probe reads - Gravit's, and a `subagent_fork` child's. A role child, a bot or
  * any other delegated child is told nothing.
  *
@@ -36,6 +39,16 @@ export const LUNHUI_MODULE_PATH = join(PROTOCOLS_DIR, LUNHUI_MODULE_FILE);
 export const LUNHUI_MODULE_SECTION = "lunhui:module";
 export const LUNHUI_MODULE_MAX_BYTES = 1500;
 
+/** The memory's protocol: what only this host knows about the memory's tools (memory-connect plan 1), its file,
+ * section name and probe - the recall tool by the name the `mcp-memory` row registers it under
+ * (`mcp__<server>__<raw>`, src/memory-row.ts), so the section reads only where that row mounted and the
+ * assembling scope may call it - and its own budget, which {@link readMemoryProtocol} enforces. */
+export const MEMORY_FILE = "memory.md";
+export const MEMORY_PATH = join(PROTOCOLS_DIR, MEMORY_FILE);
+export const MEMORY_SECTION = "gravit:memory";
+export const MEMORY_PROBE = "mcp__memory__memory_recall";
+export const MEMORY_MAX_BYTES = 1000;
+
 /** The largest protocol file, in bytes as `wc -c` counts them (spec §5.10). A whole number of
  * three-byte characters, for tests/protocols.test.ts. */
 export const PROTOCOL_MAX_BYTES = 3000;
@@ -55,9 +68,10 @@ const refusal = (file: string, reason: string, cause?: unknown): Error =>
   new Error(`${file}: ${reason}`, cause === undefined ? undefined : { cause });
 
 /** A protocol's text, trimmed. Throws an `Error` whose message opens with the absolute path of
- * `path` when the file is missing, cannot be read, is empty, is over {@link PROTOCOL_MAX_BYTES}
- * (raw bytes, inclusive), or contains `{{`. */
-export function readProtocol(path: string): string {
+ * `path` when the file is missing, cannot be read, is empty, is over `maxBytes` (raw bytes,
+ * inclusive; {@link PROTOCOL_MAX_BYTES} unless a protocol has a smaller budget of its own), or
+ * contains `{{`. */
+export function readProtocol(path: string, maxBytes: number = PROTOCOL_MAX_BYTES): string {
   const file = resolve(path);
   let bytes: Buffer;
   try {
@@ -68,17 +82,26 @@ export function readProtocol(path: string): string {
   }
   const text = bytes.toString("utf8").trim();
   if (text === "") throw refusal(file, "the protocol is empty");
-  if (bytes.length > PROTOCOL_MAX_BYTES) throw refusal(file, `is ${bytes.length} bytes; the limit is ${PROTOCOL_MAX_BYTES}`);
+  if (bytes.length > maxBytes) throw refusal(file, `is ${bytes.length} bytes; the limit is ${maxBytes}`);
   if (text.includes("{{")) throw refusal(file, "contains {{, which a protocol may not");
   return text;
 }
 
+/** The memory's protocol, read from `dir` (default {@link PROTOCOLS_DIR}) and refused as
+ * {@link readProtocol} refuses, path-first, with {@link MEMORY_MAX_BYTES} as its cap. Gravit's
+ * default preset carries it as the last of {@link readProtocols}; the conversation's preset carries
+ * it alone (src/router-preset.ts). */
+export function readMemoryProtocol(dir: string = PROTOCOLS_DIR): Protocol {
+  return { name: MEMORY_SECTION, probe: MEMORY_PROBE, text: readProtocol(join(dir, MEMORY_FILE), MEMORY_MAX_BYTES) };
+}
+
 /** Every shipped protocol, read from `dir` (default {@link PROTOCOLS_DIR}; tests point it at a
- * fixture): the run protocol, then the module protocol, both gated on `lunhui_read_run`. The order
- * is the sections' order (plugins/gravit.js). */
+ * fixture): the run protocol, then the module protocol, both gated on `lunhui_read_run`, then the
+ * memory's, gated on {@link MEMORY_PROBE}. The order is the sections' order (plugins/gravit.js). */
 export function readProtocols(dir: string = PROTOCOLS_DIR): Protocol[] {
   return [
     { name: LUNHUI_RUN_SECTION, probe: "lunhui_read_run", text: readProtocol(join(dir, LUNHUI_RUN_FILE)) },
     { name: LUNHUI_MODULE_SECTION, probe: "lunhui_read_run", text: readProtocol(join(dir, LUNHUI_MODULE_FILE)) },
+    readMemoryProtocol(dir),
   ];
 }

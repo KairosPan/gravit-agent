@@ -29,6 +29,10 @@ import { registerAnalogViewRoute, type AnalogViewService } from "./analog-view.t
 import { registerAccountProxy } from "./account-proxy.ts";
 import { registerMarketProxy } from "./market-proxy.ts";
 import { composedMarketRow } from "./market-row.ts";
+import { composedMemoryRow } from "./memory-row.ts";
+import { memoryOpener } from "./memory.ts";
+import { readBriefMemory } from "./memory-brief.ts";
+import { installMemoryClock, memoryClockEnabled, type MemoryClock } from "./memory-clock.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { claimsOf, deskDir, installDesk, type DeskHandle } from "./desk.ts";
@@ -129,6 +133,9 @@ let disposeProxy: (() => void) | undefined;
 let searchIndex: SearchIndex | undefined;
 /** The market proxy's own unwind (src/market-proxy.ts), run beside the account's, for the same reason. */
 let disposeMarketProxy: (() => void) | undefined;
+/** The memory's reconcile clock (src/memory-clock.ts), unless `FACE_MEMORY_RECONCILE=0`: both exits clear its timers
+ * first, before anything is torn down, and wait for no run. */
+let memoryClock: MemoryClock | undefined;
 
 /** Tear the tree down, then leave with `code`. A dispose that rejects still
  * exits, and says why: a signal the process has already acknowledged must not
@@ -137,6 +144,7 @@ let disposeMarketProxy: (() => void) | undefined;
  * beats waiting on an unbounded teardown. */
 async function shutdown(code: number): Promise<void> {
   try {
+    memoryClock?.dispose();
     /* the phone first: no text is taken that a disposed conversation would refuse; the outlet stays for its last answers */
     await desk?.quiesce();
     await tasks?.dispose();
@@ -173,6 +181,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
  * under a 2 s bound, and exits 1 (:679-728). `release` unwinds what this entry
  * installed on the tree before the tree itself. */
 installFailLoud(BIN, process, async () => {
+  memoryClock?.dispose();
   /* the phone first: no text is taken that a disposed conversation would refuse; the outlet stays for its last answers */
   await desk?.quiesce();
   await tasks?.dispose();
@@ -273,6 +282,10 @@ registerSeatRoute(
 const marketRow = seatLoader === undefined ? undefined : composedMarketRow(seatLoader.entries());
 const marketProxy = registerMarketProxy(booted.ctx.webServer, marketRow === undefined ? {} : marketRow.disabled ? { disabled: true } : { url: marketRow.url });
 disposeMarketProxy = marketProxy.dispose;
+/* The memory as the tree composed its `mcp-memory` row (src/memory-row.ts): an operator patch may have re-pointed its
+ * install or its home, or disabled it, and the face's own reads follow the row, not the environment. Built once, for
+ * the reconcile clock below and the brief. */
+const openMemory = memoryOpener(seatLoader === undefined ? undefined : composedMemoryRow(seatLoader.entries()));
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here
@@ -500,6 +513,7 @@ desk = installDesk(booted.ctx.webServer, {
   enabled: deskEnabled,
   ctx: booted.ctx,
   quotes,
+  memory: () => readBriefMemory(openMemory),
   root: process.cwd(),
   route: deskRoute,
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
@@ -513,6 +527,11 @@ desk = installDesk(booted.ctx.webServer, {
   watchRow: {},
 });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
+/* The memory's reconcile clock (src/memory-clock.ts), beside the desk: two minutes from now and every eight hours, as
+ * `gravit-face`, each run one line on the face's stderr; it never holds up or fails anything. */
+if (memoryClockEnabled()) {
+  memoryClock = installMemoryClock({ open: openMemory, log: (line) => { console.error(`${BIN}: ${line}`); } });
+}
 /* The conversation and its tasks (docs/superpowers/specs/2026-11-08-one-entry-router-design.md), unless
  * `FACE_ROUTER=0`: Gravit's one router session on `gravit-router` in `$DSH_HOME/face/conversation/`, found again
  * through the desk's ledger and supervised (src/conversation.ts), ensured here before any route can use it - a

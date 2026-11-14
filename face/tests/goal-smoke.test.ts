@@ -19,6 +19,7 @@
  *   bumps the revision and re-arms the rounds.
  * Own file, gated; the restart step boots the same home a second time, as subagents-smoke does. */
 import "./helpers/no-market.ts";
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";

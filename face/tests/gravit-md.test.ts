@@ -6,7 +6,7 @@ import { ROLES_ROOT, readRoles } from "../src/roles.ts";
 
 const GRAVIT_MD = fileURLToPath(new URL("../../GRAVIT.md", import.meta.url));
 /** Spec §4.2: the budget of the one file every dsh agent in the tree reads on its first request. */
-const BUDGET_BYTES = 4500;
+const BUDGET_BYTES = 4650;
 
 test("GRAVIT.md fits its budget and contains no template group", () => {
   const text = readFileSync(GRAVIT_MD, "utf8");
@@ -42,7 +42,7 @@ test("GRAVIT.md tells Gravit to answer a Lunhui market run with lunhui_present",
 
 test("GRAVIT.md reaches AKShare through the market row, not the seat", () => {
   const text = readFileSync(GRAVIT_MD, "utf8");
-  assert.ok(Buffer.byteLength(text, "utf8") <= 4500);
+  assert.ok(Buffer.byteLength(text, "utf8") <= 4650);
   assert.match(text, /mcp__market__market_akshare/);
   assert.equal(text.includes("portfolio_akshare"), false);
   assert.match(text, /akshare_discover/);
@@ -73,5 +73,14 @@ test("GRAVIT.md states debates, not rooms", () => {
 test("GRAVIT.md says a return is never a bare run of numbers", () => {
   const text = readFileSync(GRAVIT_MD, "utf8");
   assert.ok(text.includes("never as a bare run of numbers"));
+  assert.ok(Buffer.byteLength(text, "utf8") <= BUDGET_BYTES);
+});
+
+/* Memory in Gravit, plan 1: one line names the memory's tools and who arms a lesson, right after the seat's paragraph. */
+test("GRAVIT.md names the memory in one line", () => {
+  const text = readFileSync(GRAVIT_MD, "utf8");
+  const line = "`mcp__memory__*`: the owner's record of decisions and lessons; you record and propose, the owner arms.";
+  assert.ok(text.split("\n").includes(line), "the line, exactly, on a line of its own");
+  assert.ok(text.indexOf(line) > text.indexOf("`mcp__account__*`: Gravit's seat") && text.indexOf(line) < text.indexOf("## The desk"), "after the seat's paragraph");
   assert.ok(Buffer.byteLength(text, "utf8") <= BUDGET_BYTES);
 });

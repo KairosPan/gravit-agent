@@ -4,6 +4,7 @@
  * AGENTS.md or CLAUDE.md, for Gravit, for a channel session and for a bot.
  * Own file, gated: one boot per process. */
 import "./helpers/no-market.ts";
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";

@@ -12,6 +12,7 @@
  * Account moving under the face: a renamed write tool falls out of the gate's
  * list here, not offline. */
 import { DEAD_MARKET_URL } from "./helpers/no-market.ts";
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";

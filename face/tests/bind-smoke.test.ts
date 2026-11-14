@@ -5,6 +5,7 @@
  * FACE_BIND; this pins the refusal, so a dsh that starts admitting the wildcard is noticed rather
  * than assumed. Own file, gated: one boot per process. */
 import "./helpers/no-market.ts";
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

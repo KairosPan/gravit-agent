@@ -19,6 +19,7 @@
  * scratch home is a `mkdtemp` directory, never `~/.dsh`, and the seat is disabled. This is the canary for the
  * Account's reads moving under the face, beside `account-seat-smoke`'s for its seat. */
 import { DEAD_MARKET_URL } from "./helpers/no-market.ts";
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { LUNHUI_MODULE_MAX_BYTES, LUNHUI_MODULE_PATH, LUNHUI_MODULE_SECTION, LUNHUI_RUN_PATH, LUNHUI_RUN_SECTION, PROTOCOLS_DIR, PROTOCOL_MAX_BYTES, readProtocol, readProtocols } from "../src/protocols.ts";
+import { LUNHUI_MODULE_MAX_BYTES, LUNHUI_MODULE_PATH, LUNHUI_MODULE_SECTION, LUNHUI_RUN_PATH, LUNHUI_RUN_SECTION, MEMORY_FILE, MEMORY_MAX_BYTES, MEMORY_PATH, MEMORY_PROBE, MEMORY_SECTION, PROTOCOLS_DIR, PROTOCOL_MAX_BYTES, readMemoryProtocol, readProtocol, readProtocols } from "../src/protocols.ts";
 import { ROLES_ROOT, readRoles } from "../src/roles.ts";
 import { LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
-import { LUNHUI_MODULE_SECTION as PLUGIN_MODULE_SECTION, LUNHUI_RUN_SECTION as PLUGIN_RUN_SECTION } from "../plugins/gravit.js";
+import { LUNHUI_MODULE_SECTION as PLUGIN_MODULE_SECTION, LUNHUI_RUN_SECTION as PLUGIN_RUN_SECTION, apply, validateGravitConfig } from "../plugins/gravit.js";
+import { MEMORY_SERVER, MEMORY_TOOLS } from "../src/memory-row.ts";
 
 /** Both shipped protocol files, for the checks that hold of each. */
 const SHIPPED = [LUNHUI_RUN_PATH, LUNHUI_MODULE_PATH];
@@ -120,10 +121,11 @@ test("the module protocol's budget is its own, under the loader's: 1,500 bytes r
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test("readProtocols: the run and module protocols, in that order, gated on lunhui_read_run, from the profile directory or a given one", async () => {
+test("readProtocols: the run and module protocols, gated on lunhui_read_run, then the memory's, from the profile directory or a given one", async () => {
   assert.deepEqual(readProtocols(), [
     { name: LUNHUI_RUN_SECTION, probe: "lunhui_read_run", text: readProtocol(LUNHUI_RUN_PATH) },
     { name: LUNHUI_MODULE_SECTION, probe: "lunhui_read_run", text: readProtocol(LUNHUI_MODULE_PATH) },
+    readMemoryProtocol(),
   ]);
   assert.equal(LUNHUI_RUN_SECTION, "lunhui:run");
   assert.equal(LUNHUI_MODULE_SECTION, "lunhui:module");
@@ -135,9 +137,13 @@ test("readProtocols: the run and module protocols, in that order, gated on lunhu
     const onlyRun = join(dir, "lunhui-module.md");
     assert.throws(() => readProtocols(dir), (e: Error) => e.message === `${onlyRun}: the protocol file is missing`, "the run file alone: the module file is named");
     await writeFile(onlyRun, "# 单模块\n\n只做这一个。\n");
+    const noMemory = join(dir, "memory.md");
+    assert.throws(() => readProtocols(dir), (e: Error) => e.message === `${noMemory}: the protocol file is missing`, "the Lunhui files alone: the memory's file is named");
+    await writeFile(noMemory, "Memory. Record first.\n");
     assert.deepEqual(readProtocols(dir), [
       { name: "lunhui:run", probe: "lunhui_read_run", text: "# 运行\n\n先冻结。" },
       { name: "lunhui:module", probe: "lunhui_read_run", text: "# 单模块\n\n只做这一个。" },
+      { name: "gravit:memory", probe: "mcp__memory__memory_recall", text: "Memory. Record first." },
     ]);
     const empty = await mkdtemp(join(tmpdir(), "face-protocols-"));
     try {
@@ -182,4 +188,71 @@ test("readProtocol: the limit is inclusive and counts raw bytes - PROTOCOL_MAX_B
     await writeFile(over, "运".repeat(PROTOCOL_MAX_BYTES / 3) + "\n");
     assert.throws(() => readProtocol(over), (e: Error) => e.message === `${over}: is ${PROTOCOL_MAX_BYTES + 1} bytes; the limit is ${PROTOCOL_MAX_BYTES}`);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+/* The memory's section (memory-connect plan 1, Task 3): what only this host knows about the
+ * memory's tools - the Market's spelling of a symbol, whose call is registered when, the facts the
+ * face can compute for a lesson card, and the seat's notes as another store. Gated on the recall
+ * tool, by the full name the MCP row registers it under (`mcp__<server>__<raw>`). */
+test("the memory's section: its file, its cap, its probe", () => {
+  const p = readMemoryProtocol();
+  assert.deepEqual({ name: p.name, probe: p.probe }, { name: "gravit:memory", probe: "mcp__memory__memory_recall" });
+  assert.equal(MEMORY_SECTION, "gravit:memory");
+  assert.equal(MEMORY_PROBE, `mcp__${MEMORY_SERVER}__${MEMORY_TOOLS[0]}`, "the probe is the row's recall tool, by its registered name");
+  assert.equal(MEMORY_PATH, join(PROTOCOLS_DIR, MEMORY_FILE));
+  assert.equal(MEMORY_MAX_BYTES, 1000);
+  assert.ok(statSync(MEMORY_PATH).size <= 1000, `memory.md is ${statSync(MEMORY_PATH).size} bytes`);
+  for (const word of ["600519", "whose: agent", "whose: owner", "change_5d_pct", "portfolio_memory"]) assert.ok(p.text.includes(word), word);
+  assert.equal(p.text.includes("{{"), false);
+});
+
+test("three protocols for Gravit, in order", () => assert.deepEqual(readProtocols().map((p) => p.name), ["lunhui:run", "lunhui:module", "gravit:memory"]));
+
+test("a memory.md over 1,000 bytes is refused, path first", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "face-memory-protocol-"));
+  try {
+    const at = join(dir, MEMORY_FILE);
+    await writeFile(at, "m".repeat(MEMORY_MAX_BYTES));
+    assert.equal(readMemoryProtocol(dir).text, "m".repeat(MEMORY_MAX_BYTES), "exactly the cap is read");
+    await writeFile(at, "m".repeat(MEMORY_MAX_BYTES) + "\n");
+    assert.throws(() => readMemoryProtocol(dir), (e: Error) => e.message === `${at}: is ${MEMORY_MAX_BYTES + 1} bytes; the limit is ${MEMORY_MAX_BYTES}`);
+    await rm(at);
+    assert.throws(() => readMemoryProtocol(dir), (e: Error) => e.message === `${at}: the protocol file is missing`);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+/** A stand-in scope for the plugin's `apply`, as tests/gravit-plugin.test.ts builds one: the sections
+ *  it registers, and a registry whose `get(name, scope)` resolves a name the scope lists in `visible`. */
+function fakeScope() {
+  const sections: Array<{ name: string; text: unknown }> = [];
+  const ctx = {
+    effect(fn: () => unknown) { return fn(); },
+    systemPrompt: {
+      section(section: { name: string; text: unknown }) { sections.push(section); return () => {}; },
+      getSectionOrder: () => 10_000,
+    },
+    tools: { get: (name: string, scope?: { visible?: readonly string[] }) => scope?.visible?.includes(name) ? { name } : undefined },
+  };
+  return { ctx, sections };
+}
+
+test("the section is in a prompt only where the recall tool can be called", () => {
+  const memory = readMemoryProtocol();
+  const tree = fakeScope();
+  apply(tree.ctx, { protocols: [memory] });
+  const section = tree.sections.find((s) => s.name === MEMORY_SECTION)!;
+  assert.ok(section, "registered under its own name");
+  const textFor = (visible: string[], header: object) => (section.text as (c: unknown) => string)({ scope: { visible }, agent: { session: { header } } });
+  const withRecall = ["read", ...MEMORY_TOOLS.map((raw) => `mcp__memory__${raw}`)];
+  assert.equal(textFor(withRecall, { id: "root", isSeeded: false }), memory.text, "a root session that can call the recall tool: the text");
+  assert.equal(textFor(withRecall, { id: "fork", origin: "subagent", isSeeded: true }), memory.text, "a fork child: the same text");
+  assert.equal(textFor(["read", "grep"], { id: "root", isSeeded: false }), "", "the recall tool not callable (no row, or a mask without it): nothing");
+  assert.equal(textFor(withRecall, { id: "spawn", origin: "subagent", isSeeded: false }), "", "a delegated child that is not a fork: nothing");
+});
+
+test("the plugin takes the router's contract with the memory's section", () => {
+  assert.equal(validateGravitConfig({ router: { text: "T", root: "/r" }, protocols: [readMemoryProtocol()] }), undefined);
+  const tree = fakeScope();
+  apply(tree.ctx, { router: { text: "T", root: "/r" }, protocols: [readMemoryProtocol()] });
+  assert.deepEqual(tree.sections.map((s) => s.name).sort(), ["deployment:today", "gravit:memory", "gravit:router"]);
 });

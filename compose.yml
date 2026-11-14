@@ -80,6 +80,9 @@ services:
       - ./AGENTS.md:${PWD}/AGENTS.md:ro
       - dsh-home:/dsh-home
       - seat-home:/seat-home
+      # The memory's home (gravit-memory): this box's alone; the operator makes it here
+      # (`gravit-memory init`), the face never does.
+      - memory-home:/memory-home
       # Linux node_modules over the host's macOS ones; the entrypoint runs npm ci when empty.
       - face-modules:${PWD}/face/node_modules
       # Its mount point must exist in the read-only bind above: `cd account && npm ci` on the host first.
@@ -99,6 +102,7 @@ services:
       FACE_MARKET_URL: "http://market:4821"
       BUYER_HOME: /seat-home
       DSH_HOME: /dsh-home
+      GRAVIT_MEMORY_HOME: /memory-home
     ports: ["127.0.0.1:3090:3090"]
     depends_on:
       account:
@@ -113,6 +117,7 @@ networks:
 volumes:
   dsh-home: {}
   seat-home: {}
+  memory-home: {}
   account-home: {}
   face-modules: {}
   account-modules: {}

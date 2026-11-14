@@ -7,6 +7,7 @@ STRATEGY runs on DeepSeek Harness (dsh). This directory is the repo's half of th
 | `profile/cordis.yml` | profile TEMPLATE — the operator's half: the skill roots, the model, and the INTENDED approval list (see step 4); it names the rows the face composes itself |
 | `profile/persona.md`, `profile/cycle.md` | Gravit's two prompt texts, read by the face at compose time (dsh itself reads nothing here): the persona, set as the `system-prompt` row's `personaPrefix`, and the research-cycle contract, mounted as the `gravit:cycle` section of Gravit's prompt (a bot's and a role child's carry none). `cycle.md` is at most 3,300 bytes (`CYCLE_MAX_BYTES`); after an edit, `cd face && npm run render:roles` regenerates the mirror that embeds it (`face/README.md` "The profile") |
 | `profile/lunhui-run.md` | the A-share research runs' order (in `cn-market`: freeze, delegate to `cn-market-analyst`, read the run back; in a strategy channel: read the day's market run, freeze the candidates' quotes, delegate the leader and then the mode to `cn-stock-analyst`, read the run back), read by the face at compose time (`face/src/protocols.ts`) and mounted as the `lunhui:run` section of Gravit's prompt only while the Lunhui rows are mounted (a bot's and a role child's carry none); Chinese, at most 3,000 bytes (`PROTOCOL_MAX_BYTES`), no `{{`; after an edit, `cd face && npm run render:roles` regenerates the mirror that embeds it (`face/README.md` "Lunhui analysis") |
+| `profile/memory.md` | what only this host knows of the memory's tools (how the Market spells a symbol, whose call to register before an order, the facts the face computes, the Account's own notes being another store), read by the face at compose time (`face/src/protocols.ts`) and mounted as the `gravit:memory` section of the conversation's and the workers' prompts only while `mcp__memory__memory_recall` is callable (a desk's, a bot's and a role child's carry none); the memory's own instructions are its server's `mcp:memory` section, not this file; at most 1,000 bytes (`MEMORY_MAX_BYTES`), no `{{`; after an edit, `cd face && npm run render:roles` regenerates the mirror that embeds it (`face/README.md` "The memory") |
 | `skills/mechanics/` | neutral mechanics, always apply: `account-seat-guide`, `analog-guide` (what `analog_events` answers, how to research an event through the source reader, how to report the result) |
 | `skills/style-gravit/` | the operator's own style: `doctrine`, `signals`, `lessons` — converted from the retired `seeds_v2/` JSON packs |
 | `../roles/` (the repo root's, not this directory's) | the role library the face renders into Gravit's preset (`face/src/roles.ts`, `DEVELOPMENT.md` §3.8); `_template` is the copy source and five roles ship: `cn-market-analyst`, `cn-reviewer` and `cn-stock-analyst`, the Lunhui modules' three, `pdf-page-reader` and `source-reader`; each `role.yml` names an MCP tool as `mcp__<serverName>__<raw>`, spelling the server name the installed profile mounts |
@@ -19,8 +20,11 @@ deferring. Every style-gravit SKILL.md carries that scope header at the top.
 ## Install
 
 There is no Python side and no server of this repo's to mount: the face composes its own MCP
-rows (the Account seat `mcp-account`, and the market's `mcp-market`, whose `market_akshare` is
-AKShare) on every boot, and the operator adds two rows of their own.
+rows (the Account seat `mcp-account`, the market's `mcp-market`, whose `market_akshare` is
+AKShare, and the memory's `mcp-memory`) on every boot — the memory's not on a scratch harness home
+that names no memory home (`FACE_MEMORY_HOME` or `GRAVIT_MEMORY_HOME`) — and the operator adds two
+rows of their own. The memory's home is the operator's to make, outside the repository
+(`face/README.md` "The memory").
 
 1. **Create the harness home and the face profile.** `cd face && npm install && npm run setup`
    creates `$DSH_HOME/profiles/face/` (`$DSH_HOME` defaults to `~/.dsh`): a `package.json`
@@ -80,7 +84,7 @@ The template above is realized, live and drilled, in the face's profile. The sha
 actually bound, for the next install or the next pin bump:
 
 - **The MCP bridge is `@deepseek-ai/dsh-mcp-client`, and it is NOT in dsh-base.** The face's
-  Account seat row and market row use it. It is declared in `face/package.json` at the exact
+  Account seat row, market row and memory row use it. It is declared in `face/package.json` at the exact
   `DSH_PIN` (the lockstep sweep in `face/tests/version.test.ts` covers it automatically), not
   installed into the profile — rows resolve plugin names from the face's dependency closure
   through the runtime module resolution the face computes from `face/package.json` at every

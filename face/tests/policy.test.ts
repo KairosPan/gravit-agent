@@ -2,6 +2,7 @@
  * egress and telemetry posture, restored over dsh-base 0.2.1-rc.5 and
  * overridable by the operator. Composition-level, against the INSTALLED
  * dsh-base: every assertion here is about the entry list boot will mount. */
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";

@@ -8,6 +8,7 @@
  * Skipped unless `FACE_SMOKE=1` and the repo's `account/` is installed, as `account-graft-smoke` is, whose boot this mirrors: the
  * install read, never written; the stand-in on a free port, never 4820; the seat row disabled; ONE BOOT PER PROCESS. */
 import { DEAD_MARKET_URL } from "./helpers/no-market.ts";
+import "./helpers/no-memory.ts";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

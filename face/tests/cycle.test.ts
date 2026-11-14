@@ -132,6 +132,15 @@ test("the shipped desk.md reads, fits 3,200 bytes and states the desk rules", ()
     "the browser's answer stays in the browser, router off");
 });
 
+/* The pre-close brief carries the memory's state when the face reads one (src/memory-brief.ts); the desk holds none of
+ * the memory's tools, so the contract's one sentence is all it is told of it, in the lines that say what it reports. */
+test("desk.md tells the desk to say the brief's memory line, within its cap", () => {
+  const text = readDesk(DESK_PATH);
+  assert.ok(Buffer.byteLength(text, "utf8") <= DESK_MAX_BYTES);
+  assert.ok(text.split("\n").includes("When nothing happened, say so in one line. When a brief carries `memory`, say it in one line."),
+    "the sentence sits beside the quiet turn's, where the desk's report is said");
+});
+
 /** The one conversation's contract (one entry's plan 3 task 6): a phone text's provenance line is the operator on the
  * phone, answered short; the desk's [schedule · …] and [alert · …] lines are context, fenced as data like a task's report. */
 test("the shipped router.md reads the phone and the desk's lines, within ROUTER_MAX_BYTES", () => {

@@ -23,6 +23,10 @@
  * that order, each once and at most {@link BRIEF_SYMBOLS_MAX} of them - one Market explore read each - those past the
  * bound named in `quotesOmitted` (p2-m15): the numbers `desk_quotes` shows (P2-2 - no Python and no bars). Before any of it, the firing's ET date is checked once: one that
  * is not `YYYY-MM-DD` fails the producer with one error, and nothing is read or asked.
+ * THE MEMORY. Given a reader ({@link BriefDeps.memory}: src/memory-brief.ts `readBriefMemory`, which calls the
+ * memory's `status` and `review` and never `reconcile`, within its own 2 s limit), the brief carries `memory`, the
+ * memory's state as numbers and lesson ids, read beside the book; a reader that throws is `{ connected: false, say }`, its fault said by its code
+ * and never fails the brief. Without a reader the brief has no `memory` key.
  *
  * EVERY NUMBER NAMES ITS SOURCE AND TIME (dsh/profile/desk.md). A price carries `at`, desk-tools.ts's `quoteTime`:
  * the feed and New York's clock to the second (`NASDAQ 15:21:03 ET`), dated when the quote is from another ET day. The
@@ -52,13 +56,15 @@
  * {@link briefProducer} never rejects.
  *
  * A CUT TAKES THE TAIL. The firing quotes at most 32,768 characters of a producer's text (producer.ts
- * `PRODUCER_TEXT_MAX`) and cuts the rest, so the brief's keys are written with the errors early: `quotesError`
- * straight after the session, ahead of every quote; in each block, the file's state and its errors ahead of its rows,
+ * `PRODUCER_TEXT_MAX`) and cuts the rest, so the brief's keys are written with the errors early: `memory` straight
+ * after the session - only the date, the time taken and the session's three short fields come before it, and it is
+ * bounded itself (counts, fixed sentences - a fault is said by its code, never its message - and five ids of at most 40), so it lies in
+ * the text's first kilobyte and no cut reaches it - then `quotesError`, ahead of every quote; in each block, the file's state and its errors ahead of its rows,
  * near levels and refusals; the watch's blocks after the levels block, each with its counts, `more` and error ahead of
  * its items, newest first; `aShares` and `scope` at the very end. A brief past the cap loses from its end: `scope`,
  * `aShares`, then the filings' items oldest first and the filings' head, then the alerts' items oldest first and the
  * alerts' head, then the tail of the levels' refusals and near levels (nearest first, so the farthest go).
- * `quotesError` and the levels' errors come earlier and survive, with one exception: the holdings rows come ahead of
+ * `memory`, `quotesError` and the levels' errors come earlier and survive, with one exception: the holdings rows come ahead of
  * the whole levels block, so many long-labelled holdings can push the levels error past the cap first. A book at its
  * caps (60 holdings, 40 levels with long plans) already passes 32,768 characters, so its brief loses both watch blocks
  * whole, their counts and errors with them (DEVELOPMENT.md R71).
@@ -76,6 +82,7 @@ import { etClock, etDate, etDayStart, etTime } from "./et.ts";
 import { isFilingRecord, type FilingRecord } from "./filings.ts";
 import { isFiringRecord } from "./firing.ts";
 import { HttpError } from "./http.ts";
+import { briefFaultWords, type BriefMemory } from "./memory-brief.ts";
 import type { BuiltinProducer, ProducerInput, ProducerOutput } from "./producer.ts";
 import type { MarketProviderState as ProviderState, MarketQuote as LiveQuote, MarketQuoteIdentity as QuoteIdentity, MarketQuotePayload as QuotePayload, MarketQuoteSource } from "./market-quotes.ts";
 import { isEtDate } from "./standing.ts";
@@ -139,6 +146,9 @@ export interface BriefDeps {
   now?: () => number;
   /** The symbol bound, {@link BRIEF_SYMBOLS_MAX} by default; for tests. */
   symbolsMax?: number;
+  /** The memory's state for the brief (src/memory-brief.ts `readBriefMemory` over main.ts's opener); without one the
+   * brief has no `memory` key. A reader that throws is the brief's `memory: { connected: false, say }`. */
+  memory?: () => Promise<BriefMemory>;
 }
 
 /** One quote as the brief carries it: the last price; its move from the previous close, in percent; the previous
@@ -259,6 +269,8 @@ export interface Brief {
   date: string;
   takenAt: string;
   session: { open: string; close: string; early: boolean };
+  /** The memory's state, when the brief was given a reader ({@link BriefDeps.memory}). */
+  memory?: BriefMemory;
   quotesError?: string;
   quotesOmitted?: string[];
   indexes: BriefQuote[];
@@ -588,6 +600,13 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
     return { ok: false, error: `the brief takes the firing's ET date as YYYY-MM-DD, not ${JSON.stringify(String(input.date).slice(0, 40))}` };
   }
   const clock = deps.now ?? Date.now;
+  /* The memory is read beside the book and the prices, not after them; its reader keeps its own limit, and one that
+   * throws - before its promise or in it - is the memory's fault said by its code, never by its message, and never the
+   * brief's. */
+  const reader = deps.memory;
+  const memoryRead: Promise<BriefMemory> | undefined = reader === undefined
+    ? undefined
+    : Promise.resolve().then(reader).catch((error: unknown): BriefMemory => ({ connected: false, say: briefFaultWords(error) }));
   /* The loaders never throw: a file's every fault is in its result, and the one argument they refuse - the date - is
    * checked above. */
   const [holdings, deskLevels] = await Promise.all([
@@ -631,6 +650,7 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
     quotesError = `quotes unavailable: the source has no price for any symbol (US provider ${usProviderState(payload)})`;
   }
   const watch = await watchBlocks(deps.home, input, now);
+  const memory = await memoryRead;
   /* Every symbol the brief prices is one the snapshot was asked for, so each has its quote. */
   const quoteFor = (symbol: string): BriefQuote => quotes.get(symbol) as BriefQuote;
 
@@ -639,6 +659,7 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
     date: input.date,
     takenAt: `${etClock(new Date(now))} ET`,
     session: { open: sessionTime(input.session.open), close: sessionTime(input.session.close), early: input.session.early },
+    ...(memory === undefined ? {} : { memory }),
     ...(quotesError === undefined ? {} : { quotesError }),
     ...(omitted.length === 0 ? {} : { quotesOmitted: omitted }),
     indexes: BRIEF_INDEXES.map((symbol) => quoteFor(symbol)),

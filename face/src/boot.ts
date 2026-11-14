@@ -130,10 +130,12 @@ import { CYCLE_PATH, DESK_PATH, readCycle, readDesk, readRouter, REPO_ROOT, ROUT
 import { declareDeskPreset, deskPresetDefinition, deskRosterProblem } from "./desk-preset.ts";
 import { routerPresetDefinition } from "./router-preset.ts";
 import { installSourceReader, SOURCE_READER_ROLE } from "./source-reader.ts";
-import { readProtocols } from "./protocols.ts";
+import { readMemoryProtocol, readProtocols } from "./protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { accountSeatPatches } from "./account-seat.ts";
 import { marketRowPatches } from "./market-row.ts";
+import { memoryRowPatches } from "./memory-row.ts";
+import { MEMORY_NO_HOME_NOTICE } from "./memory.ts";
 import { lunhuiPatches } from "./lunhui.ts";
 import { analogPatches } from "./analog.ts";
 import { readThroughPatches } from "./readthrough.ts";
@@ -246,7 +248,8 @@ export interface FaceBootOptions {
   /** The directory the run protocols are read from (`dsh/profile/`, src/protocols.ts); tests point
    * it at a fixture. Defaults to the repository's. {@link composeFace} reads them beside the cycle
    * and hands them to Gravit's default preset as the `gravit` row's `protocols`, refusing the
-   * compose the same way, path-first. */
+   * compose the same way, path-first; {@link bootFace} reads the memory's from it again for the
+   * conversation's preset. */
   protocolsDir?: string;
   /** Leave the gateway's readiness uncommitted: the caller commits it with
    * {@link BootedFace.commitReady} once its OWN routes are mounted. `main.ts`
@@ -403,8 +406,14 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
   /* The market row (src/market-row.ts): the market's own keyless reads, the
    * same project layer, right after the seat, so a patch disables either alone. */
   const marketPatches = marketRowPatches();
+  /* The memory row (src/memory-row.ts): gravit-memory's door as the agent
+   * `gravit`, the same project layer, right after the market row, so a patch
+   * disables it alone. In a test process its home is judged here, loudly. On a
+   * scratch harness home naming no memory home there is no row, said once. */
+  const memoryPatches = memoryRowPatches(home);
+  if (memoryPatches.length === 0) process.stderr.write(`${BIN}: ${MEMORY_NO_HOME_NOTICE}\n`);
   /* The Lunhui rows (src/lunhui.ts, modules spec §5.12): the same project
-   * layer, right after the market row, below everything the operator writes. */
+   * layer, right after the memory row, below everything the operator writes. */
   const lunhuiRows = lunhuiPatches();
   /* The analog rows (src/analog.ts): the same project layer, right after the
    * Lunhui rows; their views live under the harness home. */
@@ -418,7 +427,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * could rewrite them under the caller. */
   const extraPatches: FacePatchList = structuredClone(opts.extraPatches ?? []);
   const patches: FacePatchList = [
-    ...bundlePatches, ...policyPatches, ...seatPatches, ...marketPatches, ...lunhuiRows, ...analogRows, ...readThroughRows, ...profile.patches, ...homePatches, ...extraPatches,
+    ...bundlePatches, ...policyPatches, ...seatPatches, ...marketPatches, ...memoryPatches, ...lunhuiRows, ...analogRows, ...readThroughRows, ...profile.patches, ...homePatches, ...extraPatches,
   ];
   /* Both switches below are guarded on the row actually being in the composed
    * tree. A patch that matches nothing is inert and — measured, not assumed —
@@ -429,7 +438,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * never mounted the row. (With the policy layer disabling
    * `session-telemetry-otel` by default the env switch is redundant until an
    * operator re-enables the row - and then it still wins, composing after.) */
-  const below = composeEntries([bundlePatches, policyPatches, seatPatches, marketPatches, lunhuiRows, analogRows, readThroughRows, profile.patches, homePatches, extraPatches]);
+  const below = composeEntries([bundlePatches, policyPatches, seatPatches, marketPatches, memoryPatches, lunhuiRows, analogRows, readThroughRows, profile.patches, homePatches, extraPatches]);
   const rows = new Set(below.flatMap((row) => (typeof row.id === "string" ? [row.id] : [])));
   /* app-boot exports the CLI's own resolver now (NEW packages/boot/app-boot/
    * src/profile-context.ts:52-55): ANY non-empty value disables, and a
@@ -1102,8 +1111,12 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * the roster check below. Disposed with the root, as the bots are. */
     await declareDeskPreset(ctx, deskPresetDefinition({ desk }));
     /* The conversation's preset (src/router-preset.ts), right after the desk's and for the same reason: its mask
-     * is plugins/bot.js, mounted eagerly. Its section names the repository by `<REPO>`, filled with REPO_ROOT. */
-    await declarePreset(ctx, routerPresetDefinition({ router: { text: readRouter(opts.routerPath ?? ROUTER_PATH), root: REPO_ROOT } }), "router preset");
+     * is plugins/bot.js, mounted eagerly. Its section names the repository by `<REPO>`, filled with REPO_ROOT. Its
+     * gravit row carries the memory's section alone, never the Lunhui protocols (src/protocols.ts). */
+    await declarePreset(ctx, routerPresetDefinition({
+      router: { text: readRouter(opts.routerPath ?? ROUTER_PATH), root: REPO_ROOT },
+      protocols: [readMemoryProtocol(opts.protocolsDir)],
+    }), "router preset");
     /* One preset per role (D20/B1; src/roles.ts `rolePresetDefinition`), declared right after the desk
      * and for the same reason: each is plugins/bot.js carrying the role's persona and mask, mounted
      * eagerly at the declaration, so it must find the settled tree - a name the tree lacks is dropped
