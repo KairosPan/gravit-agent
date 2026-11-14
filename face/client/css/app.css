@@ -766,6 +766,7 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .dk-move { flex: 0 0 64px; font-variant-numeric: tabular-nums; }
 .dk-note { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
 .dk-word { flex: 0 0 auto; font-size: calc(13px * var(--fs)); }
+.dk-early .dk-note + .dk-word, .dk-early .dk-move + .dk-word { margin-left: auto; }
 .dk-word.warn { color: var(--warn-text); font-weight: 600; }
 .dk-word.held { color: var(--dim); }
 .dk-fold { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--bg); color: var(--text); font-size: calc(14px * var(--fs)); font-weight: 600; text-align: left; }

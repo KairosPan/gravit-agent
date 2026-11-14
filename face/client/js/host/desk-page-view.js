@@ -59,13 +59,14 @@ export function newsViewOf(news, ui = {}) {
   };
 }
 
-/** An alert's move, `{ text, dir }` - its sign and one decimal (`−8.1%`, a true minus) and `up` or `down` - or null for a
- *  level's or a filing's, which draws its label. */
+/** An alert's move, `{ text, dir }` - its sign and one decimal (`−8.1%`, a true minus) and `up` or `down`, both read from the
+ *  value as rounded, so −0.04 is `0.0%` - or null for a level's or a filing's, which draws its label. */
 export function moveOf(alert) {
   const pct = alert?.movePct;
   if (typeof pct !== 'number' || !Number.isFinite(pct)) return null;
-  const sign = pct < 0 ? '−' : pct > 0 ? '+' : '';
-  return { text: `${sign}${Math.abs(pct).toFixed(1)}%`, dir: pct < 0 ? 'down' : 'up' };
+  const shown = Number(pct.toFixed(1));
+  const sign = shown < 0 ? '\u2212' : shown > 0 ? '+' : '';
+  return { text: `${sign}${Math.abs(shown).toFixed(1)}%`, dir: shown < 0 ? 'down' : 'up' };
 }
 
 /** An alert's time on its own New York date, `HH:MM`. */
@@ -83,13 +84,18 @@ function heldWord(code) {
   }
 }
 
-/** The one word a row carries where it holds, `{ text, tone }` (`held` or `warn`), or null: why the watch held it back,
- *  Undelivered, or no reason for an alert not held that has none. */
-export function rowWordOf(alert) {
-  if (alert?.delivery === 'held' || alert?.held !== undefined) return { text: heldWord(str(alert.held)), tone: 'held' };
-  if (alert?.delivery === 'undelivered') return { text: t('desk.row.undelivered'), tone: 'warn' };
-  if (!isRecord(alert?.reason)) return { text: t('desk.row.noReason'), tone: 'warn' };
-  return null;
+/** The words a row carries where they hold, each `{ text, tone }` (`held` or `warn`): a held-back alert its one word, why the
+ *  watch held it (none for a code it does not name); else Undelivered, and no reason for an alert that has none - an
+ *  undelivered alert with no reason carries both. */
+export function rowWordsOf(alert) {
+  if (alert?.delivery === 'held' || alert?.held !== undefined) {
+    const text = heldWord(str(alert.held));
+    return text ? [{ text, tone: 'held' }] : [];
+  }
+  const words = [];
+  if (alert?.delivery === 'undelivered') words.push({ text: t('desk.row.undelivered'), tone: 'warn' });
+  if (!isRecord(alert?.reason)) words.push({ text: t('desk.row.noReason'), tone: 'warn' });
+  return words;
 }
 
 const ORDINAL = new Intl.PluralRules('en-US', { type: 'ordinal' });

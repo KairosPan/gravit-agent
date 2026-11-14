@@ -3,7 +3,7 @@
 // move, its row word and its count of the day, a rule's row and a standing order's state.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deskHeadOf, newsViewOf, moveOf, rowWordOf, nthWord, ruleRowOf, orderStateOf } from '../../client/js/host/desk-page-view.js';
+import { deskHeadOf, newsViewOf, moveOf, rowWordsOf, nthWord, ruleRowOf, orderStateOf } from '../../client/js/host/desk-page-view.js';
 import { deskNews, deskPageStatus } from './helpers/desk-news.js';
 import { deskStatus, DESK_NOW } from './helpers/desk-status.js';
 
@@ -52,12 +52,16 @@ test("an alert's move, its row word and its count of the day", () => {
   assert.deepEqual(moveOf({ movePct: -8.1 }), { text: '−8.1%', dir: 'down' });
   assert.deepEqual(moveOf({ movePct: 3.25 }), { text: '+3.3%', dir: 'up' });
   assert.equal(moveOf({ movePct: null }), null, 'a level or a filing draws its label');
+  assert.deepEqual(moveOf({ movePct: -0.04 }), { text: '0.0%', dir: 'up' }, 'the sign and colour of the rounded value: no minus on 0.0%');
+  assert.deepEqual(moveOf({ movePct: -0.05 }), { text: '\u22120.1%', dir: 'down' });
   const [crwv] = deskNews().alerts.groups;
-  assert.equal(rowWordOf(crwv.latest), null, 'sent with its reason: no word');
-  assert.deepEqual(rowWordOf(crwv.earlier[1]), { text: 'cooldown', tone: 'held' });
-  assert.deepEqual(rowWordOf(crwv.earlier[2]), { text: 'Undelivered', tone: 'warn' });
-  assert.deepEqual(rowWordOf({ delivery: 'queued' }), { text: 'no reason', tone: 'warn' });
-  for (const [held, word] of [['cap', 'cap'], ['muted', 'muted'], ['off', 'paused'], ['window', 'outside its window']]) assert.equal(rowWordOf({ delivery: 'held', held }).text, word);
+  assert.deepEqual(rowWordsOf(crwv.latest), [], 'sent with its reason: no word');
+  assert.deepEqual(rowWordsOf(crwv.earlier[1]), [{ text: 'cooldown', tone: 'held' }]);
+  assert.deepEqual(rowWordsOf(crwv.earlier[2]), [{ text: 'Undelivered', tone: 'warn' }, { text: 'no reason', tone: 'warn' }], 'undelivered and unexplained: both words');
+  assert.deepEqual(rowWordsOf({ ...crwv.earlier[2], reason: crwv.earlier[0].reason }), [{ text: 'Undelivered', tone: 'warn' }], 'undelivered with its reason: one word');
+  assert.deepEqual(rowWordsOf({ delivery: 'queued' }), [{ text: 'no reason', tone: 'warn' }]);
+  assert.deepEqual(rowWordsOf({ delivery: 'held' }), [], 'held with no code: no word');
+  for (const [held, word] of [['cap', 'cap'], ['muted', 'muted'], ['off', 'paused'], ['window', 'outside its window']]) assert.deepEqual(rowWordsOf({ delivery: 'held', held }), [{ text: word, tone: 'held' }]);
   assert.deepEqual([1, 2, 3, 4, 11, 12, 13, 21, 22].map(nthWord), ['1st alert today', '2nd alert today', '3rd alert today', '4th alert today', '11th alert today',
     '12th alert today', '13th alert today', '21st alert today', '22nd alert today']);
 });

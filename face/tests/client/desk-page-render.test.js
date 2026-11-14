@@ -27,7 +27,7 @@ test('monitoring: the head, News and Routines with their words', () => {
   for (const word of ['Desk', 'Monitoring', 'US equities 04:00–20:00 ET · 2 watch rules', 'News', "What moved and what's next", 'Routines', 'Run on a schedule or a trigger',
     'Calendar', 'No economic calendar or earnings source connected.', 'Quotes', 'Headlines · Nasdaq answered 503', 'Fund flows · not connected',
     'Social sentiment · not connected', 'Connect in Discover', 'Watch rules · 2', 'No routines yet.']) {
-    assert.ok(html.includes(word.replace("'", '&#39;')) || html.includes(word), word);
+    assert.ok(html.includes(word), word);
   }
   assert.match(html, /data-action="deskPause"/, 'the Pause key');
   assert.match(html, /class="dk-cols"/);
@@ -50,7 +50,8 @@ test("a group's latest alert, its count of the day, its headline and earlier row
   assert.match(html, /cooldown/);
   assert.equal(count(html, 'Undelivered'), 1, 'Undelivered on the undelivered row alone');
   assert.match(html, /stop 170/, "a level's alert draws its label");
-  assert.equal(count(html, 'no reason'), 1, 'no reason on the queued level alert alone');
+  assert.equal(count(html, 'no reason'), 2, 'no reason on the queued level alert and the undelivered row');
+  assert.match(html, /<span class="dk-word warn">Undelivered<\/span><span class="dk-word warn">no reason<\/span><\/div>/, 'the undelivered row carries both words');
   assert.match(html, /data-action="dkFilter" data-value="CRWV"/);
   assert.match(html, /data-action="dkToggle" data-id="a-4" aria-expanded="false"/);
   assert.doesNotMatch(html, /dk-reason/, 'Details closed');
@@ -136,4 +137,15 @@ test('under ZH: the title 值守台, 资讯 and 例行任务', () => {
   assert.match(html, /值守台/);
   assert.match(html, /资讯/);
   assert.match(html, /例行任务/);
+});
+
+test('an earlier row whose reason has an empty headline draws no headline element; a held row with no code no word', () => {
+  const news = deskNews();
+  const [crwv] = news.alerts.groups;
+  const blank = { ...crwv.earlier[0], reason: { ...crwv.earlier[0].reason, headline: '' } };
+  const bare = { ...crwv.earlier[1], held: undefined };
+  const html = draw(onDesk(deskPageStatus(), { ...news, alerts: { ...news.alerts, groups: [{ ...crwv, earlier: [blank, bare] }, news.alerts.groups[1]] } }));
+  assert.match(html, /<div class="dk-early"><span class="dk-time">12:12<\/span><span class="dk-move down">\u22128\.5%<\/span><\/div>/, 'time and move, no empty note');
+  assert.match(html, /<div class="dk-early"><span class="dk-time">09:52<\/span><span class="dk-move down">\u22128\.2%<\/span><\/div>/, 'held with no code: no word span');
+  assert.doesNotMatch(html, /dk-note"><\/span>|dk-word[^"]*"><\/span>/);
 });

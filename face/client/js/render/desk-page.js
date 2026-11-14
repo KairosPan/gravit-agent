@@ -6,7 +6,7 @@
 // columns. Every text from the ledgers is drawn escaped, as written; the words are host/desk-page-view.js's and the table's.
 import { esc } from '../html.js';
 import { t, th, tn, thn, rawHtml, sayOf } from '../i18n/words.js';
-import { deskHeadOf, newsViewOf, moveOf, rowWordOf, nthWord, ruleRowOf, orderStateOf, alertTime } from '../host/desk-page-view.js';
+import { deskHeadOf, newsViewOf, moveOf, rowWordsOf, nthWord, ruleRowOf, orderStateOf, alertTime } from '../host/desk-page-view.js';
 import { watchHead } from '../host/desk-view.js';
 
 const page = (head, body) => `<main class="main dk">${head}<div class="dk-body">${body}</div></main>`;
@@ -57,20 +57,22 @@ const filterKeys = chips => `<div class="dk-row" role="group" aria-label="${th('
 
 // an alert's move in the up or down colour, else its label (a level's, a filing's)
 const moveChip = a => { const m = moveOf(a); return m ? chip(m.dir, m.text) : chip('grey', a.label); };
-const wordOf = a => { const w = rowWordOf(a); return w ? `<span class="dk-word ${w.tone}">${esc(w.text)}</span>` : ''; };
+const wordsOf = a => rowWordsOf(a).map(w => `<span class="dk-word ${w.tone}">${esc(w.text)}</span>`).join('');
 
 function earlierRow(a) {
   const m = moveOf(a);
   const move = m ? `<span class="dk-move ${m.dir}">${esc(m.text)}</span>` : `<span class="dk-move">${esc(a.label)}</span>`;
-  const headline = a.reason && a.reason.headline ? `<span class="dk-note">${esc(a.reason.headline)}</span>` : '<span class="dk-note"></span>';
-  return `<div class="dk-early"><span class="dk-time">${esc(alertTime(a))}</span>${move}${headline}${wordOf(a)}</div>`;
+  // a reason with no headline draws no note: the row's words keep to its right
+  const headline = a.reason?.headline ? `<span class="dk-note">${esc(a.reason.headline)}</span>` : '';
+  return `<div class="dk-early"><span class="dk-time">${esc(alertTime(a))}</span>${move}${headline}${wordsOf(a)}</div>`;
 }
 
 function group(g, today) {
   const a = g.latest;
   const r = a.reason && typeof a.reason === 'object' ? a.reason : null;
+  const words = wordsOf(a);
   const top = `<div class="dk-top"><div class="dk-row"><span class="dk-sym">${esc(g.symbol)}</span>${moveChip(a)}` +
-    `<span class="dk-dim">${esc(t('desk.et', { time: alertTime(a) }))}</span><span class="dk-dim">${esc(nthWord(a.nth))}</span></div>${wordOf(a)}</div>`;
+    `<span class="dk-dim">${esc(t('desk.et', { time: alertTime(a) }))}</span><span class="dk-dim">${esc(nthWord(a.nth))}</span></div>${words ? `<div class="dk-row">${words}</div>` : ''}</div>`;
   const headline = r && r.headline ? `<p class="dk-headline">${esc(r.headline)}</p>` : '';
   const toggle = r ? `<button type="button" class="btn-sm" data-action="dkToggle" data-id="${esc(a.id)}" aria-expanded="${g.open}">${g.open ? th('desk.news.hide') : th('desk.news.details')}</button>` : '';
   const meta = r ? `<div class="dk-top"><div class="dk-row dk-dim">${r.label ? `<span>${esc(r.label)}</span>` : ''}<span>${thn('desk.news.pages', Number(r.pages) || 0)}</span></div>${toggle}</div>` : '';
