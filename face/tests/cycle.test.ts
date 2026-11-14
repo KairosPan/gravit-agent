@@ -134,7 +134,7 @@ test("the shipped desk.md reads, fits 3,200 bytes and states the desk rules", ()
 
 /** The one conversation's contract (one entry's plan 3 task 6): a phone text's provenance line is the operator on the
  * phone, answered short; the desk's [schedule · …] and [alert · …] lines are context, fenced as data like a task's report. */
-test("the shipped router.md reads the phone and the desk's lines, within 2,000 bytes", () => {
+test("the shipped router.md reads the phone and the desk's lines, within ROUTER_MAX_BYTES", () => {
   const text = readRouter();
   assert.ok(Buffer.byteLength(text, "utf8") <= ROUTER_MAX_BYTES);
   for (const phrase of [

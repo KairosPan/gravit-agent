@@ -517,7 +517,7 @@ console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "r
  * `FACE_ROUTER=0`: Gravit's one router session on `gravit-router` in `$DSH_HOME/face/conversation/`, found again
  * through the desk's ledger and supervised (src/conversation.ts), ensured here before any route can use it - a
  * conversation the face cannot open or trust is one line and the face starts without it (installRouter) - then the tasks over its
- * workers (src/tasks.ts): the five task tools, `task_report`, `GET /data/tasks`, the relays, the boot's recovery notes,
+ * workers (src/tasks.ts): the five task tools and the two routine tools, `task_report`, `GET /data/tasks`, the relays, the boot's recovery notes,
  * the stalls. Its route is `FACE_ROUTER_MODEL`, read as `FACE_DESK_MODEL` is; the workers run on the same route. The
  * root is this process's cwd, as the desk's is. */
 if (routerEnabled(process.env)) {
@@ -545,6 +545,8 @@ if (routerEnabled(process.env)) {
       /* a bot task's bot: on the one roster, listed and unbroken (src/task-worker.ts `rosterBots`) */
       bots: rosterBots(dshHome, allBots),
       ...(desk?.enabled ? { deskLines: () => desk!.lines() } : {}),
+      /* the routine tools' store, the desk's home, the desk on or off */
+      home: dshHome,
       isTrusted: isTrustedDataRequest,
     }),
     fence: () => conversationFence(conversationDir(dshHome)),

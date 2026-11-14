@@ -20,18 +20,20 @@ import type { IncomingMessage } from "node:http";
 import { stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { MessageId, freezeMessage } from "@deepseek-ai/dsh-llm";
-import type { ConversationCtxLike, ConversationHandle } from "./conversation.ts";
+import type { ConversationCtxLike, ConversationHandle, TaskOrigin } from "./conversation.ts";
 import type { DeskLines } from "./desk.ts";
 import { CONVERSATION_PRESET } from "./desk-names.ts";
 import { DEFAULT_PRESET } from "./overlay.ts";
 import { readSessionEvents, type DeskSessionPersistenceLike } from "./desk-session.ts";
-import type { DeskAgentLike, DeskToolsCtxLike } from "./desk-tools.ts";
+import { deskSecretDecision, deskSecrets, type DeskAgentLike, type DeskToolsCtxLike } from "./desk-tools.ts";
 import type { PhoneConversation } from "./phone-bridge.ts";
 import { etDayStart } from "./et.ts";
 import { fencedGet, fencedPost, HttpError } from "./http.ts";
 import type { AgentLike, PersistedSnapshotLike, RoomDeps } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
 import type { RouteRegistrar } from "./static.ts";
+import { routineToolDefinitions } from "./routine-tools.ts";
+import { routineOps } from "./routines.ts";
 import { recoverWorkers } from "./task-recovery.ts";
 import { createRelay } from "./task-relay.ts";
 import { TASK_READ_MAX, equipConversation, taskToolDefinitions, type TaskOps } from "./task-tools.ts";
@@ -95,6 +97,10 @@ export interface TasksDeps {
   /** The desk's lines for the rail (src/desk.ts `deskLines`); `GET /data/tasks` carries them as `desk`. A provider that
    * throws leaves `desk` out and the route answers. */
   deskLines?: () => Promise<DeskLines | undefined>;
+  /** The harness home, whose routines' store (src/routines.ts, under src/desk.ts `deskDir`, the desk on or off) the
+   * conversation's two routine tools act on (src/routine-tools.ts); main.ts hands `dshHome`. Absent, the conversation
+   * has the five task tools alone. */
+  home?: string;
   isTrusted: (req: IncomingMessage) => boolean;
   now?: () => number;
   setInterval?: typeof setInterval;
@@ -139,7 +145,7 @@ function lastAssistantText(events: readonly EventLike[]): string {
 
 /**
  * Install the tasks: the five tools on the conversation's agent (src/task-tools.ts, guarded by the conversation's
- * `operatorTurn`), `task_report` on every worker (src/task-worker.ts), `GET /data/tasks`, the bus listeners, the
+ * `operatorTurn`) and, given `home`, the two routine tools after them (src/routine-tools.ts), `task_report` on every worker (src/task-worker.ts), `GET /data/tasks`, the bus listeners, the
  * {@link TICK_MS} tick, and the boot's recovery and relays (see the module header).
  * @param webServer - where `GET /data/tasks` is registered: `{ ok, conversation, tasks }` through http.ts `fencedGet`.
  * @param deps - see {@link TasksDeps}; the conversation is ensured before this is called.
@@ -470,7 +476,14 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     const conv = convId();
     return conv === undefined || conv === agent.id;
   };
-  const offTools = equipConversation(ctx, isConversation, taskToolDefinitions(ops, () => deps.conversation.operatorTurn(), () => deps.conversation.turnOrigin()), { log });
+  const operatorTurn = (): boolean => deps.conversation.operatorTurn();
+  const turnOrigin = (): TaskOrigin => deps.conversation.turnOrigin();
+  /* the routine tools' secret check: the desk guard's (src/desk-tools.ts), its secrets taken once, here */
+  const secrets = deskSecrets(process.env);
+  const routineTools = deps.home === undefined ? [] : routineToolDefinitions(routineOps({ home: deps.home, log }), {
+    home: deps.home, operatorTurn, turnOrigin, hasSecret: (text) => deskSecretDecision(text, secrets) !== null,
+  });
+  const offTools = equipConversation(ctx, isConversation, [...taskToolDefinitions(ops, operatorTurn, turnOrigin), ...routineTools], { log });
   const offReport = equipWorkers(ctx as unknown as WorkerToolsCtxLike, isWorker, { log });
 
   /* the bus: note, and leave the work to a microtask */

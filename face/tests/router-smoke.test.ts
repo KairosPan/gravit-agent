@@ -186,7 +186,7 @@ async function boot(phone?: FakePhoneAccount): Promise<Face> {
     tasks: (held) => installTasks(ctx.webServer, {
       ctx: ctx as unknown as TasksCtxLike, root, route: STUB, installModelSelection: install, conversation: held,
       bots: rosterBots(home, () => listBots(bots, () => (ctx.get("agentPresets") as { list(): Promise<{ id: string; broken?: string }[]> }).list(), booted.botPresets.errors)),
-      isTrusted: isTrustedDataRequest, log,
+      home, isTrusted: isTrustedDataRequest, log,
     }),
     log,
   });

@@ -49,7 +49,7 @@ export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", 
 export const ROUTER_PATH = join(REPO_ROOT, "dsh", "profile", "router.md");
 
 /** The largest `router.md`, in bytes as `wc -c` counts them: it rides in every conversation turn. */
-export const ROUTER_MAX_BYTES = 2_000;
+export const ROUTER_MAX_BYTES = 2_500;
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
