@@ -18,4 +18,7 @@ The research agent, Gravit, does not: dsh hands it `GRAVIT.md` and nothing else.
   suite), plus `FACE_SMOKE=1 npm test` after any change under `face/src`, `face/plugins` or to
   the dsh pins; after a change under `account/`, its own `npm test && npm run typecheck` there
   (one known red, `test/unit/ui-superagent.test.ts`) and the face's `FACE_SMOKE=1` run.
+- A face test never opens a real memory: a test that boots or composes a face imports
+  `./helpers/no-memory.ts` right after `./helpers/no-market.ts`; in a test process a memory home
+  outside the temporary directory is refused, and `face/tests/memory-row.test.ts` checks the import.
 - Commit messages go in a file and through `git commit -F`; never backticks or `$()` in `-m`.
