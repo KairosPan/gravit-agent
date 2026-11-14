@@ -40,6 +40,7 @@
  * `~/.dsh`; the seat is disabled; the model is the stub (`tests/stub-llm.ts`), as goal-smoke's.
  * @module
  */
+import "./helpers/no-memory.ts";
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
