@@ -22,7 +22,7 @@
  * the rules) into a URL it opens. Keys stay out - the guard reads no key file or dot-file and refuses any call
  * that carries a secret - and every fetch that reaches dispatch is a `desk-fetch` line in the ledger.
  *
- * The two desk tools, `desk_quotes` and `desk_state`, and `web_fetch` are not in this composition. An allow
+ * The three desk tools, `desk_quotes`, `desk_state` and `desk_headlines`, and `web_fetch` are not in this composition. An allow
  * mask filters what the preset's own layer registers too, and `tools.restrict` refuses to name such a tool, so a
  * row here could not offer them past the mask; they are registered into each desk agent's own layer instead,
  * which no restriction filters (docs/superpowers/plans/2026-10-20-desk-p1-bridge.md, Global
@@ -65,8 +65,11 @@ const BIN = "gravit-face";
 export { DESK_PRESET };
 
 /** What a desk session may see, in this order (the plan's Global Constraints): file read and edit,
- * search, skills, web search, its own todos, and the live market reads of the alpaca-kit MCP server
- * under whatever name the operator mounts it (`mcp__*__<raw>`, expanded by plugins/bot.js). Writes stay:
+ * search, skills, web search, its own todos, the live market reads of the alpaca-kit MCP server
+ * under whatever name the operator mounts it (`mcp__*__<raw>`, expanded by plugins/bot.js), `read_through`, and
+ * two reads of the face's own `mcp-market` row (src/market-row.ts): `market_explore`, the market's list of what
+ * trades, and `market_candles`, its price bars - named in full, the row's server name being the face's. A name
+ * the tree lacks (no market row mounted) is one warning at the mask's mount, never a refusal. Writes stay:
  * the session's sandbox keeps them to `desk/journal/` and the temp areas, an escalation asking the
  * operator; the face's desk guard (src/desk-tools.ts `installDeskGuard`) denies a desk turn's write of an
  * instruction file and its read outside the repository or of a key file; and the face's instruction-chain
@@ -79,6 +82,7 @@ export { DESK_PRESET };
 export const DESK_ALLOW: readonly string[] = Object.freeze([
   "read", "write", "edit", "read_image", "glob", "grep", "str_replace_editor", "skill", "web_search", "todo_write",
   "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions", "read_through",
+  "mcp__market__market_explore", "mcp__market__market_candles",
 ]);
 
 /** `plugins/bot.js` as the mask row's `name`, defined in src/roles.ts beside {@link GRAVIT_PLUGIN_URL}

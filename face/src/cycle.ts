@@ -38,7 +38,7 @@ export const CYCLE_MAX_BYTES = 3300;
 export const DESK_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dsh", "profile", "desk.md");
 
 /** The largest `desk.md`, in bytes as `wc -c` counts them. */
-export const DESK_MAX_BYTES = 3000;
+export const DESK_MAX_BYTES = 3_200;
 
 /** The repository's root, the directory two above this module (`face/src/..`/..), resolved as
  * {@link DESK_PATH} is. The conversation's section names it in place of its `<REPO>` placeholder. */
@@ -49,7 +49,7 @@ export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", 
 export const ROUTER_PATH = join(REPO_ROOT, "dsh", "profile", "router.md");
 
 /** The largest `router.md`, in bytes as `wc -c` counts them: it rides in every conversation turn. */
-export const ROUTER_MAX_BYTES = 2_000;
+export const ROUTER_MAX_BYTES = 2_500;
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
 

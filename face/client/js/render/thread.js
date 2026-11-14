@@ -19,6 +19,8 @@ import { maskSpans, maskExcerpt } from '../mask.js';
 import { railView } from '../host/turns-view.js';
 import { reportViews, reportTaskFailure } from '../host/analog.js';
 import { eventTablesHtml } from './event-table.js';
+import { routineCardOf } from '../host/desk-page-view.js';
+import { routineClosings } from '../host/kinds.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -70,6 +72,49 @@ function question(m, conv) {
   return `<div class="card orange question" data-gate="${esc(m.id)}">${blocks}${stateChip(m)}${keys}</div>`;
 }
 
+// the routine card (desk-page plan 3 Task 3, spec 2026-11-14 §6.5): what the call proposed, its chip from the routines read,
+// ✗ and ✓ while pending, else the settled line; every string as the call or the read gave it, escaped
+function routineChip(c) {
+  switch (c) {
+    case 'new': return chip(t('thread.routine.new'));
+    case 'change': return chip(t('thread.routine.change'));
+    case 'added': return chip(t('thread.routine.added'), 'up');
+    case 'dismissed': return chip(t('thread.routine.dismissed'));
+    case 'replaced': return chip(t('thread.routine.replaced'));
+    case 'expired': return chip(t('thread.routine.expired'));
+    case null: return '';   // no routines read yet: nothing to say
+    default: return chip(t('thread.routine.closed'));
+  }
+}
+function routineLine(line) {
+  switch (line?.kind) {
+    case 'replaces': return t('thread.routine.replaces', { name: line.name });
+    case 'limit': return t('thread.routine.limit');
+    case 'failed': return t('desk.requestFailed');
+    case 'notAdded': return t('thread.routine.notAdded');
+    case 'first': return t('thread.routine.firstRun', { day: line.day, time: line.time });
+    case 'next': return t('thread.routine.nextRun', { day: line.day, time: line.time });
+    default: return '';
+  }
+}
+function routineCard(m, state) {
+  const routines = state?.deskPage?.routines;
+  const id = m.data?.proposal;
+  const c = routineCardOf(m, routines?.data, { refused: state?.deskPage?.pSaid?.[id] ?? null, busy: state?.deskPage?.pBusy?.[id] === true, now: routines?.at ?? undefined });
+  const line = routineLine(c.line);
+  const keyOf = (type, label, action) => key(type, label, { title: label, 'data-action': action, 'data-proposal': c.proposal });
+  const ask = c.keys ? `<div class="rt-ask"><span class="rt-q">${th('thread.routine.ask')}</span><div class="keys right">${keyOf('no', t('thread.routine.dismiss'), 'routineNo')}${keyOf('yes', t('thread.routine.add'), 'routineYes')}</div></div>` : '';
+  // pending: a waiting change's line above the keys, a refused answer's under them; settled: its line, and View on Desk once added
+  const above = c.keys && c.line?.kind === 'replaces' ? `<div class="dim">${esc(line)}</div>` : '';
+  const under = c.keys && c.line && c.line.kind !== 'replaces' ? `<div class="rt-said">${esc(line)}</div>` : '';
+  const settled = c.keys ? ''
+    : c.desk ? `<div class="rt-done">${line ? `<span class="dim">${esc(line)}</span>` : ''}<a href="#/desk">${th('thread.routine.viewOnDesk')}</a></div>`
+      : line ? `<div class="dim">${esc(line)}</div>` : '';
+  return `<div class="card orange"><div class="card-head"><div class="card-title">${esc(c.name)}</div>${routineChip(c.chip)}</div>` +
+    `<div class="rt-when">${icon('clock', 14, 2)}<span>${esc(c.when)}</span></div><p class="rt-text">${esc(c.instruction)}</p>` +
+    `${c.note ? `<div class="dim">${esc(c.note)}</div>` : ''}${above}${ask}${under}${settled}</div>`;
+}
+
 function body(m, conv, state) {
   const d = m.data ?? {};
   switch (m.kind) {
@@ -89,6 +134,8 @@ function body(m, conv, state) {
       return question(m, conv);
     case 'receipt':
       return `<div class="bubble green"><div class="line">${chip(d.status ?? t('thread.receipt.accepted'), 'up')}<span>${esc(m.text)}</span></div></div>`;
+    case 'routine':
+      return routineCard(m, state);
     case 'refusal':
       return `<div class="card red">${d.code ? chip(`✗ ${d.code}`, 'down') : ''}<div>${esc(m.text)}</div></div>`;
     default:
@@ -175,11 +222,11 @@ function youMessage(m, conv, state, page) {
   return `<div class="msg you"><div class="you-body">${tag}${files}${bubble}</div>${avatar('you', 28)}</div>`;
 }
 
-// a desk line (host/kinds.js deskMessage): a firing of the face's clock or an alert of its watch, noted into the conversation.
-// A firing's body is the whole brief or report the phone got, so the line folds as a task's report does: its Scheduled or
-// Watch chip and its first line (masked, then clipped at DESK_SUMMARY_MAX) as the summary, the body under it (open across a render by its
+// a desk line (host/kinds.js deskMessage): a firing of the face's clock, an alert of its watch or a routine's report, noted into the conversation.
+// A firing's body is the whole brief or report the phone got, so the line folds as a task's report does: its Scheduled,
+// Watch or Routine chip and its first line (masked, then clipped at DESK_SUMMARY_MAX) as the summary, the body under it (open across a render by its
 // id); a line with no body is the chip alone. Masked as a worker's words are: an agent wrote it, and it may hold a pasted key
-const DESK_CHIP = { schedule: () => t('thread.desk.schedule'), alert: () => t('thread.desk.alert') };
+const DESK_CHIP = { schedule: () => t('thread.desk.schedule'), alert: () => t('thread.desk.alert'), routine: () => t('thread.desk.routine') };
 export const DESK_SUMMARY_MAX = 120;
 function deskLine(m, conv) {
   const line = m.data?.line;
@@ -274,14 +321,15 @@ function railOf(conv) {
 }
 
 // a tool call leaves nothing in the thread, not even the time it held: a divider reads the gap between the rows drawn;
-// the words a composed answer folds are drawn inside its Working notes, just above it, and nowhere else. Before the first
+// the words a composed answer folds are drawn inside its Working notes, just above it, and nowhere else; the closing words of
+// a turn that ends on a routine card are not drawn (host/kinds.js routineClosings: the reply is the card alone). Before the first
 // message drawn past a turn's start, that turn's mark: a loaded turn's, or one whose turn/start lies before the window
 // while this message is of its turn (a page cuts at a message group, not at turn/start); the loaded turns left at the end
 export function renderThread(conv, state, now, page = {}) {
   let prev = null;
   const out = [];
   const notes = foldNotes(conv.messages);
-  const folded = new Set([...notes.values()].flat());
+  const folded = new Set([...[...notes.values()].flat(), ...routineClosings(conv.messages)]);
   const byId = new Map(conv.messages.map(m => [m.id, m]));
   const ticks = Array.isArray(conv.outline) ? railOf(conv).ticks : [];
   let next = 0;

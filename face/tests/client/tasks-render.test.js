@@ -2,7 +2,8 @@
 // a caret; expanded, its strategy, steps, result or gate, usage and the keys its state allows.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderTaskRail } from '../../client/js/render/tasks.js';
+import { renderTaskRail, scheduledLineHtml } from '../../client/js/render/tasks.js';
+import { scheduledOf } from '../../client/js/host/rail-view.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { withTable } from '../../client/js/i18n/words.js';
@@ -131,46 +132,40 @@ test('titles and steps are escaped', () => {
   assert.match(h, /href="#\/strategy\/a%22b"/);
 });
 
-// the desk folds in (one-entry plan 3 Task 8)
+// the desk keeps its own screen (desk-page plan 1 Task 6): the rail draws no desk line and no Scheduled group; a standing
+// order's line is scheduledLineHtml's, for a strategy's page
 const withDesk = (s, desk) => R.tasksLoaded(s, { conversation: 'conv', tasks: s.tasks.items, desk, at: NOW });
-const scheduledOf = h => h.match(/<details class="task-line"[^>]*data-task="order:brief"[\s\S]*?<\/details>/)?.[0] ?? '';
+const ORDER = { order: 'brief', strategy: 'cn-market', next: '2026-11-09T20:30:00.000Z', last: { outcome: 'finished', t: '2026-11-08T20:31:00.000Z', sessionId: 'desk-1' }, enabled: true, expired: false };
+const DESK_LINE = { id: 'annotation:p1', kind: 'annotation', title: 'NVDA', state: 'done', startedAt: '2026-11-09T19:00:00.000Z', endedAt: '2026-11-09T19:02:00.000Z', sessionId: 'desk-9', text: 'NVDA fell on <guidance>' };
+
+test('the rail draws no desk line and no Scheduled group', () => {
+  const desk = { scheduled: [ORDER], lines: [DESK_LINE] };
+  assert.equal(renderTaskRail(withDesk(state([]), desk), NOW, { open: new Set(['order:brief', 'desk:annotation:p1']) }), '', 'only the desk: no rail');
+  const h = renderTaskRail(withDesk(state([task('t1')]), desk), NOW);
+  assert.deepEqual([...h.matchAll(/class="task-group-head">([^<]+)</g)].map(x => x[1]), ['Running']);
+  assert.doesNotMatch(h, /Scheduled|data-task="order:|data-task="desk:|NVDA fell/);
+  withTable(ZH, () => assert.doesNotMatch(renderTaskRail(withDesk(state([task('t1')]), desk), NOW), /定时/));
+});
 
 test('a scheduled line draws no button', () => {
-  const s = withDesk(state([]), { scheduled: [{ order: 'brief', strategy: 'cn-market', next: '2026-11-09T20:30:00.000Z', last: { outcome: 'finished', t: '2026-11-08T20:31:00.000Z', sessionId: 'desk-1' }, enabled: true, expired: false }], lines: [] });
-  const h = renderTaskRail(s, NOW, { open: new Set(['order:brief']) });
-  const heads = [...h.matchAll(/class="task-group-head">([^<]+)</g)].map(x => x[1]);
-  assert.deepEqual(heads, ['Scheduled'], 'the rail draws with only a standing order');
-  const line = scheduledOf(h);
+  const s = withDesk(state([]), { scheduled: [ORDER], lines: [] });
+  const line = scheduledLineHtml(scheduledOf(s, NOW)[0], NOW, new Set(['order:brief']));
   assert.match(line, /<details class="task-line" data-task="order:brief" open>/);
   assert.match(line, /task-title">brief</);
   assert.doesNotMatch(line, /<button/);
   assert.match(line, /href="#\/strategy\/cn-market"/);
   assert.match(line, /href="#\/history\/desk-1"/, 'its last session, in History');
   assert.match(line, /Last Finished/i);
-  withTable(ZH, () => assert.deepEqual([...renderTaskRail(s, NOW).matchAll(/class="task-group-head">([^<]+)</g)].map(x => x[1]), ['定时']));
-  const off = renderTaskRail(withDesk(state([]), { scheduled: [{ order: 'brief', enabled: false, expired: false }], lines: [] }), NOW);
-  assert.match(scheduledOf(off), /task-dot stopped/);
-  assert.doesNotMatch(scheduledOf(off), /history/, 'no session: no link');
+  const off = scheduledLineHtml(scheduledOf(withDesk(state([]), { scheduled: [{ order: 'brief', enabled: false, expired: false }], lines: [] }), NOW)[0], NOW, null);
+  assert.match(off, /task-dot stopped/);
+  assert.doesNotMatch(off, /history/, 'no session: no link');
 });
 
 test("a scheduled line's next time is drawn in New York time", () => {
   const s = withDesk(state([]), { scheduled: [{ order: 'brief', next: '2026-11-09T20:30:00.000Z', enabled: true, expired: false }], lines: [] });
-  const status = scheduledOf(renderTaskRail(s, NOW)).match(/task-status">([^<]*)</)[1];
+  const status = scheduledLineHtml(scheduledOf(s, NOW)[0], NOW, null).match(/task-status">([^<]*)</)[1];
   assert.match(status, /15:30 ET$/, '20:30 UTC is 15:30 in New York in November');
-  withTable(ZH, () => assert.match(scheduledOf(renderTaskRail(s, NOW)), /task-status">下次 (?:\S+ )?15:30 ET</));
-});
-
-test('a desk line links its session in History', () => {
-  const s = withDesk(state([]), { scheduled: [], lines: [{ id: 'annotation:p1', kind: 'annotation', title: 'NVDA', state: 'done', startedAt: '2026-11-09T19:00:00.000Z', endedAt: '2026-11-09T19:02:00.000Z', sessionId: 'desk-9', text: 'NVDA fell on <guidance>' }] });
-  const h = renderTaskRail(s, NOW, { open: new Set(['desk:annotation:p1']) });
-  const line = h.match(/<details class="task-line"[^>]*data-task="desk:annotation:p1"[\s\S]*?<\/details>/)?.[0] ?? '';
-  assert.match(line, / open>/);
-  assert.match(line, /task-title">NVDA</);
-  assert.match(line, /task-status">Done 14:02 ET</, 'the clock in New York, saying ET');
-  assert.match(line, /NVDA fell on &lt;guidance&gt;/);
-  assert.match(line, /href="#\/history\/desk-9"/);
-  assert.doesNotMatch(line, /<button/);
-  withTable(ZH, () => assert.match(renderTaskRail(s, NOW), /盯盘/));
+  withTable(ZH, () => assert.match(scheduledLineHtml(scheduledOf(s, NOW)[0], NOW, null), /task-status">下次 (?:\S+ )?15:30 ET</));
 });
 
 test('a phone task names its origin', () => {

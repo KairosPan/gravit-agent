@@ -42,7 +42,7 @@ test('source identity follows the source or connector and the qualified coin, ne
   ]) assert.equal(marketOriginOf(leg), null, JSON.stringify(leg));
 });
 
-test('all three sources stay expanded with their categories and separate Watching and Desk controls', () => {
+test('all three sources stay expanded with their categories and a separate Watching control, and no Desk', () => {
   assert.equal(marketScopeOf({}), 'more', 'old unscoped reads remain broad');
   const s = state();
   const html = renderMarketsScreen(s, NOW);
@@ -56,10 +56,10 @@ test('all three sources stay expanded with their categories and separate Watchin
     ['more', ['all', 'crypto', 'stocks', 'rwas', 'perps', 'preipo', 'predictions', 'china']],
   ]);
   assert.ok(navigation.every(row => row.categories.every(c => c.count === null)), 'unread counts remain unknown');
-  assert.deepEqual([...html.matchAll(/data-action="mkTab" data-value="([^"]+)"/g)].map(m => m[1]), ['watching', 'desk']);
+  assert.deepEqual([...html.matchAll(/data-action="mkTab" data-value="([^"]+)"/g)].map(m => m[1]), ['watching']);
   assert.match(html, /data-action="mkCategory" data-scope="xyz" data-value="stocks"/);
   assert.doesNotMatch(html, /data-action="mkCategory" data-scope="more"/, 'More expands providers; its categories appear only when selected');
-  assert.deepEqual(tableOf(s.markets, NOW).tabs.map(t => t.id), ['all', 'watching', 'desk']);
+  assert.deepEqual(tableOf(s.markets, NOW).tabs.map(t => t.id), ['all', 'watching']);
   const broad = R.setMarketsScope(s, 'more');
   assert.ok(tableOf(broad.markets, NOW).tabs.some(t => t.id === 'china'));
   assert.match(renderMarketsScreen(broad, NOW), /data-action="mkCategory" data-scope="more" data-value="china"/);

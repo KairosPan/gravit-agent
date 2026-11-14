@@ -24,7 +24,7 @@ function navItem(href, name, label, current, mini, badge = 0) {
     `<span class="nav-label">${esc(label)}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</a>`;
 }
 
-// the first level: Messages (its badge counts the tasks waiting on you, host/rail-view.js), Markets, Trade, Discover, Account with its
+// the first level: Messages (its badge counts the tasks waiting on you, host/rail-view.js), Desk, Markets, Trade, Discover, Account with its
 // leading figure once the Account's read has answered — the paper book's, named so, when it leads — and its badge counting
 // the cards waiting for you on the Account, and the collapse key; it collapses to a strip of icons
 function worthLine(state) {
@@ -44,6 +44,7 @@ export function renderNav(state) {
     `<button type="button" class="rail-toggle" data-action="toggleRail" aria-expanded="${mini ? 'false' : 'true'}" aria-label="${mini ? th('nav.expand') : th('nav.collapse')}">${icon(mini ? 'chevRight' : 'chevLeft', 16, 2.2)}</button></div>
   <div class="rail-group">
     ${navItem('#/messages', 'chat', t('nav.messages'), SIDE_SCREENS.has(screen), mini, waiting)}
+    ${navItem('#/desk', 'eye', t('nav.desk'), screen === 'desk', mini)}
     ${navItem('#/markets', 'markets', t('nav.markets'), screen === 'markets', mini)}
     ${navItem('#/trade', 'trade', t('nav.trade'), screen === 'trade', mini)}
     ${navItem('#/discover', 'compass', t('nav.discover'), screen === 'discover' || screen === 'plugin' || screen === 'module', mini)}

@@ -106,17 +106,18 @@ test("readCycle: the limit is inclusive and counts raw bytes - CYCLE_MAX_BYTES a
 });
 
 /* The desk's contract (`dsh/profile/desk.md`, the `gravit:desk` section) sits beside the cycle's, under
- * its own 3,000-byte budget. Each phrase is a rule it must state: inform and never order; a quiet turn
+ * its own 3,200-byte budget. Each phrase is a rule it must state: inform and never order; a quiet turn
  * is one line; the two desk tools; the four files a desk turn never writes; the names that must not
  * appear under its directory; the bracketed lines that say where a message came from (since one entry's plan 3 the
  * phone's two forms only as the case with the one conversation off); what a standing order's message carries; and
  * what desk_state knows of the standing orders and of the watch; the batch's and the desk state's bracketed lines. */
-test("the shipped desk.md reads, fits 3,000 bytes and states the desk rules", () => {
-  assert.equal(DESK_MAX_BYTES, 3000);
+test("the shipped desk.md reads, fits 3,200 bytes and states the desk rules", () => {
+  assert.equal(DESK_MAX_BYTES, 3_200);
   assert.equal(dirname(DESK_PATH), dirname(CYCLE_PATH), "desk.md sits beside cycle.md, resolved from the module the same way");
   const text = readDesk(DESK_PATH);
   assert.ok(Buffer.byteLength(text, "utf8") <= DESK_MAX_BYTES);
   for (const phrase of ["You inform", "never place, cancel or propose an order", "one line", "desk_quotes", "desk_state",
+    "desk_headlines is the Market's headlines for up to ten US tickers, each with its time and outlet.",
     "STANDING.md", "levels.yml", "rules.yml", "holdings.yml", "GRAVIT.md", ".git", "[telegram · operator", "[slack · operator · 14:03 ET]", "[schedule ·", "[alert ·",
     "[alerts ·", "[desk · state ·", "its producer's output", "its standing orders and their last outcomes",
     "and the watch: its files, its symbols and today's alerts",
@@ -142,7 +143,7 @@ test("desk.md tells the desk to say the brief's memory line, within its cap", ()
 
 /** The one conversation's contract (one entry's plan 3 task 6): a phone text's provenance line is the operator on the
  * phone, answered short; the desk's [schedule · …] and [alert · …] lines are context, fenced as data like a task's report. */
-test("the shipped router.md reads the phone and the desk's lines, within 2,000 bytes", () => {
+test("the shipped router.md reads the phone and the desk's lines, within ROUTER_MAX_BYTES", () => {
   const text = readRouter();
   assert.ok(Buffer.byteLength(text, "utf8") <= ROUTER_MAX_BYTES);
   for (const phrase of [

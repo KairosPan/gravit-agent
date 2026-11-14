@@ -878,7 +878,7 @@ test("the conversation imports nothing but types and the data fence's leaf: desk
 test("the desk contract says where each answer goes, as the delivery does", () => {
   const contract = readDesk(DESK_PATH);
   assert.ok(contract.includes(
-    "Your final text goes to the operator's phone, as plain text; so does your answer to a background job's notice. "
+    "Your final text goes to the operator's phone, as plain text (a routine's goes to their Desk page); so does your answer to a background job's notice. "
       + "While the conversation is off, a message with no bracketed line is the operator at the browser, where your answer stays.",
   ));
 });

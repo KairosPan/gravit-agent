@@ -4,10 +4,10 @@
 // its tokens, and the keys its state allows — Stop, Continue — beside the link to its full process. A line is open while
 // the page holds its id open (app.js), so a whole-page render never folds one the operator opened. On a narrow window
 // the rail folds above the thread under one summary counting the lines waiting on you (app.css).
-// The desk folds in (one-entry plan 3): a task from the phone names its origin; today's firings and annotations are lines
-// in running and done — expanded, their kind, their text and their session in History, no key — and the standing orders
-// are the scheduled group after done, each its order and its next firing; expanded, its strategy, its last outcome and
-// that session in History, no key. Their open ids are `desk:<id>` and `order:<order>`, never a task's.
+// A task from the phone names its origin (one-entry plan 3). The desk's lines and its standing orders are the Desk
+// screen's (desk-page plan 1 Task 6), never the rail's; a standing order's line, drawn on a strategy's page, is its order and
+// its next firing; expanded, its strategy, its last outcome and that session in History, no key. Its open id is
+// `order:<order>`, never a task's.
 import { esc, attrs, cls } from '../html.js';
 import { th } from '../i18n/words.js';
 import { icon } from '../icons.js';
@@ -16,8 +16,7 @@ import { railOf } from '../host/rail-view.js';
 import { deskTime, firingWord } from '../host/desk-view.js';
 import { gateHtml, NETWORKS } from './thread.js';
 
-const GROUPS = [['you', () => th('tasks.group.you')], ['running', () => th('tasks.group.running')], ['done', () => th('tasks.group.done')], ['scheduled', () => th('tasks.group.scheduled')]];
-const DESK_KINDS = { firing: () => th('thread.desk.schedule'), annotation: () => th('thread.desk.alert') };
+const GROUPS = [['you', () => th('tasks.group.you')], ['running', () => th('tasks.group.running')], ['done', () => th('tasks.group.done')]];
 const STOPS = new Set(['running', 'waiting', 'stalled']);
 const CONTINUES = new Set(['stalled', 'failed', 'blocked']);
 const fmtN = n => Math.round(Number(n) || 0).toLocaleString('en-US');
@@ -61,13 +60,6 @@ function lineHtml(id, dot, title, status, body, open, bot = '') {
     `<div class="task-body">${body}</div></details>`;
 }
 
-/** A firing's or an annotation's line: its kind, its text, its session in History; no key. */
-export function deskLineHtml({ desk, status }, open) {
-  const kind = Object.hasOwn(DESK_KINDS, desk.kind) ? `<div class="task-origin">${DESK_KINDS[desk.kind]()}</div>` : '';
-  const text = typeof desk.text === 'string' && desk.text !== '' ? `<div class="task-result">${esc(maskExcerpt(desk.text))}</div>` : '';
-  return lineHtml(`desk:${desk.id}`, desk.state, desk.title, status, kind + text + historyLink(desk.sessionId), open);
-}
-
 /** A standing order's line, read-only: its order and next firing; expanded, its strategy, its last outcome and when, and
  * that firing's session in History. A strategy's page draws its orders' lines with it. */
 export function scheduledLineHtml({ scheduled: o, status }, now, open) {
@@ -93,19 +85,12 @@ export function taskLineHtml({ task, gate, status }, group, state, open) {
   return lineHtml(task.id, dot, task.title, status, `${originOf(task)}${strategy}${steps}${end}${usageOf(task.usage)}${keys(task, state.tasks.busy.includes(task.id))}`, open, task.bot);
 }
 
-/** Any line of the rail in its group: a task's, the desk's or a standing order's. */
-export function railLineHtml(line, group, state, now, open) {
-  if (line.scheduled) return scheduledLineHtml(line, now, open);
-  if (line.desk) return deskLineHtml(line, open);
-  return taskLineHtml(line, group, state, open);
-}
-
 /** The rail: '' while it has no line. `open` is the ids the page holds open. */
 export function renderTaskRail(state, now, { open = null } = {}) {
   const rail = railOf(state, now);
   const groups = GROUPS.filter(([g]) => rail[g].length);
   if (!groups.length) return '';
-  const body = groups.map(([g, head]) => `<section class="task-group"><h3 class="task-group-head">${head()}</h3>${rail[g].map(l => railLineHtml(l, g, state, now, open)).join('')}</section>`).join('');
+  const body = groups.map(([g, head]) => `<section class="task-group"><h3 class="task-group-head">${head()}</h3>${rail[g].map(l => taskLineHtml(l, g, state, open)).join('')}</section>`).join('');
   return `<aside class="tasks" aria-label="${th('tasks.rail')}"><details class="tasks-fold" id="tasks-fold"><summary class="tasks-fold-key">${th('tasks.fold', { n: rail.you.length })}</summary></details>` +
     `<h2 class="tasks-title">${th('tasks.rail')}</h2><div class="tasks-body">${body}</div></aside>`;
 }

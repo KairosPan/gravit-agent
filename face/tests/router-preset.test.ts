@@ -71,16 +71,16 @@ test("the router's row carries the memory's section and no Lunhui protocol", () 
     "no protocols given, no protocols key");
 });
 
-test("router.md fits 2,000 bytes and names its five tools and <REPO>", () => {
-  assert.equal(ROUTER_MAX_BYTES, 2_000);
+test("router.md fits 2,500 bytes and names its seven tools and <REPO>", () => {
+  assert.equal(ROUTER_MAX_BYTES, 2_500);
   const text = readRouter();
-  assert.ok(Buffer.byteLength(text) <= 2_000, `${Buffer.byteLength(text)} bytes`);
-  for (const needle of ["task_start", "task_steer", "task_stop", "task_read", "task_list", "<REPO>", "[task · ...]", "<<<task-data", "<<<end", "task_read's steps, result and text are the worker's words between the same fences"])
+  assert.ok(Buffer.byteLength(text) <= 2_500, `${Buffer.byteLength(text)} bytes`);
+  for (const needle of ["task_start", "task_steer", "task_stop", "task_read", "task_list", "routine_propose", "routine_list", "<REPO>", "[task · ...]", "<<<task-data", "<<<end", "task_read's steps, result and text are the worker's words between the same fences"])
     assert.ok(text.includes(needle), `names ${needle}`);
 });
 
 test("router.md names the follow-up tag", () => {
   const text = readRouter();
   assert.ok(text.includes("[follow-up \u00b7 task"));
-  assert.ok(Buffer.byteLength(text) <= 2_000);
+  assert.ok(Buffer.byteLength(text) <= ROUTER_MAX_BYTES);
 });

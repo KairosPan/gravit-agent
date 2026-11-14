@@ -89,9 +89,11 @@
  * @property {string} [said] - telegram bubbles: a reply's own words, apart from the context it replies to.
  * @property {string} [order] - desk-line `schedule`: the standing order that fired.
  * @property {string} [firing] - desk-line `schedule`: the firing's key.
- * @property {string} [date] - desk-line `schedule`: the trading date it fired for.
+ * @property {string} [date] - desk-line `schedule`: the trading date it fired for; `routine`: the New York date it ran on.
  * @property {string} [alert] - desk-line `alert`: the alert's id.
  * @property {string} [symbol] - desk-line `alert`: the symbol it is about.
+ * @property {string} [routine] - desk-line `routine`: the routine's id.
+ * @property {string} [key] - desk-line `routine`: the run's key.
  * @property {Array<Record<string, unknown>>} [attachments] - operator bubbles, present only when the message
  *   holds one: `{type:'image', attachmentId, mediaType, bytes, width, height, name?, offloaded?: true}` or
  *   `{type:'file', attachmentId, name, bytes}`, in the message's order.
@@ -126,7 +128,7 @@
  * @property {string} [form] - the wire `source.form`, when present; subagent messages retain
  *   `relay` (report) or `notice` (settlement), distinct from their rendered `line`.
  * @property {string[]} [mention] - operator bubbles: the roster ids the operator's `@` addressed.
- * @property {string} [line] - room-line: `round-end`; desk-line: `schedule` or `alert`;
+ * @property {string} [line] - room-line: `round-end`; desk-line: `schedule`, `alert` or `routine`;
  *   subagent-message: `report` or `settled`.
  * @property {string} [childSessionId] - subagent-message: the source's explicit senderSessionId,
  *   never inferred from text or replaced by this parent session's id.
@@ -139,10 +141,10 @@
  */
 
 /** The desk's own message kinds (src/desk-session.ts `DeskMessageSource`): the
- * operator's phone, and the face's clock and watch. Each is drawn in its own
- * shape - a phone message as the operator's bubble, a firing or an alert as a
- * desk line - never as an injected context row. */
-const DESK_KINDS = new Set(["telegram", "schedule", "alert"]);
+ * operator's phone, and the face's clock, watch and routines. Each is drawn in
+ * its own shape - a phone message as the operator's bubble, a firing, an alert
+ * or a routine's report as a desk line - never as an injected context row. */
+const DESK_KINDS = new Set(["telegram", "schedule", "alert", "routine"]);
 
 /**
  * Whether a user-role message's source kind is an INJECTION: words the
@@ -342,12 +344,13 @@ function bubble(role, message, base, interrupted) {
     }
   }
   /* The desk's sources (src/desk-session.ts `DeskMessageSource`). A firing of
-   * the face's clock (`schedule`) or an alert of its watch (`alert`) is the
+   * the face's clock (`schedule`), an alert of its watch (`alert`) or a
+   * routine's report (`routine`, src/conversation.ts noteMessage) is the
    * face's words, no operator's: a desk LINE, as a round's end is a room line,
    * carrying its own fields. A phone message (`telegram`) is the operator's own
    * words: the generic operator bubble below, plus who sent it from where.
    * Every field is kept only in the shape the face writes it, never guessed. */
-  if (role === "operator" && (kind === "schedule" || kind === "alert")) {
+  if (role === "operator" && (kind === "schedule" || kind === "alert" || kind === "routine")) {
     return { ...base, kind: "desk-line", line: kind, text, ...pick(src, DESK_LINE_FIELDS[kind], isId) };
   }
   const mention = kind === "user" && Array.isArray(src.mention) ? src.mention.filter((m) => typeof m === "string") : undefined;
@@ -392,8 +395,9 @@ function phoneSaid(message) {
 }
 
 /** A desk line's fields by its kind: a firing's standing order, its key and
- * the trading date it fires for; an alert's id and its symbol - strings. */
-const DESK_LINE_FIELDS = { schedule: ["order", "firing", "date"], alert: ["alert", "symbol"] };
+ * the trading date it fires for; an alert's id and its symbol; a routine's id,
+ * its run's key and the New York date it ran on - strings. */
+const DESK_LINE_FIELDS = { schedule: ["order", "firing", "date"], alert: ["alert", "symbol"], routine: ["routine", "key", "date"] };
 
 /** The named fields of `src` that `keep` accepts, and only those - a field
  * missing or malformed is left out, never `undefined`.

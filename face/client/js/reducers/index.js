@@ -12,10 +12,11 @@ import { reducers as trade } from './trade.js';
 import { reducers as runSheet } from './run-sheet.js';
 import { reducers as lunhui } from './lunhui.js';
 import { reducers as desk } from './desk.js';
+import { reducers as deskPage } from './desk-page.js';
 import { reducers as search } from './search.js';
 import { reducers as jobs } from './jobs.js';
 import { reducers as identity } from './identity.js';
 import { reducers as tasks } from './tasks.js';
 import { reducers as analog } from './analog.js';
 
-export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade, ...runSheet, ...lunhui, ...desk, ...search, ...jobs, ...identity, ...tasks, ...analog };
+export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade, ...runSheet, ...lunhui, ...desk, ...deskPage, ...search, ...jobs, ...identity, ...tasks, ...analog };

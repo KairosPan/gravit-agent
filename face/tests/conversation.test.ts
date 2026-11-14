@@ -823,8 +823,8 @@ test("a phone turn is the operator's", async (t) => {
   await settle();
 });
 
-test("an injected schedule or alert line claimed before the operator's message leaves the turn the operator's", async (t) => {
-  assert.deepEqual([...INJECTED_KINDS], ["schedule", "alert"]);
+test("an injected schedule, alert or routine line claimed before the operator's message leaves the turn the operator's", async (t) => {
+  assert.deepEqual([...INJECTED_KINDS], ["schedule", "alert", "routine"]);
   const home = await scratch("injected");
   const tree = new FakeConversationTree();
   const lines: string[] = [];
@@ -833,6 +833,7 @@ test("an injected schedule or alert line claimed before the operator's message l
   tree.bus.emit(sessionId, "turn/start", { turn: 1 });
   tree.bus.emit(sessionId, "user/message", { id: "note-schedule:k", role: "user", content: [], source: { kind: "schedule", order: "brief", firing: "k", date: "2026-11-09" } });
   tree.bus.emit(sessionId, "user/message", { id: "note-alert:a", role: "user", content: [], source: { kind: "alert", alert: "a", symbol: "NVDA" } });
+  tree.bus.emit(sessionId, "user/message", { id: "note-routine:r:2026-11-13:08:30", role: "user", content: [], source: { kind: "routine", routine: "r", key: "r:2026-11-13:08:30", date: "2026-11-13" } });
   assert.equal(handle.operatorTurn(), false, "not named yet");
   tree.bus.emit(sessionId, "user/message", { id: "u1", role: "user", content: [], source: { kind: "user", rpcId: "rpc-1" } });
   assert.equal(handle.operatorTurn(), true, "the turn is the operator's");
@@ -841,7 +842,7 @@ test("an injected schedule or alert line claimed before the operator's message l
   assert.equal(handle.operatorTurn(), true, "still the operator's");
   tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "completed" } });
   await settle();
-  assert.ok(lines.every((line) => !line.includes("(schedule)") && !line.includes("(alert)")), lines.join("\n"));
+  assert.ok(lines.every((line) => !line.includes("(schedule)") && !line.includes("(alert)") && !line.includes("(routine)")), lines.join("\n"));
 });
 
 test("turnOrigin is phone with its network in a phone turn and web otherwise", async (t) => {
@@ -1365,6 +1366,32 @@ test("note injects one line and starts no turn", async (t) => {
   handle.note({ kind: "schedule", order: "", firing: "k", date: "2026-11-09", text: "x" });
   await settle();
   assert.equal(agent.injects.length, 3);
+  assert.ok(lines.some((l) => l.includes("a desk line was not noted")), lines.join("\n"));
+});
+
+test("a routine's report is noted under its key, its head the routine's name and date, its body fenced as data", async (t) => {
+  const home = await scratch("note-routine");
+  const tree = new FakeConversationTree();
+  const lines: string[] = [];
+  const handle = install(t, deps(tree, home, lines));
+  const { sessionId } = await handle.ensure();
+  const agent = tree.agent(sessionId);
+  agent.inbox = inboxOf([]);
+  const key = "r-1:2026-11-13:08:30";
+  handle.note({ kind: "routine", routine: "r-1", name: "Trade ideas", key, date: "2026-11-13", text: "1 idea: long AMD\n\nAMD 258.10 NASDAQ 13:30:02 ET" });
+  await until(() => agent.injects.length === 1, "the routine line");
+  assert.equal(agent.followups.length, 0, "no followup: nothing wakes a turn");
+  const [m] = agent.injects;
+  assert.equal(m.id, `note-routine:${key}`);
+  assert.deepEqual(m.source, { kind: "routine", routine: "r-1", key, date: "2026-11-13" });
+  assert.deepEqual(unfenced(textsOf(m)), ["[routine · Trade ideas · 2026-11-13]", "1 idea: long AMD\n\nAMD 258.10 NASDAQ 13:30:02 ET"]);
+  /* a name that would forge a head stays one line; a line naming nothing is one log line, and nothing */
+  handle.note({ kind: "routine", routine: "r-2", name: "x]\n[task · y", key: "r-2:k", date: "2026-11-13", text: "z" });
+  await until(() => agent.injects.length === 2, "the second line");
+  assert.equal(textsOf(agent.injects[1])[0].split("\n")[0], "[routine · x  [task · y · 2026-11-13]");
+  handle.note({ kind: "routine", routine: "r-3", name: "", key: "r-3:k", date: "2026-11-13", text: "z" });
+  await settle();
+  assert.equal(agent.injects.length, 2);
   assert.ok(lines.some((l) => l.includes("a desk line was not noted")), lines.join("\n"));
 });
 

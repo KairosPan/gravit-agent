@@ -10,9 +10,9 @@
 // among its keys (plan 4a Task 3). An Account market's page draws, from the Account's four reads beside its price (plan 4a
 // Task 4; host/market-depth-view.js): You here — the asset sheet's holding, positions with their cost, open orders with who
 // placed them, and what agents do here — its order book, its latest trades, and a perpetual's funding; each as far as its own
-// read has got. An A share's page reads none of the four. The last tab is the Desk (plan 2026-11-01-desk-p3-watch Task 11:
-// render/desk.js over the desk's status), and a market the watch holds a level for carries its mark (host/desk-view.js markOf)
-// after its name on its row, and with its plan and file under its price on its page.
+// read has got. An A share's page reads none of the four. A market the watch holds a level for carries its mark (plan
+// 2026-11-01-desk-p3-watch Task 11, host/desk-view.js markOf) after its name on its row, and with its plan and file under its
+// price on its page; the desk's own status is the Desk screen's (render/desk-page.js).
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
@@ -36,8 +36,7 @@ import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
 import { tradeableOf } from '../host/trade-view.js';
 import { isCnKey } from '../wire/china.js';
-import { DESK_TAB, deskViewOf, markOf } from '../host/desk-view.js';
-import { renderDeskTab } from './desk.js';
+import { markOf } from '../host/desk-view.js';
 import { t, th, thn, sayOf } from '../i18n/words.js';
 
 const EM = '—';
@@ -172,18 +171,13 @@ export function renderMarketsScreen(state, now) {
     (scope.id === 'more' ? `<div class="mk-more">${providersHtml(scope.active)}${scope.active ? categoriesHtml(scope) : ''}</div>` : categoriesHtml(scope)) + '</div>').join('')}</div>`;
   const globalTabs = [
     ...tabs.filter(tab => tab.id === 'results'),
-    { id: 'watching', label: t('markets.tab.watching') }, { id: DESK_TAB, label: t('markets.tab.desk') },
+    { id: 'watching', label: t('markets.tab.watching') },
   ];
   const tabsHtml = scopesHtml + `<div class="mk-tabs" role="group" aria-label="${th('nav.markets')}">${globalTabs.map(tab => `<button type="button" class="mk-tab" data-action="mkTab" data-value="${esc(tab.id)}" aria-pressed="${tab.id === m.tab}">${esc(tab.label)}</button>`).join('')}</div>`;
   const left = searching
     ? `<p class="mk-q">${thn('markets.search.count', rows.length, { q })} <button type="button" class="mk-clear" data-action="mkClear">${th('markets.search.clear')}</button></p>`
     : '<span></span>';
   const bar = `<div class="mk-bar">${left}${rows.length > 1 ? seg(sorts.map(s => [s.label, s.id]), sort, 'mkSort') : ''}</div>`;
-  // the Desk tab (plan 2026-11-01-desk-p3-watch Task 11): the desk's view in place of the table
-  if (m.tab === DESK_TAB && !searching) {
-    const desk = isRecord(state.desk) ? state.desk : {};
-    return screenHtml(m, tabsHtml, renderDeskTab(deskViewOf(desk.data, new Date(now).toISOString()), desk));
-  }
   // the muted lines: the Account's own sentence when the read the rows are from refused, the A-share search's when it failed or
   // answered in part (said once: not again under a table that already says it), the face's wire's state where an A share is
   // drawn, the watchlist's

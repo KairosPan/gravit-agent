@@ -293,7 +293,18 @@ test("installDesk: enabled writes boot and shutdown; disabled writes nothing and
   const quiet = installDesk(rec, { home: off, enabled: false });
   await quiet.ready; await quiet.dispose(0);
   assert.deepEqual(await readEvents(off), { events: [], skipped: 0 });
-  assert.deepEqual(rec.paths(), ["/data/desk/status", "/data/desk/pause"], "both routes whatever enabled says: the switch is the home's, not this face's");
+  assert.deepEqual(rec.paths(), [
+    "/data/desk/status", "/data/desk/pause", "/data/desk/news",
+    "/data/desk/routines", "/data/desk/routines/switch", "/data/desk/routines/test", "/data/desk/routines/delete",
+    "/data/desk/routines/confirm", "/data/desk/routines/dismiss",
+  ], "every route whatever enabled says: the switch is the home's, not this face's");
+  assert.equal((JSON.parse(await rec.call("/data/desk/news")) as { status: number }).status, 200, "a desk that is off still reads its News");
+  assert.equal(quiet.routines, undefined, "a desk that is off starts no routines' clock");
+  const read = JSON.parse(await rec.call("/data/desk/routines")) as { status: number; body: { ok: boolean; load: { ok: boolean }; routines: unknown[]; queued: unknown[] } };
+  assert.equal(read.status, 200, "and still reads its routines, from the store alone");
+  assert.deepEqual([read.body.ok, read.body.load.ok, read.body.routines, read.body.queued], [true, true, [], []]);
+  assert.deepEqual(JSON.parse(await rec.call("/data/desk/routines/test", { method: "POST", json: { id: "r-00000000" } })),
+    { status: 409, body: { ok: false, error: "paused" } }, "nothing runs while the desk is off");
 });
 
 test("an unreadable ledger still answers 200: no gaps, no runs, and ledgerError names the code", async () => {
@@ -1658,6 +1669,12 @@ test("installDesk loads the schedule only with the conversation; its status reac
   assert.deepEqual([routed.body.budget?.dailyTokens, routed.body.budget?.spent], [1000, true], "and its cap");
   const state = await tools.state();
   assert.equal(state.standing?.orders[0].id, "preclose", "and so does desk_state");
+  assert.ok(desk.routines !== undefined, "a desk with its schedule loads the routines' clock row");
+  assert.ok(await desk.routines !== undefined);
+  const routinesRead = JSON.parse(await rec.call("/data/desk/routines")) as { status: number; body: { load: { ok: boolean }; cap: { dailyTokens: number } } };
+  assert.deepEqual([routinesRead.status, routinesRead.body.load.ok, routinesRead.body.cap.dailyTokens], [200, true, 10_000_000], "the route reads its status");
+  assert.equal((JSON.parse(await rec.call("/data/desk/routines/test", { method: "POST", json: { id: "r-00000000" } })) as { status: number }).status, 404,
+    "and a test of no routine is the clock row's unknown");
   const posted = await desk.conversation?.post({ text: "how is the book?", source: { kind: "telegram" }, message: { kind: "telegram", from: 42, chat: 42, messageId: 7 } });
   assert.deepEqual(posted, {
     refused: "budget",
@@ -1677,6 +1694,7 @@ test("installDesk loads the schedule only with the conversation; its status reac
   });
   const stopped = brief.dispose(0);
   assert.equal(await brief.schedule, undefined);
+  assert.equal(await brief.routines, undefined, "nor any routines' clock");
   await stopped;
   assert.equal(early.pending(), 0, "nothing armed on its clock");
 
@@ -1687,6 +1705,7 @@ test("installDesk loads the schedule only with the conversation; its status reac
       installModelSelection: () => () => {}, log: () => {},
     });
     assert.equal(quiet.schedule, undefined, `no clock row (${label})`);
+    assert.equal(quiet.routines, undefined, `no routines' clock (${label})`);
     await quiet.dispose(0);
   }
 });
@@ -2013,6 +2032,8 @@ function watching(): WatchStatus {
     ],
     near: [], marks: [], pending: 2, recent: [],
     filings: { state: "no-contact", symbols: 0, aShares: 0, seeded: 0 },
+    rules: [],
+    levels: 0,
   };
 }
 

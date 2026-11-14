@@ -644,6 +644,12 @@ test("a firing of the desk's clock or watch is a desk line with its fields, as a
     alert: "a-0001", symbol: "NVDA", time: 1,
   });
   assert.deepEqual(alert, deskMessage(41, alertText, { kind: "alert", alert: "a-0001", symbol: "NVDA" }, false), "live and recorded alike");
+  const routineText = "[routine · Trade ideas · 2026-11-13]\n<<<desk-data n2>>>\n1 idea: long AMD\n<<<end n2>>>";
+  const routine = deskMessage(48, routineText, { kind: "routine", routine: "r-1", key: "r-1:2026-11-13:08:30", date: "2026-11-13" });
+  assert.deepEqual(routine, {
+    kind: "desk-line", line: "routine", seq: 48, sessionId: "desk", surfaceOp: "append", text: routineText,
+    routine: "r-1", key: "r-1:2026-11-13:08:30", date: "2026-11-13", time: 1,
+  });
   assert.equal(alert.role, undefined, "the face's words: neither the operator's lane nor Gravit's");
 
   const bare = deskMessage(42, "[schedule · ? · ?]", { kind: "schedule", order: 7, date: null });
@@ -661,7 +667,7 @@ test("every other kind is still an injected context row - the desk's own state i
     assert.equal(v.source, kind);
     assert.equal(isInjectedSource(v.source), true, `${kind} renders as a context row`);
   }
-  for (const kind of ["user", "telegram", "schedule", "alert"]) assert.equal(isInjectedSource(kind), false, kind);
+  for (const kind of ["user", "telegram", "schedule", "alert", "routine"]) assert.equal(isInjectedSource(kind), false, kind);
   assert.equal(isInjectedSource(""), true, "a kind that is no known one is still a context row, never the operator's bubble");
   // No kind at all is the rule as it stood: the mapper reports none, and the bubble is the operator's.
   for (const kind of [undefined, null, 42, {}]) assert.equal(isInjectedSource(kind), false, JSON.stringify(kind));

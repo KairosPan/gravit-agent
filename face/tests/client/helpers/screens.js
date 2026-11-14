@@ -18,11 +18,12 @@ import { fieldsOf } from '../../../client/js/host/sheet-view.js';
 import { askedOf } from '../../../client/js/host/sheet.js';
 import { renderStrategyScreen } from '../../../client/js/render/strategy.js';
 import { renderDiscover, renderPlugin } from '../../../client/js/render/discover.js';
+import { renderDeskScreen } from '../../../client/js/render/desk-page.js';
 import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
 import { newSheet } from '../../../client/js/host/run-sheet-view.js';
 import { MODULES } from '../../../client/js/host/modules-view.js';
-import { t } from '../../../client/js/i18n/words.js';
+import { t, said } from '../../../client/js/i18n/words.js';
 import { listings, modulesListing } from './inventory.js';
 import { setMarkdown } from '../../../client/js/render/thread.js';
 import { reducers as R } from '../../../client/js/reducers/index.js';
@@ -31,7 +32,8 @@ import { MIN } from '../../../client/js/time.js';
 import { VIEW_1027 } from './lunhui-view.js';
 import { EVENT_VIEW, EVENT_VIEW_ID, EVENT_VIEW_WITH_B } from './event-view.js';
 import { stockDrawerHtml } from '../../../client/js/render/lunhui/stock.js';
-import { deskStatus } from './desk-status.js';
+import { deskStatus, DESK_NOW } from './desk-status.js';
+import { deskNews, deskPageStatus, deskRoutines, deskNewsWithReports } from './desk-news.js';
 import { editorHtml, dropOverlay, lightboxHtml } from '../../../client/js/composer/view.js';
 import { DEFAULT_LIMITS } from '../../../client/js/composer/files.js';
 import { slashItems, atItems } from '../../../client/js/composer/menus.js';
@@ -112,9 +114,9 @@ function marketStates() {
     // an A share's 5D history: the sessions on one grid, the previous close dashed, a hairline between sessions
     R.candlesLoaded(R.setRange(page('cn:600519'), { id: 'cn:600519', range: '5D' }), { id: 'cn:600519', range: '5D', at: NOW,
       data: { ok: true, range: '5D', sessions: ['2026-10-29', '2026-10-30'].map(date => ({ date, prec: 100, price: [100, 101, 102], amount: [1, 1, 1] })) } }),
-    // the desk (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab, before its status and with it; a level's mark on its row
-    // and on its page
-    R.setMarketsTab(read, 'desk'), R.deskLoaded(R.setMarketsTab(read, 'desk'), { data: deskStatus(), at: NOW }),
+    // the desk (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab's two places, kept as Watching since it left Markets
+    // (desk-page plan 1 Task 5), before the desk's status and with it; a level's mark on its row and on its page
+    R.setMarketsTab(read, 'watching'), R.deskLoaded(R.setMarketsTab(read, 'watching'), { data: deskStatus(), at: NOW }),
     R.deskLoaded(read, { data: deskStatus(), at: NOW }), R.deskLoaded(page('stock:NVDA'), { data: deskStatus(), at: NOW }),
   ];
 }
@@ -396,8 +398,8 @@ export function everyState() {
     // plan 3 of one entry, Task 7: the desk in the conversation - a phone text from each network and one naming none, a
     // schedule line, an alert line, and a line with no body
     deskFoldState(base),
-    // plan 3 of one entry, Task 8: the rail's desk lines and its scheduled group, a phone task naming its origin, and a
-    // strategy's page listing its standing order
+    // plan 3 of one entry, Task 8: the rail beside the desk's lines and standing orders (no line of it since desk-page plan
+    // 1 Task 6), a phone task naming its origin, and a strategy's page listing its standing order
     ...deskRailStates(base),
     // iMessage in Account › Identity (the iMessage plan), appended after the states above (after one entry's plan 3 since the merge)
     ...imessageStates(identitySigning(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' }))),
@@ -436,6 +438,76 @@ export function namedStates() {
     ['task-event-table', { ...page, analog: { tasks: { wt: read }, views } }],
     ['market-event-window', marketEventWindow()],
     ...abilityStates(),
+    // the Desk page (desk-page plan 1 Task 3): its title alone before the desk's status is read
+    ['desk-page', R.nav(emptyState(), { screen: 'desk', id: null })],
+    // the Desk page drawn (desk-page plan 1 Task 4): monitoring with the news, CRWV's Details and the rules open; paused; the
+    // desk off; an empty day with a standing order
+    ...deskPageStates(),
+    // the Routines column (desk-page plan 2 Task 7): a routine open with its history and a test running, the other paused with
+    // a refused act's line, a standing order after them; Delete asked; the cap spent; a store that cannot be read; a report
+    // under News with its Details open
+    ...deskRoutineStates(),
+    // the routine card in Messages (desk-page plan 3 Task 3): pending, with the turn's closing words left out; added, with its
+    // first run; a change waiting, with the routine it replaces; a confirm refused for the limit
+    ...routineCardStates(),
+  ];
+}
+
+// the routine card's states (desk-page plan 3 Task 3): Gravit's one conversation with an operator's ask, the words before the
+// call, the card and the closing words the thread leaves out, under a routines read at the desk status' own clock
+function routineCardStates() {
+  const P = 'p-0a1b2c3d';
+  const data = {
+    callId: 'k1', proposal: P, name: 'Idea screening', when: 'Trading days, every 30 min, 08:30–16:00 ET · 16 runs a day',
+    instruction: 'Read quotes and headlines and screen for trade ideas.\nFor each idea give the ticker, a one-line thesis and the number it rests on.\nPlace no orders.',
+    note: 'No economic calendar is connected; it screens without one.',
+  };
+  const thread = card => [
+    m('rc1', { seq: 1, from: 'you', text: 'Screen for trade ideas every 30 minutes on trading days and post them to News.' }),
+    m('rc2', { seq: 2, text: 'Drafting it as a routine.', data: { markdown: true } }),
+    m('tk1', { seq: 3, kind: 'tool', text: '', data: { callId: 'k1', name: 'routine_propose', result: '', isError: false } }),
+    m('uk1', { seq: 3, kind: 'routine', text: card.name, data: card }),
+    m('rc4', { seq: 4, text: "I've drafted the routine; confirm it above.", data: { markdown: true } }),
+  ];
+  const view = over => ({ id: P, name: data.name, when: data.when, instruction: data.instruction, note: data.note, state: 'pending', current: false, proposedAt: '2026-11-02T14:59:00.000Z', ...over });
+  const at = (card, proposal) => R.deskRoutinesLoaded(onConv(R.hostList(emptyState(), { conversations: [conv('s1', { messages: thread(card), loaded: true })], channels: [], bots: [] }), 's1'),
+    { data: deskRoutines({ proposals: [proposal] }), at: DESK_NOW });
+  const change = { ...data, replaces: 'idea-screening', instruction: 'Read quotes and headlines and screen for trade ideas.\nPost at most three.' };
+  return [
+    ['messages-routine-card', at(data, view())],
+    ['messages-routine-added', at(data, view({ state: 'confirmed', current: true, routine: 'idea-screening', settledAt: '2026-11-02T15:00:00.000Z', next: { date: '2026-11-02', slot: '15:30', at: '2026-11-02T20:30:00.000Z' } }))],
+    ['messages-routine-change', at(change, view({ instruction: change.instruction, replaces: 'idea-screening', replacesName: 'Idea screening' }))],
+    ['messages-routine-limit', R.deskProposalSaid(at(data, view()), { proposal: P, said: 'limit' })],
+  ];
+}
+
+// the Routines column's states (desk-page plan 2 Task 7), read at the desk status' own clock
+function deskRoutineStates() {
+  const desk = (routines, news = deskNews()) => R.deskRoutinesLoaded(R.deskNewsLoaded(R.deskLoaded(R.nav(emptyState(), { screen: 'desk', id: null }),
+    { data: deskPageStatus(), at: DESK_NOW }), { data: news, at: DESK_NOW }), { data: routines, at: DESK_NOW });
+  const scheduled = { scheduled: [{ order: 'pre-close', next: '2026-11-02T20:30:00.000Z', enabled: true, expired: false }], lines: [] };
+  const open = R.deskRoutineOpen(desk(deskRoutines()), { id: 'idea-screening' });
+  return [
+    ['desk-page-routines', R.deskRoutineSaid(R.tasksLoaded(open, { conversation: 's1', tasks: [], desk: scheduled, at: DESK_NOW }), { id: 'close-recap', message: said('desk.routines.refusedPaused') })],
+    ['desk-page-routine-delete', R.deskRoutineAsk(open, { id: 'idea-screening' })],
+    ['desk-page-cap-spent', desk(deskRoutines({ cap: { dailyTokens: 10_000_000, used: 10_200_000, spent: true } }))],
+    ['desk-page-routines-unreadable', desk(deskRoutines({ load: { ok: false, error: 'routines.json: Unexpected end of JSON input' } }))],
+    ['desk-page-reports', R.deskToggle(desk(deskRoutines({ routines: [] }), deskNewsWithReports()), { id: 'report:idea-screening:2026-11-13:12:30' })],
+  ];
+}
+
+// the Desk page's states (desk-page plan 1 Task 4), read at the desk status' own clock
+function deskPageStates() {
+  const desk = (status, news) => {
+    const s = R.deskLoaded(R.nav(emptyState(), { screen: 'desk', id: null }), { data: status, at: DESK_NOW });
+    return news ? R.deskNewsLoaded(s, { data: news, at: DESK_NOW }) : s;
+  };
+  const scheduled = { scheduled: [{ order: 'pre-close', next: '2026-11-02T20:30:00.000Z', enabled: true, expired: false }], lines: [] };
+  return [
+    ['desk-page-monitoring', R.deskRules(R.deskToggle(desk(deskPageStatus(), deskNews()), { id: 'a-4' }))],
+    ['desk-page-paused', desk(deskPageStatus({ off: { setAt: '2026-11-02T14:00:00.000Z', by: 'telegram', until: '2026-11-02T16:00:00.000Z' } }), deskNews())],
+    ['desk-page-off', desk(deskPageStatus({ desk: { enabled: false } }), null)],
+    ['desk-page-empty', R.tasksLoaded(desk(deskPageStatus(), deskNews({ alerts: { total: 0, groups: [] } })), { conversation: 's1', tasks: [], desk: scheduled, at: DESK_NOW })],
   ];
 }
 
@@ -597,9 +669,10 @@ function taskRailStates(base) {
   return [on, running];
 }
 
-// the desk folds into the rail (one-entry plan 3 Task 8): a task from each network's phone; a firing running, one done with
+// the desk beside the rail (one-entry plan 3 Task 8): a task from each network's phone; a firing running, one done with
 // its session, one failed, an annotation with its text; the standing orders armed with a next firing, a last outcome and a
-// strategy, armed with none next, disabled and expired; then the scheduled group alone; then a strategy's page with its order
+// strategy, armed with none next, disabled and expired - none of the desk's a rail line since desk-page plan 1 Task 6, so
+// the first draws the phone's tasks alone; then a standing order alone, no rail; then a strategy's page with its order
 function deskRailStates(base) {
   const iso = ms => new Date(ms).toISOString();
   const task = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
@@ -853,7 +926,7 @@ function composerBuild() {
   return { pieces, inputs };
 }
 export const composerPieces = () => composerBuild().pieces;
-export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
+export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'desk' ? renderDeskScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
   : st.route.screen === 'strategy' ? renderStrategyScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
   : st.route.screen === 'history' ? renderHistoryScreen(st, now)
@@ -961,9 +1034,14 @@ const CONTENT_FIELDS = new Set([
 // (the venue its status.yaml names and the Account's rows or refusal), What you sign's lines
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); an event analog view and its
-// task as the face read them (the worker's and web pages' words); `*` is any one key
+// task as the face read them (the worker's and web pages' words); the desk's news as the face answered it (its ledgers' and
+// Gravit's words), and a routine's when line and instruction (the face's line, the operator's words), a routine card's too
+// (Gravit's call and the face's when line) and a proposal's the read holds; `*` is any one key
 const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
-  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task']];
+  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data'],
+  ['deskPage', 'routines', 'data', 'routines', 'when'], ['deskPage', 'routines', 'data', 'routines', 'instruction'],
+  ['conversations', 'messages', 'data', 'when'], ['conversations', 'messages', 'data', 'instruction'],
+  ['deskPage', 'routines', 'data', 'proposals', 'when'], ['deskPage', 'routines', 'data', 'proposals', 'instruction'], ['deskPage', 'routines', 'data', 'proposals', 'replacesName']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 // the strings a content field holds that are an ability's declared parts, its tools' and skills' names in the abilities listing
 // (an array adds nothing to a path): drawn each whole, they pass as runs (abilityRuns below) and lend no known word

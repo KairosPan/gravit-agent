@@ -1,9 +1,9 @@
 // The rail of tasks, as facts (one-entry plan 2 Task 4): the three groups in order, a line's open gate read from its
-// worker's record, the short status in words under EN and ZH, and the count the Messages badge shows.
+// worker's record, the short status in words under EN and ZH, and the count the Messages badge shows. The desk's lines and
+// the standing orders are no rail line since the Desk screen (desk-page plan 1 Task 6): the orders are scheduledOf's.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { railOf, waitingCount } from '../../client/js/host/rail-view.js';
-import { deskLineHtml } from '../../client/js/render/tasks.js';
+import { railOf, scheduledOf, waitingCount } from '../../client/js/host/rail-view.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { withTable } from '../../client/js/i18n/words.js';
@@ -23,14 +23,14 @@ const ids = lines => lines.map(l => l.task.id);
 test('groups follow you → running → done and empty groups are left out', () => {
   const s = state([task('r1'), task('d1', { state: 'done', group: 'done' }), task('w1', { state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'a', tool: 'x' } }), task('f1', { state: 'failed', group: 'you' })]);
   const rail = railOf(s, NOW);
-  assert.deepEqual(Object.keys(rail), ['you', 'running', 'done', 'scheduled']);
+  assert.deepEqual(Object.keys(rail), ['you', 'running', 'done']);
   assert.deepEqual(ids(rail.you), ['w1', 'f1']);
   assert.deepEqual(ids(rail.running), ['r1']);
   assert.deepEqual(ids(rail.done), ['d1']);
   const only = railOf(state([task('r1')]), NOW);
   assert.deepEqual([only.you.length, only.running.length, only.done.length], [0, 1, 0]);
-  assert.deepEqual(railOf(state([]), NOW), { you: [], running: [], done: [], scheduled: [] });
-  assert.deepEqual(railOf(emptyState(), NOW), { you: [], running: [], done: [], scheduled: [] }, 'nothing loaded yet: nothing drawn');
+  assert.deepEqual(railOf(state([]), NOW), { you: [], running: [], done: [] });
+  assert.deepEqual(railOf(emptyState(), NOW), { you: [], running: [], done: [] }, 'nothing loaded yet: nothing drawn');
 });
 
 test("a waiting line carries the worker's open gate", () => {
@@ -85,48 +85,35 @@ test('waitingCount counts the you group', () => {
   assert.equal(waitingCount(emptyState()), 0);
 });
 
-// the desk folds in (one-entry plan 3 Task 8): today's firings and annotations, and the standing orders
+// the desk keeps its own screen (desk-page plan 1 Task 6): today's firings and annotations, and the standing orders, are no
+// rail line; the orders are scheduledOf's, for a strategy's page and the Desk screen's Routines
 const deskLine = (id, over = {}) => ({ id, kind: 'firing', title: id, state: 'done', startedAt: new Date(NOW - 5 * MIN).toISOString(), endedAt: new Date(NOW - MIN).toISOString(), ...over });
 const order = (id, over = {}) => ({ order: id, enabled: true, expired: false, ...over });
 const withDesk = (s, desk) => R.tasksLoaded(s, { conversation: 'conv', tasks: s.tasks.items, desk, at: NOW });
 
-test('desk lines fall in running or done, never you', () => {
-  const s = withDesk(state([task('r1'), task('f1', { state: 'failed', group: 'you' })]), {
-    scheduled: [], lines: [deskLine('brief:2026-11-09', { state: 'running', endedAt: undefined }), deskLine('annotation:p1', { kind: 'annotation', title: 'NVDA' }), deskLine('report:2026-11-09', { state: 'failed' })],
+test('the rail has three groups and none holds a desk line or a standing order', () => {
+  const s = withDesk(state([task('r1'), task('f1', { state: 'failed', group: 'you' }), task('d1', { state: 'done', group: 'done' })]), {
+    scheduled: [order('brief', { strategy: 'cn-market' }), order('old', { enabled: false })],
+    lines: [deskLine('brief:2026-11-09', { state: 'running', endedAt: undefined }), deskLine('annotation:p1', { kind: 'annotation', title: 'NVDA' }), deskLine('report:2026-11-09', { state: 'failed' })],
   });
+  assert.equal(s.tasks.desk.lines.length, 3, 'the slice keeps the desk as the face sent it');
   const rail = railOf(s, NOW);
-  assert.deepEqual(ids(rail.you), ['f1'], 'a failed firing waits on no one');
-  assert.deepEqual(rail.running.map(l => l.task?.id ?? l.desk.id), ['r1', 'brief:2026-11-09'], 'the tasks first, then the desk');
-  assert.deepEqual(rail.done.map(l => l.desk.id), ['annotation:p1', 'report:2026-11-09']);
-  assert.equal(rail.done[1].status, 'Failed');
-  withTable(ZH, () => assert.match(railOf(s, NOW).done[0].status, /完成$/));
+  assert.deepEqual(Object.keys(rail), ['you', 'running', 'done']);
+  assert.deepEqual([ids(rail.you), ids(rail.running), ids(rail.done)], [['f1'], ['r1'], ['d1']], 'tasks alone');
+  assert.deepEqual(railOf(withDesk(state([]), { scheduled: [order('brief')], lines: [deskLine('x')] }), NOW), { you: [], running: [], done: [] });
 });
 
-test("a desk line's time is New York's, saying ET, as a scheduled line's is", () => {
-  const s = withDesk(state([]), {
-    scheduled: [], lines: [deskLine('brief:2026-11-09', { state: 'running', startedAt: '2026-11-09T19:03:00.000Z', endedAt: undefined }), deskLine('annotation:p1', { kind: 'annotation', startedAt: '2026-11-09T19:00:00.000Z', endedAt: '2026-11-09T19:05:00.000Z' })],
+test("scheduledOf: the standing orders as lines, in the face's order, each with its next firing in New York's time or why it has none", () => {
+  const s = withDesk(state([task('d1', { state: 'done', group: 'done' })]), {
+    scheduled: [order('brief', { strategy: 'cn-market', next: '2026-11-09T20:30:00.000Z' }), order('late'), order('old', { enabled: false }), order('gone', { expired: true })], lines: [],
   });
-  const rail = railOf(s, Date.parse('2026-11-09T19:10:00.000Z'));
-  assert.equal(rail.running[0].status, 'Since 14:03 ET');
-  assert.equal(rail.done[0].status, 'Done 14:05 ET');
-  withTable(ZH, () => assert.equal(railOf(s, Date.parse('2026-11-09T19:10:00.000Z')).done[0].status, '14:05 ET 完成'));
-});
-
-test("a desk line's state is running, done or failed, anything else done: it never reaches a class unpinned", () => {
-  const s = withDesk(state([]), { scheduled: [], lines: [deskLine('a', { state: 'x" onclick="alert(1)' }), deskLine('b', { state: 7 }), deskLine('c', { state: 'failed' }), deskLine('d', { state: 'running' })] });
-  assert.deepEqual(s.tasks.desk.lines.map(l => l.state), ['done', 'done', 'failed', 'running']);
-  const rail = railOf(s, NOW);
-  const html = deskLineHtml(rail.done[0], new Set());
-  assert.match(html, /<span class="task-dot done"><\/span>/);
-  assert.doesNotMatch(html, /onclick/);
-});
-
-test('scheduled lines are their own group, after done', () => {
-  const s = withDesk(state([task('d1', { state: 'done', group: 'done' })]), { scheduled: [order('brief', { strategy: 'cn-market' }), order('old', { enabled: false })], lines: [] });
-  const rail = railOf(s, NOW);
-  assert.deepEqual(Object.keys(rail).slice(-2), ['done', 'scheduled']);
-  assert.deepEqual(rail.scheduled.map(l => l.scheduled.order), ['brief', 'old']);
-  assert.deepEqual([rail.you.length, rail.running.length, rail.done.length], [0, 0, 1], 'an order is no task');
+  const lines = scheduledOf(s, NOW);
+  assert.deepEqual(lines.map(l => l.scheduled.order), ['brief', 'late', 'old', 'gone']);
+  assert.equal(lines[0].scheduled.strategy, 'cn-market');
+  assert.deepEqual(lines.map(l => l.status), ['Next 15:30 ET', 'No next firing', 'Disabled', 'Expired']);
+  withTable(ZH, () => assert.match(scheduledOf(s, NOW)[0].status, /^下次 (?:\S+ )?15:30 ET$/));
+  assert.deepEqual(scheduledOf(state([]), NOW), []);
+  assert.deepEqual(scheduledOf(emptyState(), NOW), [], 'nothing loaded yet: no order');
 });
 
 test('the badge ignores desk lines', () => {

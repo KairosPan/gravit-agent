@@ -11,8 +11,8 @@ import { chip } from './thread.js';
 import { markdownHtml } from './markdown.js';
 import { kv } from './controls.js';
 import { runsView } from '../host/runs-view.js';
-import { railOf } from '../host/rail-view.js';
-import { railLineHtml } from './tasks.js';
+import { railOf, scheduledOf } from '../host/rail-view.js';
+import { taskLineHtml, scheduledLineHtml } from './tasks.js';
 import { positionSideWord } from './account.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
 import { price } from '../wire/market-model.js';
@@ -78,12 +78,12 @@ function headline(status) {
     (s.next ? `<div class="dsec-line">${th('channel.next', { next: s.next })}</div>` : '') + (numbers.length ? kv(numbers) : '');
 }
 
-// the strategy's tasks: the rail's lines whose task names this strategy, in the rail's groups' order, then its standing
-// orders' scheduled lines, each drawn as the rail draws it
+// the strategy's tasks: the rail's lines whose task names this strategy, in the rail's groups' order, drawn as the rail
+// draws them, then its standing orders' scheduled lines
 function tasks(state, name, now, open) {
   const rail = railOf(state, now);
-  const mine = l => (l.scheduled ? l.scheduled.strategy : l.task?.strategy) === name;
-  const lines = ['you', 'running', 'done', 'scheduled'].flatMap(g => rail[g].filter(mine).map(l => railLineHtml(l, g, state, now, open)));
+  const lines = [...['you', 'running', 'done'].flatMap(g => rail[g].filter(l => l.task.strategy === name).map(l => taskLineHtml(l, g, state, open))),
+    ...scheduledOf(state, now).filter(l => l.scheduled.strategy === name).map(l => scheduledLineHtml(l, now, open))];
   return sec(t('strategy.tasks'), lines.length ? `<div class="strat-tasks">${lines.join('')}</div>` : none(t('strategy.noTasks')));
 }
 

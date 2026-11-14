@@ -562,6 +562,16 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .key { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); }
 .key.yes { color: var(--up); }
 .key.no { color: var(--down); }
+/* the routine card (desk-page plan 3 Task 3): the when line with its clock, the instruction whole with its line breaks, Add to
+   Routines? beside ✗ ✓, a refused answer's line, the settled line with View on Desk */
+.rt-when { display: flex; align-items: center; gap: 6px; font-size: calc(13px * var(--fs)); color: var(--dim); }
+.rt-when svg { flex: none; }
+.rt-text { margin: 0; font-size: calc(13px * var(--fs)); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rt-ask { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rt-q { font-size: calc(13px * var(--fs)); font-weight: 600; }
+.rt-said { font-size: calc(13px * var(--fs)); color: var(--warn-text); }
+.rt-done { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: calc(13px * var(--fs)); }
+.rt-done a { font-weight: 600; white-space: nowrap; }
 
 /* ---- the composer ---- */
 .composer { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 12px 28px 18px; border-top: 1px solid var(--border); margin: 0; }
@@ -735,6 +745,65 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .grid-title { font-size: calc(17px * var(--fs)); font-weight: 700; letter-spacing: -0.01em; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; }
 .back-link { color: var(--dim); font-size: calc(13px * var(--fs)); font-weight: 600; }
+/* the Desk page (#/desk): its own scroll, the head above its columns */
+.main.dk { overflow-y: auto; }
+.dk-head-l { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dk-head-l .head-title { flex: 0 0 auto; }
+.dk-line { font-size: calc(13px * var(--fs)); color: var(--dim); }
+.dk-body { box-sizing: border-box; width: 100%; max-width: 1240px; padding: 22px 30px 40px; display: flex; flex-direction: column; gap: 18px; }
+.dk-dim { margin: 0; font-size: calc(13px * var(--fs)); color: var(--dim); }
+.dk-banner { display: flex; flex-direction: column; gap: 2px; padding: 14px 18px; border: 1px solid var(--warn-edge); border-radius: 16px; background: var(--warn-fill); color: var(--warn-text); font-size: calc(13px * var(--fs)); }
+.dk-banner strong { font-size: calc(15px * var(--fs)); }
+/* News then Routines, two columns that stack on a narrow window; each a card */
+.dk-cols { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.dk-col { min-width: 0; display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; border: 1px solid var(--card-border); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-card); }
+.dk-col-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.dk-col-head h2 { margin: 0; font-size: calc(17px * var(--fs)); font-weight: 700; letter-spacing: -.01em; }
+.dk-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.dk-link { margin-left: 4px; font-size: calc(13px * var(--fs)); color: var(--accent-ink); }
+.dk-part { display: flex; flex-direction: column; gap: 6px; }
+.dk-sub { font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--dim); }
+.dk-n { font-variant-numeric: tabular-nums; }
+.dk-groups { display: flex; flex-direction: column; gap: 12px; }
+.dk-group { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.dk-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.dk-sym { font-size: calc(16px * var(--fs)); font-weight: 700; }
+.dk-headline { margin: 0; font-size: calc(15px * var(--fs)); overflow-wrap: anywhere; }
+.dk-detail { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.dk-reason { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: calc(14px * var(--fs)); line-height: 1.6; }
+.dk-early { display: flex; align-items: baseline; gap: 10px; font-size: calc(13px * var(--fs)); }
+.dk-time { flex: 0 0 44px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.dk-move { flex: 0 0 64px; font-variant-numeric: tabular-nums; }
+.dk-note { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.dk-word { flex: 0 0 auto; font-size: calc(13px * var(--fs)); }
+.dk-early .dk-note + .dk-word, .dk-early .dk-move + .dk-word { margin-left: auto; }
+.dk-word.warn { color: var(--warn-text); font-weight: 600; }
+.dk-word.held { color: var(--dim); }
+.dk-fold { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--bg); color: var(--text); font-size: calc(14px * var(--fs)); font-weight: 600; text-align: left; }
+.dk-rules { display: flex; flex-direction: column; }
+.dk-rule { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 2px; border-bottom: 1px solid var(--border); font-size: calc(14px * var(--fs)); }
+.dk-routine { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.dk-routine-b { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* a routine's row (plan 2 Task 7): the name and its when line as one key, the switch; opened, its parts, history and keys */
+.dk-rt { min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.dk-rt-top { display: flex; align-items: center; gap: 12px; }
+.dk-rt-key { flex: 1 1 0; min-width: 0; min-height: 44px; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.dk-rt-key strong { font-size: calc(15px * var(--fs)); overflow-wrap: anywhere; }
+.dk-switch { position: relative; flex: 0 0 44px; width: 44px; height: 26px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--dim); cursor: pointer; }
+.dk-switch[aria-checked="true"] { background: var(--accent-ink); }
+.dk-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--surface); transition: left .15s; }
+.dk-switch[aria-checked="true"] .dk-knob { left: 21px; }
+.dk-said { margin: 0; font-size: calc(13px * var(--fs)); color: var(--warn-text); }
+.dk-text { margin: 0; font-size: calc(14px * var(--fs)); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dk-run { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: calc(13px * var(--fs)); }
+.dk-run-t { flex: 0 0 92px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dk-run .chip { padding: 1px 8px; }
+.dk-ask { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: var(--down-fill); color: var(--down); font-size: calc(13px * var(--fs)); }
+.dk-spent { margin: 0; font-size: calc(13px * var(--fs)); font-weight: 600; color: var(--warn-text); }
+@media (max-width: 900px) {
+  .dk-cols { grid-template-columns: minmax(0, 1fr); }
+  .dk-body { padding: 18px 16px 32px; }
+}
 /* a plugin's and a market's own page: the way back, the head with its keys, then the body */
 .main.plugin-page, .main.mk-page { gap: 18px; }
 .page-back { align-self: flex-start; min-height: 32px; display: inline-flex; align-items: center; }
@@ -952,10 +1021,6 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .mk-level { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--warn-fill); color: var(--warn-text); font-size: calc(11px * var(--fs)); font-weight: 700; line-height: 1.5; white-space: nowrap; vertical-align: middle; font-variant-numeric: tabular-nums; }
 .mk-plan { margin: 6px 0 0; font-size: calc(13px * var(--fs)); color: var(--text); }
 .mk-plan .mk-level { margin-left: 0; margin-right: 6px; }
-/* the Desk tab: its status lines beside Pause, then its sections */
-.desk { display: flex; flex-direction: column; gap: 16px; }
-.desk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.desk-head .mk-feed { flex: 1; min-width: 0; }
 .mk-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin: 0; padding: 14px 16px; border-radius: var(--radius-m); background: var(--bg); }
 .mk-facts div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .mk-facts dt { font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--dim); }

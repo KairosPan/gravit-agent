@@ -17,6 +17,7 @@ import {
   type DeskGuardExecution, type DeskToolDefinition,
 } from "../src/desk-tools.ts";
 import { HttpError } from "../src/http.ts";
+import type { Headline, NewsAnswer } from "../src/market-news.ts";
 import type { MarketQuote as LiveQuote, MarketQuoteIdentity as QuoteIdentity, MarketQuotePayload as QuotePayload } from "../src/market-quotes.ts";
 import { NO_QUOTES, unwiredMarketQuotes } from "../src/market-quotes.ts";
 import { recorder } from "./route-recorder.ts";
@@ -69,8 +70,8 @@ test("a gravit-desk agent gets the desk tools and web_fetch once; a Gravit agent
   const desk = fakeAgent("desk-1", DESK_PRESET);
   assert.deepEqual(root.create(desk.agent), [undefined], "the listener answers undefined: nothing for the serial dispatch to wait on");
   root.create(desk.agent);
-  assert.deepEqual(desk.names(), ["desk_quotes", "desk_state", "web_fetch"], "the two desk tools and web_fetch, into the agent's own layer, exactly once");
-  assert.deepEqual(desk.registered.slice(0, 2), definitions, "the definitions themselves, then dsh's own web_fetch");
+  assert.deepEqual(desk.names(), ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"], "the three desk tools and web_fetch, into the agent's own layer, exactly once");
+  assert.deepEqual(desk.registered.slice(0, 3), definitions, "the definitions themselves, then dsh's own web_fetch");
 
   const gravit = fakeAgent("gravit-1", "gravit");
   const bare = fakeAgent("bare-1", undefined);
@@ -95,18 +96,18 @@ test("a desk agent live before install gets the desk tools and web_fetch from th
   const root = fakeRoot({ live: [before.agent, gravit.agent, composing.agent] });
   installDeskTools(root.ctx, deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }));
   assert.deepEqual(root.calls, ["on", "list"], "the listener first, then the sweep, in the same tick: no agent falls between them");
-  assert.deepEqual(before.names(), ["desk_quotes", "desk_state", "web_fetch"], "a desk agent already live is swept");
+  assert.deepEqual(before.names(), ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"], "a desk agent already live is swept");
   assert.deepEqual(gravit.names(), [], "a Gravit agent is not");
   assert.deepEqual(composing.names(), [], "nor one whose preset is not mounted yet");
 
   root.create(before.agent);
-  assert.deepEqual(before.names(), ["desk_quotes", "desk_state", "web_fetch"], "its creation landing after the sweep adds nothing: exactly once");
+  assert.deepEqual(before.names(), ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"], "its creation landing after the sweep adds nothing: exactly once");
   composing.agent.ctx.preset = DESK_PRESET;
   root.create(composing.agent);
-  assert.deepEqual(composing.names(), ["desk_quotes", "desk_state", "web_fetch"], "the listener equips it once its creation is announced");
+  assert.deepEqual(composing.names(), ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"], "the listener equips it once its creation is announced");
   const after = fakeAgent("desk-after", DESK_PRESET);
   root.create(after.agent);
-  assert.deepEqual(after.names(), ["desk_quotes", "desk_state", "web_fetch"], "and one created after install gets them from the listener");
+  assert.deepEqual(after.names(), ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"], "and one created after install gets them from the listener");
 });
 
 test("the listener never throws: a failing register is swallowed and logged", () => {
@@ -142,7 +143,7 @@ test("the listener never throws: a failing register is swallowed and logged", ()
   assert.match(lines[2], /^gravit-face: .*agents is not in the tree/);
   const late = fakeAgent("desk-late", DESK_PRESET);
   blind.create(late.agent);
-  assert.deepEqual(late.names(), ["desk_quotes", "desk_state", "web_fetch"]);
+  assert.deepEqual(late.names(), ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"]);
 });
 
 test("desk_quotes validates, caps at 20, maps the hub's fields and survives 429", async () => {
@@ -219,6 +220,76 @@ test("desk_quotes renders one line per quote, its time as the desk quotes it: th
     ["2026-10-20T19:21:03.123456789Z", "2026-10-19T19:59:59Z", "2026-10-21T02:30:00Z", null], "the value keeps the hub's own times");
 });
 
+/** A headline as the Market lists one. */
+const headline = (time: string, title: string, outlet = "Reuters"): Headline => ({ time, outlet, title, url: `https://example.com/${encodeURIComponent(title)}` });
+
+test("desk_headlines answers each symbol's last day of headlines from news, newest first, eight at most, one line each", async () => {
+  /* 10:00 ET on Wednesday 2026-10-21 (EDT). */
+  const now = Date.parse("2026-10-21T14:00:00.000Z");
+  const asked: { symbols: readonly string[]; since: string }[] = [];
+  /* ten headlines an hour apart, the newest at 14:00 UTC */
+  const nvda = Array.from({ length: 10 }, (_, i) => headline(`2026-10-21T${String(14 - i).padStart(2, "0")}:00:00Z`, `NVDA story ${i}`));
+  const news = async (symbols: readonly string[], since: string): Promise<Map<string, NewsAnswer>> => {
+    asked.push({ symbols, since });
+    return new Map<string, NewsAnswer>([
+      ["NVDA", { headlines: [...nvda].reverse() }],
+      ["AAPL", { headlines: [headline("2026-10-20T19:45:00Z", "Apple\nsays more", "Bloomberg")] }],
+      ["MSFT", { headlines: [] }],
+      ["ZZZ", { unavailable: "the Market answered 503" }],
+    ]);
+  };
+  const tool = byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus, news, now: () => now }), "desk_headlines");
+  assert.equal(tool.timeoutMs, 15_000);
+
+  const symbols = ["NVDA", "AAPL", "MSFT", "ZZZ", "QQQ", "NVDA"];
+  const value = await tool.execute({ symbols }, exec());
+  assert.deepEqual(asked, [{ symbols: ["NVDA", "AAPL", "MSFT", "ZZZ", "QQQ"], since: "2026-10-20T14:00:00.000Z" }],
+    "each symbol once, in the order named, since 24 hours before now");
+  const [text] = tool.output.render({ symbols }, value);
+  const lines = text.text.split("\n");
+  const nvdaLines = lines.filter((line) => line.startsWith("NVDA "));
+  assert.equal(nvdaLines.length, 8, "eight headlines a symbol at most");
+  assert.deepEqual(nvdaLines.slice(0, 2), [
+    `NVDA 10:00 ET · Reuters · NVDA story 0 · ${nvda[0].url}`,
+    `NVDA 09:00 ET · Reuters · NVDA story 1 · ${nvda[1].url}`,
+  ], "newest first, whatever order the Market listed them in, on New York's clock");
+  assert.deepEqual(lines.slice(8), [
+    "AAPL 2026-10-20 15:45 ET · Bloomberg · Apple says more · https://example.com/Apple%0Asays%20more",
+    "MSFT no headlines in the last 24 hours",
+    "ZZZ unavailable: the Market answered 503",
+    "QQQ unavailable: not read",
+  ], "a headline from before today is dated, a title is one line; a symbol with none, one unavailable and one the read did not answer say so");
+  assert.deepEqual(tool.presentCall({ symbols: ["NVDA", "AAPL"] }), { card: "generic", title: "Headlines: NVDA, AAPL", kind: "read" });
+  assert.deepEqual(tool.presentCall(null), { card: "generic", title: "Headlines", kind: "read" });
+});
+
+test("desk_headlines takes 1 to 10 US tickers, refuses an A share, and with no news says headlines are not connected", async () => {
+  let reads = 0;
+  const news = async (): Promise<Map<string, NewsAnswer>> => { reads += 1; return new Map(); };
+  const tool = byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus, news }), "desk_headlines");
+  const eleven = Array.from({ length: 11 }, (_, i) => `S${String.fromCharCode(65 + i)}`);
+  const refused: [unknown, RegExp][] = [
+    [{ symbols: eleven }, /1 to 10/],
+    [{ symbols: [] }, /1 to 10/],
+    [{}, /1 to 10/],
+    [{ symbols: ["600519"] }, /"600519"/],
+    [{ symbols: ["nvda"] }, /"nvda"/],
+  ];
+  for (const [args, why] of refused) await assert.rejects(tool.execute(args, exec()), why, JSON.stringify(args));
+  assert.equal(reads, 0, "a refused call never reaches the read");
+  await tool.execute({ symbols: eleven.slice(0, 10) }, exec());
+  assert.equal(reads, 1, "ten is the cap");
+
+  const unwired = byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }), "desk_headlines");
+  const value = await unwired.execute({ symbols: ["NVDA"] }, exec());
+  assert.deepEqual(value, { error: "headlines are not connected" });
+  assert.deepEqual(unwired.output.render({ symbols: ["NVDA"] }, value), [{ type: "text", text: "headlines are not connected" }]);
+
+  const failing = byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus, news: async () => { throw new Error("market down"); } }), "desk_headlines");
+  assert.deepEqual(await failing.execute({ symbols: ["NVDA"] }, exec()), { error: "unavailable: market down" });
+  await assert.rejects(tool.execute({ symbols: ["NVDA"] }, exec(AbortSignal.abort(new Error("already cancelled")))), /already cancelled/);
+});
+
 test("desk_state returns readState(), its runs cut to the last ten and counted in runsInLedger", async () => {
   let reads = 0;
   const runs: DeskRun[] = Array.from({ length: 12 }, (_, i) => ({ bootedAt: `2026-10-${String(i + 1).padStart(2, "0")}T13:00:00.000Z`, pid: 100 + i, lost: false }));
@@ -244,7 +315,7 @@ test("desk_state carries the watch's block without its marks: near and recent st
   const today = { sent: 1, suppressed: { cooldown: 0, cap: 0, muted: 0, off: 0, window: 0 }, repeats: 0 };
   const watch: NonNullable<DeskStatus["watch"]> = {
     state: "watching", markets: { us: { state: "polling", watched: 1, notWatched: [], today }, cn: { state: "off", watched: 0, notWatched: [], today } },
-    files: [], near, marks: [mark("NVDA"), mark("AAPL"), mark("MSFT")], pending: 0, recent, filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 },
+    files: [], near, marks: [mark("NVDA"), mark("AAPL"), mark("MSFT")], pending: 0, recent, filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 }, rules: [], levels: 0,
   };
   const status: DeskStatus = { ...STATUS, watch };
   const state = byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: async () => status }), "desk_state");
@@ -334,7 +405,7 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
     assert.equal(root.executes.length, 1, `and the fetch record (enabled: ${enabled})`);
     const agent = fakeAgent(`desk-${enabled}`, DESK_PRESET);
     root.create(agent.agent);
-    assert.deepEqual(agent.names(), ["desk_quotes", "desk_state", "web_fetch"]);
+    assert.deepEqual(agent.names(), ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"]);
     await desk.ready;
     const fromTool = await byName(agent.registered, "desk_state").execute({}, exec()) as DeskStatus & { runsInLedger: number };
     const fromRoute = JSON.parse(await rec.call("/data/desk/status")) as { status: number; body: DeskStatus };
@@ -427,7 +498,7 @@ test("a desk agent's own layer offers web_fetch beside desk_quotes and desk_stat
   installDeskTools(root.ctx, deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }));
   const desk = fakeAgent("desk-1", DESK_PRESET);
   root.create(desk.agent);
-  assert.deepEqual(desk.names(), ["desk_quotes", "desk_state", "web_fetch"], "dsh's own web_fetch, in the agent's own layer");
+  assert.deepEqual(desk.names(), ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"], "dsh's own web_fetch, in the agent's own layer");
   assert.deepEqual(desk.injected, [["web"]], "through one child plugin that injects web");
   assert.deepEqual(desk.sections, ["tool:web_fetch"], "with its prompt section, in the same layer");
   const fetch = byName(desk.registered, "web_fetch");
