@@ -296,6 +296,7 @@ test("installDesk: enabled writes boot and shutdown; disabled writes nothing and
   assert.deepEqual(rec.paths(), [
     "/data/desk/status", "/data/desk/pause", "/data/desk/news",
     "/data/desk/routines", "/data/desk/routines/switch", "/data/desk/routines/test", "/data/desk/routines/delete",
+    "/data/desk/routines/confirm", "/data/desk/routines/dismiss",
   ], "every route whatever enabled says: the switch is the home's, not this face's");
   assert.equal((JSON.parse(await rec.call("/data/desk/news")) as { status: number }).status, 200, "a desk that is off still reads its News");
   assert.equal(quiet.routines, undefined, "a desk that is off starts no routines' clock");

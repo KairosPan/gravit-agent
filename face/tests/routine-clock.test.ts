@@ -386,6 +386,7 @@ test("a store cut short stops every routine, the status says so, and nothing wri
   assert.equal(s.load.ok, false);
   assert.match(s.load.ok ? "" : s.load.error, /routines\.json is not JSON/);
   assert.deepEqual(s.routines, []);
+  assert.deepEqual(s.proposals, []);
   assert.equal(await r.rc.test("r-00000001"), "unknown");
   assert.equal(await readFile(path, "utf8"), cut);
   assert.equal(r.lines.filter((l) => l.includes("routines store")).length, 1, "one line per distinct reason");
@@ -425,6 +426,44 @@ test("status gives the next run and the runs newest first, 20 at most", async ()
   assert.equal(one!.runs.at(-1)!.note, "Day 7", "the 26 runs' newest 20");
   assert.deepEqual(s.cap, { dailyTokens: 10_000_000, used: 0, spent: false });
   assert.deepEqual(two!.runs, []);
+  await r.rc.dispose();
+});
+
+test("status carries every proposal, newest first: its when line, the routine it replaces by name, a confirmed one's next run", async () => {
+  const fx = await fixture();
+  const proposal = (n: number, over: object): object => ({
+    id: `p-0000000${n}`, name: `Proposal ${n}`, schedule: AT_0900, instruction: `Do thing ${n}.`, sha256: "0".repeat(64),
+    origin: { kind: "web" }, proposedAt: `2026-11-0${n}T12:00:00.000Z`, ...over,
+  });
+  const settled = { settledAt: "2026-11-09T12:00:00.000Z" };
+  await writeFile(join(deskDir(fx.home), ROUTINES_FILE), `${JSON.stringify({
+    version: 1, budget: { dailyTokens: 10_000_000 },
+    routines: [routine(1, AT_0900), routine(2, AT_0900, { enabled: false })],
+    proposals: [
+      proposal(1, { state: "confirmed", ...settled, routine: "r-00000001" }),
+      proposal(2, { state: "confirmed", ...settled, routine: "r-00000002" }),
+      proposal(3, { state: "confirmed", ...settled, routine: "r-00000009" }),
+      proposal(4, { state: "pending", replaces: "r-00000001", note: "Earlier." }),
+      proposal(5, { state: "superseded", ...settled, replaces: "r-00000009" }),
+    ],
+  }, null, 2)}\n`);
+  const r = rig(fx, "2026-11-13T15:00:00Z");
+  const s = await r.rc.status();
+  assert.deepEqual(s.proposals.map((p) => p.id), ["p-00000005", "p-00000004", "p-00000003", "p-00000002", "p-00000001"]);
+  const byId = new Map(s.proposals.map((p) => [p.id, p]));
+  assert.deepEqual(byId.get("p-00000001"), {
+    id: "p-00000001", name: "Proposal 1", when: "Every day at 09:00 ET", instruction: "Do thing 1.", state: "confirmed",
+    proposedAt: "2026-11-01T12:00:00.000Z", settledAt: "2026-11-09T12:00:00.000Z", routine: "r-00000001",
+    next: { date: "2026-11-14", slot: "09:00", at: "2026-11-14T14:00:00.000Z" },
+  });
+  assert.equal(byId.get("p-00000002")!.next, undefined, "a switched-off routine's proposal has no next run");
+  assert.equal(byId.get("p-00000003")!.next, undefined, "nor one whose routine was deleted");
+  assert.deepEqual(byId.get("p-00000004"), {
+    id: "p-00000004", name: "Proposal 4", when: "Every day at 09:00 ET", instruction: "Do thing 4.", note: "Earlier.",
+    replaces: "r-00000001", replacesName: "Routine 1", state: "pending", proposedAt: "2026-11-04T12:00:00.000Z",
+  });
+  assert.equal(byId.get("p-00000005")!.replaces, "r-00000009");
+  assert.equal(byId.get("p-00000005")!.replacesName, undefined, "a replaced routine the store no longer holds has no name");
   await r.rc.dispose();
 });
 

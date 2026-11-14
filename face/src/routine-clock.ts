@@ -49,9 +49,10 @@ import {
 } from "./desk.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import type { MarketCalendar } from "./market-clock.ts";
+import { proposalViews } from "./routine-routes.ts";
 import { isRunRecord, runRoutine, type RoutineRunRecord, type RunDeps, type RunItem } from "./routine-run.ts";
 import { nextRun, nyInstant, SLOT_GRACE_MS, SLOT_WAIT_MS, slotsOn, whenText } from "./routine-schedule.ts";
-import { DAILY_TOKENS_DEFAULT, loadRoutines, routineOps, ROUTINES_LEDGER, type Routine, type StoreLoad } from "./routines.ts";
+import { DAILY_TOKENS_DEFAULT, loadRoutines, routineOps, ROUTINES_LEDGER, type Proposal, type Routine, type StoreLoad } from "./routines.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
 const BIN = "gravit-face";
@@ -95,11 +96,30 @@ export interface RoutineView {
   runs: RunView[];
 }
 
-/** What the page reads: the store's load, its routines, the day's cap and the routines' spend against it, the key of
- * the run under way, and the keys queued. */
+/** A proposal as the page shows it: its store fields, its when line ({@link whenText}), `replacesName` - the name of
+ * the routine `replaces` names, while the store holds it -, and `next`, a confirmed proposal's routine's next slot as
+ * its {@link RoutineView} gives it, while the store holds that routine and it is on. */
+export interface ProposalView {
+  id: string;
+  name: string;
+  when: string;
+  instruction: string;
+  note?: string;
+  replaces?: string;
+  replacesName?: string;
+  state: Proposal["state"];
+  proposedAt: string;
+  settledAt?: string;
+  routine?: string;
+  next?: { date: string; slot: string; at: string };
+}
+
+/** What the page reads: the store's load, its routines, every proposal it holds (newest first), the day's cap and the
+ * routines' spend against it, the key of the run under way, and the keys queued. */
 export interface RoutinesStatus {
   load: { ok: true } | { ok: false; error: string };
   routines: RoutineView[];
+  proposals: ProposalView[];
   cap: { dailyTokens: number; used: number; spent: boolean };
   running?: string;
   queued: string[];
@@ -589,6 +609,7 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
     return {
       load: load.ok ? { ok: true } : { ok: false, error: load.error },
       routines,
+      proposals: load.ok ? proposalViews(load.store, routines) : [],
       cap,
       ...(inHand?.started === true ? { running: inHand.key } : {}),
       queued: queue.map((item) => item.key),

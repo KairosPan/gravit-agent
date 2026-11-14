@@ -120,6 +120,10 @@ interface LedgerLine {
 const WEEK: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const ROUTINE_ID = /^r-[0-9a-f]{8}$/;
 const PROPOSAL_ID = /^p-[0-9a-f]{8}$/;
+/** Whether `v` is a routine's id: `r-` and eight lowercase hex digits. */
+export const isRoutineId = (v: unknown): v is string => typeof v === "string" && ROUTINE_ID.test(v);
+/** Whether `v` is a proposal's id: `p-` and eight lowercase hex digits. */
+export const isProposalId = (v: unknown): v is string => typeof v === "string" && PROPOSAL_ID.test(v);
 const STATES: readonly Proposal["state"][] = ["pending", "confirmed", "dismissed", "superseded", "expired"];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
