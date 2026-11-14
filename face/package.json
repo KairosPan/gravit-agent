@@ -61,6 +61,7 @@
     "@deepseek-ai/dsh-tools": "0.2.1-rc.5",
     "@deepseek-ai/dsh-web-fetch-http": "0.2.1-rc.5",
     "@deepseek-ai/dsh-workspace": "0.2.1-rc.5",
+    "gravit-memory": "github:KairosPan/gravit-memory#a55480ea98550de0c842c4dcac06edaaf6d06990",
     "js-yaml": "4.3.2",
     "zod": "4.5.4"
   },
