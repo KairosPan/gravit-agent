@@ -2342,12 +2342,19 @@ preset is Gravit's persona with the desk's contract, `../dsh/profile/desk.md`, i
 roles and the cycle, and an allow list in place of Gravit's roster: `read`, `write`, `edit`,
 `read_image`, `glob`, `grep`, `str_replace_editor`, `skill`, `web_search`, `todo_write`, and
 the retired alpaca-kit's `earnings`, `daily_bars`, `calendar` and `corp_actions` (which match no
-tool since `alpaca_kit` left the tree). No shell and no
+tool since `alpaca_kit` left the tree), and since the routines' engine (2026-11-14) two of the
+market row's reads, `mcp__market__market_explore` (what there is to trade, by tab or query) and
+`mcp__market__market_candles` (a market's bars) — present when the face mounts the `mcp-market`
+row, which `market/`'s dependencies must be installed for. No shell and no
 background jobs: an unattended turn on untrusted text — a forwarded message, a web page, a
 filing — must not read the key files. No order or account tool, no
-question tool, no goals, no delegation, no AKShare. Each desk agent is given three tools in its
+question tool, no goals, no delegation, no AKShare. Each desk agent is given four tools in its
 own layer: dsh's `web_fetch` (below, "The desk opens web pages"), which a source reader's child is
-also given, and two that no other session has:
+also given, and three that no other session has:
+`desk_headlines`, the Market's headlines for 1 to 10 US stocks over the last 24 hours, a
+symbol's newest 8 with their outlet and time (`src/market-news.ts`, the read the why posts
+quote) — a symbol the read cannot answer says so, and with no headline read it says headlines
+are not connected;
 `desk_quotes`, the price now for 1 to 20 symbols — US tickers or six-digit A shares (`600519`) —
 each with its feed and its exchange's time (`ROBINHOOD 10:21:03 ET`, `TENCENT 14:03:12 Beijing`),
 from the market's reads (`src/market-quotes.ts`: a US share's `explore` row, A shares' `quotes`
@@ -2611,10 +2618,20 @@ window`), the reason Gravit wrote for it — the reply's line for that symbol as
 pages its turn opened (`3 sources read`), **Details** opening the whole reply and its session in
 History — and the symbol's earlier alerts under it; then the watch's rules, folded, each with
 today's count, and the price levels as counted. On a day with no alert it shows the last day that
-had one, under its date. **Routines** (例行任务) lists the standing orders as read-only rows, each
-with its state and next firing (New York time); an order's switch stays in `standing.yml`. Every
-text from the ledgers is drawn as written, as text. The screen reads `GET /data/desk/status` every
-10 s and `GET /data/desk/news` every 15 s while it is shown.
+had one, under its date; under the alerts, the routines' reports of the last seven days, grouped
+by routine — the latest with **Details** opening its body, the earlier ones a row each.
+**Routines** (例行任务, `js/host/desk-routines.js`) draws the routines ("Routines" below), the
+day's cap under its head (`{used} of {cap} tokens today`, or `Daily cap spent; runs resume at
+00:00 ET`): each a row with its when line, or `Paused`, and its switch; opened, its
+`Instruction`, `When to run`, its `Run history` — each run `Running`, `Succeeded` (its headline),
+`Failed`, `Missed` or `Skipped` with its note, a test run marked `Test` — and **Test** (`Running…`
+until the face's read holds no test of it), **Edit in Messages** (it puts `Edit your routine:
+{name}` in Gravit's composer and sends nothing) and **Delete**, asked once more (`Deleting a
+routine can't be undone`). A store that cannot be read is one line and no rows; a refused act is
+one line under its row. Under the routines, the standing orders as read-only rows, each with its
+state and next firing (New York time); an order's switch stays in `standing.yml`. Every text from
+the ledgers is drawn as written, as text. The screen reads `GET /data/desk/status` every 10 s and
+`GET /data/desk/news` and `GET /data/desk/routines` every 15 s while it is shown.
 
 `GET /data/desk/news` (`src/desk-news.ts`, mounted with the status route, the desk on or off) is
 one New York day of the watch's alerts read back from the ledgers: `{ ok, date, today, sources,
@@ -2622,7 +2639,10 @@ alerts: { total, groups }, reports, rules, levels }` — each group a symbol's `
 `earlier` ones, each alert its `kind`, `movePct`, `nth`, its `delivery` (`sent`, `queued`,
 `undelivered`, `pending` or `held`, with the gate's word) and the `reason` the annotation wrote
 (`headline`, `label`, `text`, `pages`, `sessionId`); `today` is false when an earlier day stands
-in, and a torn or half-written line of `alerts.jsonl` is skipped, never an error.
+in, and a torn or half-written line of `alerts.jsonl` is skipped, never an error. `reports` is
+`{ total, groups }`: the `report` lines of `routines.jsonl` written in the seven days to now, each
+group a routine (`id`, and the `name` its latest report gives) with its `latest` report and its
+`earlier` ones, each its run's `key`, `t`, `headline` and `body`.
 
 The Messages rail draws tasks and approvals only, in three groups — Waiting on you, Running, Done
 today; the desk's firings, annotations and standing orders are not on it (since the desk page's
@@ -2633,7 +2653,73 @@ History.
 The desk routes, `GET /data/desk/status`, `GET /data/desk/news` and `POST /data/desk/pause`, keep
 only the `/data` loopback fence and no cookie ("Data routes and caches"), so anything on this
 machine — a shell turn included — can read the status and the news and pause the desk: the safe
-direction (charter D19).
+direction (charter D19). The routines' four routes keep the same fence, so anything on this
+machine can also switch a routine, test it or delete it.
+
+### Routines (src/routine-schedule.ts + src/routines.ts + src/routine-run.ts + src/routine-clock.ts + src/routine-routes.ts)
+
+A routine is a named instruction the operator confirmed, run on a schedule by an unattended
+desk agent that reads and reports (the desk page's plan 2, 2026-11-14). It informs, never
+orders, and never reaches the phone: its answer goes to the Desk screen, and a report is also a
+line in Gravit's one conversation. **Nothing in the product creates a routine yet** — the card
+that confirms one in Messages is the next plan — so today a routine exists only when the store
+holds one.
+
+**The store** is `$DSH_HOME/face/desk/routines.json` (`src/routines.ts`), mode 0600: `{ version:
+1, budget: { dailyTokens }, routines, proposals }`. A proposal is a routine waiting for the
+operator's confirmation; confirming it makes the routine (on), or changes the routine it
+`replaces` in place, under the same id; a routine's version is the sha256 of its name, schedule
+and instruction, recomputed on every load. Limits: a name 1 to 60 characters, an instruction 1 to
+2,000, a note at most 200; at most 20 routines and 10 pending proposals; a pending proposal
+expires after 7 days, and a settled one is removed after 30. Every act — propose, confirm,
+dismiss, switch, delete, the sweep — reads the file, checks it, writes it whole (a temp file
+renamed over it) under one lock on its path, and appends one line to its ledger,
+`routines.jsonl` beside it (`proposed`, `confirmed`, `dismissed`, `superseded`, `expired`,
+`switched`, `deleted`). The cap, `budget.dailyTokens`, is 10,000,000 when the store is first
+written; edit the file to change it. A file that does not parse or fails its check — cut short
+by a crash, mis-edited by hand — runs no routine, the Desk screen says so in one line, and every
+act refuses without writing: the file is yours to fix.
+
+**The schedule** (`src/routine-schedule.ts`) is New York's wall clock: `days` — `trading` (the
+days the US market calendar holds a session), `daily`, or a list of weekdays — with either
+`times` (1 to 8 `HH:MM`) or `every` (`minutes` 15 to 240 in steps of 5, `from` and `to`), at most
+48 slots a day. A wall-clock time a daylight-saving change skips is not a slot; one it repeats is
+one slot, its first occurrence. A slot before the routine's `confirmedAt` never runs.
+
+**A run** (`src/routine-run.ts`) is a fresh `gravit-desk` session in `desk/journal/`, on the desk's
+route, behind the instruction-chain fence, under the turn's 10-minute deadline. Its wake is
+`[routine · <name> · <date> <HH:MM> ET]`, the time the face cancels the turn, the instruction as
+confirmed, the face's rules — the first line a headline of at most 80 characters with its number
+(`1 idea: long AMD`, `No ideas`), then a blank line and the report, every figure with its source
+and time — and the desk's state while the watch runs. Its message's source is `routine`, so its
+`desk-turn` in `events.jsonl` carries `source: "routine"`, which the cap counts. A one-line answer
+is the headline alone; a longer one is a report too — a `report` line in `routines.jsonl` (its
+body cut at 8,000 characters), under News, and a line noted in the one conversation
+(`note-routine:<key>`, quoted as data, starting no turn). Nothing is sent to the phone.
+
+**The clock row** (`src/routine-clock.ts`), beside the standing orders' and on the same US
+calendar, ticks every 30 s. A slot's key is `<routine>:<date>:<HH:MM>`, consumed by its `started`
+in `routines.jsonl`: of two faces on one home, one runs it. Within 5 minutes of its minute a slot
+is queued; runs go one at a time, and a queued one that cannot start by 15 minutes after its
+minute is `missed`, `busy` (`another run was going`). A slot whose grace passed unstarted is
+`missed` — `asleep` when the Mac slept across it, `down` (`the face was not running`) when it came
+before this run of the face began, `late` (`found late`) otherwise —, never run late. A routine
+switched off, deleted or edited while its slot waits drops it with no record. The desk paused is
+one `skipped`, `paused` (`the desk was paused`), a routine a pause; the day's cap spent — the
+four token buckets of the day's `desk-turn` events whose source is `routine`, from 00:00 ET —
+is one `skipped`, `cap` (`the daily cap was spent`), a routine a New York day. A `started` with
+no end is `interrupted` at the next boot, never run again. A test run (**Test**, keyed
+`<routine>:test:<ISO time>`) goes to the front of the queue, runs while the routine is off, and
+is refused while the desk is paused or the cap spent. A routine's history shows its last 20 runs.
+
+**The routes** (`src/routine-routes.ts`, mounted with the status route, the desk on or off):
+`GET /data/desk/routines` — `{ load, routines, cap: { dailyTokens, used, spent }, running?,
+queued }`, each routine with its when line, its next slot and its runs, or with the desk off the
+store alone and no runs; `POST /data/desk/routines/switch { id, enabled }` → `{ routine }`;
+`POST /data/desk/routines/test { id }` → `{ result: "queued" }`, `409` `paused` or `cap`, `404`
+for no such routine; and `POST /data/desk/routines/delete { id }` → `{}`. An act's refusal
+answers by its kind — `400` invalid, `404` unknown, `409` a limit, `503` a store that cannot be
+read.
 
 ### Standing orders (src/schedule.ts + src/firing.ts + src/standing.ts + src/brief.ts + src/market-clock.ts)
 
@@ -4731,11 +4817,11 @@ fresh one will not open the face runs without search. Node prints its `node:sqli
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 34 smoke files (43 real boots), isolated; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 35 smoke files (44 real boots), isolated; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 34 smoke files (43 real boots) listed below; `FACE_SMOKE=1` runs
-them too (4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+Offline, `npm test` skips the 35 smoke files (44 real boots) listed below; `FACE_SMOKE=1` runs
+them too (4,618 tests in 299 files on 2026-11-14 with the routines' engine: 4,555 pass and 63 skipped offline; 4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -4785,9 +4871,10 @@ and `node --test` gives each file its own:
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
 | `dsh-ui-port-smoke.test.ts` | the host side of the dsh UI port on one stub boot: pins and their `pinned` frame, `commands/list`, `skills/list` on a cold session, the `turnOutline` and `sessionStats` projections, a `job/list` stream, `session/page` earlier history, an upload sent as a `file` part, the `sessionReferenceResolver` service, and `GET /data/search` over the stored logs; since plan 3 a cold conversation's `commands/list` and `commands/execute` (each resumes it at rc.5; after a follow's snapshot the command answers), a skill by its literal `/name` reaching the model with its content, and a conversation chip's mention bringing a `Referenced sessions` message; since plan 4 `imageLimits` on a cold session, an image refused on the stub's text-only route (`MODEL_DOES_NOT_SUPPORT_IMAGES`) and accepted on a second stub route that takes images (`stub-see`), logged as an image block and given back by `session/attachment`, a receipt never staged refused (`FILE_NOT_STAGED`), `role-pdf-page-reader` listed whole with `read_image`, and a command's dropped receipt settling the error text the page matches; since plan 5 a follow's snapshot window (`cursor`, `hasMore`) and the page before it holding the turn the outline names, `turnOutline` and `sessionStats` reaching `session/control` live, `job/list` on a cold session leaving it cold, and a bash job listed, followed to its output, stopped by `job/kill` and settled `killed` (a second kill answers `already-finished`) |
 | `router-smoke.test.ts` | the conversation and a task (one entry, plan 1), two boots on one home in `mkdtemp` directories under the system's temp directory — the conversation's fence refuses a home under this checkout's `.git` — with a root of its own holding `strategies/fx` and the stub model scripted per session: the boot opens the conversation on `gravit-router` in `<home>/face/conversation` through `installRouter`, as `main.ts` does, and `session/list` shows it; an operator prompt over the Remote wire has the stub call `task_start`, and a worker runs on `gravit` in `strategies/fx` under the conversation from its `task-brief:<worker>` message; its `task_report` ready reaches the conversation as one `[task · …]` message, in whose turn `task_start` is refused with `OPERATOR_ONLY`; the second boot resumes the same conversation and does not send the relay again |
-| `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes`, `desk_state` and, since the why-it-moved plan, dsh's `web_fetch`, each `mcp__*__<raw>` entry matching one server's tool, and none of the three reaches Gravit's session or the global view; the desk's `web_fetch` of a loopback URL is refused by the http provider (`non-public IP address`) and written as one `desk-fetch` line, Gravit's call finding no such tool and writing none; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
+| `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree — the market row's `market_explore` and `market_candles` among them, so it needs `market/`'s dependencies installed (`cd market && npm ci`) — plus `desk_quotes`, `desk_state`, `desk_headlines` and, since the why-it-moved plan, dsh's `web_fetch`, each `mcp__*__<raw>` entry matching one server's tool, and none of the three reaches Gravit's session or the global view; the desk's `web_fetch` of a loopback URL is refused by the http provider (`non-public IP address`) and written as one `desk-fetch` line, Gravit's call finding no such tool and writing none; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `phone-smoke.test.ts` | the bridge end to end on a real tree against `tests/fake-phone-account.ts`, a loopback fake of the account's inbox and send (since plan B1a; it replaced `telegram-smoke`): a text pushed into the inbox opens a desk turn and its answer reaches `/send` as `{kind: "chat", text, network: "telegram"}`; `/status` carries the phone line; `/pause` and `/resume`; the account away and back, the text answered; a send the account refuses shows as `send failed`; a parked card cut at its deadline; the write and the read canaries, the secret reaching the account as `<secret>`; the fence's plant; every send body carries only its four keys |
 | `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder. Then (P4) the strategies' book on 2026-11-30, a fake XSHG calendar beside the XNYS one and one fake quote source, in clock order: an A-share report on its Beijing date naming the screen that ran and its `TENCENT` close print; the canary in a strategy (five calls: it reads and rewrites `STANDING.md` and `levels.yml`, then tries the desk's `STANDING.md`), named by one outside-reports line and holding the next order by each pin in turn; two US reports at one anchor in file order; the fence in a strategy; a producer-only strategy order; the abort last |
+| `routines-smoke.test.ts` | one routine's run end to end, as `main.ts` installs the desk with the one conversation coming, on a fake clock and calendar and a stub model, its fixture root inside the repository (`tests/tmp/routines-smoke-<pid>/`): a routine proposed and confirmed through `src/routines.ts` at 08:00 ET, a tick at its 09:30 ET slot runs one fresh `gravit-desk` session in `desk/journal/`, woken by a message whose source is `routine`, which sees `desk_headlines` and, when the boot mounts the market row, `market_explore` and `market_candles`; the stub's headline and report make `routines.jsonl`'s `started`, `finished` (ended, reported) and `report`, a `desk-turn` with `source: "routine"` in `events.jsonl`, the run Succeeded under `GET /data/desk/routines` with its tokens against the cap, the report under `GET /data/desk/news`, and one `routine` line noted to a recording stand-in of the one conversation, whose id `noteMessage` makes `note-routine:<key>` |
 | `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`), a stub headline read: the boot's tick at 09:15 ET inside the US window (04:00–20:00 ET) polling the US market alone, its pre-market prints making no record, and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply, run in a session of its own (never the desk conversation's, which reaches the model for none of it) and recorded `annotated`; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card; and, appended, the read-through (case 11): a fall on AVGO past its rule, the stub's `read_through` naming AMD inside the annotation's run, the block under the reason in the same reply with its tape, one `direction` line and one `sent: true` line, the `annotated` record naming its id, and a second crossing under the same close ending with the face's one line and recording no second direction |
 | `readthrough-smoke.test.ts` | the read-through rows on a real boot over a fake quote source and a scratch record: `read_through` registered and both rows active; a `gravit-desk` session sees it, a bot's and the source reader's do not, and the conversation's allow list does not name it; a Gravit root session's call priced, its block carrying the event, recorded as a task's; a desk session with no run refused `ALERT_ONLY`; inside a run opened through `readThroughLane`, accepted with no event line and closed with the run, not given until the lane marks it sent, then given and refused `ALREADY_GIVEN` in a later run of the event; a rival outside the fence refused by name; US shares alone asked of the source and no request leaving the process |
 | `desk-carry-smoke.test.ts` | a graceful stop and a fresh boot, two real boots on one home, each in a child process of its own (the file runs itself as `one`, then `two`): the first face, the desk as `main.ts` installs it on the stub, posts `LONG` (`telegram:1`), whose model call hangs until its abort, and `QUEUED` (`telegram:2`) behind it, then shuts down as `main.ts` does - `desk.dispose(0)`, then the tree's; the ledger holds one `desk-carry` - `QUEUED`'s key, words and time, and `LONG`'s turn 1 as `cut` - before its `shutdown`; the second face's boot posts `QUEUED` again, its provenance line ending `(carried over a restart)`, the model answers it once and `LONG` not at all, the phone gets the restart line and then `echo QUEUED`, and `desk-carried` says `posted: 1, skipped: 0` (spec §16 H3, R93; the guard across dsh upgrades for `.superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md`) |
