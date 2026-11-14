@@ -244,7 +244,7 @@ test("desk_state carries the watch's block without its marks: near and recent st
   const today = { sent: 1, suppressed: { cooldown: 0, cap: 0, muted: 0, off: 0, window: 0 }, repeats: 0 };
   const watch: NonNullable<DeskStatus["watch"]> = {
     state: "watching", markets: { us: { state: "polling", watched: 1, notWatched: [], today }, cn: { state: "off", watched: 0, notWatched: [], today } },
-    files: [], near, marks: [mark("NVDA"), mark("AAPL"), mark("MSFT")], pending: 0, recent, filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 },
+    files: [], near, marks: [mark("NVDA"), mark("AAPL"), mark("MSFT")], pending: 0, recent, filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 }, rules: [], levels: 0,
   };
   const status: DeskStatus = { ...STATUS, watch };
   const state = byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: async () => status }), "desk_state");

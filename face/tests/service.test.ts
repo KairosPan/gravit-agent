@@ -264,7 +264,7 @@ test("formatStatus prints the watch lines after the standing and budget lines", 
         us: { state: "polling", session: { date: "2026-11-30", open: "2026-11-30T14:30:00.000Z", close: "2026-11-30T21:00:00.000Z" }, watched: 3, notWatched: [], lastPollAt: "2026-11-30T15:29:00.000Z", today },
         cn: { state: "off", watched: 0, notWatched: [], today: { ...today, sent: 0, suppressed: { ...today.suppressed, cooldown: 0 } } },
       },
-      files: [], near: [], marks: [], pending: 0, recent: [], filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 },
+      files: [], near: [], marks: [], pending: 0, recent: [], filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 }, rules: [], levels: 0,
     },
   };
   const lines = formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status, url: undefined, port: 3090, now }).split("\n");
@@ -936,7 +936,7 @@ const healthStatus = (extra: Partial<DeskStatus> = {}): DeskStatus => ({
   watch: {
     state: "watching",
     markets: { us: { state: "off", watched: 0, notWatched: [], today: todayOf }, cn: { state: "off", watched: 0, notWatched: [], today: todayOf } },
-    files: [], near: [], marks: [], pending: 0, recent: [], filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 },
+    files: [], near: [], marks: [], pending: 0, recent: [], filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 }, rules: [], levels: 0,
   },
   phone: { configured: true, polling: true, networks: [{ network: "telegram", polling: true }], queued: 0, strangers: 0 },
   ...extra,

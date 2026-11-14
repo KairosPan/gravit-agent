@@ -116,6 +116,8 @@ export const LEASE_STALE_MS = 120_000;
 export const NEAR_MAX = 10;
 /** The most levels the status's `marks` carries, for the Markets rows. */
 export const MARKS_MAX = 100;
+/** The most of a rule's own names the status's `rules` carries. */
+export const RULE_SYMBOLS_MAX = 50;
 /** How long the desk state waits for each market's snapshot. */
 export const STATE_QUOTES_TIMEOUT_MS = 3_000;
 /** How many polls of a session date a watched symbol may go unpriced before it is said. */
@@ -226,7 +228,21 @@ export interface WatchMark {
   distancePct: number | null;
 }
 
-/** What the watch reports: `/data/desk/status`'s `watch`. */
+/** One rule as the status lists it: `pct` a move rule's `move_pct` or a gap rule's `gap_pct`, `forms` a filing rule's;
+ * `symbols` the names its own list gives, at most {@link RULE_SYMBOLS_MAX}, and `holdings` and `levels` whether it
+ * also follows those files. */
+export interface RuleStatus {
+  id: string;
+  kind: "move_pct" | "gap" | "filing";
+  pct?: number;
+  forms?: string[];
+  symbols: string[];
+  holdings: boolean;
+  levels: boolean;
+}
+
+/** What the watch reports: `/data/desk/status`'s `watch`. `rules` in file order; `levels` the levels loaded across the
+ * level files. */
 export interface WatchStatus {
   state: "starting" | "idle" | "held-elsewhere" | "lease-failed" | "watching" | "stopped";
   markets: Record<Market, MarketWatchStatus>;
@@ -240,6 +256,8 @@ export interface WatchStatus {
   pending: number;
   recent: AlertSummary[];
   filings: { state: "off" | "no-contact" | "polling" | "refused-today"; symbols: number; aShares: number; seeded: number; lastPollAt?: string; lastError?: string };
+  rules: RuleStatus[];
+  levels: number;
   ledgerError?: string;
 }
 
@@ -337,6 +355,18 @@ export function cutAt(text: string, max: number): string {
   if (text.length <= max) return text;
   const code = text.charCodeAt(max - 1);
   return text.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
+}
+
+/** `rules` as the status lists them, in their order (see {@link RuleStatus}). */
+export function rulesStatus(rules: readonly Rule[]): RuleStatus[] {
+  return rules.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    ...(r.kind === "move_pct" ? { pct: r.movePct } : r.kind === "gap" ? { pct: r.gapPct } : { forms: [...r.forms] }),
+    symbols: r.symbols.symbols.slice(0, RULE_SYMBOLS_MAX),
+    holdings: r.symbols.holdings,
+    levels: r.symbols.levels,
+  }));
 }
 
 /** The lease's contents. */
@@ -1685,6 +1715,8 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       pending: day.pending.length,
       recent: recentOf(),
       filings: { ...filings },
+      rules: rulesStatus(book.rules),
+      levels: book.levels.length,
       ...(ledgerError === undefined ? {} : { ledgerError }),
     };
   }

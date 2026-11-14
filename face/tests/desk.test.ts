@@ -2013,6 +2013,8 @@ function watching(): WatchStatus {
     ],
     near: [], marks: [], pending: 2, recent: [],
     filings: { state: "no-contact", symbols: 0, aShares: 0, seeded: 0 },
+    rules: [],
+    levels: 0,
   };
 }
 
