@@ -9,8 +9,10 @@
  * (`gravit:cycle`, from the `cycle` config key, which `composeFace` fills from
  * `dsh/profile/cycle.md` through src/cycle.ts), the run protocols (one
  * section per entry of the `protocols` config key, which `composeFace` fills
- * from `dsh/profile/` through src/protocols.ts: `lunhui:run` and `lunhui:module`),
- * and the desk's contract (`gravit:desk`, from the `desk` config key; THE DESK, below).
+ * from `dsh/profile/` through src/protocols.ts: `lunhui:run`, `lunhui:module`
+ * and `gravit:memory`), the desk's contract (`gravit:desk`, from the `desk`
+ * config key; THE DESK, below) and the conversation's (`gravit:router`, THE
+ * CONVERSATION, below).
  *
  * WHY A DATE. The 2026-10-10 prompt trace found no date anywhere in the
  * assembled prompt, so Gravit could not tell a fresh bar from a stale one or
@@ -96,7 +98,9 @@
  * Its config is `{ text, root }`: every `<REPO>` in the text becomes `root`, the
  * repository's absolute path, at mount. It carries no cycle and no desk, and
  * {@link validateGravitConfig} refuses a row that carries it beside either; the
- * `gravit-router` preset (src/router-preset.ts) mounts it.
+ * `gravit-router` preset (src/router-preset.ts) mounts it. The router's row may
+ * carry `protocols` beside it: it carries the memory's, `gravit:memory`, alone,
+ * mounted and gated as every protocol is (THE PROTOCOLS, below).
  *
  * SCOPED, NOT GLOBAL. `ctx.systemPrompt.section` registers into the CALLING
  * context's scope, the preset revision's standing layer, so each section
@@ -115,13 +119,17 @@
  * THE PROTOCOLS. Each entry of `protocols` - `{ name, probe, text }` - is a
  * section named `name` at `DEPLOYMENT_PERSONA_SUFFIX - 60 + index` (its index
  * in the list), just before the cycle, gated as the cycle is but on its own
- * probe: `isRootOrFork(context) && canCall(ctx, context, probe)`. Two ship:
+ * probe: `isRootOrFork(context) && canCall(ctx, context, probe)`. Three ship:
  * `lunhui:run` (`dsh/profile/lunhui-run.md`, modules spec A9, §5.10) and, one
  * step after it, `lunhui:module` (`dsh/profile/lunhui-module.md`, modules-cards
- * spec G4), both probed on `lunhui_read_run`. The Lunhui tools are registered tree-wide, so the probe
+ * spec G4), both probed on `lunhui_read_run`, then `gravit:memory`
+ * (`dsh/profile/memory.md`), probed on `mcp__memory__memory_recall` - the name
+ * the `mcp-memory` row's MCP client registers the recall tool under
+ * (`mcp__<server>__<raw>`). The Lunhui tools are registered tree-wide, so the probe
  * only says the Lunhui rows mounted: the preset scope keeps the section from a
  * bot, the header from a spawn child, and the allow list (no `lunhui_read_run`)
- * with the header from a role child.
+ * with the header from a role child. The memory's probe reads the same way, and
+ * a mask without the recall tool (the conversation's names it) blanks it too.
  *
  * `interpolate: false` on every section because their text is prose, not a
  * template: the dsh system prompt is a strict `{{...}}` template with no
@@ -327,8 +335,8 @@ export function apply(ctx, config) {
     }));
   }
   /* Ten before the cycle, in their listed order (the run protocol, then the module protocol, one
-   * step after), each on its own probe: they read only where the Lunhui rows mounted, for Gravit
-   * and a fork child (the same text, the same cached prefix). */
+   * step after, then the memory's), each on its own probe: each reads only where its tools mounted,
+   * for Gravit and a fork child (the same text, the same cached prefix). */
   for (const [index, protocol] of (config.protocols ?? []).entries()) {
     ctx.effect(() => ctx.systemPrompt.section({
       name: protocol.name,

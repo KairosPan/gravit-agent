@@ -8,6 +8,9 @@ import { CONVERSATION_PRESET } from "../src/desk-names.ts";
 import { SEAT_READ_RAW_NAMES, SEAT_WRITE_RAW_NAMES } from "../src/orders.ts";
 import { BOT_PLUGIN_URL, GRAVIT_PLUGIN_URL, GRAVIT_ROW_ID } from "../src/roles.ts";
 import { ROUTER_ALLOW, routerPresetDefinition } from "../src/router-preset.ts";
+import { MEMORY_TOOLS } from "../src/memory-row.ts";
+import { readMemoryProtocol } from "../src/protocols.ts";
+import { validateGravitConfig } from "../plugins/gravit.js";
 
 test("the router preset is the gravit row with a router section, and a mask-only allow list", () => {
   assert.equal(CONVERSATION_PRESET, "gravit-router");
@@ -40,7 +43,26 @@ test("the allow list reads and never writes", () => {
     "mcp__*__market_explore", "mcp__*__market_quotes", "mcp__*__market_candles", "mcp__*__market_book",
     ...["overview", "read", "markets", "quote", "account", "statement", "holdings", "history", "asset", "venues", "live_positions", "live_markets"]
       .map((raw) => `mcp__*__portfolio_${raw}`),
+    "mcp__*__memory_recall", "mcp__*__memory_record", "mcp__*__memory_amend", "mcp__*__memory_propose",
+    "mcp__*__memory_reconcile", "mcp__*__memory_review", "mcp__*__memory_status",
   ]);
+});
+
+test("the conversation holds the memory's seven tools, by name", () => {
+  assert.deepEqual(ROUTER_ALLOW.slice(-7), ["mcp__*__memory_recall", "mcp__*__memory_record", "mcp__*__memory_amend",
+    "mcp__*__memory_propose", "mcp__*__memory_reconcile", "mcp__*__memory_review", "mcp__*__memory_status"]);
+  assert.deepEqual(ROUTER_ALLOW.slice(-7), MEMORY_TOOLS.map((raw) => `mcp__*__${raw}`), "the row's seven, in the row's order");
+});
+
+test("the router's row carries the memory's section and no Lunhui protocol", () => {
+  const memory = readMemoryProtocol();
+  const definition = routerPresetDefinition({ router: { text: "x", root: "/r" }, protocols: [memory] });
+  const config = definition.plugins![0].config as { router: unknown; protocols: Array<{ name: string }> };
+  assert.deepEqual(config, { router: { text: "x", root: "/r" }, protocols: [memory] });
+  assert.equal(validateGravitConfig(config), undefined, "the plugin takes the router beside protocols");
+  assert.deepEqual(config.protocols.map((p) => p.name), ["gravit:memory"]);
+  assert.deepEqual(routerPresetDefinition({ router: { text: "x", root: "/r" } }).plugins![0].config, { router: { text: "x", root: "/r" } },
+    "no protocols given, no protocols key");
 });
 
 test("router.md fits 2,000 bytes and names its five tools and <REPO>", () => {

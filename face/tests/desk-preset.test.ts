@@ -11,13 +11,17 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { load } from "js-yaml";
 import { Context } from "@deepseek-ai/cordis";
 import { entryListProblem, type PresetDefinition } from "@deepseek-ai/dsh-agent-preset-registry";
 import {
   BOT_PLUGIN_URL, DESK_ALLOW, DESK_PRESET, declareDeskPreset, deskPresetDefinition, deskRosterProblem,
 } from "../src/desk-preset.ts";
-import { BOT_PLUGIN_URL as ROLES_BOT_PLUGIN_URL, GRAVIT_PLUGIN_URL } from "../src/roles.ts";
+import { BOT_PLUGIN_URL as ROLES_BOT_PLUGIN_URL, GRAVIT_PLUGIN_URL, ROLES_ROOT } from "../src/roles.ts";
+import { BOTS_ROOT } from "../src/overlay.ts";
 import { declarePreset } from "../src/bot-presets.ts";
 import { validateBotConfig } from "../plugins/bot.js";
 import { validateGravitConfig } from "../plugins/gravit.js";
@@ -78,6 +82,36 @@ test("DESK_ALLOW is exactly the plan's 15 names, in order - no shell, no job too
     "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions", "read_through",
   ]);
   assert.equal(Object.isFrozen(DESK_ALLOW), true);
+});
+
+/* Who holds the memory's tools (memory-connect plan 1): Gravit's workers, unmasked, and the conversation, by
+ * name - never the desk, a bot or a role. A debate member is a bot's preset, read-only, so it holds none either. */
+test("the desk holds no memory tool", () => {
+  assert.equal(DESK_ALLOW.length, 15);
+  assert.ok(DESK_ALLOW.every((n) => !n.includes("memory_")));
+});
+
+test("no bot and no role names a memory tool", () => {
+  /** Every `allow` list anywhere in a parsed composition or role file. */
+  const allowsIn = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.flatMap(allowsIn);
+    if (value === null || typeof value !== "object") return [];
+    return Object.entries(value).flatMap(([key, inner]) =>
+      key === "allow" && Array.isArray(inner) ? inner.map(String) : allowsIn(inner));
+  };
+  const dirs = (root: string) => readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(root, e.name));
+  const files = [
+    ...dirs(BOTS_ROOT).map((dir) => join(dir, "agent.cordis.yml")),
+    ...dirs(ROLES_ROOT).map((dir) => join(dir, "role.yml")),
+  ].filter((file) => existsSync(file));
+  assert.ok(files.length >= 10, `the shipped bots and roles: ${files.length}`);
+  let named = 0;
+  for (const file of files) {
+    const allow = allowsIn(load(readFileSync(file, "utf8")));
+    named += allow.length;
+    assert.deepEqual(allow.filter((name) => name.includes("memory_")), [], file);
+  }
+  assert.ok(named > 0, "the lists were read");
 });
 
 /* Everything the registry and the two plugins would refuse at the mount is refused here first: the

@@ -718,10 +718,10 @@ test("a composition without an agent-instructions row gets no instructions patch
 });
 
 /* The run protocols are read where the cycle is and refused the same way: a protocols directory
- * without lunhui-run.md, or with it but without lunhui-module.md, refuses the compose, its message
- * opening with the missing file, so Gravit never boots the Lunhui rows without the order they are
- * driven in. `protocolsDir` points the read at a fixture directory. */
-test("composeFace refuses a protocols directory with no lunhui-run.md or no lunhui-module.md, its message opening with the path", async () => {
+ * without lunhui-run.md, or with it but without lunhui-module.md, or without memory.md, refuses the
+ * compose, its message opening with the missing file, so Gravit never boots the Lunhui rows without
+ * the order they are driven in. `protocolsDir` points the read at a fixture directory. */
+test("composeFace refuses a protocols directory with no lunhui-run.md, no lunhui-module.md or no memory.md, its message opening with the path", async () => {
   const home = freshHome();
   const rolesRoot = await makeRolesRoot();
   const protocolsDir = mkdtempSync(join(tmpdir(), "face-protocols-"));
@@ -732,11 +732,15 @@ test("composeFace refuses a protocols directory with no lunhui-run.md or no lunh
     assert.throws(() => composeFace({ profileName: "face", port: 3090, dshHome: home, rolesRoot, protocolsDir }),
       (e: Error) => e.message === `${join(protocolsDir, "lunhui-module.md")}: the protocol file is missing`);
     await writeFile(join(protocolsDir, "lunhui-module.md"), "# 单模块\n\n只做这一个。\n");
+    assert.throws(() => composeFace({ profileName: "face", port: 3090, dshHome: home, rolesRoot, protocolsDir }),
+      (e: Error) => e.message === `${join(protocolsDir, "memory.md")}: the protocol file is missing`);
+    await writeFile(join(protocolsDir, "memory.md"), "Memory. Record first.\n");
     const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home, rolesRoot, protocolsDir });
     const plugins = (composeEntries([patches]).find((entry) => entry.id === "preset-gravit")?.config as unknown as { plugins: Array<{ config: { protocols: unknown } }> }).plugins;
     assert.deepEqual(plugins[0].config.protocols, [
       { name: "lunhui:run", probe: "lunhui_read_run", text: "# 运行\n\n先冻结。" },
       { name: "lunhui:module", probe: "lunhui_read_run", text: "# 单模块\n\n只做这一个。" },
+      { name: "gravit:memory", probe: "mcp__memory__memory_recall", text: "Memory. Record first." },
     ], "the fixtures' texts are the ones composed, in order");
   } finally {
     await rm(rolesRoot, { recursive: true, force: true });

@@ -130,7 +130,7 @@ import { CYCLE_PATH, DESK_PATH, readCycle, readDesk, readRouter, REPO_ROOT, ROUT
 import { declareDeskPreset, deskPresetDefinition, deskRosterProblem } from "./desk-preset.ts";
 import { routerPresetDefinition } from "./router-preset.ts";
 import { installSourceReader, SOURCE_READER_ROLE } from "./source-reader.ts";
-import { readProtocols } from "./protocols.ts";
+import { readMemoryProtocol, readProtocols } from "./protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { accountSeatPatches } from "./account-seat.ts";
 import { marketRowPatches } from "./market-row.ts";
@@ -247,7 +247,8 @@ export interface FaceBootOptions {
   /** The directory the run protocols are read from (`dsh/profile/`, src/protocols.ts); tests point
    * it at a fixture. Defaults to the repository's. {@link composeFace} reads them beside the cycle
    * and hands them to Gravit's default preset as the `gravit` row's `protocols`, refusing the
-   * compose the same way, path-first. */
+   * compose the same way, path-first; {@link bootFace} reads the memory's from it again for the
+   * conversation's preset. */
   protocolsDir?: string;
   /** Leave the gateway's readiness uncommitted: the caller commits it with
    * {@link BootedFace.commitReady} once its OWN routes are mounted. `main.ts`
@@ -1107,8 +1108,12 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * the roster check below. Disposed with the root, as the bots are. */
     await declareDeskPreset(ctx, deskPresetDefinition({ desk }));
     /* The conversation's preset (src/router-preset.ts), right after the desk's and for the same reason: its mask
-     * is plugins/bot.js, mounted eagerly. Its section names the repository by `<REPO>`, filled with REPO_ROOT. */
-    await declarePreset(ctx, routerPresetDefinition({ router: { text: readRouter(opts.routerPath ?? ROUTER_PATH), root: REPO_ROOT } }), "router preset");
+     * is plugins/bot.js, mounted eagerly. Its section names the repository by `<REPO>`, filled with REPO_ROOT. Its
+     * gravit row carries the memory's section alone, never the Lunhui protocols (src/protocols.ts). */
+    await declarePreset(ctx, routerPresetDefinition({
+      router: { text: readRouter(opts.routerPath ?? ROUTER_PATH), root: REPO_ROOT },
+      protocols: [readMemoryProtocol(opts.protocolsDir)],
+    }), "router preset");
     /* One preset per role (D20/B1; src/roles.ts `rolePresetDefinition`), declared right after the desk
      * and for the same reason: each is plugins/bot.js carrying the role's persona and mask, mounted
      * eagerly at the declaration, so it must find the settled tree - a name the tree lacks is dropped

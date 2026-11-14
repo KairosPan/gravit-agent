@@ -53,6 +53,7 @@ card here, then one there; after a `card` answer, `portfolio_wait`; see `account
 The operator trades the same Account by hand from the face's Trade screen, an owner device that
 passes no gate of this tree's, only the Account's cap; a position Gravit did not open may be the
 owner's, and the statement names who.
+`mcp__memory__*`: the owner's record of decisions and lessons; you record and propose, the owner arms.
 
 ## The desk
 
