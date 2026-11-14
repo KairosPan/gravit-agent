@@ -340,8 +340,8 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     const roster = await turn("ROSTER_PROBE");
     const known = new Set(tools.schemas().map((s) => s.name));
     const expanded = expandAllow([...DESK_ALLOW], known);
-    assert.deepEqual(expanded.missing, [], "every name DESK_ALLOW asks for is in this tree, the stand-in answering for alpaca-kit");
-    const expected = [...expanded.allow, "desk_quotes", "desk_state", "web_fetch"].sort();
+    assert.deepEqual(expanded.missing, [], "every name DESK_ALLOW asks for is in this tree, the stand-in answering for alpaca-kit and the face's market row for its two reads");
+    const expected = [...expanded.allow, "desk_quotes", "desk_state", "desk_headlines", "web_fetch"].sort();
     assert.deepEqual(names(tools.schemas(deskAgent)), expected, "the desk sees (DESK_ALLOW expanded ∩ tree) ∪ the desk tools, exactly");
     const first = requests.get(deskId)?.[0];
     assert.ok(first !== undefined, "the desk's first request reached the model");
@@ -389,7 +389,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
       assert.equal(parameters?.required?.includes(arg) ?? false, tool === "glob", `${tool}'s ${arg} is ${tool === "glob" ? "required" : "optional"}`);
     }
     assert.equal(names(tools.schemas(deskAgent)).includes(ORDER_STAND_IN), false, "the desk never sees the order stand-in");
-    for (const deskTool of ["desk_quotes", "desk_state", "web_fetch"]) assert.equal(known.has(deskTool), false, `the global view has no ${deskTool}`);
+    for (const deskTool of ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"]) assert.equal(known.has(deskTool), false, `the global view has no ${deskTool}`);
     const base = `http://127.0.0.1:${ctx.webServer.port}`;
     mountClient(ctx);
     const cookie = await signIn(ctx, base);
@@ -399,7 +399,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     assert.ok(gravit !== undefined);
     const gravitTools = names(tools.schemas(gravit));
     assert.ok(gravitTools.includes(ORDER_STAND_IN) && gravitTools.includes(`mcp__${SERVER}__earnings`), "Gravit's view is the tree's");
-    for (const deskTool of ["desk_quotes", "desk_state", "web_fetch"]) assert.equal(gravitTools.includes(deskTool), false, `Gravit's session has no ${deskTool}`);
+    for (const deskTool of ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"]) assert.equal(gravitTools.includes(deskTool), false, `Gravit's session has no ${deskTool}`);
 
     /* 2. THE PROMPT the desk's first request carried: Gravit's persona, the date, the desk contract - and neither
      * the cycle contract nor the roles section, which belong to Gravit's preset. The control is a turn on the

@@ -38,7 +38,7 @@ export const CYCLE_MAX_BYTES = 3300;
 export const DESK_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dsh", "profile", "desk.md");
 
 /** The largest `desk.md`, in bytes as `wc -c` counts them. */
-export const DESK_MAX_BYTES = 3000;
+export const DESK_MAX_BYTES = 3_200;
 
 /** The repository's root, the directory two above this module (`face/src/..`/..), resolved as
  * {@link DESK_PATH} is. The conversation's section names it in place of its `<REPO>` placeholder. */

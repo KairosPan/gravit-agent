@@ -113,6 +113,7 @@ test("DESK_WRITE_TOOLS are DESK_ALLOW's writers, each with the path arguments th
   assert.deepEqual(DESK_ALLOW.filter((name) => !(DESK_WRITE_TOOLS as readonly string[]).includes(name)), [
     "read", "read_image", "glob", "grep", "skill", "web_search", "todo_write",
     "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions", "read_through",
+    "mcp__market__market_explore", "mcp__market__market_candles",
   ]);
 });
 
@@ -135,6 +136,7 @@ test("DESK_READ_TOOLS are DESK_ALLOW's readers, each with the path argument the 
   const judged: readonly string[] = [...DESK_WRITE_TOOLS, ...DESK_READ_TOOLS];
   assert.deepEqual(DESK_ALLOW.filter((name) => !judged.includes(name)), [
     "skill", "web_search", "todo_write", "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions", "read_through",
+    "mcp__market__market_explore", "mcp__market__market_candles",
   ]);
 });
 

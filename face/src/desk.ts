@@ -1893,7 +1893,8 @@ async function readAlertsCached(home: string): Promise<{ records: (RailAlert | R
  *   schedule's), whether a pid lives, `edgar`, SEC's fetch and contact: `null` for none, absent for the face's
  *   own, the global `fetch` with `ALPHA_EDGAR_USER_AGENT` when that is set - the watch's filings poll and its why
  *   posts' filings read both use it - and `news`, a why post's headline read: `null` for none, absent for the
- *   Market's (src/market-news.ts `marketNews`, loaded with the watch); the watch's posts wait on the annotation
+ *   Market's (src/market-news.ts `marketNews`, loaded with the watch or on the first `desk_headlines` call, which
+ *   reads the Market's whatever this says); the watch's posts wait on the annotation
  *   lane's `idle`, so passes that come while a turn runs fold into one post; `log`,
  *   where every line of the desk's goes - the guard's, its line at install naming what the secret
  *   check covers included, the tools', the ledger's, the conversation's, the bridge's and the clock's -
@@ -1958,9 +1959,14 @@ export function installDesk(
   const recordFetch = ({ sessionId, url }: DeskFetch): Promise<void> =>
     appendEvent(home, { t: new Date(now()).toISOString(), kind: "desk-fetch", sessionId, url }, { log });
   const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root, { log, recordFetch });
+  /* The Market's headline read (src/market-news.ts), loaded on its first use - a desk_headlines call or the watch's
+   * start - and shared by both, so a desk that never reads one never loads the module. */
+  let newsRead: Promise<(symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>> | undefined;
+  const marketNewsRead = () => newsRead ??= import("./market-news.ts").then((module) => module.marketNews());
   const removeTools = deps.ctx === undefined || deps.quotes === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
     quotes: deps.quotes,
     readState: () => deskStatus(status),
+    news: async (symbols, since) => (await marketNewsRead())(symbols, since),
   }), { log });
   if (!enabled) {
     return {
@@ -2127,7 +2133,7 @@ export function installDesk(
       const userAgent = process.env.ALPHA_EDGAR_USER_AGENT;
       const edgar = watchRow.edgar === null ? undefined
         : watchRow.edgar ?? (userAgent ? { fetch: globalThis.fetch as EdgarFetch, userAgent } : undefined);
-      const news = watchRow.news === null ? undefined : watchRow.news ?? (await import("./market-news.ts")).marketNews();
+      const news = watchRow.news === null ? undefined : watchRow.news ?? await marketNewsRead();
       if (disposing !== undefined) return undefined;
       const handle = watchModule.installWatch({
         home,
