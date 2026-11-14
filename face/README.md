@@ -2608,9 +2608,11 @@ turn (`DEVELOPMENT.md` §9).
 `client/js/render/desk-page.js` over `js/host/desk-page-view.js` and `js/host/desk-news.js`), the
 rail's item between Messages and Markets. Its head bar reads `Desk` with the desk's state —
 `Monitoring`, `Off hours`, `Paused`, `Muted until …` or `Watch stopped` — the line `US equities
-04:00–20:00 ET · <n> watch rules` and **Pause**; paused, a banner says by whom and since when, and
-that `npm run desk -- resume` lifts it. A desk that is off, or a status that cannot be read, is one
-line and no columns. Below, two columns. **News** (资讯) draws the sources the watch reads — Quotes,
+04:00–20:00 ET · <n> watch rules` and **Pause**; a stopped watch's line says why instead — `The
+watch is not running` when there is none, else its state (idle, held by another face, its lease
+failed). **Pause** is not drawn while the desk is paused or off; paused, a banner says by whom and
+since when, and that `npm run desk -- resume` lifts it. A desk that is off, or a status that cannot
+be read, is one line and no columns. Below, two columns. **News** (资讯) draws the sources the watch reads — Quotes,
 Headlines, Filings, each with its state, and fund flows and social sentiment as not connected —,
 one line saying no economic calendar or earnings source is connected, a filter (`All`, then each
 symbol), and the day's alerts grouped by symbol, newest first: each group's latest alert with its
@@ -2629,7 +2631,8 @@ day's cap under its head (`{used} of {cap} tokens today`, or `Daily cap spent; r
 until the face's read holds no test of it), **Edit in Messages** (it puts `Edit your routine:
 {name}` in Gravit's composer and sends nothing) and **Delete**, asked once more (`Deleting a
 routine can't be undone`). A store that cannot be read is one line and no rows; a refused act is
-one line under its row. Under the routines, the standing orders as read-only rows, each with its
+one line under its row; `No routines yet.` is drawn only once a routines read has answered with
+neither a routine nor a standing order. Under the routines, the standing orders as read-only rows, each with its
 state and next firing (New York time); an order's switch stays in `standing.yml`. Every text from
 the ledgers is drawn as written, as text. The screen reads `GET /data/desk/status` every 10 s and
 `GET /data/desk/news` and `GET /data/desk/routines` every 15 s while it is shown.
@@ -2665,8 +2668,9 @@ A routine is a named instruction the operator confirmed, run on a schedule by an
 desk agent that reads and reports (the desk page's plan 2, 2026-11-14). It informs, never
 orders, and never reaches the phone: its answer goes to the Desk screen, and a report is also a
 line in Gravit's one conversation. A routine is created from Messages (the desk page's plan 3,
-2026-11-14; "Creating one" below): Gravit proposes it, and your ✓ on its card adds it. Only your
-click adds, changes, resumes, tests or deletes a routine — no tool and no phone command does.
+2026-11-14; "Creating one" below): Gravit proposes it, and your ✓ on its card adds it. No tool and
+no phone command adds, changes, resumes, tests or deletes a routine: those are the page's routes,
+behind the same loopback fence as the desk's others (above).
 
 **The store** is `$DSH_HOME/face/desk/routines.json` (`src/routines.ts`), mode 0600: `{ version:
 1, budget: { dailyTokens }, routines, proposals }`. A proposal is a routine waiting for the
@@ -2687,7 +2691,10 @@ act refuses without writing: the file is yours to fix.
 days the US market calendar holds a session), `daily`, or a list of weekdays — with either
 `times` (1 to 8 `HH:MM`) or `every` (`minutes` 15 to 240 in steps of 5, `from` and `to`), at most
 48 slots a day. A wall-clock time a daylight-saving change skips is not a slot; one it repeats is
-one slot, its first occurrence. A slot before the routine's `confirmedAt` never runs.
+one slot, its first occurrence. A slot before the routine's `confirmedAt`, or before its
+`enabledAt` — when it was last switched on, stamped by the switch, left as it is by a switch off and
+kept by a change; absent until the first switch on, and no part of the version —, is never run and
+never recorded: the slots that passed while a routine was off leave no line.
 
 **A run** (`src/routine-run.ts`) is a fresh `gravit-desk` session in `desk/journal/`, on the desk's
 route, behind the instruction-chain fence, under the turn's 10-minute deadline. Its wake is
@@ -2710,8 +2717,10 @@ before this run of the face began, `late` (`found late`) otherwise —, never ru
 switched off, deleted or edited while its slot waits drops it with no record. The desk paused is
 one `skipped`, `paused` (`the desk was paused`), a routine a pause; the day's cap spent — the
 four token buckets of the day's `desk-turn` events whose source is `routine`, from 00:00 ET —
-is one `skipped`, `cap` (`the daily cap was spent`), a routine a New York day. A `started` with
-no end is `interrupted` at the next boot, never run again. A test run (**Test**, keyed
+is one `skipped`, `cap` (`the daily cap was spent`), a routine a New York day; the face keeps only
+that day's sum, reading again only what was appended to `events.jsonl`. A `started` with no end is
+`interrupted` at the next boot, never run again, and its history shows it so (`Failed`) unless it
+is the run under way. A key already `missed` is never started. A test run (**Test**, keyed
 `<routine>:test:<ISO time>`) goes to the front of the queue, runs while the routine is off, and
 is refused while the desk is paused or the cap spent. A routine's history shows its last 20 runs.
 
@@ -2754,7 +2763,7 @@ the card staying pending. After ✓: `First run {day} at {time} ET`
 card's state is the face's (`GET /data/desk/routines`, by the proposal's id): answered in two
 windows it is one routine and both cards settle on the next read; a proposal the face no longer
 holds — pruned after 30 days, or another home's — draws `Closed` from the call's own arguments, with
-no keys. A turn whose last call is an ok proposal draws no closing text in the browser: the card is
+no keys; before the face's first routines read has answered, the card draws no chip and no keys. A turn whose last call is an ok proposal draws no closing text in the browser: the card is
 the reply. The phone gets Gravit's closing text — a routine card is waiting on your page — and the
 card is answered in the browser, as every card is. **Edit in Messages** on the Desk screen puts
 `Edit your routine: {name}` in the composer; say what changes, Gravit reads `routine_list` and
