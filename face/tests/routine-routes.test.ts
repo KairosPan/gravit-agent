@@ -108,7 +108,7 @@ test("the read with no clock row is the store's alone: each routine's when, no r
     }],
     proposals: [{
       id: proposal, name: "Morning movers", when: "Every day at 09:00 ET", instruction: "List the movers.", state: "confirmed",
-      proposedAt: r.confirmedAt, settledAt: r.confirmedAt, routine: id,
+      proposedAt: r.confirmedAt, settledAt: r.confirmedAt, routine: id, current: true,
     }],
     cap: { dailyTokens: DAILY_TOKENS_DEFAULT, used: 0, spent: false },
     queued: [],
@@ -395,7 +395,7 @@ test("a twenty-first routine at confirm is 409 limit, and its proposal stays pen
   assert.equal(load.store.proposals.find((p) => p.id === pid)!.state, "pending");
 });
 
-test("after a replace the read lists every proposal newest first: the confirmed change, its superseded sibling, the original", async () => {
+test("after a replace the read lists every proposal newest first: the superseded sibling, the change current with its next run, the original not", async () => {
   const { home, id, proposal: first } = await withRoutine();
   let t = T0;
   const ops = routineOps({ home, now: () => (t += 60_000), log: () => {} });
@@ -415,10 +415,29 @@ test("after a replace the read lists every proposal newest first: the confirmed 
   assert.equal(confirmed.status, 200);
   assert.equal((confirmed.body.routine as { id: string }).id, id, "changed in place");
   const after = (await call(rec, "/data/desk/routines")).body.proposals as Record<string, unknown>[];
-  assert.deepEqual(after.map((p) => [p.id, p.state, p.routine, p.replacesName]), [
-    [sibling, "superseded", undefined, "Morning movers, wider"],
-    [change, "confirmed", id, "Morning movers, wider"],
-    [first, "confirmed", id, undefined],
+  assert.deepEqual(after.map((p) => [p.id, p.state, p.routine, p.replacesName, p.current]), [
+    [sibling, "superseded", undefined, "Morning movers, wider", false],
+    [change, "confirmed", id, "Morning movers, wider", true],
+    [first, "confirmed", id, undefined, false],
   ]);
   assert.equal(typeof after[0]!.settledAt, "string");
+
+  /* through the clock row's views: the change, current, has the routine's next run; the original none */
+  const { proposalViews } = await import("../src/routine-routes.ts");
+  const load = await loadRoutines(home);
+  assert.ok(load.ok);
+  const next = { date: "2026-11-17", slot: "09:00", at: "2026-11-17T14:00:00.000Z" };
+  const views = proposalViews(load.store, [{
+    id, name: "Morning movers, wider", when: "Every day at 09:00 ET", instruction: "", enabled: true, sha256: "", confirmedAt: "", next, runs: [],
+  }]);
+  assert.deepEqual(views.map((p) => [p.id, p.current, p.next]), [[sibling, false, undefined], [change, true, next], [first, false, undefined]]);
+});
+
+test("after a delete the confirmed proposal is not current and has no next run", async () => {
+  const { home, ops, id, proposal } = await withRoutine();
+  const rec = recorder();
+  registerRoutineRoutes(rec, { ops, clock: () => undefined, home });
+  assert.equal((await call(rec, "/data/desk/routines/delete", { id })).status, 200);
+  const read = (await call(rec, "/data/desk/routines")).body.proposals as Record<string, unknown>[];
+  assert.deepEqual(read.map((p) => [p.id, p.state, p.routine, p.current, p.next]), [[proposal, "confirmed", id, false, undefined]]);
 });

@@ -97,8 +97,9 @@ export interface RoutineView {
 }
 
 /** A proposal as the page shows it: its store fields, its when line ({@link whenText}), `replacesName` - the name of
- * the routine `replaces` names, while the store holds it -, and `next`, a confirmed proposal's routine's next slot as
- * its {@link RoutineView} gives it, while the store holds that routine and it is on. */
+ * the routine `replaces` names, while the store holds it -, `current` - confirmed, and the routine it made still held
+ * at its version (`routine.proposal` is its id): false once that routine is deleted or replaced by a later one - and
+ * `next`, a current proposal's routine's next slot as its {@link RoutineView} gives it, while that routine is on. */
 export interface ProposalView {
   id: string;
   name: string;
@@ -111,6 +112,7 @@ export interface ProposalView {
   proposedAt: string;
   settledAt?: string;
   routine?: string;
+  current: boolean;
   next?: { date: string; slot: string; at: string };
 }
 

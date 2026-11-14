@@ -60,21 +60,23 @@ function proposalOf(body: Record<string, unknown>): string {
 
 /**
  * Every proposal `store` holds, as the page shows it, newest first by `proposedAt` (of two at one instant, the later
- * in the store first): its when line, the name of the routine it replaces while the store holds it, and - confirmed,
- * its routine held and on - that routine's next slot from `routines`. Light, so the clock row and the store-only read
+ * in the store first): its when line, the name of the routine it replaces while the store holds it, `current` - it is
+ * confirmed and the routine it made is held and at its version (`routine.proposal` is its id), not deleted nor
+ * replaced since -, and, current and its routine on, that routine's next slot from `routines`. Light, so the clock row and the store-only read
  * share it.
  * @param store - the loaded store.
  * @param routines - the store's routines as the page shows them; a view with no `next` gives none.
  */
 export function proposalViews(store: RoutineStore, routines: readonly RoutineView[]): ProposalView[] {
-  const nameOf = new Map(store.routines.map((r) => [r.id, r.name]));
+  const held = new Map(store.routines.map((r) => [r.id, r]));
   const viewOf = new Map(routines.map((v) => [v.id, v]));
   return store.proposals
     .map((p, order) => ({ p, order }))
     .sort((a, b) => (a.p.proposedAt < b.p.proposedAt ? 1 : a.p.proposedAt > b.p.proposedAt ? -1 : b.order - a.order))
     .map(({ p }) => {
-      const replacesName = p.replaces === undefined ? undefined : nameOf.get(p.replaces);
-      const view = p.state === "confirmed" && p.routine !== undefined ? viewOf.get(p.routine) : undefined;
+      const replacesName = p.replaces === undefined ? undefined : held.get(p.replaces)?.name;
+      const current = p.state === "confirmed" && p.routine !== undefined && held.get(p.routine)?.proposal === p.id;
+      const view = current ? viewOf.get(p.routine!) : undefined;
       const next = view?.enabled === true ? view.next : undefined;
       return {
         id: p.id, name: p.name, when: whenText(p.schedule), instruction: p.instruction,
@@ -84,6 +86,7 @@ export function proposalViews(store: RoutineStore, routines: readonly RoutineVie
         state: p.state, proposedAt: p.proposedAt,
         ...(p.settledAt === undefined ? {} : { settledAt: p.settledAt }),
         ...(p.routine === undefined ? {} : { routine: p.routine }),
+        current,
         ...(next === undefined ? {} : { next }),
       };
     });
