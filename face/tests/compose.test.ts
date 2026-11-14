@@ -81,7 +81,21 @@ test("compose.yml runs the face, the account and the market as three boxes, the 
   assert.match(readFileSync(new URL("../docker-entrypoint.sh", import.meta.url), "utf8"), /for dir in \.\.\/face \.\.\/account \.\.\/market/);
   assert.ok(agentMounts.every(v => !v.includes("docker.sock") && !v.includes("account-home")));
   assert.ok(agentMounts.some(v => v.startsWith("face-modules:")) && agentMounts.some(v => v.startsWith("account-modules:")));
-  assert.deepEqual(Object.keys(c.volumes).sort(), ["account-home", "account-modules", "dsh-home", "face-modules", "market-modules", "seat-home"]);
+  assert.deepEqual(Object.keys(c.volumes).sort(), ["account-home", "account-modules", "dsh-home", "face-modules", "market-modules", "memory-home", "seat-home"]);
+});
+
+/* The memory's home in the docker mode (memory plan 1): a volume the agent box alone mounts, named to the face and
+ * to the memory's own door by GRAVIT_MEMORY_HOME. The operator makes the home inside the box; the face never does. */
+test("the memory's home is a volume of the agent box alone", async () => {
+  const c = load(await readFile(composeFile, "utf8")) as Compose;
+  assert.ok(c.services.agent.volumes.map(String).includes("memory-home:/memory-home"), "the agent box mounts memory-home at /memory-home");
+  assert.equal(c.services.agent.environment.GRAVIT_MEMORY_HOME, "/memory-home");
+  assert.ok("memory-home" in c.volumes, "the volume is declared with the others");
+  for (const name of ["account", "market"]) {
+    const service = c.services[name]!;
+    assert.ok((service.volumes ?? []).map(String).every((v) => !v.includes("memory-home")), `the ${name} box mounts no memory-home`);
+    assert.equal(service.environment.GRAVIT_MEMORY_HOME, undefined, `the ${name} box is not told of the memory's home`);
+  }
 });
 
 test("the agent image and the account image carry no AKShare, the market image carries it at the pin", async () => {
