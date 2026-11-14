@@ -1,4 +1,4 @@
-// face/client/js/host/desk.js — the Desk tab's impure half (plan 2026-11-01-desk-p3-watch Task 11): /data/desk/status into the
+// face/client/js/host/desk.js — the desk status' impure half (plan 2026-11-01-desk-p3-watch Task 11): /data/desk/status into the
 // store's desk slice, at once (unless read within the poll already) and every DESK_POLL_MS while Markets is on screen in a
 // visible tab — any tab of it, or a market's page, as startMarkets's own show — so the level marks on the rows stay fresh; one read in flight at a time. And the page's
 // one write, Pause: POST /data/desk/pause with no `until` (paused until a terminal resumes), its answer landed at once, then

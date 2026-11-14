@@ -1,5 +1,5 @@
 // face/client/js/render/desk-page.js — the Desk page (#/desk, desk-page plan 1 Task 4, spec 2026-11-14 §6.1–§6.2): the head
-// bar - the title, the state chip, one line and the Pause key the Desk tab draws (none while off or paused) - the paused
+// bar - the title, the state chip, one line and the Pause key (none while off or paused) - the paused
 // banner, then two columns: News (the sources, Calendar's one line, the filter chips, each symbol's group with its latest
 // alert, Details and the earlier rows, the watch rules folded) and Routines (the standing orders as read-only rows, made in
 // a terminal; the foot saying where routines are created). The desk off, or its status not read, is one line and no

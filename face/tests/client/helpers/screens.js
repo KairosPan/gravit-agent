@@ -114,9 +114,9 @@ function marketStates() {
     // an A share's 5D history: the sessions on one grid, the previous close dashed, a hairline between sessions
     R.candlesLoaded(R.setRange(page('cn:600519'), { id: 'cn:600519', range: '5D' }), { id: 'cn:600519', range: '5D', at: NOW,
       data: { ok: true, range: '5D', sessions: ['2026-10-29', '2026-10-30'].map(date => ({ date, prec: 100, price: [100, 101, 102], amount: [1, 1, 1] })) } }),
-    // the desk (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab, before its status and with it; a level's mark on its row
-    // and on its page
-    R.setMarketsTab(read, 'desk'), R.deskLoaded(R.setMarketsTab(read, 'desk'), { data: deskStatus(), at: NOW }),
+    // the desk (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab's two places, kept as Watching since it left Markets
+    // (desk-page plan 1 Task 5), before the desk's status and with it; a level's mark on its row and on its page
+    R.setMarketsTab(read, 'watching'), R.deskLoaded(R.setMarketsTab(read, 'watching'), { data: deskStatus(), at: NOW }),
     R.deskLoaded(read, { data: deskStatus(), at: NOW }), R.deskLoaded(page('stock:NVDA'), { data: deskStatus(), at: NOW }),
   ];
 }

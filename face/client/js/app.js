@@ -475,7 +475,7 @@ export function boot(win, host = {}) {
   // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
   // followed on the stream its line is on; the stars in this browser's storage
   const markets = startMarkets({ store, storage, getJson, win, now, stream, marketStream, schedule, cancelTimer, owner, afterAction });
-  // the desk's status beside the markets (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab, and the level marks on the rows;
+  // the desk's status beside the markets (plan 2026-11-01-desk-p3-watch Task 11): the level marks on the rows;
   // and on the Desk page (desk-page plan 1), beside its news
   const desk = startDesk({ store, getJson, postJson, schedule, cancelTimer, now });
   // the Desk page's news: the day's alerts with their reasons, read while the Desk shows
@@ -1909,7 +1909,7 @@ export function boot(win, host = {}) {
       store.dispatch('setMarketsSort', el.dataset.value);
       if (store.get().markets.tab === 'china' && store.get().markets.sort !== before) readHiddenMarkets();
     },
-    // the Desk tab's one control: Pause (no Resume: a terminal resumes)
+    // the Desk page's one control on the desk: Pause (no Resume: a terminal resumes)
     deskPause: () => { void desk.pause(); },
     // the Desk page's own choices: a symbol's filter (All is `all`), a row opened or folded, the watch rules unfolded
     dkFilter: el => store.dispatch('deskFilter', { value: el.dataset.value }),

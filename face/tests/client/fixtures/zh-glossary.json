@@ -89,7 +89,6 @@
     {"en":"limit-down","zh":"跌停","note":"an A-share limit-down"},
     {"en":"limit down","zh":"跌停","note":"an A-share limit-down, spaced"},
     {"en":"order","zh":"订单","note":"an order; Open orders, Order book; the order type word \"market\" and \"limit\" are not this term"},
-    {"en":"standing order","zh":"常设指令","note":"the desk's standing orders (a longer term masks \"order\")"},
     {"en":"position","zh":"持仓","note":"an open position; to close a position is 平仓"},
     {"en":"holdings","zh":"持仓","note":"what you hold; also a holding"},
     {"en":"P&L","zh":"盈亏","note":"profit and loss"},

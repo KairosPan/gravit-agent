@@ -11,7 +11,6 @@
 import { normalizeAsset, number } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, isChiNext, cnHitsOf } from '../wire/china.js';
 import { MIN, HOUR, DAY } from '../time.js';
-import { DESK_TAB } from './desk-view.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
 import { t, isSaid, sayOf } from '../i18n/words.js';
 
@@ -333,8 +332,7 @@ export function chinaRowsOf(markets, atPage = []) {
  *  have something in them, in accountTabs's order and words (Stocks is the Account's alone: the A shares' home is China). An
  *  answer not read, or one that is not an answer, is All alone. China (`opts.china`, `{ count }`) follows the Account's tabs
  *  (spec 2026-10-31 §4). As the retired page orders them, All results leads while `searching` and Watching follows China
- *  while `watching` (anything is starred), neither with a count; the Desk (`opts.desk`, plan 2026-11-01-desk-p3-watch Task 11)
- *  closes the row, with no count. */
+ *  while `watching` (anything is starred), neither with a count. */
 export function tabsOf(explore, cnCount, opts) {
   const cn = Math.max(0, number(cnCount) ?? 0);
   const counts = new Map();
@@ -351,7 +349,6 @@ export function tabsOf(explore, cnCount, opts) {
     ...out,
     ...(opts?.china ? [{ id: CHINA_TAB, label: t('markets.tab.china'), count: opts.china.count ?? null }] : []),
     ...(opts?.watching ? [{ id: 'watching', label: t('markets.tab.watching'), count: null }] : []),
-    ...(opts?.desk ? [{ id: DESK_TAB, label: t('markets.tab.desk'), count: null }] : []),
   ];
 }
 
@@ -679,9 +676,9 @@ export function tableOf(markets, now = Date.now(), page = null) {
   const watching = starredOf(m).length > 0 || watchlist.length > 0 || atPage.length > 0;
   const chinaCount = rankOf(m) ? Math.max(0, number(rankOf(m).total) ?? 0) : null;
   const more = marketScopeOf(m) === 'more' && !marketSourceOf(m);
-  const tabs = tabsOf(all, more ? cnStarsOf(m, atPage).length : 0, { watching: watching || !more, searching, china: more ? { count: chinaCount } : null, desk: true })
-    .filter(tab => more || [...marketCategoryIds(marketScopeOf(m)), 'results', 'watching', DESK_TAB].includes(tab.id))
-    .map(tab => (counted || tab.id === CHINA_TAB || tab.id === DESK_TAB ? tab : { ...tab, count: null }));
+  const tabs = tabsOf(all, more ? cnStarsOf(m, atPage).length : 0, { watching: watching || !more, searching, china: more ? { count: chinaCount } : null })
+    .filter(tab => more || [...marketCategoryIds(marketScopeOf(m)), 'results', 'watching'].includes(tab.id))
+    .map(tab => (counted || tab.id === CHINA_TAB ? tab : { ...tab, count: null }));
   const mine = own(reads, KIND_TABS.has(m.tab) ? m.tab : 'all');
   const source = onChina ? m.rank : searching ? m.results : mine?.data ? mine : own(reads, 'all');
   const read = { status: str(source?.status) || 'idle', answered: isRecord(source) && source.data != null,

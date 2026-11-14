@@ -51,7 +51,7 @@ test('the desk slice starts idle with nothing read', () => {
 test('the desk status is read at once and every 10 s while Markets shows, and stops when it leaves', async () => {
   const r = rig();
   assert.deepEqual(r.reads, [], 'nothing before Markets shows');
-  // Markets on screen on the Stocks tab: the Desk tab never visited
+  // Markets on screen on the Stocks tab
   r.store.dispatch('nav', { screen: 'markets', id: null });
   r.store.dispatch('setMarketsTab', 'stocks');
   r.desk.show(true);
@@ -137,8 +137,7 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
 });
 
 test('a persistent failure stays said through the polls on their way: the message is kept while loading, cleared by an answer', async () => {
-  const { renderDeskTab } = await import('../../client/js/render/desk.js');
-  const { deskViewOf } = await import('../../client/js/host/desk-view.js');
+  const { renderDeskScreen } = await import('../../client/js/render/desk-page.js');
   let release;
   const r = rig();
   r.desk.show(true); await settle();
@@ -148,10 +147,10 @@ test('a persistent failure stays said through the polls on their way: the messag
   r.fire();
   assert.equal(r.s().status, 'loading');
   assert.equal(r.s().message, '/data/desk/status: HTTP 503', 'the read on its way keeps the sentence');
-  const html = renderDeskTab(deskViewOf(r.s().data, new Date(r.clock.t).toISOString()), r.s());
-  assert.match(html, /<p class="mk-note">\/data\/desk\/status: HTTP 503<\/p>/, 'and the tab still says it');
+  const html = renderDeskScreen({ desk: r.s() }, r.clock.t);
+  assert.match(html, /<p class="dk-dim">\/data\/desk\/status: HTTP 503<\/p>/, 'and the Desk screen still says it');
   release(deskStatus()); await settle();
   assert.equal(r.s().message, null);
-  // with no view kept: unavailable, said through a poll on its way too
-  assert.match(renderDeskTab(null, { status: 'loading', message: 'HTTP 503' }), /HTTP 503[\s\S]*Desk status unavailable/);
+  // with no status kept: unavailable, said through a poll on its way too
+  assert.match(renderDeskScreen({ desk: { status: 'loading', data: null, message: 'HTTP 503' } }, r.clock.t), /HTTP 503[\s\S]*Desk status unavailable/);
 });

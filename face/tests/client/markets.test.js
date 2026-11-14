@@ -970,35 +970,17 @@ test('an Account that answers the book with express’s 404 page, and the trades
   assert.deepEqual(errors, [], 'no parse error reaches the console');
 });
 
-// ---- the Desk tab and a level's marks (plan 2026-11-01-desk-p3-watch Task 11)
+// ---- a level's marks (plan 2026-11-01-desk-p3-watch Task 11); the Desk is its own screen since desk-page plan 1 Task 5
 
-test('the Desk tab is listed last; on it the desk view is drawn in place of the table, with one Pause and no Resume', async () => {
+test('Markets lists no Desk tab, and setMarketsTab with desk leaves the tab as it was', async () => {
   const { deskStatus, DESK_NOW } = await import('./helpers/desk-status.js');
-  const { s } = screen({ tab: 'desk' });
+  const { s } = screen({ tab: 'watching' });
   const html = renderMarketsScreen(R.deskLoaded(s, { data: deskStatus(), at: DESK_NOW }), DESK_NOW);
-  const tabs = [...html.matchAll(/data-action="mkTab" data-value="([^"]+)" aria-pressed="(true|false)"/g)].map(m => [m[1], m[2]]);
-  assert.deepEqual(tabs.at(-1), ['desk', 'true']);
-  assert.doesNotMatch(html, /<table class="mk-t">/, 'no market table on the Desk tab');
-  const t = text(html);
-  for (const words of [
-    'up 3h 5m since 2026-11-02T11:55:00.000Z · desk on', 'watch: watching',
-    'watch US: polling the 2026-11-02 session, 2 symbols, last poll 09:59 ET', 'alerts today (US): 1 sent, 1 suppressed (cap 1)',
-    'watch A shares: the 2026-11-02 session has closed', 'alerts today (A shares): 1 sent, 1 suppressed (muted 1)',
-    'filings: off: set ALPHA_EDGAR_USER_AGENT', 'alerts: muted until 11:00 ET (npm run desk -- unmute)',
-    'NVDA stop · 169.8 ROBINHOOD', '1.8 s', 'suppressed (cap)', 'stop 170 · -1.30%', 'sell half on a close below 170',
-    'desk/levels.yml', '1 of 3 refused: #3 TSLA: price must be a positive number', 'next 2026-11-03 09:20 ET', 'pid 4000', 'lost', '20 min',
-  ]) assert.ok(t.includes(words), words);
-  assert.equal((html.match(/data-action="deskPause"/g) ?? []).length, 1, 'one Pause');
-  assert.doesNotMatch(html, /Resume/);
-  // before the status lands: Loading…; a failed read with nothing kept: unavailable with its message; a failed read over a
-  // view kept: the view, under the message
-  assert.match(renderMarketsScreen(s, NOW), /<p class="mk-empty">Loading…<\/p>/);
-  const failed = R.deskFailed(s, { at: NOW, message: '/data/desk/status: HTTP 503' });
-  assert.match(renderMarketsScreen(failed, NOW), /Desk status unavailable/);
-  const kept = R.deskFailed(R.deskLoaded(s, { data: deskStatus(), at: DESK_NOW }), { at: DESK_NOW, message: '/data/desk/status: HTTP 503' });
-  const keptHtml = renderMarketsScreen(kept, DESK_NOW);
-  assert.ok(text(keptHtml).includes('/data/desk/status: HTTP 503'));
-  assert.ok(text(keptHtml).includes('watch: watching'));
+  const tabs = [...html.matchAll(/data-action="mkTab" data-value="([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(tabs, ['watching']);
+  assert.doesNotMatch(html, /data-action="deskPause"/, 'no Pause on Markets');
+  assert.equal(R.setMarketsTab(s, 'desk'), s, 'desk is no tab of Markets');
+  assert.equal(R.setMarketsTab(s, 'desk').markets.tab, 'watching');
 });
 
 test('a marked row draws its mark after its name; a page draws the plan and file under its price', async () => {
@@ -1019,19 +1001,15 @@ test('a marked row draws its mark after its name; a page draws the plan and file
   assert.doesNotMatch(renderMarketsScreen(nvda.s, NOW), /mk-plan/);
 });
 
-test('a level, an alert and a file the operator wrote are text, never markup: on the row, the page and the Desk tab', async () => {
+test('a level, its plan and its file as the operator wrote them are text, never markup: on the row and the page', async () => {
   const { deskStatus, DESK_NOW } = await import('./helpers/desk-status.js');
   const EVIL = '<img src=x onerror=alert(1)>';
   const st = deskStatus();
   st.watch.marks[0] = { ...st.watch.marks[0], kind: EVIL, level: EVIL, plan: EVIL, file: EVIL };
-  st.watch.recent[0] = { ...st.watch.recent[0], symbol: EVIL, label: EVIL, feed: EVIL, suppressed: EVIL, outcome: 'suppressed' };
-  st.watch.files[0] = { ...st.watch.files[0], file: EVIL, refusals: [{ file: EVIL, index: 0, symbol: EVIL, reason: EVIL }] };
-  st.standing.orders[0] = { ...st.standing.orders[0], id: EVIL, at: EVIL };
   const withDesk = x => R.deskLoaded(x, { data: st, at: DESK_NOW });
   const table = renderMarketsScreen(withDesk(screen().s), NOW);
   const page = renderMarketsScreen(withDesk(screen({ route: { screen: 'markets', id: 'stock:NVDA' }, account: true }).s), NOW);
-  const desk = renderMarketsScreen(withDesk(screen({ tab: 'desk' }).s), DESK_NOW);
-  for (const [name, html] of [['row', rowOf(table, 'stock:NVDA')], ['page', page], ['desk', desk]]) {
+  for (const [name, html] of [['row', rowOf(table, 'stock:NVDA')], ['page', page]]) {
     assert.doesNotMatch(html, /<img/, `${name}: no markup`);
     assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/, `${name}: the text, escaped`);
   }
