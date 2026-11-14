@@ -97,8 +97,24 @@ test("a reason is joined by pass, its headline by symbol, its pages by session",
   assert.equal(crwv.outcome, "ended");
   assert.equal(crwv.text, text);
   assert.equal(of("INTC").reason!.headline, "共同原因");
+  assert.equal(of("INTC").reason!.label, null, "a first-line headline has no label: never another symbol's line");
   assert.equal(of("INTC").reason!.pages, 3);
   assert.equal(of("AMD").reason, undefined, "a pass with no annotated line has no reason");
+});
+
+test("a label is never a line that starts with another symbol of the pass", () => {
+  const text = "CRWV 盘中 -8.1%\nINTC 跟跌 -3%\n来源：a";
+  const records = [
+    alert("CRWV", "2026-11-13T15:00:00.000Z", { pass: "pass-3" }),
+    alert("INTC", "2026-11-13T15:00:01.000Z", { pass: "pass-3" }),
+    { t: "2026-11-13T15:03:00.000Z", kind: "annotated", pass: "pass-3", sessionId: "s-3", outcome: "ended", sent: [], text },
+  ];
+  const news = buildNews({ records, fetches: [], now: FRIDAY });
+  const of = (symbol: string) => news.alerts.groups.find((g) => g.symbol === symbol)!.latest.reason!;
+  assert.equal(of("CRWV").headline, "CRWV 盘中 -8.1%");
+  assert.equal(of("CRWV").label, null);
+  assert.equal(of("INTC").headline, "INTC 跟跌 -3%");
+  assert.equal(of("INTC").label, null, "the next line is the last");
 });
 
 test("held-back and undelivered alerts are rows with their word", () => {

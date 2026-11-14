@@ -120,15 +120,18 @@ function deliveryOf(a: AlertLine, d: DeliveredLine | undefined): Pick<NewsAlert,
 const startsWithSymbol = (line: string, symbol: string): boolean =>
   line.startsWith(symbol) && !/^[A-Za-z0-9]/.test(line.slice(symbol.length));
 
-/** The reason a row of `symbol` carries from its pass's reply `r`: see {@link NewsReason}. */
-function reasonOf(symbol: string, r: AnnotatedLine, pagesBySession: ReadonlyMap<string, number>): NewsReason {
+/** The reason a row of `symbol` carries from its pass's reply `r`: see {@link NewsReason}. A label is taken only under a
+ * headline that starts with `symbol` itself, and never from a line that starts with another of `passSymbols`, the
+ * symbols the pass alerted on: a row whose headline is the reply's first line has none. */
+function reasonOf(symbol: string, passSymbols: readonly string[], r: AnnotatedLine, pagesBySession: ReadonlyMap<string, number>): NewsReason {
   const lines = r.text.split(/\r?\n/).map((l) => l.trim());
   while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  let at = lines.findIndex((l) => startsWithSymbol(l, symbol));
-  if (at < 0) at = lines.findIndex((l) => l !== "");
+  const own = lines.findIndex((l) => startsWithSymbol(l, symbol));
+  const at = own >= 0 ? own : lines.findIndex((l) => l !== "");
   const headline = at < 0 ? "" : lines[at]!;
-  const next = at < 0 ? undefined : lines[at + 1];
-  const label = next !== undefined && next !== "" && next.length <= 40 && at + 1 < lines.length - 1 ? next : null;
+  const next = own < 0 ? undefined : lines[own + 1];
+  const label = next !== undefined && next !== "" && next.length <= 40 && own + 1 < lines.length - 1
+    && !passSymbols.some((other) => other !== symbol && startsWithSymbol(next, other)) ? next : null;
   return { headline, label, text: r.text, pages: pagesBySession.get(r.sessionId) ?? 0, sessionId: r.sessionId, outcome: r.outcome };
 }
 
@@ -155,7 +158,7 @@ function filingsSource(watch: WatchStatus | undefined): NewsSource {
  * shows Friday's), else today with no groups. Each of the day's alerts is a row, its `nth` counted in time order
  * among its symbol's, held-back ones counted; rows are grouped by symbol, the groups ordered by their latest row,
  * newest first. A row's reason is the last `annotated` line of its own non-empty `pass` (a filing's pass is empty: it
- * has none). The rules are the watch's, each with the day's alerts whose `trigger.rule` - or, a level's, whose
+ * has none); a label is read only under a headline of the row's own ticker. The rules are the watch's, each with the day's alerts whose `trigger.rule` - or, a level's, whose
  * `label` - is its id; no watch gives none, and no sources but `off`.
  * @param input - `records`, the lines of `alerts.jsonl` (any line this module's guards refuse is skipped); `fetches`,
  *   the ledger's `desk-fetch` events, every one, since a reason's pages are counted by its session whatever the day;
@@ -182,6 +185,12 @@ export function buildNews(input: { records: unknown[]; fetches: { sessionId: str
   const date = days.includes(today) || days.length === 0 ? today : days.reduce((a, b) => (b > a ? b : a));
   const ofDay = alerts.filter((a) => dayOf.get(a) === date).sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
 
+  const symbolsByPass = new Map<string, string[]>();
+  for (const a of alerts) {
+    const list = symbolsByPass.get(a.pass) ?? [];
+    if (!list.includes(a.symbol)) list.push(a.symbol);
+    symbolsByPass.set(a.pass, list);
+  }
   const pagesBySession = new Map<string, number>();
   for (const f of input.fetches) pagesBySession.set(f.sessionId, (pagesBySession.get(f.sessionId) ?? 0) + 1);
 
@@ -196,7 +205,7 @@ export function buildNews(input: { records: unknown[]; fetches: { sessionId: str
       movePct: (kind === "move" || kind === "gap") && typeof chg === "number" && Number.isFinite(chg) ? chg : null,
       nth: rows.length + 1,
       ...deliveryOf(a, delivered.get(a.id)),
-      ...(reasonLine === undefined ? {} : { reason: reasonOf(a.symbol, reasonLine, pagesBySession) }),
+      ...(reasonLine === undefined ? {} : { reason: reasonOf(a.symbol, symbolsByPass.get(a.pass) ?? [], reasonLine, pagesBySession) }),
     });
     bySymbol.set(a.symbol, rows);
   }
