@@ -3,7 +3,7 @@
 // the symbol filter, the rows opened by id, the watch rules unfolded. And the Routines column (host/desk-routines.js, plan 2
 // Task 7): /data/desk/routines as it last answered under `routines`, a failed read keeping the routines it had; the routine
 // row opened (`rOpen`), the one asked to delete (`rAsk`), the acts under way by id (`rBusy`: `test`) and a refused act's line
-// by id (`rSaid`)
+// by id (`rSaid`); and a routine card's refused answer by its proposal's id (`pSaid`: `limit` or `failed`, plan 3 Task 3)
 const deskPage = (s, patch) => ({ ...s, deskPage: { ...s.deskPage, ...patch } });
 const isId = id => typeof id === 'string' && id !== '';
 // a map by id with `id` set to `value`, or without it for null
@@ -27,4 +27,6 @@ export const reducers = {
   deskRoutineOpen: (s, { id } = {}) => (isId(id) ? deskPage(s, { rOpen: s.deskPage.rOpen === id ? '' : id, rAsk: '' }) : s),
   deskRoutineAsk: (s, { id } = {}) => (isId(id) ? deskPage(s, { rAsk: id }) : s),
   deskRoutineAskOff: s => deskPage(s, { rAsk: '' }),
+  deskProposalSaid: (s, { proposal, said = null } = {}) => (isId(proposal)
+    ? deskPage(s, { pSaid: keyed(s.deskPage.pSaid ?? {}, proposal, said === 'limit' || said === 'failed' ? said : null) }) : s),
 };

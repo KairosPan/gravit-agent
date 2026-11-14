@@ -4,7 +4,9 @@
 // acts - a routine's switch, its Test and its Delete - each a POST to src/routine-routes.ts, the routines read again after
 // it answers. A refused act is one line under its row: the desk paused, the cap spent, else the request failed. A Test reads
 // Running… from the click until a read made after the face queued it holds no test of that routine, queued or under way.
-// Nothing here touches the DOM.
+// And the routine card's two answers (plan 3 Task 3): confirm and dismiss a proposal, the routines read again after it
+// answers, a refusal kept by the proposal's id (`limit`, else `failed`) for the card to word; the poll runs while the Desk or
+// Messages, where the cards are, is on screen. Nothing here touches the DOM.
 import { said } from '../i18n/words.js';
 
 export const DESK_ROUTINES_POLL_MS = 15_000;
@@ -13,6 +15,8 @@ const ROUTINES = '/data/desk/routines';
 const SWITCH = '/data/desk/routines/switch';
 const TEST = '/data/desk/routines/test';
 const DELETE = '/data/desk/routines/delete';
+const CONFIRM = '/data/desk/routines/confirm';
+const DISMISS = '/data/desk/routines/dismiss';
 const messageOf = err => (err instanceof Error ? err.said ?? err.message : err == null ? said('desk.requestFailed') : String(err));
 // a call made now, at once, its throw a rejection
 const attempt = fn => { try { return Promise.resolve(fn()); } catch (err) { return Promise.reject(err); } };
@@ -83,8 +87,22 @@ export function startDeskRoutines({ store, getJson, postJson, schedule, cancelTi
       });
   }
 
+  // a routine card's answer on `proposal`: its line cleared, the post, then the routines read again; a refusal is kept by the
+  // proposal's id - `limit` when the face holds twenty routines already, `failed` for any other
+  function respond(proposal, path) {
+    if (closed || typeof proposal !== 'string' || proposal === '') return Promise.resolve();
+    store.dispatch('deskProposalSaid', { proposal, said: null });
+    return attempt(() => postJson(path, { proposal })).then(() => (closed ? undefined : reread()), err => {
+      if (closed) return undefined;
+      const code = err?.body?.error ?? err?.code;
+      store.dispatch('deskProposalSaid', { proposal, said: code === 'limit' ? 'limit' : 'failed' });
+      return undefined;
+    });
+  }
+
   return {
-    /** The Desk on screen in a visible tab, or not: the routines are read at once on showing, then every DESK_ROUTINES_POLL_MS. */
+    /** The Desk or Messages on screen in a visible tab, or not: the routines are read at once on showing, then every
+     *  DESK_ROUTINES_POLL_MS. */
     show(on) {
       if (closed) return;
       const next = Boolean(on);
@@ -116,6 +134,14 @@ export function startDeskRoutines({ store, getJson, postJson, schedule, cancelTi
         store.dispatch('deskRoutineAskOff');
         return answer ? reread() : undefined;
       });
+    },
+    /** A routine card's ✓: POST { proposal } to confirm, then the routines read again, the card settling on that read. */
+    confirm(proposal) {
+      return respond(proposal, CONFIRM);
+    },
+    /** A routine card's ✗: POST { proposal } to dismiss, then the routines read again. */
+    dismiss(proposal) {
+      return respond(proposal, DISMISS);
     },
     dispose() {
       closed = true;

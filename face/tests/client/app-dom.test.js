@@ -764,8 +764,55 @@ test('the Desk reads its news, its routines and the desk status; Markets keeps t
   f.fire('doc', 'visibilitychange');
   f.win.location.hash = '#/messages';
   await settle();
-  assert.equal(held(DESK_POLL_MS), 0, 'on Messages none polls');
-  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 2);
+  assert.equal(held(DESK_POLL_MS), 0, 'on Messages neither the status');
+  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 1, 'nor the news; the routines poll there, for the routine cards (plan 3 Task 3)');
+});
+
+// the routine card (desk-page plan 3 Task 3): an ok routine_propose drawn as the card alone, the turn's closing words left out;
+// ✓ posts { proposal } to confirm and the card settles on the read after it; ✗ posts to dismiss; a refused proposal keeps its words
+test("a routine card in Messages: the reply is the card alone; ✓ adds it and the card settles; ✗ dismisses; a refused proposal's words are drawn", async () => {
+  const f = fakeWindow({ hash: '#/messages', storage: memoryStorage() });
+  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 's1' });
+  const P = 'p-0a1b2c3d';
+  const proposal = state => ({ id: P, name: 'Idea screening', when: 'Trading days at 08:30 ET', instruction: 'Screen.', state, current: state === 'confirmed', proposedAt: '2026-11-14T12:59:00.000Z', ...(state === 'confirmed' ? { routine: 'r-idea', next: { date: '2026-11-14', slot: '08:30', at: '2026-11-14T13:30:00.000Z' } } : {}) });
+  h.inventory['/data/desk/routines'] = deskRoutines({ proposals: [proposal('pending')] });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers: new HeldTimers(() => true), now: () => Date.parse('2026-11-14T13:00:00.000Z') });
+  await h.ready();
+  await settle();
+  assert.ok(h.reads.includes('/data/desk/routines'), 'the routines read on Messages');
+  const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
+  follow.cbs.onItem({ type: 'snapshot', records: [] });
+  const event = e => follow.cbs.onItem({ type: 'event', event: e });
+  const words = (seq, text) => event({ type: 'assistant/message', seq, time: 1756512200000 + seq, surfaceOp: 'append', data: { turn: 4, step: seq, message: { id: `m-${seq}`, role: 'assistant', content: [{ type: 'text', text }], source: { kind: 'model' } } } });
+  const propose = (seq, callId, result, isError = false) => {
+    event({ type: 'tool/call', seq, time: 1756512200000 + seq, data: { turn: 4, step: seq, callId, name: 'routine_propose', arguments: JSON.stringify({ name: 'Idea screening', schedule: { days: 'trading', at: ['08:30'] }, instruction: 'Screen.' }) } });
+    event({ type: 'tool/result', seq: seq + 1, time: 1756512200001 + seq, surfaceOp: 'append', data: { turn: 4, step: seq, message: { id: `m-${seq + 1}`, role: 'tool', source: { kind: 'tool', callId }, toolCallId: callId, content: [{ type: 'text', text: result }], isError } } });
+  };
+  words(40, 'Drafting it.');
+  propose(41, 'k1', JSON.stringify({ ok: true, proposal: P, when: 'Trading days at 08:30 ET', runsPerDay: 1 }));
+  words(43, "I've drafted the routine above.");
+  await settle();
+  assert.match(f.html(), /Drafting it\./);
+  assert.match(f.html(), /<span class="chip grey">New routine<\/span>/);
+  assert.doesNotMatch(f.html(), /drafted the routine above/, 'the closing words are not drawn');
+  h.inventory['/data/desk/routines'] = deskRoutines({ proposals: [proposal('confirmed')] });
+  const before = h.reads.filter(p => p === '/data/desk/routines').length;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'routineYes', proposal: P } });
+  await settle();
+  assert.deepEqual(h.posted.filter(([p]) => p === '/data/desk/routines/confirm').map(([, b]) => b), [{ proposal: P }]);
+  assert.equal(h.reads.filter(p => p === '/data/desk/routines').length, before + 1, 'read again after the answer');
+  assert.match(f.html(), /<span class="chip up">Added to Routines<\/span>/);
+  assert.match(f.html(), /First run Today at 08:30 ET<\/span><a href="#\/desk">View on Desk<\/a>/);
+  assert.doesNotMatch(f.html(), /data-action="routineYes"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'routineNo', proposal: P } });
+  await settle();
+  assert.deepEqual(h.posted.filter(([p]) => p === '/data/desk/routines/dismiss').map(([, b]) => b), [{ proposal: P }]);
+  propose(50, 'k2', 'Error: schedule: say a time', true);
+  words(52, 'That schedule was refused; which time?');
+  await settle();
+  assert.match(f.html(), /That schedule was refused; which time\?/, "a refused proposal's words are drawn");
+  assert.equal(store.get().route.screen, 'messages');
+  store.timers.clear();
 });
 
 // the Desk page drawn (desk-page plan 1 Task 4): its keys clicked - a symbol's filter chip, Details on an alert and the

@@ -163,10 +163,51 @@ export function presentLift(name, args, text, isError, callId) {
     },
   };
 }
-// the tool results that lift a message of their own: a seat write's receipt or refusal, Gravit's composed answer
+// Gravit's proposed routine (desk-page plan 3 Task 3, spec 2026-11-14 §6.5): an ok `routine_propose` result is the routine
+// card - its name, instruction, note and the routine it replaces as the call gave them, the proposal's id and the face's when
+// line from the result - so a card always shows what that call proposed, a later change notwithstanding; its state is the
+// routines read's (host/desk-page-view.js routineCardOf). A refusal (a tool error the model can fix) lifts nothing.
+export const PROPOSE_TOOL = 'routine_propose';
+const isProposeTool = name => name === PROPOSE_TOOL || (typeof name === 'string' && name.endsWith(`__${PROPOSE_TOOL}`));
+export function routineLift(name, args, text, isError, callId) {
+  if (!isProposeTool(name) || isError) return null;
+  const v = parseArgs(text);
+  if (v.ok !== true || typeof v.proposal !== 'string' || v.proposal === '') return null;
+  const a = isObj(args) ? args : {};
+  const str = x => (typeof x === 'string' ? x : '');
+  return {
+    kind: 'routine', text: str(a.name),
+    data: {
+      callId, proposal: v.proposal, name: str(a.name), when: str(v.when), instruction: str(a.instruction),
+      ...(typeof a.note === 'string' ? { note: a.note } : {}), ...(typeof a.replaces === 'string' ? { replaces: a.replaces } : {}),
+    },
+  };
+}
+// the tool results that lift a message of their own: a seat write's receipt or refusal, Gravit's composed answer, the routine card
 function liftOf(name, args, text, isError, callId) {
-  const [prefix, lift] = isSeatWriteTool(name) ? ['r', seatLift(name, args, text, isError, callId)] : ['p', presentLift(name, args, text, isError, callId)];
+  const [prefix, lift] = isSeatWriteTool(name) ? ['r', seatLift(name, args, text, isError, callId)]
+    : isProposeTool(name) ? ['u', routineLift(name, args, text, isError, callId)] : ['p', presentLift(name, args, text, isError, callId)];
   return lift && { id: `${prefix}${callId}`, ...lift };
+}
+
+/** The ids of the Gravit words the thread does not draw (spec 2026-11-14 §6.5, "the reply is the card alone"): a turn whose
+ *  last tool call is an ok `routine_propose` ends on its card, so Gravit's words after the card - up to the next message that
+ *  is not Gravit's (the next turn's opening line), or the list's end - are its closing text. Another tool call after the card
+ *  makes them that call's, kept; words before the call are kept; a refused proposal lifts no card and hides nothing. The
+ *  messages stay in the store (the preview, the turn rail's excerpt and the phone keep them); only the thread leaves them out. */
+export function routineClosings(messages) {
+  const out = new Set();
+  let held = null;   // the words after a card, while no other call has followed it
+  const flush = () => { if (held) for (const id of held) out.add(id); held = null; };
+  for (const m of Array.isArray(messages) ? messages : []) {
+    if (m.kind === 'routine') { held = []; continue; }
+    if (held === null) continue;
+    if (m.kind === 'tool') held = null;
+    else if (m.from !== 'gravit') flush();
+    else if (m.kind === 'text') held.push(m.id);
+  }
+  flush();
+  return out;
 }
 
 // a call id is a session's own (the host's guard treats them as non-unique too), so a call is kept by session AND id

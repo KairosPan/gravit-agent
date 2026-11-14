@@ -562,6 +562,16 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .key { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); }
 .key.yes { color: var(--up); }
 .key.no { color: var(--down); }
+/* the routine card (desk-page plan 3 Task 3): the when line with its clock, the instruction whole with its line breaks, Add to
+   Routines? beside ✗ ✓, a refused answer's line, the settled line with View on Desk */
+.rt-when { display: flex; align-items: center; gap: 6px; font-size: calc(13px * var(--fs)); color: var(--dim); }
+.rt-when svg { flex: none; }
+.rt-text { margin: 0; font-size: calc(13px * var(--fs)); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rt-ask { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rt-q { font-size: calc(13px * var(--fs)); font-weight: 600; }
+.rt-said { font-size: calc(13px * var(--fs)); color: var(--warn-text); }
+.rt-done { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: calc(13px * var(--fs)); }
+.rt-done a { font-weight: 600; white-space: nowrap; }
 
 /* ---- the composer ---- */
 .composer { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 12px 28px 18px; border-top: 1px solid var(--border); margin: 0; }

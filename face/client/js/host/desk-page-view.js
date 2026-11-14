@@ -3,10 +3,12 @@
 // (src/desk-news.ts DeskNews) under the page's own choices (the deskPage slice: the filter, the rows opened, the rules
 // unfolded), an alert's move, its row word and its count of the day, and a rule's words (a standing order's state is
 // host/rail-view.js scheduledOf's); and the Routines column (plan 2 Task 7) from /data/desk/routines (src/routine-clock.ts
-// RoutinesStatus): each routine's row, its run history worded, the cap's line. Every text from the ledgers is passed as it
-// came, for the renderer to escape; the page translates nothing. Pure: nothing here reads, polls or touches the DOM.
+// RoutinesStatus): each routine's row, its run history worded, the cap's line; and the routine card in the thread (plan 3
+// Task 3) from the same read's proposals. Every text from the ledgers is passed as it came, for the renderer to escape; the
+// page translates nothing. Pure: nothing here reads, polls or touches the DOM.
 import { t, tn } from '../i18n/words.js';
 import { deskTime, etWhen } from './desk-view.js';
+import { etDate } from '../time.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -211,4 +213,46 @@ export function routinesViewOf(data, ui = {}, nowIso) {
     };
   });
   return { error: null, cap: capView, rows };
+}
+
+// ---- the routine card in the thread (plan 3 Task 3, spec 2026-11-14 §6.5)
+
+// a settled card's chip, by its proposal's state
+function settledChip(p) {
+  switch (p.state) {
+    case 'confirmed': return p.current === true ? 'added' : 'replaced';
+    case 'superseded': return 'replaced';
+    case 'dismissed': return 'dismissed';
+    case 'expired': return 'expired';
+    default: return 'closed';
+  }
+}
+
+/** The routine card of a lifted `routine` message (host/kinds.js routineLift) under the routines read `data` (a
+ *  RoutinesStatus body, or null before one): `name`, `when`, `instruction` and `note` the call's and the result's, as they
+ *  came; `chip` from the proposal the read holds by the card's id - `new` pending (`change` when the call replaces a
+ *  routine), `added` confirmed and its routine's current version, `replaced` confirmed but replaced since or superseded,
+ *  `dismissed`, `expired`, and `closed` with no read yet or a proposal the read does not hold; `keys` only while pending.
+ *  `line`: a pending card's refused answer (`refused`: `limit`, else `failed`), else a pending change's `replaces` (the
+ *  routine's name, while the read holds it); an added card's `first` run (`next` for a change) with `day` (the word for
+ *  today, else its New York date) and `time` (`HH:MM` New York) from the read's next slot, none without one; a dismissed
+ *  card's `notAdded`. `desk` an added card's View on Desk. `now` (an ISO time or ms) is the day the card reads as today. */
+export function routineCardOf(message, data, { refused = null, now } = {}) {
+  const d = isRecord(message?.data) ? message.data : {};
+  const id = str(d.proposal);
+  const p = isRecord(data) && data.ok === true && id ? records(data.proposals).find(x => x.id === id) : undefined;
+  const replaces = str(d.replaces) !== '';
+  const chip = !p ? 'closed' : p.state === 'pending' ? (replaces ? 'change' : 'new') : settledChip(p);
+  const keys = p?.state === 'pending';
+  const card = { proposal: id, name: str(d.name), when: str(d.when), instruction: str(d.instruction), note: str(d.note), chip, keys, desk: chip === 'added' };
+  if (keys && refused) return { ...card, line: { kind: refused === 'limit' ? 'limit' : 'failed' } };
+  if (chip === 'change' && str(p.replacesName)) return { ...card, line: { kind: 'replaces', name: p.replacesName } };
+  if (chip === 'dismissed') return { ...card, line: { kind: 'notAdded' } };
+  if (chip === 'added' && isRecord(p.next) && Number.isFinite(Date.parse(p.next.at))) {
+    const at = p.next.at;
+    const today = new Date(typeof now === 'number' ? now : nowOf(now)).toISOString();
+    const day = etDate(at) === etDate(today) ? t('time.today') : etDate(at);
+    return { ...card, line: { kind: replaces ? 'next' : 'first', day, time: etWhen(at, Date.parse(at)) } };
+  }
+  return card;
 }

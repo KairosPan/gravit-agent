@@ -34,7 +34,7 @@ function rig({ answer = news() } = {}) {
 
 test('the deskPage slice starts idle, on All, nothing open, the rules folded', () => {
   assert.deepEqual(emptyState().deskPage, { status: 'idle', data: null, at: null, message: null, filter: 'all', open: {}, rules: false,
-    routines: { status: 'idle', data: null, at: null, message: null }, rOpen: '', rAsk: '', rBusy: {}, rSaid: {} });
+    routines: { status: 'idle', data: null, at: null, message: null }, rOpen: '', rAsk: '', rBusy: {}, rSaid: {}, pSaid: {} });
   assert.equal(DESK_NEWS_POLL_MS, 15_000);
 });
 

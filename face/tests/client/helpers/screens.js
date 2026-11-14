@@ -447,6 +447,37 @@ export function namedStates() {
     // a refused act's line, a standing order after them; Delete asked; the cap spent; a store that cannot be read; a report
     // under News with its Details open
     ...deskRoutineStates(),
+    // the routine card in Messages (desk-page plan 3 Task 3): pending, with the turn's closing words left out; added, with its
+    // first run; a change waiting, with the routine it replaces; a confirm refused for the limit
+    ...routineCardStates(),
+  ];
+}
+
+// the routine card's states (desk-page plan 3 Task 3): Gravit's one conversation with an operator's ask, the words before the
+// call, the card and the closing words the thread leaves out, under a routines read at the desk status' own clock
+function routineCardStates() {
+  const P = 'p-0a1b2c3d';
+  const data = {
+    callId: 'k1', proposal: P, name: 'Idea screening', when: 'Trading days, every 30 min, 08:30–16:00 ET · 16 runs a day',
+    instruction: 'Read quotes and headlines and screen for trade ideas.\nFor each idea give the ticker, a one-line thesis and the number it rests on.\nPlace no orders.',
+    note: 'No economic calendar is connected; it screens without one.',
+  };
+  const thread = card => [
+    m('rc1', { seq: 1, from: 'you', text: 'Screen for trade ideas every 30 minutes on trading days and post them to News.' }),
+    m('rc2', { seq: 2, text: 'Drafting it as a routine.', data: { markdown: true } }),
+    m('tk1', { seq: 3, kind: 'tool', text: '', data: { callId: 'k1', name: 'routine_propose', result: '', isError: false } }),
+    m('uk1', { seq: 3, kind: 'routine', text: card.name, data: card }),
+    m('rc4', { seq: 4, text: "I've drafted the routine; confirm it above.", data: { markdown: true } }),
+  ];
+  const view = over => ({ id: P, name: data.name, when: data.when, instruction: data.instruction, note: data.note, state: 'pending', current: false, proposedAt: '2026-11-02T14:59:00.000Z', ...over });
+  const at = (card, proposal) => R.deskRoutinesLoaded(onConv(R.hostList(emptyState(), { conversations: [conv('s1', { messages: thread(card), loaded: true })], channels: [], bots: [] }), 's1'),
+    { data: deskRoutines({ proposals: [proposal] }), at: DESK_NOW });
+  const change = { ...data, replaces: 'idea-screening', instruction: 'Read quotes and headlines and screen for trade ideas.\nPost at most three.' };
+  return [
+    ['messages-routine-card', at(data, view())],
+    ['messages-routine-added', at(data, view({ state: 'confirmed', current: true, routine: 'idea-screening', settledAt: '2026-11-02T15:00:00.000Z', next: { date: '2026-11-02', slot: '15:30', at: '2026-11-02T20:30:00.000Z' } }))],
+    ['messages-routine-change', at(change, view({ instruction: change.instruction, replaces: 'idea-screening', replacesName: 'Idea screening' }))],
+    ['messages-routine-limit', R.deskProposalSaid(at(data, view()), { proposal: P, said: 'limit' })],
   ];
 }
 
@@ -1004,10 +1035,13 @@ const CONTENT_FIELDS = new Set([
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); an event analog view and its
 // task as the face read them (the worker's and web pages' words); the desk's news as the face answered it (its ledgers' and
-// Gravit's words), and a routine's when line and instruction (the face's line, the operator's words); `*` is any one key
+// Gravit's words), and a routine's when line and instruction (the face's line, the operator's words), a routine card's too
+// (Gravit's call and the face's when line) and a proposal's the read holds; `*` is any one key
 const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data'],
-  ['deskPage', 'routines', 'data', 'routines', 'when'], ['deskPage', 'routines', 'data', 'routines', 'instruction']];
+  ['deskPage', 'routines', 'data', 'routines', 'when'], ['deskPage', 'routines', 'data', 'routines', 'instruction'],
+  ['conversations', 'messages', 'data', 'when'], ['conversations', 'messages', 'data', 'instruction'],
+  ['deskPage', 'routines', 'data', 'proposals', 'when'], ['deskPage', 'routines', 'data', 'proposals', 'instruction'], ['deskPage', 'routines', 'data', 'proposals', 'replacesName']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 // the strings a content field holds that are an ability's declared parts, its tools' and skills' names in the abilities listing
 // (an array adds nothing to a path): drawn each whole, they pass as runs (abilityRuns below) and lend no known word

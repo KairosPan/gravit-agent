@@ -504,13 +504,13 @@ export function boot(win, host = {}) {
   // a room member's trace, read without activating the member's session
   const traces = startTraces({ store, call, loadMemberTrace, now });
   // the quotes run only while Markets is on screen in a visible tab, the desk's status while Markets or the Desk is, the Desk's
-  // news and routines while the Desk is; Trade's picks only while Trade is
+  // news while the Desk is, the routines while the Desk or Messages (its routine cards) is; Trade's picks only while Trade is
   const showMarkets = () => {
     const screen = store.get().route.screen;
     markets.show(screen === 'markets' && !doc.hidden);
     desk.show((screen === 'markets' || screen === 'desk') && !doc.hidden);
     deskNews.show(screen === 'desk' && !doc.hidden);
-    deskRoutines.show(screen === 'desk' && !doc.hidden);
+    deskRoutines.show((screen === 'desk' || screen === 'messages') && !doc.hidden);
   };
   // Embedded browsers may report hidden before their first visibility event. Opening Markets or choosing a source still
   // needs one answer; only the recurring polls depend on visibility.
@@ -1933,6 +1933,9 @@ export function boot(win, host = {}) {
     dkDelete: el => store.dispatch('deskRoutineAsk', { id: el.dataset.id }),
     dkDeleteYes: el => { void deskRoutines.remove(el.dataset.id); },
     dkDeleteNo: () => store.dispatch('deskRoutineAskOff'),
+    // a routine card's two answers in the thread (plan 3 Task 3): ✓ adds the routine, ✗ dismisses it; the card settles on the read after
+    routineYes: el => { void deskRoutines.confirm(el.dataset.proposal); },
+    routineNo: el => { void deskRoutines.dismiss(el.dataset.proposal); },
     // the render keeps what an input holds, so Clear empties the box before the query; a search still waiting goes with it
     mkClear: () => {
       const box = doc.getElementById('mq');
