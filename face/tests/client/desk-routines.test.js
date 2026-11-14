@@ -156,6 +156,41 @@ test('Delete posts { id }, closes the question and reads the routines again', as
   assert.equal(r.posted.length, 1, 'nothing after dispose');
 });
 
+test('Delete clears its question before the post, and a second Delete of an id in flight posts nothing', async () => {
+  const r = rig();
+  let answer;
+  r.answers.post = () => new Promise(done => { answer = done; });
+  r.store.dispatch('deskRoutineAsk', { id: 'close-recap' });
+  const first = r.dr.remove('close-recap');
+  assert.equal(r.s().rAsk, '', 'the question goes at the click');
+  const second = r.dr.remove('close-recap');
+  assert.deepEqual(r.posted, [['/data/desk/routines/delete', { id: 'close-recap' }]], 'one post for a double click');
+  answer({ ok: true });
+  await Promise.all([first, second]);
+  await settle();
+  r.answers.post = { ok: true };
+  await r.dr.remove('close-recap');
+  assert.equal(r.posted.length, 2, 'once answered, a Delete posts again');
+});
+
+test('a routines read drops the open row, the delete question, the busy and the said line of an id it no longer holds', () => {
+  let s = emptyState();
+  for (const id of ['close-recap', 'gone']) {
+    s = reducers.deskRoutineBusy(s, { id, what: 'test' });
+    s = reducers.deskRoutineSaid(s, { id, message: 'no' });
+  }
+  s = reducers.deskRoutineAsk(reducers.deskRoutineOpen(s, { id: 'gone' }), { id: 'gone' });
+  const held = deskRoutines();
+  const loaded = reducers.deskRoutinesLoaded(s, { data: held, at: 5 }).deskPage;
+  assert.deepEqual([loaded.rOpen, loaded.rAsk], ['', '']);
+  assert.deepEqual(loaded.rBusy, { 'close-recap': 'test' });
+  assert.deepEqual(loaded.rSaid, { 'close-recap': 'no' });
+  const kept = reducers.deskRoutinesLoaded(reducers.deskRoutineOpen(s, { id: 'close-recap' }), { data: held, at: 5 }).deskPage;
+  assert.equal(kept.rOpen, 'close-recap', 'a row the read holds stays open');
+  const unreadable = reducers.deskRoutinesLoaded(s, { data: deskRoutines({ load: { ok: false, error: 'x' }, routines: [] }), at: 5 }).deskPage;
+  assert.deepEqual([unreadable.rOpen, unreadable.rSaid], ['gone', s.deskPage.rSaid], 'a store that cannot be read says nothing of which routines are gone');
+});
+
 test('the reducers: a row opened and closed, its delete question with it; busy and said by id', () => {
   let s = emptyState();
   s = reducers.deskRoutineOpen(s, { id: 'a' });

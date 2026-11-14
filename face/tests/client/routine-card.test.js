@@ -80,15 +80,29 @@ test('the card in each of its seven chips, from the proposal the read holds by i
   assert.deepEqual([of(proposal({ state: 'expired' })).chip, of(proposal({ state: 'expired' })).keys], ['expired', false]);
 });
 
-test('Review Focus 3: no read yet, a read that cannot load, or a proposal the read does not hold is Closed, from the call, with no keys', () => {
-  for (const data of [null, undefined, { ok: false }, deskRoutines({ load: { ok: false, error: 'x' }, proposals: [] }), read(proposal({ id: 'p-ffffffff' })), deskRoutines()]) {
+test('Review Focus 3: a read that cannot load, or a proposal the read does not hold, is Closed, from the call, with no keys', () => {
+  for (const data of [{ ok: false }, deskRoutines({ load: { ok: false, error: 'x' }, proposals: [] }), read(proposal({ id: 'p-ffffffff' })), deskRoutines()]) {
     const c = routineCardOf(card(), data, { now: NOW_ISO });
     assert.deepEqual([c.chip, c.keys, c.line], ['closed', false, undefined]);
     assert.equal(c.name, 'Idea <screening>'); assert.equal(c.instruction, ARGS.instruction);
   }
-  const html = renderMessage(card(), conv(), emptyState());
+  const html = renderMessage(card(), conv(), stateWith(deskRoutines()));
   assert.match(html, /<span class="chip grey">Closed<\/span>/);
   assert.doesNotMatch(html, /data-action="routine(Yes|No)"/);
+});
+
+test('before the first routines read has answered, the card draws no chip and no keys, from the call', () => {
+  for (const data of [null, undefined]) {
+    const c = routineCardOf(card(), data, { now: NOW_ISO });
+    assert.deepEqual([c.chip, c.keys, c.line], [null, false, undefined]);
+    assert.equal(c.name, 'Idea <screening>'); assert.equal(c.instruction, ARGS.instruction);
+  }
+  for (const state of [emptyState(), R.deskRoutinesFailed(emptyState(), { at: Date.parse(NOW_ISO), message: 'HTTP 502' })]) {
+    const html = renderMessage(card(), conv(), state);
+    assert.match(html, /Idea &lt;screening&gt;/);
+    assert.doesNotMatch(html, /class="chip/, 'no chip, not Closed');
+    assert.doesNotMatch(html, /data-action="routine(Yes|No)"/);
+  }
 });
 
 test('a refused confirm keeps the keys: the limit line for limit, the request failed for any other', () => {

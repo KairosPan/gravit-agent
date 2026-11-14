@@ -91,6 +91,7 @@ export function startDeskRoutines({ store, getJson, postJson, schedule, cancelTi
   // its keys hidden and its line cleared, the post, then the routines read again, the keys back only once that read settles;
   // a refusal is kept by the proposal's id - `limit` when the face holds twenty routines already, `failed` for any other
   const answering = new Set();
+  const deleting = new Set();   // the ids whose Delete is in flight
   function respond(proposal, path) {
     if (closed || typeof proposal !== 'string' || proposal === '' || answering.has(proposal)) return Promise.resolve();
     answering.add(proposal);
@@ -135,12 +136,13 @@ export function startDeskRoutines({ store, getJson, postJson, schedule, cancelTi
         return reread();
       });
     },
-    /** Delete `id` (asked once more on the page first): the post, the question closed, then the routines read again. */
+    /** Delete `id` (asked once more on the page first): the question closed, the post, then the routines read again; a
+     *  second Delete of `id` while one is in flight does nothing. */
     remove(id) {
-      return act(id, DELETE, { id }).then(answer => {
-        store.dispatch('deskRoutineAskOff');
-        return answer ? reread() : undefined;
-      });
+      if (closed || typeof id !== 'string' || id === '' || deleting.has(id)) return Promise.resolve();
+      deleting.add(id);
+      store.dispatch('deskRoutineAskOff');
+      return act(id, DELETE, { id }).then(answer => (answer ? reread() : undefined)).finally(() => { deleting.delete(id); });
     },
     /** A routine card's ✓: POST { proposal } to confirm, then the routines read again, the card settling on that read. */
     confirm(proposal) {

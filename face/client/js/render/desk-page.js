@@ -156,7 +156,7 @@ function routineRow(r) {
 }
 
 // the column: the cap's line (and the spent one) under the head, a read's failure, the routines - or the store's one line when
-// it cannot be read - then the standing orders' read-only rows; No routines yet. only with neither
+// it cannot be read - then the standing orders' read-only rows; No routines yet. only with neither, once a read has answered
 function routines(state, now) {
   const p = state.deskPage;
   const view = routinesViewOf(p.routines.data, p, new Date(now).toISOString());
@@ -167,7 +167,7 @@ function routines(state, now) {
   const error = view?.error ? dim(t('desk.routines.unreadable', { error: view.error })) : '';
   const messages = rawHtml(`<a href="#/messages">${th('nav.messages')}</a>`);
   return `<section class="dk-col" aria-label="${th('desk.routines.title')}"><div class="dk-col-head"><h2>${th('desk.routines.title')}</h2><span class="dk-dim">${th('desk.routines.caption')}</span></div>` +
-    `${cap}${failed}${error}${rows.length ? `<div class="dk-groups">${rows.join('')}</div>` : view?.error ? '' : `<p>${th('desk.routines.none')}</p>`}<p class="dk-dim">${th('desk.routines.foot', { messages })}</p></section>`;
+    `${cap}${failed}${error}${rows.length ? `<div class="dk-groups">${rows.join('')}</div>` : view?.error || p.routines.status !== 'ready' ? '' : `<p>${th('desk.routines.none')}</p>`}<p class="dk-dim">${th('desk.routines.foot', { messages })}</p></section>`;
 }
 
 /** The Desk screen at `now` (ms): the head and its state, then News and Routines. The desk off is one line; so is its status

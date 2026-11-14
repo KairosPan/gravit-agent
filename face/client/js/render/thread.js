@@ -82,6 +82,7 @@ function routineChip(c) {
     case 'dismissed': return chip(t('thread.routine.dismissed'));
     case 'replaced': return chip(t('thread.routine.replaced'));
     case 'expired': return chip(t('thread.routine.expired'));
+    case null: return '';   // no routines read yet: nothing to say
     default: return chip(t('thread.routine.closed'));
   }
 }

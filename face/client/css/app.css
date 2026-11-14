@@ -796,7 +796,7 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .dk-said { margin: 0; font-size: calc(13px * var(--fs)); color: var(--warn-text); }
 .dk-text { margin: 0; font-size: calc(14px * var(--fs)); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dk-run { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: calc(13px * var(--fs)); }
-.dk-run-t { flex: 0 0 92px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.dk-run-t { flex: 0 0 92px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dk-run .chip { padding: 1px 8px; }
 .dk-ask { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: var(--down-fill); color: var(--down); font-size: calc(13px * var(--fs)); }
 .dk-spent { margin: 0; font-size: calc(13px * var(--fs)); font-weight: 600; color: var(--warn-text); }

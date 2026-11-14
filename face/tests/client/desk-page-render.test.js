@@ -26,7 +26,7 @@ test('monitoring: the head, News and Routines with their words', () => {
   const html = draw(onDesk());
   for (const word of ['Desk', 'Monitoring', 'US equities 04:00–20:00 ET · 2 watch rules', 'News', "What moved and what's next", 'Routines', 'Run on a schedule or a trigger',
     'Calendar', 'No economic calendar or earnings source connected.', 'Quotes', 'Headlines · Nasdaq answered 503', 'Fund flows · not connected',
-    'Social sentiment · not connected', 'Connect in Discover', 'Watch rules · 2', 'No routines yet.']) {
+    'Social sentiment · not connected', 'Connect in Discover', 'Watch rules · 2']) {
     assert.ok(html.includes(word), word);
   }
   assert.match(html, /data-action="deskPause"/, 'the Pause key');
@@ -215,6 +215,15 @@ test('the standing orders follow the routines; No routines yet. only with neithe
   assert.ok(html.indexOf('Close recap') < html.indexOf('pre-close'), 'the routines first');
   assert.doesNotMatch(html, /No routines yet\./);
   assert.match(draw(withRoutines(deskRoutines({ routines: [] }))), /No routines yet\./);
+});
+
+test('No routines yet. waits for the first routines read: not while it is pending, nor when it failed', () => {
+  const pending = draw(onDesk());
+  assert.match(pending, /Routines/);
+  assert.doesNotMatch(pending, /No routines yet\./, 'not read yet');
+  const failed = draw(R.deskRoutinesFailed(onDesk(), { at: DESK_NOW, message: 'HTTP 502' }));
+  assert.match(failed, /HTTP 502/);
+  assert.doesNotMatch(failed, /No routines yet\./, 'a failed first read says why, not that there are none');
 });
 
 test("a report under News: the routine, its headline, Details opening its body escaped; the Reports chip counts them", () => {

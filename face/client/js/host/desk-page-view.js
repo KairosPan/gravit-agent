@@ -232,8 +232,8 @@ function settledChip(p) {
  *  RoutinesStatus body, or null before one): `name`, `when`, `instruction` and `note` the call's and the result's, as they
  *  came; `chip` from the proposal the read holds by the card's id - `new` pending (`change` when the call replaces a
  *  routine), `added` confirmed and its routine's current version, `replaced` confirmed but replaced since or superseded,
- *  `dismissed`, `expired`, and `closed` with no read yet, a proposal the read does not hold, or one whose name or instruction
- *  (trimmed) is not the call's; `keys` only while pending and no answer of the card's is in flight (`busy`).
+ *  `dismissed`, `expired`, `closed` for a proposal the read does not hold or one whose name or instruction (trimmed) is not
+ *  the call's, and null - no chip - before a read has answered; `keys` only while pending and no answer of the card's is in flight (`busy`).
  *  `line`: a pending card's refused answer (`refused`: `limit`, else `failed`), else a pending change's `replaces` (the
  *  routine's name, while the read holds it); an added card's `first` run (`next` for a change) with `day` (the word for
  *  today, else its New York date) and `time` (`HH:MM` New York) from the read's next slot, none without one; a dismissed
@@ -246,7 +246,8 @@ export function routineCardOf(message, data, { refused = null, busy = false, now
   const same = held && str(held.name).trim() === str(d.name).trim() && str(held.instruction).trim() === str(d.instruction).trim();
   const p = same ? held : undefined;
   const replaces = str(d.replaces) !== '';
-  const chip = !p ? 'closed' : p.state === 'pending' ? (replaces ? 'change' : 'new') : settledChip(p);
+  // before a routines read has answered there is nothing to say of the proposal: no chip at all, not Closed
+  const chip = !isRecord(data) ? null : !p ? 'closed' : p.state === 'pending' ? (replaces ? 'change' : 'new') : settledChip(p);
   const keys = p?.state === 'pending' && !busy;
   const card = { proposal: id, name: str(d.name), when: str(d.when), instruction: str(d.instruction), note: str(d.note), chip, keys, desk: chip === 'added' };
   if (keys && refused) return { ...card, line: { kind: refused === 'limit' ? 'limit' : 'failed' } };

@@ -20,7 +20,22 @@ export const reducers = {
   deskFilter: (s, { value } = {}) => deskPage(s, { filter: typeof value === 'string' && value !== '' ? value : 'all' }),
   deskToggle: (s, { id } = {}) => (typeof id === 'string' && id !== '' ? deskPage(s, { open: { ...s.deskPage.open, [id]: !s.deskPage.open[id] } }) : s),
   deskRules: s => deskPage(s, { rules: !s.deskPage.rules }),
-  deskRoutinesLoaded: (s, { data, at } = {}) => deskPage(s, { routines: { status: 'ready', data, at, message: null } }),
+  // a read that holds the routines drops the row open, the delete question, the acts under way and the lines of an id it no
+  // longer holds; one whose store cannot be read says nothing of which are gone, and drops nothing
+  deskRoutinesLoaded: (s, { data, at } = {}) => {
+    const routines = { status: 'ready', data, at, message: null };
+    if (!Array.isArray(data?.routines) || data?.load?.ok === false) return deskPage(s, { routines });
+    const ids = new Set(data.routines.map(r => r?.id));
+    const p = s.deskPage;
+    const only = map => Object.fromEntries(Object.entries(map).filter(([id]) => ids.has(id)));
+    return deskPage(s, {
+      routines,
+      rOpen: ids.has(p.rOpen) ? p.rOpen : '',
+      rAsk: ids.has(p.rAsk) ? p.rAsk : '',
+      rBusy: only(p.rBusy),
+      rSaid: only(p.rSaid),
+    });
+  },
   deskRoutinesFailed: (s, { at, message = null } = {}) => deskPage(s, { routines: { ...s.deskPage.routines, status: 'error', at, message } }),
   deskRoutineBusy: (s, { id, what = null } = {}) => (isId(id) ? deskPage(s, { rBusy: keyed(s.deskPage.rBusy, id, what === 'test' ? 'test' : null) }) : s),
   deskRoutineSaid: (s, { id, message = null } = {}) => (isId(id) ? deskPage(s, { rSaid: keyed(s.deskPage.rSaid, id, message) }) : s),
