@@ -88,6 +88,9 @@ import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
 import { readThroughLane } from "./readthrough-lane.ts";
+import type { RoutineClock } from "./routine-clock.ts";
+import { registerRoutineRoutes } from "./routine-routes.ts";
+import { routineOps } from "./routines.ts";
 import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts";
 import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
@@ -1648,7 +1651,10 @@ function withPersistence(ctx: DeskSessionCtxLike): DeskSessionCtxLike {
  * could not load, or when the desk was disposed first - and never rejects; `watchRow`, present with the schedule
  * when `installDesk` was given `watchRow`, settles to the watch (src/watch.ts) once its module has loaded -
  * `undefined` with no quote source or one `unavailable`, when the schedule or the watch could not load, or when the
- * desk was disposed first - and never rejects; `dispose(code)` ends the run. */
+ * desk was disposed first - and never rejects; `routines`, present with the schedule, settles to the routines' clock
+ * row (src/routine-clock.ts) once its module has loaded - `undefined` when it could not load, when the market
+ * calendars could not be made, or when the desk was disposed first - and never rejects; `dispose(code)` ends the
+ * run. */
 export interface DeskHandle {
   enabled: boolean;
   bootedAt: number;
@@ -1657,6 +1663,7 @@ export interface DeskHandle {
   annotator?: Annotator;
   schedule?: Promise<ScheduleHandle | undefined>;
   watchRow?: Promise<WatchHandle | undefined>;
+  routines?: Promise<RoutineClock | undefined>;
   /** Bind Gravit's one conversation, once main.ts has installed it (`deps.router`): the phone's texts, `/stop` and
    * `/status` go to it, the desk session is never ensured, and once the outlet is set the conversation answers what a
    * graceful stop carried (its `carry`); `undefined` - the install failed - and the desk session answers the phone as
@@ -1955,6 +1962,10 @@ export function installDesk(
   registerDeskRoutes(webServer, status);
   /* the Desk screen's News (src/desk-news.ts), the desk on or off: with it off there is no watch, and the ledgers still read */
   registerDeskNewsRoute(webServer, { home, now, watch: status.watch });
+  /* The routines' clock row once it runs; until then, and in a face that runs none (the desk off), the page's read is
+   * the store's alone and a test is `paused` (src/routine-routes.ts). The acts are the store's, the desk on or off. */
+  let routineClock: RoutineClock | undefined;
+  registerRoutineRoutes(webServer, { ops: routineOps({ home, now, log }), clock: () => routineClock, home, now });
   /* every desk web_fetch that reaches dispatch is a desk-fetch line, the desk on or off (spec 2026-11-07 §5.6) */
   const recordFetch = ({ sessionId, url }: DeskFetch): Promise<void> =>
     appendEvent(home, { t: new Date(now()).toISOString(), kind: "desk-fetch", sessionId, url }, { log });
@@ -2161,6 +2172,37 @@ export function installDesk(
       log(`${BIN}: desk: the watch could not be loaded: ${reasonOf(err)}`);
       return undefined;
     });
+  /* The routines' clock row (src/routine-clock.ts) loads on first use as well - with it src/routine-run.ts and the desk
+   * session's module -, once the standing orders' module has made the market calendars: it runs on the US one. Its
+   * timers are the schedule's: the test's clock when one is given, else the wall clock `unref`'d on the desk's now, so
+   * it never holds the process open. A routine names no model: each run is a fresh desk agent on the desk's own
+   * route. Its wake carries the watch's state while the watch runs. It never rejects: a module that cannot load is
+   * one line and `undefined`; one that arrives once dispose has begun starts nothing. */
+  const routining = scheduling === undefined || wiring === undefined ? undefined : scheduling
+    .then(async () => {
+      if (calendars === undefined) return undefined;
+      const us = calendars.us;
+      const [clockModule, sessionModule] = await Promise.all([import("./routine-clock.ts"), import("./desk-session.ts")]);
+      if (disposing !== undefined) return undefined;
+      routineClock = clockModule.installRoutineClock({
+        home,
+        root: wiring.root,
+        clock: deps.schedule?.clock ?? watchClock(now),
+        calendar: us,
+        bootedAt,
+        createAgent: (o) => sessionModule.createDeskAgent(wiring.session, o),
+        resolveRoute: async () => wiring.session.route,
+        on: wiring.on,
+        note,
+        ...(watching === undefined ? {} : { state: async () => watch?.stateText() }),
+        log,
+      });
+      return routineClock;
+    })
+    .catch((err: unknown) => {
+      log(`${BIN}: desk: the routines' clock could not be loaded: ${reasonOf(err)}`);
+      return undefined;
+    });
   return {
     enabled,
     bootedAt,
@@ -2169,6 +2211,7 @@ export function installDesk(
     ...(annotator === undefined ? {} : { annotator }),
     ...(scheduling === undefined ? {} : { schedule: scheduling }),
     ...(watching === undefined ? {} : { watchRow: watching }),
+    ...(routining === undefined ? {} : { routines: routining }),
     bindRouter,
     lines: () => deskLines({ home, now, standing: () => schedule?.status() }),
     async quiesce() {
@@ -2180,6 +2223,7 @@ export function installDesk(
       disposing ??= (async () => {
         decide();
         await (await scheduling)?.dispose();
+        await (await routining)?.dispose();
         await (await watching)?.dispose();
         await annotator?.dispose();
         conversation?.setState(undefined);

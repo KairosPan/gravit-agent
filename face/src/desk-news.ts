@@ -3,19 +3,22 @@
  * with its word - grouped by symbol, and the reason Gravit wrote for its pass (the `annotated` line) is joined to it:
  * its headline the line of the reply that starts with the row's own ticker, the pages its session opened counted from
  * the `desk-fetch` events of `events.jsonl`. The watch's rules come with the day's count each, and the three sources
- * the watch reads with their state.
+ * the watch reads with their state. Under them, the routines' reports of the last seven days (the `report` lines of
+ * `routines.jsonl`, src/routine-run.ts), grouped by routine.
  *
- * Read-only, and cheap: `alerts.jsonl` is parsed again only when its size or mtime moved. Texts are passed through as
+ * Read-only, and cheap: `alerts.jsonl` and `routines.jsonl` are each parsed again only when its size or mtime moved. Texts are passed through as
  * written - the server never escapes; the client draws them as text. A line this module's guards refuse - torn, half
  * written, of another shape - is skipped, so a bad line never fails the route.
  *
  * src/desk.ts loads this module (its `installDesk` registers the route) and this module reads the ledgers through
  * src/desk.ts: neither uses the other at module top level, so the cycle is safe. The watch's modules are named for
- * their types alone (tests/desk-weight.test.ts). */
+ * their types alone (tests/desk-weight.test.ts), and a report line is read by this module's own guard, never
+ * src/routine-run.ts's, which is heavy. */
 import { stat } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
 import { ALERTS_FILE, deskDir, readEvents, readRecords } from "./desk.ts";
+import { ROUTINES_LEDGER } from "./routines.ts";
 import { etDate } from "./et.ts";
 import { fencedGet, isTrustedDataRequest } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
@@ -51,6 +54,16 @@ export interface NewsRule { id: string; kind: "move_pct" | "gap" | "filing"; pct
 /** One source the watch reads, and its state. */
 export interface NewsSource { id: "quotes" | "headlines" | "filings"; state: "ok" | "unavailable" | "off"; reason?: string }
 
+/** One routine's report as News draws it: its run's key, when it was written, its headline and its body. */
+export interface NewsReport { key: string; t: string; headline: string; body: string }
+
+/** One routine's reports of the last seven days: the routine (named as its latest report names it), the latest, and
+ * the earlier ones newest first. */
+export interface NewsReportGroup { routine: { id: string; name: string }; latest: NewsReport; earlier: NewsReport[] }
+
+/** How far back News reads the routines' reports. */
+const REPORTS_WINDOW_MS = 7 * 86_400_000;
+
 /** What `GET /data/desk/news` answers, after `ok`. */
 export interface DeskNews {
   /** The New York date shown. */
@@ -60,8 +73,8 @@ export interface DeskNews {
   sources: NewsSource[];
   /** Groups ordered by their latest alert, newest first. */
   alerts: { total: number; groups: NewsGroup[] };
-  /** Plan 2 fills it. */
-  reports: { total: number; groups: never[] };
+  /** The routines' reports of the last seven days; groups ordered by their latest report, newest first. */
+  reports: { total: number; groups: NewsReportGroup[] };
   rules: NewsRule[];
   levels: number;
 }
@@ -101,6 +114,15 @@ function isNewsRecord(x: unknown): x is NewsRecord {
     default:
       return false;
   }
+}
+
+/** A `report` line of `routines.jsonl`, by the fields News reads of it. */
+type ReportLine = { t: string; kind: "report"; key: string; routine: string; name: string; headline: string; body: string };
+
+/** Whether `x` is a {@link ReportLine}; a run's other lines and an act's are not. */
+function isReportLine(x: unknown): x is ReportLine {
+  return isObject(x) && x.kind === "report" && isText(x.t) && isText(x.key) && isText(x.routine) && isText(x.name)
+    && isText(x.headline) && isText(x.body);
 }
 
 /* ---------- the view ---------- */
@@ -151,6 +173,24 @@ function filingsSource(watch: WatchStatus | undefined): NewsSource {
   return { id: "filings", state: "unavailable", reason: f.lastError ?? f.state };
 }
 
+/** The reports of `lines` written in the {@link REPORTS_WINDOW_MS} up to `now`, grouped by routine: see {@link DeskNews}. */
+function reportsOf(lines: readonly unknown[], now: number): DeskNews["reports"] {
+  const kept: { line: ReportLine; ms: number }[] = [];
+  for (const line of lines) {
+    if (!isReportLine(line)) continue;
+    const ms = Date.parse(line.t);
+    if (Number.isFinite(ms) && ms >= now - REPORTS_WINDOW_MS && ms <= now) kept.push({ line, ms });
+  }
+  kept.sort((a, b) => b.ms - a.ms);
+  const byRoutine = new Map<string, ReportLine[]>();
+  for (const { line } of kept) byRoutine.set(line.routine, [...(byRoutine.get(line.routine) ?? []), line]);
+  const view = (r: ReportLine): NewsReport => ({ key: r.key, t: r.t, headline: r.headline, body: r.body });
+  const groups: NewsReportGroup[] = [...byRoutine].map(([id, lines]) => ({
+    routine: { id, name: lines[0]!.name }, latest: view(lines[0]!), earlier: lines.slice(1).map(view),
+  }));
+  return { total: kept.length, groups };
+}
+
 /**
  * One day's News from the ledgers' lines.
  *
@@ -162,9 +202,10 @@ function filingsSource(watch: WatchStatus | undefined): NewsSource {
  * `label` - is its id; no watch gives none, and no sources but `off`.
  * @param input - `records`, the lines of `alerts.jsonl` (any line this module's guards refuse is skipped); `fetches`,
  *   the ledger's `desk-fetch` events, every one, since a reason's pages are counted by its session whatever the day;
- *   `watch`, the watch's status when it runs; `now`, in ms since the epoch.
+ *   `watch`, the watch's status when it runs; `reports`, the lines of `routines.jsonl` (any line but a `report` is
+ *   skipped; none when absent); `now`, in ms since the epoch.
  */
-export function buildNews(input: { records: unknown[]; fetches: { sessionId: string }[]; watch?: WatchStatus; now: number }): DeskNews {
+export function buildNews(input: { records: unknown[]; fetches: { sessionId: string }[]; watch?: WatchStatus; reports?: unknown[]; now: number }): DeskNews {
   const { watch, now } = input;
   const alerts: AlertLine[] = [];
   const delivered = new Map<string, DeliveredLine>();
@@ -226,40 +267,43 @@ export function buildNews(input: { records: unknown[]; fetches: { sessionId: str
     today: date === today,
     sources: [marketSource("quotes", watch), marketSource("headlines", watch), filingsSource(watch)],
     alerts: { total: ofDay.length, groups },
-    reports: { total: 0, groups: [] },
+    reports: reportsOf(input.reports ?? [], now),
     rules,
     levels: watch?.levels ?? 0,
   };
 }
 
-/** The last parse of `alerts.jsonl` per home, valid while its size and mtime hold. */
-const newsCache = new Map<string, { key: string; records: NewsRecord[] }>();
-async function readNewsRecords(home: string): Promise<NewsRecord[]> {
+/** The last parse of a desk ledger `file` per home, valid while its size and mtime hold. */
+type ParseCache<T> = Map<string, { key: string; records: T[] }>;
+async function readCached<T>(cache: ParseCache<T>, home: string, file: string, guard: (x: unknown) => x is T): Promise<T[]> {
   let key = "absent";
   try {
-    const st = await stat(join(deskDir(home), ALERTS_FILE));
+    const st = await stat(join(deskDir(home), file));
     key = `${st.size}:${st.mtimeMs}`;
   } catch { /* absent or unreadable: readRecords decides */ }
-  const hit = newsCache.get(home);
+  const hit = cache.get(home);
   if (hit !== undefined && hit.key === key) return hit.records;
-  const { records } = await readRecords(home, ALERTS_FILE, isNewsRecord);
-  newsCache.set(home, { key, records });
+  const { records } = await readRecords(home, file, guard);
+  cache.set(home, { key, records });
   return records;
 }
+const newsCache: ParseCache<NewsRecord> = new Map();
+const reportCache: ParseCache<ReportLine> = new Map();
 
 /**
- * The day's News for `home`: {@link buildNews} over `alerts.jsonl` (parsed again only when its size or mtime moved)
- * and every `desk-fetch` event of the current `events.jsonl`.
+ * The day's News for `home`: {@link buildNews} over `alerts.jsonl` and the `report` lines of `routines.jsonl` (each
+ * parsed again only when its size or mtime moved) and every `desk-fetch` event of the current `events.jsonl`.
  * @param deps - `home`, the harness home; `watch`, the watch's status while it runs; `now` (default `Date.now`).
  * @returns rejects when a ledger exists but cannot be read; an absent one is empty.
  */
 export async function deskNews(deps: { home: string; watch?: () => WatchStatus | undefined; now?: () => number }): Promise<DeskNews> {
-  const records = await readNewsRecords(deps.home);
+  const records = await readCached(newsCache, deps.home, ALERTS_FILE, isNewsRecord);
+  const reports = await readCached(reportCache, deps.home, ROUTINES_LEDGER, isReportLine);
   const { events } = await readEvents(deps.home);
   const fetches: { sessionId: string }[] = [];
   for (const e of events) if (e.kind === "desk-fetch") fetches.push({ sessionId: e.sessionId });
   const watch = deps.watch?.();
-  return buildNews({ records, fetches, ...(watch === undefined ? {} : { watch }), now: (deps.now ?? Date.now)() });
+  return buildNews({ records, fetches, ...(watch === undefined ? {} : { watch }), reports, now: (deps.now ?? Date.now)() });
 }
 
 /**

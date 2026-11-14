@@ -268,3 +268,57 @@ test("GET /data/desk/news is fenced", async () => {
   assert.equal(forged.status, 403);
   assert.deepEqual(forged.body, { ok: false, error: "forbidden" });
 });
+
+/* ---------- the routines' reports (plan 2) ---------- */
+
+/** One `report` line of `routines.jsonl`: routine `routine` (named `name`) at `t`. */
+const report = (routine: string, name: string, t: string): Record<string, unknown> => ({
+  t, kind: "report", key: `${routine}:${t.slice(0, 10)}:09:00`, routine, name, headline: `${name} headline ${t}`, body: `${name} body ${t}\n<b>as written</b>`,
+});
+
+test("the routines' reports of the last seven days, grouped by routine, newest first, groups by their latest", () => {
+  const reports: unknown[] = [];
+  /* nine days back from Friday 15:00 New York, one report a day from each of two routines: seven days are kept */
+  for (let back = 8; back >= 0; back--) {
+    const t = new Date(FRIDAY - back * 86_400_000 - 3_600_000).toISOString();
+    reports.push(report("r-aaaaaaaa", back === 0 ? "Movers (renamed)" : "Movers", t));
+    reports.push(report("r-bbbbbbbb", "Filings", new Date(Date.parse(t) - 60_000).toISOString()));
+  }
+  /* an act's line and a run's other lines are not reports */
+  reports.push({ t: new Date(FRIDAY).toISOString(), kind: "switched", routine: "r-aaaaaaaa", enabled: false });
+  reports.push({ t: new Date(FRIDAY).toISOString(), kind: "finished", key: "k", routine: "r-bbbbbbbb", outcome: "ended", headline: "h", reported: true, wallMs: 1 });
+  const news = buildNews({ records: [], fetches: [], reports, now: FRIDAY });
+  assert.equal(news.reports.total, 14);
+  assert.deepEqual(news.reports.groups.map((g) => g.routine), [
+    { id: "r-aaaaaaaa", name: "Movers (renamed)" },
+    { id: "r-bbbbbbbb", name: "Filings" },
+  ], "a group's name is its latest report's");
+  const movers = news.reports.groups[0]!;
+  assert.equal(movers.latest.t, new Date(FRIDAY - 3_600_000).toISOString());
+  assert.equal(movers.latest.key, `r-aaaaaaaa:${movers.latest.t.slice(0, 10)}:09:00`);
+  assert.equal(movers.latest.headline, `Movers (renamed) headline ${movers.latest.t}`);
+  assert.equal(movers.latest.body, `Movers (renamed) body ${movers.latest.t}\n<b>as written</b>`, "texts pass through as written");
+  assert.deepEqual(Object.keys(movers.latest).sort(), ["body", "headline", "key", "t"]);
+  assert.equal(movers.earlier.length, 6);
+  assert.deepEqual(movers.earlier.map((r) => r.t), [1, 2, 3, 4, 5, 6].map((back) => new Date(FRIDAY - back * 86_400_000 - 3_600_000).toISOString()));
+  assert.equal(news.alerts.total, 0, "reports are not alerts");
+
+  /* none given, none shown */
+  assert.deepEqual(buildNews({ records: [], fetches: [], now: FRIDAY }).reports, { total: 0, groups: [] });
+});
+
+test("deskNews reads the reports from routines.jsonl, skipping a broken line, and re-reads it when it changes", async () => {
+  const h = await home();
+  await ledger(h, "routines.jsonl", [
+    report("r-aaaaaaaa", "Movers", "2026-11-13T14:00:00.000Z"),
+    "{\"kind\":\"report\",\"t\":\"2026-11-13T14:00:00.000Z\",\"routine\":7}\n",
+    "{\"kind\":\"report\"",
+  ]);
+  const first = await deskNews({ home: h, now: () => FRIDAY });
+  assert.equal(first.reports.total, 1);
+  assert.equal(first.reports.groups[0]!.routine.name, "Movers");
+  await writeFile(join(deskDir(h), "routines.jsonl"), "\n" + JSON.stringify(report("r-bbbbbbbb", "Filings", "2026-11-13T15:00:00.000Z")) + "\n", { flag: "a" });
+  const second = await deskNews({ home: h, now: () => FRIDAY });
+  assert.equal(second.reports.total, 2);
+  assert.deepEqual(second.reports.groups.map((g) => g.routine.id), ["r-bbbbbbbb", "r-aaaaaaaa"]);
+});
