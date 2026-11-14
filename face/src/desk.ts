@@ -81,6 +81,7 @@ import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { createAnnotator, type Annotator } from "./annotator.ts";
 import { createDeskConversation, type ClaimsOn, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
+import { registerDeskNewsRoute } from "./desk-news.ts";
 import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSessionPersistenceLike, SessionEventsOn } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskFetch, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
@@ -1813,7 +1814,8 @@ async function readAlertsCached(home: string): Promise<{ records: (RailAlert | R
 /**
  * Mount the desk's rows on a booted face.
  *
- * The status and pause routes ({@link registerDeskRoutes}) are mounted whatever `enabled` says -
+ * The status and pause routes ({@link registerDeskRoutes}) and the News route (src/desk-news.ts
+ * `registerDeskNewsRoute`, on the status's `home`, `now` and `watch`) are mounted whatever `enabled` says -
  * the switch is the home's, not this face's - and so, given both `ctx` and `quotes`, are the two desk
  * tools (src/desk-tools.ts): every `gravit-desk` agent, those already live included, gets
  * `desk_quotes` over `quotes` and `desk_state` over {@link deskStatus} with the status route's own
@@ -1950,6 +1952,8 @@ export function installDesk(
     watch: () => watch?.status(),
   };
   registerDeskRoutes(webServer, status);
+  /* the Desk screen's News (src/desk-news.ts), the desk on or off: with it off there is no watch, and the ledgers still read */
+  registerDeskNewsRoute(webServer, { home, now, watch: status.watch });
   /* every desk web_fetch that reaches dispatch is a desk-fetch line, the desk on or off (spec 2026-11-07 §5.6) */
   const recordFetch = ({ sessionId, url }: DeskFetch): Promise<void> =>
     appendEvent(home, { t: new Date(now()).toISOString(), kind: "desk-fetch", sessionId, url }, { log });

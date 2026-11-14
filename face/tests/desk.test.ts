@@ -293,7 +293,8 @@ test("installDesk: enabled writes boot and shutdown; disabled writes nothing and
   const quiet = installDesk(rec, { home: off, enabled: false });
   await quiet.ready; await quiet.dispose(0);
   assert.deepEqual(await readEvents(off), { events: [], skipped: 0 });
-  assert.deepEqual(rec.paths(), ["/data/desk/status", "/data/desk/pause"], "both routes whatever enabled says: the switch is the home's, not this face's");
+  assert.deepEqual(rec.paths(), ["/data/desk/status", "/data/desk/pause", "/data/desk/news"], "every route whatever enabled says: the switch is the home's, not this face's");
+  assert.equal((JSON.parse(await rec.call("/data/desk/news")) as { status: number }).status, 200, "a desk that is off still reads its News");
 });
 
 test("an unreadable ledger still answers 200: no gaps, no runs, and ledgerError names the code", async () => {
