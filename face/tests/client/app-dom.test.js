@@ -18,6 +18,7 @@ import { rebuildQuery } from '../../src/account-proxy.ts';
 import { sayOf, setTable, said as wordLine, wordsEpoch } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
 import { ZH } from '../../client/js/i18n/zh.js';
+import { deskNews, deskPageStatus } from './helpers/desk-news.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -763,6 +764,31 @@ test('the Desk reads its news and the desk status; Markets keeps the status alon
   await settle();
   assert.equal(held(DESK_POLL_MS), 0, 'on Messages neither polls');
   assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 1);
+});
+
+// the Desk page drawn (desk-page plan 1 Task 4): its keys clicked - a symbol's filter chip, Details on an alert and the
+// watch rules' fold - each redrawing the screen
+test("the Desk's filter, Details and rules keys narrow the news, open a reason and unfold the rules", async () => {
+  const f = fakeWindow({ hash: '#/desk', storage: memoryStorage() });
+  const h = host({ rows: [row('s1')] });
+  h.inventory['/data/desk/status'] = deskPageStatus();
+  h.inventory['/data/desk/news'] = deskNews();
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers: new HeldTimers(() => true), now: () => 1_000_000 });
+  await h.ready();
+  await settle();
+  assert.match(f.html(), /4th alert today/, 'the news drawn');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkFilter', value: 'NVDA' } });
+  assert.equal(store.get().deskPage.filter, 'NVDA');
+  assert.match(f.html(), /data-value="NVDA" aria-pressed="true"/);
+  assert.doesNotMatch(f.html(), /4th alert today/, 'CRWV filtered out');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkFilter', value: 'all' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkToggle', id: 'a-4' } });
+  assert.deepEqual(store.get().deskPage.open, { 'a-4': true });
+  assert.match(f.html(), /<pre class="dk-reason">CRWV 52\.10, &lt;script&gt;/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkRules' } });
+  assert.equal(store.get().deskPage.rules, true);
+  assert.match(f.html(), /Price levels · 3/);
+  store.timers.clear();
 });
 
 // the manual look (2026-10-20): the render keeps what an input holds, so Clear must empty the box itself

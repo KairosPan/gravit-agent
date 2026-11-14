@@ -194,7 +194,8 @@ export function firingWord(code) {
 const WATCH_ERROR_SHOWN_MAX = 200;
 const FILE_ERROR_SHOWN_MAX = 80;
 
-function watchHead(w) {
+/** The watch's own line (src/desk.ts watchLines' head): nothing to watch, held elsewhere, its lease refused, or its state. */
+export function watchHead(w) {
   if (w.state === 'idle') return t('desk.watch.idle');
   if (w.state === 'held-elsewhere') return isRecord(w.holder) ? t('desk.watch.heldBy', { pid: w.holder.pid }) : t('desk.watch.held');
   if (w.state === 'lease-failed') return t('desk.watch.lease', { error: str(w.leaseError) || t('desk.watch.unknown') });

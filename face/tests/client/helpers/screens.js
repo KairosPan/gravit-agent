@@ -32,7 +32,8 @@ import { MIN } from '../../../client/js/time.js';
 import { VIEW_1027 } from './lunhui-view.js';
 import { EVENT_VIEW, EVENT_VIEW_ID, EVENT_VIEW_WITH_B } from './event-view.js';
 import { stockDrawerHtml } from '../../../client/js/render/lunhui/stock.js';
-import { deskStatus } from './desk-status.js';
+import { deskStatus, DESK_NOW } from './desk-status.js';
+import { deskNews, deskPageStatus } from './desk-news.js';
 import { editorHtml, dropOverlay, lightboxHtml } from '../../../client/js/composer/view.js';
 import { DEFAULT_LIMITS } from '../../../client/js/composer/files.js';
 import { slashItems, atItems } from '../../../client/js/composer/menus.js';
@@ -437,8 +438,26 @@ export function namedStates() {
     ['task-event-table', { ...page, analog: { tasks: { wt: read }, views } }],
     ['market-event-window', marketEventWindow()],
     ...abilityStates(),
-    // the Desk page (desk-page plan 1 Task 3): its title alone, until Task 4 draws it
+    // the Desk page (desk-page plan 1 Task 3): its title alone before the desk's status is read
     ['desk-page', R.nav(emptyState(), { screen: 'desk', id: null })],
+    // the Desk page drawn (desk-page plan 1 Task 4): monitoring with the news, CRWV's Details and the rules open; paused; the
+    // desk off; an empty day with a standing order
+    ...deskPageStates(),
+  ];
+}
+
+// the Desk page's states (desk-page plan 1 Task 4), read at the desk status' own clock
+function deskPageStates() {
+  const desk = (status, news) => {
+    const s = R.deskLoaded(R.nav(emptyState(), { screen: 'desk', id: null }), { data: status, at: DESK_NOW });
+    return news ? R.deskNewsLoaded(s, { data: news, at: DESK_NOW }) : s;
+  };
+  const scheduled = { scheduled: [{ order: 'pre-close', next: '2026-11-02T20:30:00.000Z', enabled: true, expired: false }], lines: [] };
+  return [
+    ['desk-page-monitoring', R.deskRules(R.deskToggle(desk(deskPageStatus(), deskNews()), { id: 'a-4' }))],
+    ['desk-page-paused', desk(deskPageStatus({ off: { setAt: '2026-11-02T14:00:00.000Z', by: 'telegram', until: '2026-11-02T16:00:00.000Z' } }), deskNews())],
+    ['desk-page-off', desk(deskPageStatus({ desk: { enabled: false } }), null)],
+    ['desk-page-empty', R.tasksLoaded(desk(deskPageStatus(), deskNews({ alerts: { total: 0, groups: [] } })), { conversation: 's1', tasks: [], desk: scheduled, at: DESK_NOW })],
   ];
 }
 
@@ -964,9 +983,10 @@ const CONTENT_FIELDS = new Set([
 // (the venue its status.yaml names and the Account's rows or refusal), What you sign's lines
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); an event analog view and its
-// task as the face read them (the worker's and web pages' words); `*` is any one key
+// task as the face read them (the worker's and web pages' words); the desk's news as the face answered it (its ledgers' and
+// Gravit's words); `*` is any one key
 const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
-  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task']];
+  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 // the strings a content field holds that are an ability's declared parts, its tools' and skills' names in the abilities listing
 // (an array adds nothing to a path): drawn each whole, they pass as runs (abilityRuns below) and lend no known word

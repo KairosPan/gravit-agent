@@ -118,7 +118,9 @@ test('the three UI reducers change only their own fields', () => {
   assert.equal(reducers.deskNewsLoading(failed).deskPage.message, 'x', 'the sentence stays while a read is on its way');
 });
 
-test('the stub screen is the Desk page with its title', () => {
+test('the Desk page before the desk status is read: its title and Loading…, no columns', () => {
   const html = renderDeskScreen(emptyState(), 0);
-  assert.match(html, /^<main class="main dk"><header class="head"><h1 class="head-title">Desk<\/h1><\/header><\/main>$/);
+  assert.match(html, /^<main class="main dk"><header class="head">.*<h1 class="head-title">Desk<\/h1>/);
+  assert.match(html, /Loading…/);
+  assert.doesNotMatch(html, /dk-cols/);
 });

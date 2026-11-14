@@ -108,6 +108,7 @@
     {"en":"desk","zh":"值守台","note":"the always-on desk"},
     {"en":"brief","zh":"简报","note":"the pre-close brief"},
     {"en":"alert","zh":"提醒","note":"the watch's alerts"},
+    {"en":"routine","zh":"例行任务","note":"a routine of the Desk page, run on a schedule or a trigger"},
     {"en":"paper","zh":"模拟","note":"a paper account, paper dollars, the Paper chip"},
     {"en":"Refused","zh":"已拒绝","note":"a refusal the face words (the Account's own sentences stay as they came)"},
     {"en":"Retry","zh":"重试","note":"the Retry key"},
