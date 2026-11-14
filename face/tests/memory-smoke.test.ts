@@ -3,7 +3,7 @@
  * gravit-memory's own door from the install beside the face, as the agent `gravit`, and this file shows who holds its
  * seven tools, what one of them answers through the tree, and where the two prompt sections reach.
  *
- * THREE STATES OF THE WORLD, THREE BOOTS. The first boots over a home made with the package's own `initHome`: the
+ * FOUR STATES OF THE WORLD, FOUR BOOTS. The first boots over a home made with the package's own `initHome`: the
  * conversation (`gravit-router`, opened as main.ts opens it - src/tasks.ts `installRouter`) and a task's worker
  * (`gravit`, started by the stubbed conversation's `task_start`) each hold the seven `mcp__memory__memory_*` tools, a
  * desk session (src/desk-session.ts `createDeskAgent`, the firings' create path) holds none; `memory_status`, called
@@ -12,15 +12,18 @@
  * sections `mcp:memory` (dsh-mcp-client's server instructions) and `gravit:memory` (dsh/profile/memory.md, gated on the
  * recall tool). The second boots over a home nobody made: healthy, and the tool says "no memory here". The third points
  * `FACE_MEMORY_DIR` at an empty directory, an install that is not there: healthy, no memory tool, the face's own
- * standing "not installed". Each boot's environment is set before it and put back after it, since the row reads it at
- * compose time.
+ * standing "not installed". The fourth disables the row by a line in the operator's own patch file: no memory tool in
+ * the tree, the conversation or a Gravit session, no `gravit:memory` in their prompts, the face's standing "disabled".
+ * Each boot's environment (and the fourth's patch file) is set before it and put back after it, since the row reads it
+ * at compose time.
  *
  * THE MEASURE. Asserted: a worker's and the conversation's prompts hold both sections, a desk session's holds no
  * `gravit:memory`. Recorded and not asserted - dsh has no switch for it: whether `mcp:memory` reaches a desk session's,
- * a bot's and a role child's prompt. Each is written to stderr as one `memory-smoke: measure:` line.
+ * a bot's and a role child's prompt, and, with the row disabled, whether it reaches the conversation's and a Gravit
+ * session's. Each is written to stderr as one `memory-smoke: measure:` line.
  *
  * WHERE IT RUNS. Every directory is a `mkdtemp` under the system's temporary directory - the harness home (shared by
- * the three boots, as tests/router-smoke.test.ts's boots share one), the repository root the tasks read (with a `.git`
+ * the four boots, as tests/router-smoke.test.ts's boots share one), the repository root the tasks read (with a `.git`
  * of its own and `strategies/fx`), the bots root, the roles root, the memory's home and the empty install - and each is
  * removed in `after`. The memory homes are under it too: in a test process any other is refused (src/memory.ts).
  *
@@ -52,7 +55,7 @@ import { createDeskAgent, type DeskSessionDeps } from "../src/desk-session.ts";
 import { isTrustedDataRequest } from "../src/http.ts";
 import { listBots } from "../src/bots.ts";
 import { NO_MEMORY_HERE, memoryOpener } from "../src/memory.ts";
-import { MEMORY_TOOL_PREFIX, MEMORY_TOOLS, composedMemoryRow } from "../src/memory-row.ts";
+import { MEMORY_ROW_ID, MEMORY_TOOL_PREFIX, MEMORY_TOOLS, composedMemoryRow } from "../src/memory-row.ts";
 import { DEFAULT_PRESET } from "../src/overlay.ts";
 import { MEMORY_SECTION } from "../src/protocols.ts";
 import { ensureRoster, setAvailable } from "../src/roster.ts";
@@ -143,6 +146,12 @@ function rowOf(booted: BootedFace) {
   const loader = booted.ctx.get("loader") as { entries(): Iterable<SeatEntryLike> };
   return composedMemoryRow(loader.entries());
 }
+/** Whether the memory row's plugin is active: dsh-mcp-client's `apply` awaits its first connection attempt, failed or
+ * not, so an active row has settled that attempt and registered whatever tools it will. */
+function rowSettled(booted: BootedFace): boolean {
+  const loader = booted.ctx.get("loader") as { entries(): Iterable<{ options: { id?: unknown }; fiber?: { state: number } }> };
+  return [...loader.entries()].some((entry) => entry.options.id === MEMORY_ROW_ID && entry.fiber?.state === 2 /* FiberState.ACTIVE */);
+}
 
 const made: string[] = [];
 let home = "";
@@ -183,7 +192,7 @@ after(async () => {
 });
 
 /** The scratch harness home, the repository root, the bots root (with {@link BOT} on the one roster) and the roles
- * root (tests/bots-fixture.ts's `probe` role, `read` alone), made once for the three boots. */
+ * root (tests/bots-fixture.ts's `probe` role, `read` alone), made once for the four boots. */
 async function makeFixtures(): Promise<void> {
   home = await mkdtemp(join(tmpdir(), "face-memory-home-"));
   made.push(home);
@@ -425,11 +434,61 @@ test("an install that is not there: the boot is healthy", { skip, timeout: 120_0
     const created = await remote<{ sessionId: string }>(base, cookie, "session/create", { request: { cwd: root } });
     const agent = booted.ctx.agents.get(SessionId(created.sessionId))!;
     await booted.ctx.systemPrompt.assemble(assembleContextFor(agent));
+    await waitFor("the memory row's first attempt to settle", () => rowSettled(booted));
     assert.deepEqual(memoryNamesIn(toolsOf(booted).schemas().map((s) => s.name)), [], "the row has no tools");
     assert.deepEqual(memoryNamesIn(toolsOf(booted).schemas(agent).map((s) => s.name)), [], "and a session holds none");
     const standing = await memoryOpener(row)();
     assert.deepEqual(standing, { connected: false, why: "no install", say: "the memory is not connected: gravit-memory is not installed" });
   } finally {
     await booted.dispose();
+  }
+});
+
+test("a row an operator's patch disabled: no memory tool, no gravit:memory, the disabled standing", { skip, timeout: 180_000 }, async () => {
+  assert.ok(home !== "", "the fixtures from the first test");
+  await stopFace();
+  /* the operator's own patch file, as an operator disables the row; put back after the boot */
+  const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
+  const patch = readFileSync(patchPath, "utf8");
+  writeFileSync(patchPath, `${patch}\n- id: ${MEMORY_ROW_ID}\n  disabled: true\n`);
+  try {
+    face = await bootWithConversation();
+  } finally {
+    writeFileSync(patchPath, patch);
+  }
+  const f = face;
+  try {
+    assert.deepEqual(rowOf(f.booted), { disabled: true }, "the row as the tree composed it");
+    assert.deepEqual(memoryNamesIn(toolsOf(f.booted).schemas().map((s) => s.name)), [], "no memory tool in the tree");
+
+    /* the conversation (found again from the first boot's ledger): no memory tool on its session or in this boot's
+     * first request, and no gravit:memory */
+    firstRequests.delete(f.sessionId);
+    await remote(f.base, f.cookie, "session/prompt", {
+      request: { requestId: `memory-${crypto.randomUUID()}`, sessionId: f.sessionId, mode: "queue", content: [{ type: "text", text: "OK?" }] },
+    });
+    const conversation = conversationAgent(f);
+    assert.deepEqual(memoryNamesIn(toolsOf(f.booted).schemas(conversation).map((s) => s.name)), [], "the conversation holds none");
+    await waitFor("the conversation's first request", () => firstRequests.has(f.sessionId));
+    assert.deepEqual(memoryNamesIn((firstRequests.get(f.sessionId)!.tools ?? []).map((t) => t.name)), [], "and offers none to the model");
+    const sections = await sectionsOf(f.booted, conversation);
+    assert.equal(sections.has(MEMORY_SECTION), false, `the conversation's prompt holds no ${MEMORY_SECTION}: ${[...sections.keys()].join(", ")}`);
+
+    /* a plain Gravit session: none either */
+    const plain = await remote<{ sessionId: string }>(f.base, f.cookie, "session/create", { request: { cwd: root } });
+    const plainAgent = f.booted.ctx.agents.get(SessionId(plain.sessionId))!;
+    assert.deepEqual(memoryNamesIn(toolsOf(f.booted).schemas(plainAgent).map((s) => s.name)), [], "a Gravit session holds none");
+    const plainSections = await sectionsOf(f.booted, plainAgent);
+    assert.equal(plainSections.has(MEMORY_SECTION), false, `a Gravit session's prompt holds no ${MEMORY_SECTION}`);
+
+    /* the face's own standing over the row */
+    assert.deepEqual(await memoryOpener(rowOf(f.booted))(), {
+      connected: false, why: "disabled", say: "the memory is not connected: the mcp-memory row is disabled",
+    });
+
+    /* recorded, not asserted: mcp:memory in a prompt with the row disabled */
+    console.error(`memory-smoke: measure: with the row disabled, ${MCP_SECTION} in the conversation's prompt: ${sections.has(MCP_SECTION)}; in a Gravit session's: ${plainSections.has(MCP_SECTION)}`);
+  } finally {
+    await stopFace();
   }
 });
