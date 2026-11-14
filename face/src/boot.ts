@@ -135,6 +135,7 @@ import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts"
 import { accountSeatPatches } from "./account-seat.ts";
 import { marketRowPatches } from "./market-row.ts";
 import { memoryRowPatches } from "./memory-row.ts";
+import { MEMORY_NO_HOME_NOTICE } from "./memory.ts";
 import { lunhuiPatches } from "./lunhui.ts";
 import { analogPatches } from "./analog.ts";
 import { readThroughPatches } from "./readthrough.ts";
@@ -407,8 +408,10 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
   const marketPatches = marketRowPatches();
   /* The memory row (src/memory-row.ts): gravit-memory's door as the agent
    * `gravit`, the same project layer, right after the market row, so a patch
-   * disables it alone. In a test process its home is judged here, loudly. */
-  const memoryPatches = memoryRowPatches();
+   * disables it alone. In a test process its home is judged here, loudly. On a
+   * scratch harness home naming no memory home there is no row, said once. */
+  const memoryPatches = memoryRowPatches(home);
+  if (memoryPatches.length === 0) process.stderr.write(`${BIN}: ${MEMORY_NO_HOME_NOTICE}\n`);
   /* The Lunhui rows (src/lunhui.ts, modules spec §5.12): the same project
    * layer, right after the memory row, below everything the operator writes. */
   const lunhuiRows = lunhuiPatches();

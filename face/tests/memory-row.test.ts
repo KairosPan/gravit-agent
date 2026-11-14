@@ -7,6 +7,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import {
   MEMORY_ROW_ID, MEMORY_SERVER, MEMORY_TOOL_PREFIX, MEMORY_TOOLS, composedMemoryRow, memoryRowPatches,
 } from "../src/memory-row.ts";
@@ -48,11 +49,30 @@ function bootsAFace(src: string): boolean {
 /** Whether a source imports the memory helper. */
 const importsNoMemory = (src: string): boolean => importsOf(src).some(({ from }) => from === "./helpers/no-memory.ts");
 
+/** A test process's environment, so the guard is on whatever the runner's own holds. */
+const IN_TEST = { NODE_TEST_CONTEXT: "child-v8" };
+/** An install's directory, built with node:path so it compares on Windows too. */
+const OPT = join("/opt", "gravit-memory");
+/** A scratch harness home: not the harness's default. */
+const SCRATCH_DSH = join(tmpdir(), "m", "dsh");
+
 test("the row, exactly", () => {
-  assert.deepEqual(memoryRowPatches("/opt/gravit-memory", join(tmpdir(), "m", "home")), [{ insert: [{ id: "mcp-memory",
+  const home = join(tmpdir(), "m", "home");
+  assert.deepEqual(memoryRowPatches(SCRATCH_DSH, { dir: OPT, env: { ...IN_TEST, FACE_MEMORY_HOME: home } }), [{ insert: [{ id: "mcp-memory",
     name: "@deepseek-ai/dsh-mcp-client", config: { transport: "stdio", serverName: "memory", command: process.execPath,
-      args: [join("/opt/gravit-memory", "dist", "cli.js"), "mcp", "--as", "gravit", "--home", join(tmpdir(), "m", "home")],
+      args: [join(OPT, "dist", "cli.js"), "mcp", "--as", "gravit", "--home", home],
       toolCallTimeoutMs: 60_000, failOnStartupError: false } }] }]);
+});
+
+test("a scratch harness home with no memory home named composes no row; the default harness home composes the default", () => {
+  assert.deepEqual(memoryRowPatches(SCRATCH_DSH, { dir: OPT, env: {} }), [], "nothing is spawned over the default home");
+  const row = (memoryRowPatches(resolveDshHome(undefined, {}), { dir: OPT, env: {} })[0] as unknown as
+    { insert: { config: { args: string[] } }[] }).insert[0]!;
+  assert.deepEqual(row.config.args.slice(-2), ["--home", join(homedir(), ".gravit-memory")]);
+  const named = join(tmpdir(), "m", "named");
+  const docker = (memoryRowPatches(SCRATCH_DSH, { dir: OPT, env: { GRAVIT_MEMORY_HOME: named } })[0] as unknown as
+    { insert: { config: { args: string[] } }[] }).insert[0]!;
+  assert.deepEqual(docker.config.args.slice(-2), ["--home", named], "a home named by GRAVIT_MEMORY_HOME, as the docker box names it");
 });
 
 test("the seven tools, under the server's prefix", () => {
@@ -65,23 +85,28 @@ test("the seven tools, under the server's prefix", () => {
 });
 
 test("a boot that forgot the helper is refused", () => {
-  assert.throws(() => memoryRowPatches("/opt/gravit-memory", join(homedir(), ".gravit-memory")), /never opens a real memory/);
+  assert.throws(() => memoryRowPatches(SCRATCH_DSH, { dir: OPT, env: { ...IN_TEST, FACE_MEMORY_HOME: join(homedir(), ".gravit-memory") } }),
+    /never opens a real memory/);
+  // with no home named the guard refuses first, before the harness home is looked at
+  assert.throws(() => memoryRowPatches(SCRATCH_DSH, { dir: OPT, env: IN_TEST }), /never opens a real memory/);
+  assert.throws(() => memoryRowPatches(resolveDshHome(undefined, {}), { dir: OPT, env: IN_TEST }), /never opens a real memory/);
 });
 
 test("the composed row: disabled, re-pointed, absent", () => {
   const home = join(tmpdir(), "m", "home");
-  const row = (memoryRowPatches("/opt/gravit-memory", home)[0] as unknown as { insert: { id: string; config: unknown }[] }).insert[0];
+  const row = (memoryRowPatches(SCRATCH_DSH, { dir: OPT, env: { ...IN_TEST, FACE_MEMORY_HOME: home } })[0] as unknown as
+    { insert: { id: string; config: unknown }[] }).insert[0]!;
   assert.deepEqual(composedMemoryRow([entry("mcp-market", {}), entry(row.id, row.config)]), {
-    disabled: false, dir: "/opt/gravit-memory", home,
+    disabled: false, dir: OPT, home,
   });
   assert.deepEqual(composedMemoryRow([entry(MEMORY_ROW_ID, row.config, true)]), { disabled: true }, "a patch's disabled: true");
   assert.deepEqual(composedMemoryRow([entry(MEMORY_ROW_ID, row.config, () => { throw new Error("!!js"); })]), { disabled: true }, "a disabled getter that throws");
   const otherHome = join(tmpdir(), "other", "home");
   const repointed = {
     ...(row.config as Record<string, unknown>),
-    args: [join("/srv/memory", "dist", "cli.js"), "mcp", "--as", "gravit", "--home", otherHome],
+    args: [join("/srv", "memory", "dist", "cli.js"), "mcp", "--as", "gravit", "--home", otherHome],
   };
-  assert.deepEqual(composedMemoryRow([entry(MEMORY_ROW_ID, repointed)]), { disabled: false, dir: "/srv/memory", home: otherHome }, "args patched to another home and install");
+  assert.deepEqual(composedMemoryRow([entry(MEMORY_ROW_ID, repointed)]), { disabled: false, dir: join("/srv", "memory"), home: otherHome }, "args patched to another home and install");
   assert.equal(composedMemoryRow([entry("mcp-market", {})]), undefined, "no such row");
 });
 

@@ -4,9 +4,11 @@
  * Offline; no home is opened. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Memory, Review, Status } from "gravit-memory";
 import { BRIEF_MEMORY_IDS, BRIEF_MEMORY_LIMIT_MS, readBriefMemory } from "../src/memory-brief.ts";
-import { NO_MEMORY_HERE, type MemoryStanding } from "../src/memory.ts";
+import { NO_MEMORY_HERE, memoryOpener, type MemoryStanding } from "../src/memory.ts";
 
 /** A status as the package gives it: nothing in the home but what a test names. */
 function status(over: Partial<Status> = {}): Status {
@@ -98,6 +100,11 @@ test("a broken owner's chain is noted", async () => {
 test("not connected, no home, a fault, a limit passed: said, never thrown", async () => {
   const off = "the memory is not connected: the mcp-memory row is disabled";
   assert.deepEqual(await readBriefMemory(async () => ({ connected: false, why: "disabled", say: off })), { connected: false, say: off });
+  // a face on a scratch harness home naming no memory home: the opener's own standing, nothing opened
+  const scratchFace = memoryOpener(undefined, { DSH_HOME: join(tmpdir(), "face-brief-scratch-dsh") });
+  assert.deepEqual(await readBriefMemory(scratchFace), {
+    connected: false, say: "the memory is not connected: this face runs on a scratch harness home and no memory home is named",
+  });
 
   const noHome = Object.assign(new Error("no home at /memory/home"), { code: "E_NO_HOME" });
   const homeless = { status: async () => { throw noHome; }, review: async () => { throw noHome; } } as unknown as Memory;

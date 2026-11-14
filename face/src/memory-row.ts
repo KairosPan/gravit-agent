@@ -4,7 +4,9 @@
  * `FACE_MEMORY_DIR` names another install, src/memory.ts).
  *
  * The door runs as the agent `gravit` over the owner's home (`FACE_MEMORY_HOME`,
- * else `GRAVIT_MEMORY_HOME`, else `~/.gravit-memory`): seven tools, from
+ * else `GRAVIT_MEMORY_HOME`, else `~/.gravit-memory` - the default for a face on
+ * the harness's default home alone: on a scratch harness home naming neither
+ * variable there is no row, src/memory.ts `namedMemoryHome`): seven tools, from
  * `memory_recall` to `memory_status`. Under the server name `memory` they are
  * `mcp__memory__…`, which is not under the seat's prefix, so Gate 2 never cards
  * one (src/orders.ts). The child is local and reaches no network; a home nobody
@@ -25,7 +27,7 @@ import { dirname, join } from "node:path";
 import type { StdioConfig } from "@deepseek-ai/dsh-mcp-client";
 import type { SeatEntryLike } from "./account-seat.ts";
 import type { FacePatchList } from "./boot.ts";
-import { AGENT_MEMORY_NAME, assertHomeAllowed, memoryDir, memoryHome } from "./memory.ts";
+import { AGENT_MEMORY_NAME, assertHomeAllowed, memoryDir, memoryHome, namedMemoryHome } from "./memory.ts";
 
 export const MEMORY_ROW_ID = "mcp-memory";
 /** The server name, hence the tool prefix `mcp__memory__`. */
@@ -64,10 +66,21 @@ export function composedMemoryRow(entries: Iterable<SeatEntryLike>): MemoryRowSt
   return undefined;
 }
 
-/** The row. Throws what {@link assertHomeAllowed} throws; startup never
- * installs anything and never makes the home. */
-export function memoryRowPatches(dir = memoryDir(), home = memoryHome()): FacePatchList {
-  assertHomeAllowed(home);
+/** The row, for a face on harness home `dshHome`. In a test process the home
+ * is judged first and throws what {@link assertHomeAllowed} throws; then
+ * {@link namedMemoryHome}'s rule: on a scratch harness home that names no
+ * memory home there is no row (an empty list), so nothing is spawned over the
+ * default home and src/boot.ts says so once. Startup never installs anything
+ * and never makes the home. */
+export function memoryRowPatches(
+  dshHome: string,
+  opts: { dir?: string; env?: NodeJS.ProcessEnv } = {},
+): FacePatchList {
+  const env = opts.env ?? process.env;
+  assertHomeAllowed(memoryHome(env), env);
+  const home = namedMemoryHome(dshHome, env);
+  if (home === undefined) return [];
+  const dir = opts.dir ?? memoryDir(env);
   return [{
     insert: [{
       id: MEMORY_ROW_ID,

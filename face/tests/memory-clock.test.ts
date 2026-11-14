@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Memory, ReconcileReport } from "gravit-memory";
 import {
   MEMORY_EVERY_MS,
@@ -10,7 +12,7 @@ import {
   reconcileLine,
   type MemoryClockDeps,
 } from "../src/memory-clock.ts";
-import type { MemoryStanding } from "../src/memory.ts";
+import { memoryOpener, type MemoryStanding } from "../src/memory.ts";
 
 /** A timer the clock asked for: what it runs, after how long, and whether it was cleared. */
 type FakeTimer = { fn: () => void; ms: number; cleared: boolean };
@@ -97,6 +99,9 @@ test("fresh, no source, no home, not connected, a fault: each its line", async (
   assert.equal(await lineOf(connected(async () => { throw noHome; })), "memory: no memory here: run gravit-memory init");
   assert.equal(await lineOf(async () => ({ connected: false, why: "disabled", say: "the memory is not connected: the mcp-memory row is disabled" })),
     "memory: the memory is not connected: the mcp-memory row is disabled");
+  // a face on a scratch harness home naming no memory home: the opener's own standing, nothing reconciled
+  assert.equal(await lineOf(memoryOpener(undefined, { DSH_HOME: join(tmpdir(), "face-clock-scratch-dsh") })),
+    "memory: the memory is not connected: this face runs on a scratch harness home and no memory home is named");
   assert.equal(await lineOf(connected(async () => { throw new Error("the ledger\nis torn"); })),
     "memory: reconcile failed: the ledger is torn");
   // an open that throws is a fault too
