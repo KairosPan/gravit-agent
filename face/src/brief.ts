@@ -25,7 +25,7 @@
  * is not `YYYY-MM-DD` fails the producer with one error, and nothing is read or asked.
  * THE MEMORY. Given a reader ({@link BriefDeps.memory}: src/memory-brief.ts `readBriefMemory`, which calls the
  * memory's `status` and `review` and never `reconcile`, within its own 2 s limit), the brief carries `memory`, the
- * memory's state as numbers and lesson ids, read beside the book; a reader that throws is `{ connected: false, say }`
+ * memory's state as numbers and lesson ids, read beside the book; a reader that throws is `{ connected: false, say }`, its fault said by its code
  * and never fails the brief. Without a reader the brief has no `memory` key.
  *
  * EVERY NUMBER NAMES ITS SOURCE AND TIME (dsh/profile/desk.md). A price carries `at`, desk-tools.ts's `quoteTime`:
@@ -58,7 +58,7 @@
  * A CUT TAKES THE TAIL. The firing quotes at most 32,768 characters of a producer's text (producer.ts
  * `PRODUCER_TEXT_MAX`) and cuts the rest, so the brief's keys are written with the errors early: `memory` straight
  * after the session - only the date, the time taken and the session's three short fields come before it, and it is
- * bounded itself (counts, fixed sentences or a fault of at most 200 characters, five ids of at most 40), so it lies in
+ * bounded itself (counts, fixed sentences - a fault is said by its code, never its message - and five ids of at most 40), so it lies in
  * the text's first kilobyte and no cut reaches it - then `quotesError`, ahead of every quote; in each block, the file's state and its errors ahead of its rows,
  * near levels and refusals; the watch's blocks after the levels block, each with its counts, `more` and error ahead of
  * its items, newest first; `aShares` and `scope` at the very end. A brief past the cap loses from its end: `scope`,
@@ -82,8 +82,7 @@ import { etClock, etDate, etDayStart, etTime } from "./et.ts";
 import { isFilingRecord, type FilingRecord } from "./filings.ts";
 import { isFiringRecord } from "./firing.ts";
 import { HttpError } from "./http.ts";
-import { memoryFaultWords } from "./memory.ts";
-import type { BriefMemory } from "./memory-brief.ts";
+import { briefFaultWords, type BriefMemory } from "./memory-brief.ts";
 import type { BuiltinProducer, ProducerInput, ProducerOutput } from "./producer.ts";
 import type { MarketProviderState as ProviderState, MarketQuote as LiveQuote, MarketQuoteIdentity as QuoteIdentity, MarketQuotePayload as QuotePayload, MarketQuoteSource } from "./market-quotes.ts";
 import { isEtDate } from "./standing.ts";
@@ -602,11 +601,12 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
   }
   const clock = deps.now ?? Date.now;
   /* The memory is read beside the book and the prices, not after them; its reader keeps its own limit, and one that
-   * throws - before its promise or in it - is the memory's fault in words, never the brief's. */
+   * throws - before its promise or in it - is the memory's fault said by its code, never by its message, and never the
+   * brief's. */
   const reader = deps.memory;
   const memoryRead: Promise<BriefMemory> | undefined = reader === undefined
     ? undefined
-    : Promise.resolve().then(reader).catch((error: unknown): BriefMemory => ({ connected: false, say: memoryFaultWords(error) }));
+    : Promise.resolve().then(reader).catch((error: unknown): BriefMemory => ({ connected: false, say: briefFaultWords(error) }));
   /* The loaders never throw: a file's every fault is in its result, and the one argument they refuse - the date - is
    * checked above. */
   const [holdings, deskLevels] = await Promise.all([

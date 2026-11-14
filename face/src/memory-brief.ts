@@ -11,8 +11,8 @@
  * cards whole, so {@link BriefMemory} carries counts, a price run's time and outcome, and lesson ids - at most
  * {@link BRIEF_MEMORY_IDS}, each one only when it has a lesson id's shape ({@link LESSON_ID}): a hand-written ledger
  * line can put anything where an id belongs, and such a card is counted and not listed. No card's words, definition,
- * thesis or reason ever reaches it. Its only free text is one of this module's fixed sentences, a standing's `say`
- * (src/memory.ts's own), or src/memory.ts `memoryFaultWords`' one line.
+ * thesis or reason ever reaches it. Its only free text is one of this module's fixed sentences or a standing's `say`
+ * (src/memory.ts's own): a fault is said by its code ({@link briefFaultWords}), never by its message.
  *
  * NOTHING WAITS ON IT. A memory that is not connected, a home nobody made, a fault, and a read that has not answered
  * within {@link BRIEF_MEMORY_LIMIT_MS} are each `{ connected: false, say }`; the reader never rejects. A read past its
@@ -20,7 +20,7 @@
  * @module
  */
 import type { Review, Status } from "gravit-memory";
-import { memoryFaultWords, type MemoryStanding } from "./memory.ts";
+import { NO_MEMORY_HERE, type MemoryStanding } from "./memory.ts";
 
 /** How long the brief waits for the memory: 2 s. */
 export const BRIEF_MEMORY_LIMIT_MS = 2000;
@@ -32,6 +32,9 @@ const LESSON_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
 /** The note when the owner's chain is broken: no card applies until the owner reseals it. */
 const NOTE_RESEAL = "no lesson is applied until gravit-memory reseal";
+
+/** A fault's sentence, with the package's code after it when the fault carries one. */
+const FAULT_SAY = "the memory could not be read";
 
 /** What the brief carries of the memory: not connected, with the words that say why; or its state - the proposals
  * waiting for the owner, the cards changed since they were armed (counted, and the first {@link BRIEF_MEMORY_IDS}
@@ -60,6 +63,21 @@ const DEFAULT_TIMERS: BriefMemoryTimers = {
   setTimer: (fn, ms) => setTimeout(fn, ms),
   clearTimer: (timer) => clearTimeout(timer as NodeJS.Timeout),
 };
+
+/** A package's error code: `E_` then upper-case letters, digits or underscores. */
+const PACKAGE_CODE = /^E_[A-Z0-9_]+$/;
+
+/**
+ * A memory fault as the brief says it: by its code in a fixed sentence, never by its message, which can quote a file
+ * of the home, a value the memory's config held or a path of the machine. A home nobody made is {@link NO_MEMORY_HERE};
+ * a fault carrying a package code is `the memory could not be read (<code>)`; anything else, a file-system error
+ * included, `the memory could not be read`. (src/memory.ts `memoryFaultWords` stays the log's wording.)
+ */
+export function briefFaultWords(error: unknown): string {
+  const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
+  if (code === "E_NO_HOME") return NO_MEMORY_HERE;
+  return typeof code === "string" && PACKAGE_CODE.test(code) ? `${FAULT_SAY} (${code})` : FAULT_SAY;
+}
 
 /** The length of `value` when it is an array, else 0. */
 function countOf(value: unknown): number {
@@ -107,7 +125,7 @@ async function readMemory(open: () => Promise<MemoryStanding>): Promise<BriefMem
     const [status, review] = await Promise.all([standing.memory.status(), standing.memory.review()]);
     return briefMemoryOf(status, review);
   } catch (error) {
-    return { connected: false, say: memoryFaultWords(error) };
+    return { connected: false, say: briefFaultWords(error) };
   }
 }
 
@@ -125,13 +143,15 @@ export function readBriefMemory(
 ): Promise<BriefMemory> {
   return new Promise<BriefMemory>((resolve) => {
     let done = false;
+    /* declared before `finish` reads it, so a timer that fires at once finds it */
+    let limit: unknown;
     const finish = (memory: BriefMemory): void => {
       if (done) return;
       done = true;
       timers.clearTimer(limit);
       resolve(memory);
     };
-    const limit = timers.setTimer(() => finish({ connected: false, say: `the memory did not answer in ${limitMs / 1000} s` }), limitMs);
+    limit = timers.setTimer(() => finish({ connected: false, say: `the memory did not answer in ${limitMs / 1000} s` }), limitMs);
     void readMemory(open).then(finish);
   });
 }
