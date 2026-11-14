@@ -824,18 +824,34 @@ in a test process the test guard below still refuses first.
 
 **The service reads none of your terminal's exports.** The launch file `npm run service` writes passes
 PATH, HOME, `DSH_HOME` and `FACE_PORT` alone (`scripts/service.ts`), so the four variables above,
-exported in a shell, do not reach the installed face. (The face does read the harness home's `.env`
-at boot, for any name its launch environment lacks.) The service's way to move the memory's home or
-to switch the row off is the row's patch, in `$DSH_HOME/profiles/face/cordis.patch.yml`:
+exported in a shell, do not reach the installed face. Its ways:
 
-```yaml
-- id: mcp-memory
-  disabled: true                # the row off; or, to move the home, instead:
-# config:
-#   args: [<install>/dist/cli.js, mcp, --as, gravit, --home, <home>]
-```
+- **To move the home, simply:** a line `FACE_MEMORY_HOME=<the home>` in the harness home's `.env`
+  (`$DSH_HOME/.env`), which the face reads at boot for any name its launch environment lacks.
+  `FACE_MEMORY_RECONCILE=0` there is likewise the service's switch for the clock.
+- **To switch the row off:** the row's patch, in `$DSH_HOME/profiles/face/cordis.patch.yml`:
 
-The clock and the brief follow the row as patched; a restart takes either in.
+  ```yaml
+  - id: mcp-memory
+    disabled: true
+  ```
+
+- **To move the row itself:** a patch that restates the row's whole config. A patch that names
+  `config` replaces all of it, so one that names `args` alone leaves the row without its server name
+  and command, and the face refuses to boot:
+
+  ```yaml
+  - id: mcp-memory
+    config:
+      transport: stdio
+      serverName: memory
+      command: <the node binary's path>
+      args: [<face>/node_modules/gravit-memory/dist/cli.js, mcp, --as, gravit, --home, <the home>]
+      toolCallTimeoutMs: 60000
+      failOnStartupError: false
+  ```
+
+The clock and the brief follow the row as composed; a restart takes any of these in.
 
 **The home is the operator's.** The face never makes it and never writes its `config.json`; with
 no home every tool answers `no memory here: run gravit-memory init`. Make it once, at a terminal:
@@ -4890,10 +4906,10 @@ fresh one will not open the face runs without search. Node prints its `node:sqli
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 35 smoke files (47 real boots), isolated; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 35 smoke files (48 real boots), isolated; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 35 smoke files (47 real boots) listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 35 smoke files (48 real boots) listed below; `FACE_SMOKE=1` runs
 them too (4,544 tests in 292 files on 2026-11-14 with the memory connected and its final review's fixes: 4,476 pass and 68 skipped offline; 4,539 tests at its build, where `FACE_SMOKE=1` ran 4,543 tests, 4,543 pass; 4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
