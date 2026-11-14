@@ -60,12 +60,18 @@ export function memoryHome(env: NodeJS.ProcessEnv = process.env): string {
  * with no `DSH_HOME` (asked of its own resolver, with an empty environment; the two compared by real path) - the
  * installed service, the daily start - gets it, and a face on any other harness home, a second face on a scratch one,
  * gets none, so it never opens, writes or reconciles the operator's real memory. The one rule the row's builder
- * (src/memory-row.ts `memoryRowPatches`) and the opener ({@link openFaceMemory}) both follow.
+ * (src/memory-row.ts `memoryRowPatches`) and the opener ({@link openFaceMemory}) both follow. It never throws: a
+ * real path that cannot be resolved (a user home that cannot be entered, say) is read as "not the default", so the
+ * face connects to nothing and says so, and nothing fails a boot over the memory.
  */
 export function namedMemoryHome(dshHome: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
   if (env.FACE_MEMORY_HOME || env.GRAVIT_MEMORY_HOME) return memoryHome(env);
-  const harnessDefault = realPathOrAncestor(resolveDshHome(undefined, {}));
-  return realPathOrAncestor(resolve(dshHome)) === harnessDefault ? memoryHome(env) : undefined;
+  try {
+    const harnessDefault = realPathOrAncestor(resolveDshHome(undefined, {}));
+    return realPathOrAncestor(resolve(dshHome)) === harnessDefault ? memoryHome(env) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether this process is a test's: node's test runner sets `NODE_TEST_CONTEXT` in the process

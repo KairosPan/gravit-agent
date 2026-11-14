@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,7 @@ import {
   namedMemoryHome,
   openFaceMemory,
 } from "../src/memory.ts";
+import { memoryRowPatches } from "../src/memory-row.ts";
 
 const FACE = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(readFileSync(join(FACE, "package.json"), "utf8"));
@@ -191,6 +192,32 @@ test("on a scratch harness home with no home named nothing is opened, and the st
   await assert.rejects(memoryOpener(undefined, { ...IN_TEST, DSH_HOME: join(tmp, "dsh") })(), /a test never opens a real memory/);
   // the boot's one line names the variable to set
   assert.equal(MEMORY_NO_HOME_NOTICE, `${NO_HOME.say}; set FACE_MEMORY_HOME to name one`);
+});
+
+test("a default harness home that cannot be resolved is not the default: the rule, the row and the opener say no home named, never throw", {
+  skip: process.platform === "win32" || process.getuid?.() === 0 ? "needs a POSIX user a mode-000 directory stops" : false,
+}, async (t) => {
+  const tmp = await mkdtemp(join(tmpdir(), "face-memory-"));
+  // the user's home inside a directory nobody may enter: realpath of the harness's default home fails EACCES
+  const locked = join(tmp, "locked");
+  await mkdir(join(locked, "user"), { recursive: true });
+  await chmod(locked, 0o000);
+  /* one hook, so the directory is opened again before it is removed */
+  t.after(async () => { await chmod(locked, 0o700); await rm(tmp, { recursive: true, force: true }); });
+  const was = process.env.HOME;
+  process.env.HOME = join(locked, "user");
+  t.after(() => { if (was === undefined) delete process.env.HOME; else process.env.HOME = was; });
+  const dshDefault = resolveDshHome(undefined, {});
+  assert.equal(dshDefault, join(locked, "user", ".dsh"), "the harness resolves its default under the stubbed user home");
+  // the rule: neither the default nor a scratch harness home throws, and neither names a home
+  assert.equal(namedMemoryHome(dshDefault, {}), undefined);
+  assert.equal(namedMemoryHome(join(tmp, "dsh"), {}), undefined);
+  // a home named still wins
+  assert.equal(namedMemoryHome(dshDefault, { FACE_MEMORY_HOME: join(tmp, "home") }), join(tmp, "home"));
+  // the row's builder composes no row; the opener stands at no home named (not a test process's env: the rule decides)
+  assert.deepEqual(memoryRowPatches(dshDefault, { env: {} }), []);
+  assert.deepEqual(await openFaceMemory({ env: {}, dshHome: dshDefault }), NO_HOME);
+  assert.deepEqual(await memoryOpener(undefined, {})(), NO_HOME);
 });
 
 test("a fault is one short line, and no home is said as the door says it", () => {
