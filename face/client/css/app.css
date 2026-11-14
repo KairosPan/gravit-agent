@@ -774,6 +774,22 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .dk-rule { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 2px; border-bottom: 1px solid var(--border); font-size: calc(14px * var(--fs)); }
 .dk-routine { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; }
 .dk-routine-b { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* a routine's row (plan 2 Task 7): the name and its when line as one key, the switch; opened, its parts, history and keys */
+.dk-rt { min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.dk-rt-top { display: flex; align-items: center; gap: 12px; }
+.dk-rt-key { flex: 1 1 0; min-width: 0; min-height: 44px; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.dk-rt-key strong { font-size: calc(15px * var(--fs)); overflow-wrap: anywhere; }
+.dk-switch { position: relative; flex: 0 0 44px; width: 44px; height: 26px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--dim); cursor: pointer; }
+.dk-switch[aria-checked="true"] { background: var(--accent-ink); }
+.dk-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--surface); transition: left .15s; }
+.dk-switch[aria-checked="true"] .dk-knob { left: 21px; }
+.dk-said { margin: 0; font-size: calc(13px * var(--fs)); color: var(--warn-text); }
+.dk-text { margin: 0; font-size: calc(14px * var(--fs)); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dk-run { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: calc(13px * var(--fs)); }
+.dk-run-t { flex: 0 0 92px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.dk-run .chip { padding: 1px 8px; }
+.dk-ask { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: var(--down-fill); color: var(--down); font-size: calc(13px * var(--fs)); }
+.dk-spent { margin: 0; font-size: calc(13px * var(--fs)); font-weight: 600; color: var(--warn-text); }
 @media (max-width: 900px) {
   .dk-cols { grid-template-columns: minmax(0, 1fr); }
   .dk-body { padding: 18px 16px 32px; }

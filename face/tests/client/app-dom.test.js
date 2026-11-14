@@ -2,6 +2,7 @@
 import { TASKS_POLL_MS } from '../../client/js/host/tasks.js';
 import { DESK_POLL_MS } from '../../client/js/host/desk-view.js';
 import { DESK_NEWS_POLL_MS } from '../../client/js/host/desk-news.js';
+import { DESK_ROUTINES_POLL_MS } from '../../client/js/host/desk-routines.js';
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -18,7 +19,7 @@ import { rebuildQuery } from '../../src/account-proxy.ts';
 import { sayOf, setTable, said as wordLine, wordsEpoch } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
 import { ZH } from '../../client/js/i18n/zh.js';
-import { deskNews, deskPageStatus } from './helpers/desk-news.js';
+import { deskNews, deskPageStatus, deskRoutines } from './helpers/desk-news.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -731,39 +732,40 @@ test("typing in the search box searches; a star watches and writes the face's ke
   store.timers.clear();
 });
 
-// the Desk page (desk-page plan 1 Task 3): the desk's status polls on Markets and on the Desk, the news on the Desk alone,
-// and a hidden tab stops both
-test('the Desk reads its news and the desk status; Markets keeps the status alone; a hidden tab stops both', async () => {
+// the Desk page (desk-page plan 1 Task 3): the desk's status polls on Markets and on the Desk, the news and (plan 2 Task 7)
+// the routines on the Desk alone, and a hidden tab stops them all
+test('the Desk reads its news, its routines and the desk status; Markets keeps the status alone; a hidden tab stops them', async () => {
   const f = fakeWindow({ hash: '#/desk', storage: memoryStorage() });
   const h = host({ rows: [row('s1')] });
   const timers = new HeldTimers(ms => ms === DESK_POLL_MS || ms === DESK_NEWS_POLL_MS);
   const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers, now: () => 1_000_000 });
   await h.ready();
   // a clock that stands still, so a screen shown again inside a poll re-arms it whole; counted against Markets, as the tasks'
-  // poll may share the news' period
+  // poll may share the news' and the routines' period (one period: the Desk holds both)
+  assert.equal(DESK_ROUTINES_POLL_MS, DESK_NEWS_POLL_MS);
   const held = ms => timers.delays().filter(x => x === ms).length;
   assert.deepEqual(store.get().route, { screen: 'desk', id: null });
-  assert.ok(h.reads.includes('/data/desk/news') && h.reads.includes('/data/desk/status'), 'both read on entering the Desk');
+  assert.ok(['/data/desk/news', '/data/desk/status', '/data/desk/routines'].every(p => h.reads.includes(p)), 'all three read on entering the Desk');
   assert.equal(held(DESK_POLL_MS), 1, 'the status polls on the Desk');
   const onDesk = held(DESK_NEWS_POLL_MS);
   f.win.location.hash = '#/markets';
   await settle();
   assert.equal(held(DESK_POLL_MS), 1, 'and on Markets');
-  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 1, 'the news does not poll on Markets');
+  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 2, 'neither the news nor the routines poll on Markets');
   f.win.location.hash = '#/desk';
   await settle();
   assert.equal(held(DESK_POLL_MS), 1);
-  assert.equal(held(DESK_NEWS_POLL_MS), onDesk, 'back on the Desk the news polls again');
+  assert.equal(held(DESK_NEWS_POLL_MS), onDesk, 'back on the Desk both poll again');
   f.doc.hidden = true;
   f.fire('doc', 'visibilitychange');
   assert.equal(held(DESK_POLL_MS), 0, 'hidden: the status stops');
-  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 1, 'and the news');
+  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 2, 'and the news and the routines');
   f.doc.hidden = false;
   f.fire('doc', 'visibilitychange');
   f.win.location.hash = '#/messages';
   await settle();
-  assert.equal(held(DESK_POLL_MS), 0, 'on Messages neither polls');
-  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 1);
+  assert.equal(held(DESK_POLL_MS), 0, 'on Messages none polls');
+  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 2);
 });
 
 // the Desk page drawn (desk-page plan 1 Task 4): its keys clicked - a symbol's filter chip, Details on an alert and the
@@ -788,6 +790,56 @@ test("the Desk's filter, Details and rules keys narrow the news, open a reason a
   f.click({ tagName: 'BUTTON', dataset: { action: 'dkRules' } });
   assert.equal(store.get().deskPage.rules, true);
   assert.match(f.html(), /Price levels · 3/);
+  store.timers.clear();
+});
+
+// the Routines column (desk-page plan 2 Task 7): a row opened, its switch posting and the routines read again, Test posting and
+// reading Running…, Delete asking once more with only Delete routine posting, Edit in Messages putting its words in Gravit's
+// composer and sending nothing
+test("the Desk's routines: open a row, flip its switch, Test it, Delete it once asked, Edit it in Messages", async () => {
+  const f = fakeWindow({ hash: '#/desk', storage: memoryStorage() });
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  const h = host({ rows: [row('s1')], conversation: 's1' });
+  h.inventory['/data/desk/status'] = deskPageStatus();
+  h.inventory['/data/desk/news'] = deskNews();
+  h.inventory['/data/desk/routines'] = deskRoutines({ running: undefined });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers: new HeldTimers(() => true), now: () => 1_000_000 });
+  await h.ready();
+  await settle();
+  const routineReads = () => h.reads.filter(p => p === '/data/desk/routines').length;
+  const posts = path => h.posted.filter(([p]) => p === path).map(([, b]) => b);
+  assert.match(f.html(), /Idea screening/, 'the routines drawn');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkRoutine', id: 'idea-screening' } });
+  assert.equal(store.get().deskPage.rOpen, 'idea-screening');
+  assert.match(f.html(), /Run history/);
+  const before = routineReads();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkSwitch', id: 'idea-screening', value: 'false' } });
+  await settle();
+  assert.deepEqual(posts('/data/desk/routines/switch'), [{ id: 'idea-screening', enabled: false }]);
+  assert.equal(routineReads(), before + 1, 'read again after the switch');
+  h.inventory['/data/desk/routines'] = deskRoutines({ running: undefined, queued: ['idea-screening:test:2026-11-02T15:00:00.000Z'] });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkTest', id: 'idea-screening' } });
+  assert.match(f.html(), /data-action="dkTest" data-id="idea-screening" disabled>Running…</, 'Running… at the click');
+  await settle();
+  assert.deepEqual(posts('/data/desk/routines/test'), [{ id: 'idea-screening' }]);
+  assert.match(f.html(), />Running…</, 'still queued: Running…');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkDelete', id: 'idea-screening' } });
+  assert.match(f.html(), /Deleting a routine can't be undone/);
+  assert.deepEqual(posts('/data/desk/routines/delete'), [], 'Delete only asks');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkDeleteNo' } });
+  assert.doesNotMatch(f.html(), /Deleting a routine/);
+  assert.deepEqual(posts('/data/desk/routines/delete'), [], 'Cancel posts nothing');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkDelete', id: 'idea-screening' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkDeleteYes', id: 'idea-screening' } });
+  await settle();
+  assert.deepEqual(posts('/data/desk/routines/delete'), [{ id: 'idea-screening' }], 'Delete routine posts');
+  assert.equal(store.get().deskPage.rAsk, '');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkEdit', text: 'Edit your routine: Idea screening' } });
+  await settle();
+  assert.equal(f.win.location.hash, '#/messages');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(say.value, 'Edit your routine: Idea screening');
+  assert.deepEqual(h.calls.filter(c => c[0] === 'session/prompt' || c[0] === 'commands/execute' || c[0] === 'session/create'), [], 'nothing sent');
   store.timers.clear();
 });
 

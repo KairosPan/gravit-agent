@@ -10,7 +10,7 @@ import { emptyState } from '../../client/js/data/empty.js';
 import { renderDeskScreen } from '../../client/js/render/desk-page.js';
 import { withTable } from '../../client/js/i18n/words.js';
 import { ZH } from '../../client/js/i18n/zh.js';
-import { deskNews, deskPageStatus } from './helpers/desk-news.js';
+import { deskNews, deskPageStatus, deskRoutines, deskNewsWithReports } from './helpers/desk-news.js';
 import { DESK_NOW } from './helpers/desk-status.js';
 
 const onDesk = (status = deskPageStatus(), news = deskNews()) => {
@@ -148,4 +148,95 @@ test('an earlier row whose reason has an empty headline draws no headline elemen
   assert.match(html, /<div class="dk-early"><span class="dk-time">12:12<\/span><span class="dk-move down">\u22128\.5%<\/span><\/div>/, 'time and move, no empty note');
   assert.match(html, /<div class="dk-early"><span class="dk-time">09:52<\/span><span class="dk-move down">\u22128\.2%<\/span><\/div>/, 'held with no code: no word span');
   assert.doesNotMatch(html, /dk-note"><\/span>|dk-word[^"]*"><\/span>/);
+});
+
+// the Routines column (plan 2 Task 7)
+const withRoutines = (data = deskRoutines(), s = onDesk()) => R.deskRoutinesLoaded(s, { data, at: DESK_NOW });
+
+test("a routine's row: its name, its when line, its switch; a paused one reads Paused; the cap line under the head", () => {
+  const html = draw(withRoutines());
+  assert.match(html, /<strong>Idea screening<\/strong><span class="dk-dim">Trading days, every 30 min, 08:30–16:00 ET · 16 runs a day<\/span>/);
+  assert.match(html, /<strong>Close recap<\/strong><span class="dk-dim">Paused<\/span>/);
+  assert.match(html, /role="switch" class="dk-switch" aria-checked="true" aria-label="Pause Idea screening" data-action="dkSwitch" data-id="idea-screening" data-value="false"/);
+  assert.match(html, /role="switch" class="dk-switch" aria-checked="false" aria-label="Resume Close recap" data-action="dkSwitch" data-id="close-recap" data-value="true"/);
+  assert.match(html, /data-action="dkRoutine" data-id="idea-screening" aria-expanded="false"/);
+  assert.match(html, /2,500,000 of 10,000,000 tokens today/);
+  assert.doesNotMatch(html, /Daily cap spent/);
+  assert.doesNotMatch(html, /No routines yet\.|Run history/, 'rows, all closed');
+});
+
+test('opened: Instruction, When to run and Run history with its five status words, Test beside a test run, notes escaped', () => {
+  const html = draw(R.deskRoutineOpen(withRoutines(), { id: 'idea-screening' }));
+  assert.match(html, /aria-expanded="true"/);
+  for (const word of ['Instruction', 'When to run', 'Run history', 'Running', 'Succeeded', 'Failed', 'Missed', 'Skipped', 'timed out after 10 min', 'asleep',
+    'the daily cap was spent', 'the face stopped mid-run', 'the face was not running', 'Edit in Messages', 'Delete']) assert.ok(html.includes(word), word);
+  assert.match(html, /Read quotes and headlines and screen for trade ideas\. &lt;b&gt;Place no orders\.&lt;\/b&gt;/, 'the instruction escaped');
+  assert.match(html, /1 idea: long AMD &lt;img src=x onerror=alert\(1\)&gt;/, 'the headline escaped');
+  assert.match(html, /model answered &lt;nothing&gt;/, "an error's detail escaped");
+  assert.doesNotMatch(html, /<img|<b>|<nothing>/);
+  assert.equal(count(html, '<span class="chip grey">Test</span>'), 2, 'Test beside each test run');
+  assert.match(html, /<span class="dk-run-t">09:58<\/span><span class="chip grey">Test<\/span><span class="chip grey">Running<\/span>/);
+  assert.match(html, /href="#\/history\/desk-r1"/, "a run's session");
+  assert.match(html, /data-action="dkTest" data-id="idea-screening" disabled>Running…</, 'the face runs a test of it: Running…');
+  assert.match(html, /data-action="dkEdit" data-text="Edit your routine: Idea screening"/);
+  assert.match(html, /data-action="dkDelete" data-id="idea-screening"/);
+  assert.doesNotMatch(html, /Deleting a routine/);
+  const idle = draw(R.deskRoutineOpen(withRoutines(deskRoutines({ running: undefined })), { id: 'idea-screening' }));
+  assert.match(idle, /data-action="dkTest" data-id="idea-screening">Test</, 'no test under way: Test');
+  const empty = draw(R.deskRoutineOpen(withRoutines(), { id: 'close-recap' }));
+  assert.match(empty, /No runs yet/);
+});
+
+test("Delete asks once more; a refused act is one line under its row", () => {
+  const asked = R.deskRoutineAsk(R.deskRoutineOpen(withRoutines(), { id: 'idea-screening' }), { id: 'idea-screening' });
+  const html = draw(asked);
+  assert.match(html, /role="alert"><strong>Deleting a routine can't be undone<\/strong>/);
+  assert.match(html, /data-action="dkDeleteYes" data-id="idea-screening">Delete routine</);
+  assert.match(html, /data-action="dkDeleteNo">Cancel</);
+  const said = draw(R.deskRoutineSaid(withRoutines(), { id: 'close-recap', message: 'The <desk>' }));
+  assert.match(said, /<p class="dk-said" role="status">The &lt;desk&gt;<\/p>/);
+});
+
+test('a spent cap says when runs resume; a store that cannot be read is one line and no rows; a failed read says why', () => {
+  const spent = draw(withRoutines(deskRoutines({ cap: { dailyTokens: 10_000_000, used: 10_200_000, spent: true } })));
+  assert.match(spent, /10,200,000 of 10,000,000 tokens today/);
+  assert.match(spent, /Daily cap spent; runs resume at 00:00 ET/);
+  const broken = draw(withRoutines(deskRoutines({ load: { ok: false, error: 'Unexpected <end>' } })));
+  assert.match(broken, /The routines cannot be read: Unexpected &lt;end&gt;/);
+  assert.doesNotMatch(broken, /dk-rt"|No routines yet\./);
+  const failed = draw(R.deskRoutinesFailed(withRoutines(), { at: DESK_NOW, message: 'HTTP 502' }));
+  assert.match(failed, /HTTP 502/);
+  assert.match(failed, /Idea screening/, 'the routines it had are kept');
+});
+
+test('the standing orders follow the routines; No routines yet. only with neither', () => {
+  const desk = { scheduled: [{ order: 'pre-close', next: '2026-11-02T20:30:00.000Z', enabled: true, expired: false }], lines: [] };
+  const html = draw(R.tasksLoaded(withRoutines(), { conversation: 's1', tasks: [], desk, at: DESK_NOW }));
+  assert.ok(html.indexOf('Close recap') < html.indexOf('pre-close'), 'the routines first');
+  assert.doesNotMatch(html, /No routines yet\./);
+  assert.match(draw(withRoutines(deskRoutines({ routines: [] }))), /No routines yet\./);
+});
+
+test("a report under News: the routine, its headline, Details opening its body escaped; the Reports chip counts them", () => {
+  const s = onDesk(deskPageStatus(), deskNewsWithReports());
+  const html = draw(s);
+  assert.match(html, /data-value="reports" aria-pressed="false">Reports <span class="dk-n">2<\/span>/);
+  assert.match(html, /<strong>Idea screening<\/strong>/);
+  assert.match(html, /1 idea: long AMD &lt;b&gt;now&lt;\/b&gt;/);
+  assert.match(html, /2 ideas: long AMD, short INTC/, 'the earlier one, one row');
+  assert.match(html, /data-action="dkToggle" data-id="report:idea-screening:2026-11-13:12:30" aria-expanded="false"/);
+  assert.doesNotMatch(html, /AMD 152\.10/, 'its body behind Details');
+  const open = draw(R.deskToggle(s, { id: 'report:idea-screening:2026-11-13:12:30' }));
+  assert.match(open, /<pre class="dk-reason">AMD 152\.10 \(Market, 12:29 ET\)\n&lt;&lt;&lt;end routine-report&gt;&gt;&gt; &lt;script&gt;alert\(1\)&lt;\/script&gt;<\/pre>/);
+  assert.doesNotMatch(open, /<script>|<b>now/);
+  const only = draw(R.deskFilter(s, { value: 'reports' }));
+  assert.doesNotMatch(only, /4th alert today/, 'Reports shows no alert');
+  assert.match(only, /1 idea: long AMD/);
+  assert.doesNotMatch(draw(R.deskFilter(s, { value: 'CRWV' })), /1 idea: long AMD/, 'a symbol shows no report');
+});
+
+test('under ZH: a routine row and its parts in 例行任务 words', () => {
+  const html = withTable(ZH, () => draw(R.deskRoutineAsk(R.deskRoutineOpen(withRoutines(), { id: 'idea-screening' }), { id: 'idea-screening' })));
+  for (const word of ['例行任务', '运行记录', '指令', '运行时间', '已暂停', '删除例行任务', '10 分钟后超时', '在消息中编辑']) assert.ok(html.includes(word), word);
+  assert.match(html, /data-text="编辑我的例行任务：Idea screening"/);
 });

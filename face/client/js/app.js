@@ -27,6 +27,7 @@ import { makeActions } from './host/actions.js';
 import { startMarkets } from './host/markets.js';
 import { startDesk } from './host/desk.js';
 import { startDeskNews } from './host/desk-news.js';
+import { startDeskRoutines } from './host/desk-routines.js';
 import { startAccount } from './host/account.js';
 import { startSeat } from './host/seat.js';
 import { startChannels } from './host/channels.js';
@@ -480,6 +481,8 @@ export function boot(win, host = {}) {
   const desk = startDesk({ store, getJson, postJson, schedule, cancelTimer, now });
   // the Desk page's news: the day's alerts with their reasons, read while the Desk shows
   const deskNews = startDeskNews({ store, getJson, schedule, cancelTimer, now });
+  // the Desk page's routines: read while the Desk shows; a switch, a Test and a Delete, each read again after it answers
+  const deskRoutines = startDeskRoutines({ store, getJson, postJson, schedule, cancelTimer, now });
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
@@ -501,12 +504,13 @@ export function boot(win, host = {}) {
   // a room member's trace, read without activating the member's session
   const traces = startTraces({ store, call, loadMemberTrace, now });
   // the quotes run only while Markets is on screen in a visible tab, the desk's status while Markets or the Desk is, the Desk's
-  // news while the Desk is; Trade's picks only while Trade is
+  // news and routines while the Desk is; Trade's picks only while Trade is
   const showMarkets = () => {
     const screen = store.get().route.screen;
     markets.show(screen === 'markets' && !doc.hidden);
     desk.show((screen === 'markets' || screen === 'desk') && !doc.hidden);
     deskNews.show(screen === 'desk' && !doc.hidden);
+    deskRoutines.show(screen === 'desk' && !doc.hidden);
   };
   // Embedded browsers may report hidden before their first visibility event. Opening Markets or choosing a source still
   // needs one answer; only the recurring polls depend on visibility.
@@ -1915,6 +1919,20 @@ export function boot(win, host = {}) {
     dkFilter: el => store.dispatch('deskFilter', { value: el.dataset.value }),
     dkToggle: el => store.dispatch('deskToggle', { id: el.dataset.id }),
     dkRules: () => store.dispatch('deskRules'),
+    // the Routines column: a row opened or folded, its switch, its Test, Delete asked once more and answered; Edit in Messages
+    // puts its words in Gravit's composer as an ability's ask key does, and sends nothing
+    dkRoutine: el => store.dispatch('deskRoutineOpen', { id: el.dataset.id }),
+    dkSwitch: el => { void deskRoutines.switchOne(el.dataset.id, el.dataset.value === 'true'); },
+    dkTest: el => { void deskRoutines.test(el.dataset.id); },
+    dkEdit: el => {
+      const words = el.dataset.text;
+      if (!words) return;
+      go({ screen: 'messages', id: null });
+      putWords(words);
+    },
+    dkDelete: el => store.dispatch('deskRoutineAsk', { id: el.dataset.id }),
+    dkDeleteYes: el => { void deskRoutines.remove(el.dataset.id); },
+    dkDeleteNo: () => store.dispatch('deskRoutineAskOff'),
     // the render keeps what an input holds, so Clear empties the box before the query; a search still waiting goes with it
     mkClear: () => {
       const box = doc.getElementById('mq');

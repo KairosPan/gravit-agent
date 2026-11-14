@@ -23,7 +23,7 @@ import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
 import { newSheet } from '../../../client/js/host/run-sheet-view.js';
 import { MODULES } from '../../../client/js/host/modules-view.js';
-import { t } from '../../../client/js/i18n/words.js';
+import { t, said } from '../../../client/js/i18n/words.js';
 import { listings, modulesListing } from './inventory.js';
 import { setMarkdown } from '../../../client/js/render/thread.js';
 import { reducers as R } from '../../../client/js/reducers/index.js';
@@ -33,7 +33,7 @@ import { VIEW_1027 } from './lunhui-view.js';
 import { EVENT_VIEW, EVENT_VIEW_ID, EVENT_VIEW_WITH_B } from './event-view.js';
 import { stockDrawerHtml } from '../../../client/js/render/lunhui/stock.js';
 import { deskStatus, DESK_NOW } from './desk-status.js';
-import { deskNews, deskPageStatus } from './desk-news.js';
+import { deskNews, deskPageStatus, deskRoutines, deskNewsWithReports } from './desk-news.js';
 import { editorHtml, dropOverlay, lightboxHtml } from '../../../client/js/composer/view.js';
 import { DEFAULT_LIMITS } from '../../../client/js/composer/files.js';
 import { slashItems, atItems } from '../../../client/js/composer/menus.js';
@@ -443,6 +443,25 @@ export function namedStates() {
     // the Desk page drawn (desk-page plan 1 Task 4): monitoring with the news, CRWV's Details and the rules open; paused; the
     // desk off; an empty day with a standing order
     ...deskPageStates(),
+    // the Routines column (desk-page plan 2 Task 7): a routine open with its history and a test running, the other paused with
+    // a refused act's line, a standing order after them; Delete asked; the cap spent; a store that cannot be read; a report
+    // under News with its Details open
+    ...deskRoutineStates(),
+  ];
+}
+
+// the Routines column's states (desk-page plan 2 Task 7), read at the desk status' own clock
+function deskRoutineStates() {
+  const desk = (routines, news = deskNews()) => R.deskRoutinesLoaded(R.deskNewsLoaded(R.deskLoaded(R.nav(emptyState(), { screen: 'desk', id: null }),
+    { data: deskPageStatus(), at: DESK_NOW }), { data: news, at: DESK_NOW }), { data: routines, at: DESK_NOW });
+  const scheduled = { scheduled: [{ order: 'pre-close', next: '2026-11-02T20:30:00.000Z', enabled: true, expired: false }], lines: [] };
+  const open = R.deskRoutineOpen(desk(deskRoutines()), { id: 'idea-screening' });
+  return [
+    ['desk-page-routines', R.deskRoutineSaid(R.tasksLoaded(open, { conversation: 's1', tasks: [], desk: scheduled, at: DESK_NOW }), { id: 'close-recap', message: said('desk.routines.refusedPaused') })],
+    ['desk-page-routine-delete', R.deskRoutineAsk(open, { id: 'idea-screening' })],
+    ['desk-page-cap-spent', desk(deskRoutines({ cap: { dailyTokens: 10_000_000, used: 10_200_000, spent: true } }))],
+    ['desk-page-routines-unreadable', desk(deskRoutines({ load: { ok: false, error: 'routines.json: Unexpected end of JSON input' } }))],
+    ['desk-page-reports', R.deskToggle(desk(deskRoutines({ routines: [] }), deskNewsWithReports()), { id: 'report:idea-screening:2026-11-13:12:30' })],
   ];
 }
 
@@ -985,9 +1004,10 @@ const CONTENT_FIELDS = new Set([
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); an event analog view and its
 // task as the face read them (the worker's and web pages' words); the desk's news as the face answered it (its ledgers' and
-// Gravit's words); `*` is any one key
+// Gravit's words), and a routine's when line and instruction (the face's line, the operator's words); `*` is any one key
 const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
-  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data']];
+  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data'],
+  ['deskPage', 'routines', 'data', 'routines', 'when'], ['deskPage', 'routines', 'data', 'routines', 'instruction']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 // the strings a content field holds that are an ability's declared parts, its tools' and skills' names in the abilities listing
 // (an array adds nothing to a path): drawn each whole, they pass as runs (abilityRuns below) and lend no known word
