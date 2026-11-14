@@ -14,6 +14,7 @@ import {
   isTestProcess,
   memoryFaultWords,
   memoryHome,
+  memoryOpener,
   openFaceMemory,
 } from "../src/memory.ts";
 
@@ -115,6 +116,26 @@ test("opening a home outside the temporary directory in a test throws before any
   for (const opts of [{}, { disabled: true }, { dir: join(tmpdir(), "no-such-install") }]) {
     await assert.rejects(openFaceMemory({ ...opts, home: "/somewhere/else/memory" }), /a test never opens a real memory/);
   }
+});
+
+test("the opener follows the row as composed: disabled or absent is the disabled standing, else its install and home", async (t) => {
+  const tmp = await scratch(t);
+  const home = join(tmp, "home");
+  // a disabled or absent row names no home: the environment's is the one guarded
+  const was = process.env.FACE_MEMORY_HOME;
+  process.env.FACE_MEMORY_HOME = home;
+  t.after(() => { if (was === undefined) delete process.env.FACE_MEMORY_HOME; else process.env.FACE_MEMORY_HOME = was; });
+  const disabled = { connected: false, why: "disabled", say: "the memory is not connected: the mcp-memory row is disabled" };
+  assert.deepEqual(await memoryOpener({ disabled: true })(), disabled);
+  assert.deepEqual(await memoryOpener(undefined)(), disabled);
+  const empty = await mkdtemp(join(tmp, "empty-"));
+  assert.equal((await memoryOpener({ disabled: false, dir: empty, home })()).connected, false);
+  const s = await memoryOpener({ disabled: false, dir: DEFAULT_MEMORY_DIR, home })();
+  assert.equal(s.connected, true);
+  if (s.connected) assert.equal(s.home, home);
+  // the row's home is guarded as any other
+  await assert.rejects(memoryOpener({ disabled: false, dir: DEFAULT_MEMORY_DIR, home: "/somewhere/else/memory" })(),
+    /a test never opens a real memory/);
 });
 
 test("a fault is one short line, and no home is said as the door says it", () => {

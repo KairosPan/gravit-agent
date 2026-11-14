@@ -135,6 +135,18 @@ export async function openFaceMemory(
   return { connected: true, memory: library.openMemory(home), home };
 }
 
+/** The opener of the memory as the tree composed its row - what `composedMemoryRow` gives
+ *  (src/memory-row.ts), typed here by its shape alone: a disabled row, or no such row, is the
+ *  disabled standing; otherwise the row's install and home are opened. Built once by main.ts and
+ *  handed to the reconcile clock and the brief, so both follow the row an operator patch may have
+ *  re-pointed or disabled, not the environment. */
+export function memoryOpener(
+  row: { disabled: true } | { disabled: false; dir: string; home: string } | undefined,
+): () => Promise<MemoryStanding> {
+  return () =>
+    row === undefined || row.disabled ? openFaceMemory({ disabled: true }) : openFaceMemory({ dir: row.dir, home: row.home });
+}
+
 /** A memory fault in words: {@link NO_MEMORY_HERE} for an error whose `code` is `E_NO_HOME` -
  *  judged by the code it carries, since the library is loaded from the install's own path and
  *  its `MemoryError` is not this module's to `instanceof` - else the error's message as one line
