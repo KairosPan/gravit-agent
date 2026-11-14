@@ -1,9 +1,9 @@
 // face/client/js/host/desk-page-view.js — the Desk page's views (desk-page plan 1 Task 4, spec 2026-11-14 §6.1–§6.2): the head
 // bar's state from /data/desk/status (src/desk.ts DeskStatus, src/watch.ts WatchStatus), News from /data/desk/news
 // (src/desk-news.ts DeskNews) under the page's own choices (the deskPage slice: the filter, the rows opened, the rules
-// unfolded), an alert's move, its row word and its count of the day, a rule's words, and a standing order's state. Every
-// text from the ledgers is passed as it came, for the renderer to escape; the page translates nothing. Pure: nothing here
-// reads, polls or touches the DOM.
+// unfolded), an alert's move, its row word and its count of the day, and a rule's words (a standing order's state is
+// host/rail-view.js scheduledOf's). Every text from the ledgers is passed as it came, for the renderer to escape; the page
+// translates nothing. Pure: nothing here reads, polls or touches the DOM.
 import { t, tn } from '../i18n/words.js';
 import { deskTime, etWhen } from './desk-view.js';
 
@@ -121,12 +121,4 @@ export function ruleRowOf(rule) {
     : rule.kind === 'gap' ? t('desk.rule.gap', { pct: typeof rule.pct === 'number' ? rule.pct : '' })
       : t('desk.rule.move', { pct: typeof rule.pct === 'number' ? rule.pct : '' });
   return { names: names.length ? names.join(t('common.list.sep')) : t('desk.rule.none'), what, today: tn('desk.rule.today', count(rule.alertsToday)) };
-}
-
-/** A standing order's state on the Routines column (`state.tasks.desk.scheduled`'s line): Expired, Disabled, its next
- *  firing as deskTime writes it, or none. */
-export function orderStateOf(order, now) {
-  if (order.expired === true) return t('tasks.scheduled.expired');
-  if (order.enabled !== true) return t('tasks.scheduled.disabled');
-  return typeof order.next === 'string' && order.next !== '' ? t('tasks.scheduled.next', { at: deskTime(order.next, now) }) : t('tasks.scheduled.noNext');
 }

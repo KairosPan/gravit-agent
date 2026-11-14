@@ -99,8 +99,6 @@ export const EN = Object.freeze({
   'tasks.group.you': 'Waiting on you',
   'tasks.group.running': 'Running',
   'tasks.group.done': 'Done today',
-  'tasks.group.scheduled': 'Scheduled',
-  'tasks.desk.since': 'Since {clock}',
   'tasks.desk.session': 'Open in History',
   'tasks.scheduled.next': 'Next {at}',
   'tasks.scheduled.last': 'Last {outcome} {at}',

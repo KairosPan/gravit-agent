@@ -6,7 +6,8 @@
 // columns. Every text from the ledgers is drawn escaped, as written; the words are host/desk-page-view.js's and the table's.
 import { esc } from '../html.js';
 import { t, th, tn, thn, rawHtml, sayOf } from '../i18n/words.js';
-import { deskHeadOf, newsViewOf, moveOf, rowWordsOf, nthWord, ruleRowOf, orderStateOf, alertTime } from '../host/desk-page-view.js';
+import { deskHeadOf, newsViewOf, moveOf, rowWordsOf, nthWord, ruleRowOf, alertTime } from '../host/desk-page-view.js';
+import { scheduledOf } from '../host/rail-view.js';
 import { watchHead } from '../host/desk-view.js';
 
 const page = (head, body) => `<main class="main dk">${head}<div class="dk-body">${body}</div></main>`;
@@ -106,8 +107,7 @@ function news(state) {
 // ---- Routines
 
 function routines(state, now) {
-  const orders = Array.isArray(state.tasks?.desk?.scheduled) ? state.tasks.desk.scheduled : [];
-  const rows = orders.map(o => `<article class="dk-routine"><div class="dk-routine-b"><strong>${esc(o.order)}</strong><span class="dk-dim">${esc(orderStateOf(o, now))}</span></div>${chip('grey', t('desk.chip.terminal'))}</article>`);
+  const rows = scheduledOf(state, now).map(({ scheduled: o, status }) => `<article class="dk-routine"><div class="dk-routine-b"><strong>${esc(o.order)}</strong><span class="dk-dim">${esc(status)}</span></div>${chip('grey', t('desk.chip.terminal'))}</article>`);
   const messages = rawHtml(`<a href="#/messages">${th('nav.messages')}</a>`);
   return `<section class="dk-col" aria-label="${th('desk.routines.title')}"><div class="dk-col-head"><h2>${th('desk.routines.title')}</h2><span class="dk-dim">${th('desk.routines.caption')}</span></div>` +
     `${rows.length ? `<div class="dk-groups">${rows.join('')}</div>` : `<p>${th('desk.routines.none')}</p>`}<p class="dk-dim">${th('desk.routines.foot', { messages })}</p></section>`;

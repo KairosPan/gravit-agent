@@ -101,8 +101,6 @@ export const ZH = Object.freeze({
   'tasks.group.you': '等你',
   'tasks.group.running': '进行中',
   'tasks.group.done': '今天完成',
-  'tasks.group.scheduled': '定时',
-  'tasks.desk.since': '{clock} 开始',
   'tasks.desk.session': '在历史中查看',
   'tasks.scheduled.next': '下次 {at}',
   'tasks.scheduled.last': '上次 {outcome} {at}',

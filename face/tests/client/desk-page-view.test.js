@@ -3,7 +3,7 @@
 // move, its row word and its count of the day, a rule's row and a standing order's state.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deskHeadOf, newsViewOf, moveOf, rowWordsOf, nthWord, ruleRowOf, orderStateOf } from '../../client/js/host/desk-page-view.js';
+import { deskHeadOf, newsViewOf, moveOf, rowWordsOf, nthWord, ruleRowOf } from '../../client/js/host/desk-page-view.js';
 import { deskNews, deskPageStatus } from './helpers/desk-news.js';
 import { deskStatus, DESK_NOW } from './helpers/desk-status.js';
 
@@ -66,14 +66,9 @@ test("an alert's move, its row word and its count of the day", () => {
     '12th alert today', '13th alert today', '21st alert today', '22nd alert today']);
 });
 
-test("a rule's row and a standing order's state", () => {
+test("a rule's row", () => {
   const [move, filing] = deskNews().rules;
   assert.deepEqual(ruleRowOf(move), { names: 'CRWV', what: '±8% move', today: '4 alerts today' });
   assert.deepEqual(ruleRowOf(filing), { names: 'Holdings', what: 'Filings 8-K, 4', today: '0 alerts today' });
   assert.deepEqual(ruleRowOf({ kind: 'gap', pct: 3, symbols: [], alertsToday: 1 }), { names: 'No symbols', what: '±3% gap', today: '1 alert today' });
-  const now = DESK_NOW;
-  assert.equal(orderStateOf({ order: 'brief', enabled: true, expired: false, next: '2026-11-03T14:20:00.000Z' }, now), 'Next 2026-11-03 09:20 ET');
-  assert.equal(orderStateOf({ order: 'brief', enabled: true, expired: false }, now), 'No next firing');
-  assert.equal(orderStateOf({ order: 'brief', enabled: false, expired: false }, now), 'Disabled');
-  assert.equal(orderStateOf({ order: 'brief', enabled: true, expired: true }, now), 'Expired');
 });

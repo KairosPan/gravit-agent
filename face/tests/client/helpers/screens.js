@@ -398,8 +398,8 @@ export function everyState() {
     // plan 3 of one entry, Task 7: the desk in the conversation - a phone text from each network and one naming none, a
     // schedule line, an alert line, and a line with no body
     deskFoldState(base),
-    // plan 3 of one entry, Task 8: the rail's desk lines and its scheduled group, a phone task naming its origin, and a
-    // strategy's page listing its standing order
+    // plan 3 of one entry, Task 8: the rail beside the desk's lines and standing orders (no line of it since desk-page plan
+    // 1 Task 6), a phone task naming its origin, and a strategy's page listing its standing order
     ...deskRailStates(base),
     // iMessage in Account › Identity (the iMessage plan), appended after the states above (after one entry's plan 3 since the merge)
     ...imessageStates(identitySigning(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' }))),
@@ -619,9 +619,10 @@ function taskRailStates(base) {
   return [on, running];
 }
 
-// the desk folds into the rail (one-entry plan 3 Task 8): a task from each network's phone; a firing running, one done with
+// the desk beside the rail (one-entry plan 3 Task 8): a task from each network's phone; a firing running, one done with
 // its session, one failed, an annotation with its text; the standing orders armed with a next firing, a last outcome and a
-// strategy, armed with none next, disabled and expired; then the scheduled group alone; then a strategy's page with its order
+// strategy, armed with none next, disabled and expired - none of the desk's a rail line since desk-page plan 1 Task 6, so
+// the first draws the phone's tasks alone; then a standing order alone, no rail; then a strategy's page with its order
 function deskRailStates(base) {
   const iso = ms => new Date(ms).toISOString();
   const task = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
