@@ -1910,7 +1910,6 @@ export const ZH = Object.freeze({
   'discover.ability.roles': '角色',
   'discover.ability.notRegistered': '未注册',
   'discover.ability.missing': '缺失',
-  'discover.ability.rowOff': '关闭',
   'discover.signIn.ok': '已登录',
   'discover.signIn.none': '未登录',
   'discover.signIn.unknown': '未知',

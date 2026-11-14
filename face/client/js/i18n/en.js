@@ -1916,7 +1916,6 @@ export const EN = Object.freeze({
   'discover.ability.roles': 'Roles',
   'discover.ability.notRegistered': 'not registered',
   'discover.ability.missing': 'missing',
-  'discover.ability.rowOff': 'off',
   'discover.signIn.ok': 'Signed in',
   'discover.signIn.none': 'Not signed in',
   'discover.signIn.unknown': 'Unknown',

@@ -6,8 +6,9 @@
 // from the literals the sources keep on screen on purpose (en-kept, the off-screen ones left out). An accepted limit: a word
 // the fixtures' own prose happens to hold (closed, filled, Paper, in a venue's note or an Account sentence) is known, so the
 // face drawing that same word from outside the table would pass; a sentinel test below holds the codes' words out. An ability's
-// declared prose (its about's lines, its asks, its limits) adds no known word: a run drawn that is one of them whole passes as
-// it is (helpers/screens.js abilityRuns), so a code word it holds (an ask about a trial that just failed) stays unknown.
+// declared text (its blurb, its about's lines, its asks, its limits) and its parts' names (its tools', skills', rows' and roles')
+// add no known word: a run drawn that is one of them whole passes as it is (helpers/screens.js abilityRuns), so a code word it
+// holds (an ask about a trial that just failed, a row's tool) stays unknown.
 process.env.TZ = 'America/New_York';
 const { test } = await import('node:test');
 const assert = (await import('node:assert/strict')).default;
@@ -128,6 +129,23 @@ test("an ability's declared line passes whole and lends its words to no other ru
   assert.deepEqual(strayWords(ask, known, runs), []);
   assert.deepEqual(strayWords(' failed ', known, runs), ['failed'], 'the word drawn alone is stray');
   assert.ok(strayWords(`${ask} Again`, known, runs).includes('failed'), 'a run that is no declared line whole is read word by word');
+});
+
+// an ability's blurb and its parts' names (its tools' and skills' names, its rows' and roles' ids) are declared too, each drawn
+// whole: they pass as runs and lend no word, so a word only they hold (tool, views, rivals) drawn anywhere else is stray
+test("an ability's blurb and its parts' names pass whole and lend no word", async () => {
+  const { abilitiesListing } = await import('./helpers/inventory.js');
+  const known = withTable(PROBE, () => knownWords());
+  const runs = abilityRuns();
+  for (const a of abilitiesListing().abilities) {
+    const skills = a.skills.map(k => k.name);
+    const declared = [a.blurb, a.zh.blurb, ...a.tools.map(x => x.name), ...skills, ...skills.map(k => `${k} ›`), ...a.rows.map(r => r.id), ...a.roles.map(r => r.id)];
+    for (const run of declared) assert.ok(runs.has(run), `${run} is a run`);
+  }
+  for (const w of ['Under', 'bad', 'logic', 'past', 'points', 'rivals', 'analog', 'guide', 'reader', 'service', 'tool', 'views']) {
+    assert.ok(!known.has(w), `${w} is not a known word`);
+  }
+  assert.deepEqual(strayWords('tool views', known, runs), ['tool', 'views'], 'the words drawn outside a declared run are stray');
 });
 
 test('a word table read after import follows the table (the Account tabs, the history ranges, the months)', () => {

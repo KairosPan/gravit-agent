@@ -326,12 +326,42 @@ test("an ability's page draws no section it has nothing for, and says what is no
   assert.match(h, /source-reader<\/span><span class="dim">missing<\/span>/);
   assert.match(h, /analog-guide<\/span><span class="dim">missing<\/span>/);
   assert.doesNotMatch(h, /href="#\/plugin\/skill%3Aanalog-guide"/, 'a missing skill is no link');
-  assert.match(h, /analog-views<\/span><span class="dim">off<\/span>/);
+  assert.match(h, /analog-views<\/span><span class="dim">Off<\/span>/);
   assert.match(h, /analog-events<\/span><span class="dim">Failed<\/span>/);
   const rt = renderPlugin(conversing(abilityAt('ability:read-through')));
   assert.ok(labelAt(rt, 'Made of') > 0);
   assert.doesNotMatch(rt, /kv-k">Roles<|kv-k">Skills</, 'the read-through has no roles and no skills: no such rows');
   assert.match(rt, /read_through/);
+});
+
+// the server's rule (src/abilities.ts abilityState): a row disabled or with no phase makes the ability off; its line says the
+// State's own word, never a phase's dash
+test("a row's line agrees with the State: Off for a row that is disabled or has no phase", () => {
+  const rows = [{ id: 'analog-views', enabled: true, phase: null }, { id: 'analog-events', enabled: false, phase: null }];
+  const s = conversing(abilityAt('ability:event-analogs', withAbility(0, { state: 'off', rows })));
+  const h = renderPlugin(s);
+  assert.match(h, /<span class="kv-k">State<\/span><span class="kv-v">Off<\/span>/);
+  const made = h.slice(labelAt(h, 'Made of'));
+  assert.match(made, /analog-views<\/span><span class="dim">Off<\/span>/, 'enabled with no phase: Off');
+  assert.match(made, /analog-events<\/span><span class="dim">Off<\/span>/, 'disabled: Off');
+  assert.doesNotMatch(made, /—/, 'no dash');
+  withTable(ZH, () => {
+    const zh = renderPlugin(R.setLang(s, 'zh'));
+    assert.match(zh, /<span class="kv-v">关闭<\/span>/);
+    assert.match(zh, /analog-views<\/span><span class="dim">关闭<\/span>/, 'the same word in Chinese');
+  });
+});
+
+// a listing that did not come through the face's validator may hold a name that is not well formed (a lone surrogate), which
+// encodeURIComponent throws on: the skill is drawn by name with no link, and the page is drawn
+test("a skill whose name is not well formed is drawn without a link, and the page does not throw", () => {
+  const bad = 'analog-guide\uD800';
+  const l = withAbility(0, { skills: [{ name: bad, present: true }, { name: 'analog-guide', present: true }] });
+  let h = '';
+  assert.doesNotThrow(() => { h = renderPlugin(conversing(abilityAt('ability:event-analogs', l))); });
+  assert.ok(h.includes(`<span class="made-part"><span class="mono">${bad}</span></span>`), 'its name alone, no link and no note');
+  assert.match(h, /<a class="link mono" href="#\/plugin\/skill%3Aanalog-guide">analog-guide ›<\/a>/, 'a well-formed name keeps its link');
+  assert.equal(h.match(/href="#\/plugin\/skill%3A/g)?.length, 1, 'one link');
 });
 
 test("an ability's listed strings are escaped, and its page never names a tool's description", () => {

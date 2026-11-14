@@ -137,6 +137,65 @@ test("validateAbility trims strings and refuses a control character, but keeps a
   if (paragraphs.ok) assert.equal(paragraphs.ability.about, "First paragraph.\nSecond paragraph.");
 });
 
+/** The refusal's rule for `input`, failing the test unless `field` is the one refused. */
+function refusedRule(input: unknown, field: string): string {
+  assert.equal(refusedField(input), field, `${JSON.stringify(input)} breaks ${field}`);
+  const result = validateAbility(input);
+  return result.ok ? "" : result.error.rule;
+}
+
+/** The kept declaration's name for `input`, failing the test when it is refused. */
+function keptName(input: unknown): string {
+  const result = validateAbility(input);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  return result.ok ? result.ability.name : "";
+}
+
+test("validateAbility refuses a line or paragraph separator inside a string, in about too; one trim removes is dropped", () => {
+  for (const separator of ["\u2028", "\u2029"]) {
+    assert.match(refusedRule({ ...MINIMAL, name: `Event${separator}analogs` }, "name"), /invisible character/);
+    refusedRule({ ...MINIMAL, about: `First paragraph.${separator}Second paragraph.` }, "about");
+    refusedRule({ ...MINIMAL, asks: [`One${separator}two?`] }, "asks");
+    refusedRule({ ...MINIMAL, zh: { blurb: `一行${separator}两行` } }, "zh.blurb");
+    assert.equal(keptName({ ...MINIMAL, name: `${separator}Event analogs${separator}` }), "Event analogs", "trimmed at the edges");
+  }
+});
+
+test("validateAbility refuses a bidi control anywhere in a string, at its edges too", () => {
+  const BIDI = ["\u061C", "\u200E", "\u200F", "\u202A", "\u202B", "\u202C", "\u202D", "\u202E", "\u2066", "\u2067", "\u2068", "\u2069"];
+  for (const control of BIDI) {
+    const hex = control.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0");
+    assert.match(refusedRule({ ...MINIMAL, name: `Event${control}analogs` }, "name"), new RegExp(`invisible character.*U\\+${hex}`));
+    refusedRule({ ...MINIMAL, name: `${control}Event analogs` }, "name");
+    refusedRule({ ...MINIMAL, limits: [`A limit${control}`] }, "limits");
+    refusedRule({ ...MINIMAL, icon: `rew${control}ind` }, "icon");
+  }
+});
+
+test("validateAbility refuses a zero-width character inside a string; a name that is one U+200B is refused as the character", () => {
+  for (const zero of ["\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF"]) {
+    assert.match(refusedRule({ ...MINIMAL, name: `Event${zero}analogs` }, "name"), /invisible character/);
+    refusedRule({ ...MINIMAL, blurb: `A line${zero}for the card` }, "blurb");
+    refusedRule({ ...MINIMAL, zh: { name: `事件${zero}对标` } }, "zh.name");
+  }
+  assert.match(refusedRule({ ...MINIMAL, name: "\u200B" }, "name"), /invisible character.*U\+200B/, "refused as the character, not as empty");
+  /* U+FEFF is white space to trim(): at an edge it is dropped. */
+  assert.equal(keptName({ ...MINIMAL, name: "\uFEFFEvent analogs\uFEFF" }), "Event analogs");
+});
+
+test("validateAbility refuses a string that is not well formed: a lone surrogate, in any field", () => {
+  for (const lone of ["\uD800", "\uDFFF", "a\uDC00b"]) {
+    assert.match(refusedRule({ ...MINIMAL, name: `Event ${lone}` }, "name"), /well formed/);
+    refusedRule({ ...MINIMAL, about: `About ${lone}.` }, "about");
+    refusedRule({ ...MINIMAL, asks: [`Ask ${lone}?`] }, "asks");
+    refusedRule({ ...MINIMAL, zh: { about: `简介${lone}` } }, "zh.about");
+    refusedRule({ ...MINIMAL, icon: `rewind${lone}` }, "icon");
+    refusedRule({ ...MINIMAL, tools: [`alpha_tool${lone}`] }, "tools");
+  }
+  /* A pair is one character, kept. */
+  assert.equal(keptName({ ...MINIMAL, name: "Event \uD83D\uDE00" }), "Event 😀");
+});
+
 test("validateAbility drops keys the declaration does not name", () => {
   const result = validateAbility({ ...MINIMAL, kind: "mcp", url: "https://example.com/mcp", by: "someone" });
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -173,6 +232,10 @@ test("readAbilities keeps the good files in folder order and refuses the rest, e
     assert.deepEqual(refused.map((r) => r.file), ["c/ability.json", "d/ability.json", "e/ability.json", "f/ability.json", "g/ability.json"]);
     assert.equal(refused.find((r) => r.file === "f/ability.json")?.field, "id");
     for (const r of refused) assert.ok(r.rule.length > 0, `${r.file} says its rule`);
+    /* The not-JSON refusal is a fixed text: nothing of the file, which a parser's message quotes. */
+    const notJson = refused.find((r) => r.file === "c/ability.json");
+    assert.deepEqual(notJson && { field: notJson.field, rule: notJson.rule }, { field: "manifest", rule: "is not JSON" });
+    assert.equal(notJson?.rule.includes("this is not JSON"), false, "the file's text is absent");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

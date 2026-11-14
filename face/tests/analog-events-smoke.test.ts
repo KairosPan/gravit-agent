@@ -157,12 +157,14 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
       assert.ok(row, `${id} must be listed; saw ${listedRows.map((r) => r.id).join(", ")}`);
       assert.equal(row.phase, "active", id);
     }
-    /* Discover's abilities over the booted tree, as main.ts lists them: both shipped declarations on, every
-     * declared tool registered, the event analog's role and skill present. */
+    /* Discover's abilities over the booted tree, as main.ts lists them - the role ids from the roles the boot
+     * read, which are the library's: both shipped declarations on, every declared tool registered, the event
+     * analog's role and skill present. */
+    assert.deepEqual(booted.roles.map((role) => role.id), readRoles(ROLES_ROOT).map((role) => role.id), "the boot hands back the role library");
     const { abilities } = await abilityListing({
       ...panelDeps(ctx, process.cwd(), home),
       abilities: readAbilities(PLUGINS_ROOT).abilities,
-      roleIds: new Set(readRoles(ROLES_ROOT).map((role) => role.id)),
+      roleIds: new Set(booted.roles.map((role) => role.id)),
     });
     assert.deepEqual(abilities.map((a) => [a.id, a.state]), [["event-analogs", "on"], ["read-through", "on"]],
       `both abilities are on; saw ${JSON.stringify(abilities.map((a) => ({ id: a.id, state: a.state, rows: a.rows })))}`);

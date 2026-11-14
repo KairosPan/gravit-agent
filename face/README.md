@@ -3629,15 +3629,15 @@ Starting or Failed), **About**, **Ask Gravit**, **What it does not tell you** an
 each tool by name (`not registered` when the tree lacks it; never its registered description,
 which is written for the model), each role (`missing` when the face did not read it at boot), each
 skill as a link to its own page (`missing` when the skill registry does not list it), each row
-with its phase (`off` when it is disabled or not composed) — a section drawn only when it has
-something. An ask is a key: pressing it goes to Messages and puts its words in Gravit's composer,
-after whatever the composer holds; nothing is sent. The keys work only while the ability is On and
-the page knows Gravit's conversation: with none (`FACE_ROUTER=0`, or the tasks not read yet) they
-are disabled under `Gravit's conversation is not available`, and with the ability not On they are
-disabled with no line. The page's text is the declaration's `zh` overlay when the page is in
-Chinese, its top level otherwise; the search finds an ability by its name and blurb. There is no
-switch: an ability is turned off as any row is, `disabled: true` on its rows in
-`cordis.patch.yml`.
+with its phase (Off, the State's own word, when it is disabled, not composed or has no phase) — a
+section drawn only when it has something. An ask is a key: pressing it goes to Messages and puts
+its words in Gravit's composer, after whatever the composer holds; nothing is sent. The keys work
+only while the ability is On and the page knows Gravit's conversation: with none
+(`FACE_ROUTER=0`, or the tasks not read yet) they are disabled under `Gravit's conversation is not
+available`, and with the ability not On they are disabled with no line. The page's text is the
+declaration's `zh` overlay when the page is in Chinese, its top level otherwise; the search finds
+an ability by its name and blurb. There is no switch: an ability is turned off as any row is,
+`disabled: true` on its rows in `cordis.patch.yml`.
 
 **Research**, drawn third after Abilities and Data, is the six Lunhui modules in the chain's
 order — Environment, Sentiment, Theme, Leader, Mode, Counterevidence — read from `GET
@@ -3810,15 +3810,18 @@ Gravit never reads it, and it changes no prompt, preset, tool or role.
 | `zh` | optional object holding any of `name`, `blurb`, `about`, `asks`, `limits`, each under its rule above |
 
 Strings are trimmed and counted in characters; one holding a control character is refused, but
-a line break inside `about`. An optional key may be absent or `null`. A key the table does not name
-is ignored and never served, so a Gravit-Field manifest's `kind`, `url`, `homepage`, `by`,
-`needs` and `writes` pass unread. The top-level text is English; `zh` overlays it on the Chinese
-page, a field it lacks read from the top level, and its `asks` and `limits` replace their lists
-whole. `face/tests/abilities-shipped.test.ts` reads the repo's declarations as the face does —
-none refused, the two shipped ones in order, so a third plugin's card joins that test with its
-file — and holds each to its plugin: its tools and rows the ones the plugin registers and
-composes, its roles under `roles/`, its skills under `dsh/skills/`, its icon one of the client's,
-a `zh` with a name, a blurb and an about, and no string holding `做多`.
+a line break inside `about`, and so is one that is not well formed (a lone surrogate) or holds an
+invisible character — a line or paragraph separator, a bidi control or a zero-width character —
+anywhere after the trim (one at an edge that the trim removes is dropped). An optional key may be
+absent or `null`. A key the table does not name is ignored and never served, so a Gravit-Field
+manifest's `kind`, `url`, `homepage`, `by`, `needs` and `writes` pass unread. The top-level text
+is English; `zh` overlays it on the Chinese page, a field it lacks read from the top level, and
+its `asks` and `limits` replace their lists whole. `face/tests/abilities-shipped.test.ts` reads
+the repo's declarations as the face does — none refused, the two shipped ones in order, so a
+third plugin's card joins that test with its file — and holds each to its plugin: its tools and
+rows the ones the plugin registers and composes, its roles under `roles/`, its skills under
+`dsh/skills/`, its icon one of the client's, a `zh` with a name, a blurb and an about, and no
+string holding `做多`.
 
 The face reads every `face/plugins/*/ability.json` once at boot, folders in name order. A file
 over the size, not UTF-8, not JSON, breaking a rule, or repeating an id an earlier folder took is

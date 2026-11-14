@@ -50,7 +50,6 @@ import type { StoredEvent } from "./search-text.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
 import { hasExec, lunhuiMounted, panelDeps, readAgentsMeta, registerPanelRoutes } from "./panels.ts";
 import { PLUGINS_ROOT, readAbilities, registerAbilityRoutes } from "./abilities.ts";
-import { ROLES_ROOT, readRoles } from "./roles.ts";
 import { installRoom, placeOf, registerRoomRoutes, type RoomContextLike } from "./room.ts";
 import { ensureRoster } from "./roster.ts";
 import { registerRosterRoutes } from "./roster-routes.ts";
@@ -442,13 +441,13 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
 /* Discover's abilities (abilities.ts): every `face/plugins/<folder>/ability.json`, read once
  * here; a refused declaration is one stderr line and left out, never a stopped boot. The
  * listing reads the same tree as the panels, beside the declarations and the ids of the roles
- * under roles/ (the library boot.ts read). */
+ * under roles/ (the library bootFace read, `booted.roles`, not read again). */
 const declared = readAbilities(PLUGINS_ROOT);
 for (const { file, field, rule } of declared.refused) console.error(`${BIN}: ability left out - ${file}: ${field} - ${rule}`);
 registerAbilityRoutes(booted.ctx.webServer, {
   ...deps,
   abilities: declared.abilities,
-  roleIds: new Set(readRoles(ROLES_ROOT).map((role) => role.id)),
+  roleIds: new Set(booted.roles.map((role) => role.id)),
 });
 /* The desk (desk.ts): `/data/desk/status`, the Desk panel's
  * `POST /data/desk/pause` (it only pauses; a terminal resumes) and the two

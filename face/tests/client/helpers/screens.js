@@ -929,14 +929,15 @@ export function corpus() {
 // the fields whose strings are words a screen draws as they come — the operator's, Gravit's, a bot's, a venue's or the
 // Account's prose, a name, a ticker, a path — and the only ones corpusStrings counts outside an upstream's content: a code
 // (a status, a screen, a phase, a run's state, an id) is never one, so a code word drawn as a word (failed, running,
-// messages) is the probe's to find. An ability's about, asks and limits are none of them: their words are known nowhere, and
-// the probe passes each as a whole run (abilityRuns below)
+// messages) is the probe's to find. An ability's blurb, about, asks and limits are none of them, nor are its parts' names (its
+// tools' and skills', which `name` would make content: DECLARED below): their words are known nowhere, and the probe passes
+// each as a whole run (abilityRuns below)
 const CONTENT_FIELDS = new Set([
   // prose
   'text', 'title', 'name', 'label', 'note', 'notes', 'message', 'description', 'question', 'header', 'prompt', 'response', 'detail',
   'displayReason', 'reason', 'why', 'whyNot', 'said', 'error', 'words', 'what', 'example', 'via', 'readOnlyBecause', 'noTradeBecause',
   'proven', 'lands', 'guard', 'beast', 'door', 'request', 'plan', 'soul', 'legs', 'line', 'broken', 'setupIssues', 'freezes',
-  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age', 'steps', 'body', 'blurb',
+  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age', 'steps', 'body',
   // names: a venue's, a product's, an agent's, an account's, a market's, a network's
   'productName', 'protocol', 'quoteFrom', 'sourceWord', 'venueName', 'accountName', 'agentName', 'byName', 'toName', 'unitWord',
   'network', 'networks', 'chain', 'chains', 'bridgeChains', 'funded', 'exchange', 'feed', 'source', 'model', 'route', 'runtime',
@@ -960,13 +961,14 @@ const CONTENT_FIELDS = new Set([
 // (the venue its status.yaml names and the Account's rows or refusal), What you sign's lines
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); an event analog view and its
-// task as the face read them (the worker's and web pages' words); an ability's declared row and role ids, which its page draws
-// as they come (its tools' and skills' names are content by `name`) — so their words (analog, views, events, read, through,
-// service, tool, source, reader) are known on every screen, and the key name id with them; `*` is any one key
+// task as the face read them (the worker's and web pages' words); `*` is any one key
 const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
-  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'],
-  ['discover', 'shelves', 'abilities', 'data', 'abilities', 'rows', 'id'], ['discover', 'shelves', 'abilities', 'data', 'abilities', 'roles', 'id']];
+  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
+// the strings a content field holds that are an ability's declared parts, its tools' and skills' names in the abilities listing
+// (an array adds nothing to a path): drawn each whole, they pass as runs (abilityRuns below) and lend no known word
+const DECLARED = [['discover', 'shelves', 'abilities', 'data', 'abilities', 'tools', 'name'], ['discover', 'shelves', 'abilities', 'data', 'abilities', 'skills', 'name']];
+const isDeclared = at => DECLARED.some(c => c.length === at.length && c.every((p, i) => p === at[i]));
 
 // every string, as { text, key }, the corpus' own states, the composer pieces' inputs and the module catalog (its sub-titles,
 // roles, codes and rulings' citations: content, spec §5.10) hold in a content field, or anywhere inside an upstream's content:
@@ -976,7 +978,7 @@ export function corpusStrings() {
   const out = [];
   const seen = new Map();
   const walk = (v, key, path, content) => {
-    if (typeof v === 'string') { if (content || CONTENT_FIELDS.has(key)) out.push({ text: v, key }); return; }
+    if (typeof v === 'string') { if ((content || CONTENT_FIELDS.has(key)) && !isDeclared(path)) out.push({ text: v, key }); return; }
     if (v === null || typeof v !== 'object') return;
     const modes = seen.get(v) ?? new Set();
     if (modes.has(content)) return;
@@ -998,19 +1000,25 @@ export function corpusStrings() {
   return out;
 }
 
-// an ability's declared prose (spec 2026-11-13 §4.1) in the abilities listings the corpus' states hold, top level and zh overlay:
-// each line of its about, each ask and each limit, trimmed — the runs its page draws each whole, which the words probe passes
-// as they are (words-probe.test.js), never as a source of known words: a code word one holds (the event analog's ask about a
-// trial that just failed) stays unknown everywhere else
+// an ability's declared text (spec 2026-11-13 §4.1) in the abilities listings the corpus' states hold — its blurb, each line of
+// its about, each ask and each limit, top level and zh overlay, trimmed — and its parts' names: each tool's and skill's name,
+// a present skill's link (its name and ›), each row's and role's id. These are the runs its card and page draw each whole,
+// which the words probe passes as they are (words-probe.test.js), never as a source of known words: a code word one holds (the
+// event analog's ask about a trial that just failed, a row's `tool`) stays unknown everywhere else
 export function abilityRuns() {
   const runs = new Set();
   const lines = v => (typeof v === 'string' ? v.split('\n') : Array.isArray(v) ? v.filter(s => typeof s === 'string').flatMap(s => s.split('\n')) : []);
+  const names = (v, key) => (Array.isArray(v) ? v.filter(x => x && typeof x[key] === 'string').map(x => x[key]) : []);
   for (const st of [...everyState(), ...namedStates().map(([, st]) => st)]) {
     const listed = st.discover?.shelves?.abilities?.data?.abilities;
     for (const a of Array.isArray(listed) ? listed : []) {
       for (const text of [a, a?.zh]) {
         if (!text || typeof text !== 'object') continue;
-        for (const s of [...lines(text.about), ...lines(text.asks), ...lines(text.limits)]) if (s.trim()) runs.add(s.trim());
+        for (const s of [...lines(text.blurb), ...lines(text.about), ...lines(text.asks), ...lines(text.limits)]) if (s.trim()) runs.add(s.trim());
+      }
+      const skills = names(a?.skills, 'name');
+      for (const s of [...names(a?.tools, 'name'), ...skills, ...skills.map(k => `${k} ›`), ...names(a?.rows, 'id'), ...names(a?.roles, 'id')]) {
+        if (s.trim()) runs.add(s.trim());
       }
     }
   }

@@ -7,9 +7,12 @@
  * prompt, a preset, a tool or a role. {@link validateAbility} checks one parsed object field by
  * field, in the order of {@link AbilityFile}, and keeps only the fields it names: a Gravit-Field
  * manifest's `kind`, `url`, `homepage`, `by`, `needs` and `writes` pass unread. Every string is
- * trimmed, its length counted in code points, and refused when it holds a control character
- * (C0, U+007F, C1) - but a line break (`\n`) inside `about`, which separates its paragraphs.
- * A key a declaration may leave out is left out when it is absent or `null`.
+ * trimmed, its length counted in code points, and then refused when it holds a control character
+ * (C0, U+007F, C1) - but a line break (`\n`) inside `about`, which separates its paragraphs -,
+ * when it is not well formed (a lone surrogate), or when it holds an invisible character: a line
+ * or paragraph separator, a bidi control or a zero-width character (one at an edge that `trim()`
+ * removes is dropped, not refused). A key a declaration may leave out is left out when it is
+ * absent or `null`.
  *
  * {@link readAbilities} reads every `<folder>/ability.json` directly under a root, folders in
  * name order, once, synchronously, as `readRoles` (src/roles.ts) reads the role library. A file that is
@@ -51,6 +54,13 @@ const SKILL_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CONTROL_RE = /[\u0000-\u001F\u007F-\u009F]/;
 /** {@link CONTROL_RE} but the line break `about` separates its paragraphs with. */
 const CONTROL_BUT_NEWLINE_RE = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/;
+/** What a reader cannot see that changes what a line shows: the line and paragraph separators
+ *  (U+2028, U+2029), the bidi controls (U+061C, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069) and
+ *  the zero-width characters (U+200B-U+200D, U+2060, U+FEFF). */
+const INVISIBLE_RE = /[\u2028\u2029\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u200B-\u200D\u2060\uFEFF]/;
+/** `String.prototype.isWellFormed` (Node 20 and later): no lone surrogate. The ES2022 lib this
+ *  tree is checked against does not declare it. */
+const isWellFormed = (value: string): boolean => (value as string & { isWellFormed(): boolean }).isWellFormed();
 /** UTF-8's byte-order mark. */
 const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 
@@ -115,6 +125,17 @@ const given = (value: unknown): boolean => value !== undefined && value !== null
 
 const lengthOf = (text: string): number => [...text].length;
 
+/** Refuse a trimmed string a reader cannot read as it is: one that is not well formed (a lone
+ *  surrogate), or one holding an invisible character, the first named by its code point since it
+ *  cannot be seen. */
+function refuseUnreadable(kept: string, field: string, label: string): void {
+  if (!isWellFormed(kept)) throw new Refused(field, `${label}is not well formed: it holds a lone surrogate`);
+  const unseen = INVISIBLE_RE.exec(kept)?.[0];
+  if (unseen !== undefined) {
+    throw new Refused(field, `${label}holds an invisible character, U+${unseen.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`);
+  }
+}
+
 /** A text field's value, trimmed, `label` opening its rules (a list entry's number). */
 function text(value: unknown, field: string, max: number, options: { label?: string; paragraphs?: boolean } = {}): string {
   const label = options.label ?? "";
@@ -123,6 +144,7 @@ function text(value: unknown, field: string, max: number, options: { label?: str
   if ((options.paragraphs === true ? CONTROL_BUT_NEWLINE_RE : CONTROL_RE).test(kept)) {
     throw new Refused(field, `${label}holds a control character${options.paragraphs === true ? "; only a line break (\\n) is allowed" : ""}`);
   }
+  refuseUnreadable(kept, field, label);
   const length = lengthOf(kept);
   if (length < 1 || length > max) throw new Refused(field, `${label}must be 1 to ${max} characters (it has ${length})`);
   return kept;
@@ -172,6 +194,7 @@ function iconOf(value: unknown): string | null {
   const icon = value.trim();
   if (icon === "") throw new Refused("icon", "must name an icon, or be left out");
   if (CONTROL_RE.test(icon)) throw new Refused("icon", "holds a control character");
+  refuseUnreadable(icon, "icon", "");
   return icon;
 }
 
@@ -269,8 +292,9 @@ function readDeclaration(path: string): { ok: true; value: unknown } | { ok: fal
   }
   try {
     return { ok: true, value: JSON.parse(source) };
-  } catch (error) {
-    return manifest(`is not JSON: ${messageOf(error)}`);
+  } catch {
+    /* A fixed text: the parser's message quotes the file's first characters. */
+    return manifest("is not JSON");
   }
 }
 

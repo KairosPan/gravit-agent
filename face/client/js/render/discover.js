@@ -196,9 +196,13 @@ function skillPage(item, state) {
 // language; a tool is named alone, never with its registered description
 const partsOf = (v, key) => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && typeof x[key] === 'string') : []);
 const part = (name, note) => `<span class="made-part"><span class="mono">${esc(name)}</span>${note ? `<span class="dim">${esc(note)}</span>` : ''}</span>`;
-const skillPart = k => (k.present === true
-  ? `<span class="made-part"><a${attrs({ class: 'link mono', href: `#/plugin/${encodeURIComponent(`skill:${k.name}`)}` })}>${esc(k.name)} ›</a></span>`
-  : part(k.name, t('discover.ability.missing')));
+// a present skill links to its page; one whose name is not well formed (a listing the face's validator did not pass) has no
+// link to build, encodeURIComponent throwing on it, and is drawn by its name alone
+const skillPart = k => (k.present !== true ? part(k.name, t('discover.ability.missing'))
+  : k.name.isWellFormed() ? `<span class="made-part"><a${attrs({ class: 'link mono', href: `#/plugin/${encodeURIComponent(`skill:${k.name}`)}` })}>${esc(k.name)} ›</a></span>`
+    : part(k.name, null));
+// a row's word: its phase while it is enabled and has one; otherwise the State's own Off, the server's rule for an ability off
+const rowWord = r => (r.enabled === true && typeof r.phase === 'string' ? phaseWord(r.phase) : abilityStateWord('off'));
 
 // the ask keys put their words in Gravit's composer: they work while the ability is on and the page knows Gravit's
 // conversation (Messages draws no composer without one), and the line under them says which
@@ -216,7 +220,7 @@ function madeOf(a) {
     [t('discover.key.tools'), partsOf(a.tools, 'name').map(x => part(x.name, x.registered === true ? null : t('discover.ability.notRegistered')))],
     [t('discover.ability.roles'), partsOf(a.roles, 'id').map(r => part(r.id, r.present === true ? null : t('discover.ability.missing')))],
     [t('discover.shelf.skills'), partsOf(a.skills, 'name').map(skillPart)],
-    [t('discover.ability.rows'), partsOf(a.rows, 'id').map(r => part(r.id, r.enabled === true ? phaseWord(r.phase) : t('discover.ability.rowOff')))],
+    [t('discover.ability.rows'), partsOf(a.rows, 'id').map(r => part(r.id, rowWord(r)))],
   ].filter(([, parts]) => parts.length).map(([k, parts]) => [k, parts.join('')]);
   return rows.length ? sec(t('discover.ability.madeOf'), `<div class="made-of">${kv(rows)}</div>`) : '';
 }
