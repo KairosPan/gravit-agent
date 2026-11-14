@@ -210,6 +210,7 @@ export const ZH = Object.freeze({
   'thread.phone.on': '手机 · {network}',
   'thread.desk.schedule': '定时',
   'thread.desk.alert': '盯盘',
+  'thread.desk.routine': '例行任务',
   'thread.context': '上下文 · {source}',
   'thread.report': '来自 {child} 的报告：{text}',
   'thread.aChild': '子任务',

@@ -601,6 +601,16 @@ test('a schedule line carries 定时 and an alert line 盯盘', () => {
   assert.equal(renderMessage(deskMsg({ line: 'alert' }, ''), conv(), state), '<div class="sysline desk-line"><span class="chip grey">Watch</span></div>', 'no body: the chip alone');
 });
 
+test('a routine line carries Routine, and 例行任务 in Chinese', () => {
+  assert.equal(renderMessage(deskMsg({ line: 'routine', routine: 'r-1' }, '1 idea: long AMD\n\nAMD 258.10'), conv(), state),
+    '<details class="sysline ctx desk-line" id="desk-s1-e81"><summary><span class="chip grey">Routine</span> <span class="desk-text">1 idea: long AMD</span></summary><pre>1 idea: long AMD\n\nAMD 258.10</pre></details>');
+  withTable({ 'thread.desk.routine': '例行任务' }, () => {
+    assert.match(renderMessage(deskMsg({ line: 'routine' }, 'x'), conv(), state), /<span class="chip grey">例行任务<\/span>/);
+  });
+  // a report's markup is text
+  assert.match(renderMessage(deskMsg({ line: 'routine' }, '<b>x</b>'), conv(), state), /&lt;b&gt;x&lt;\/b&gt;/);
+});
+
 test("a desk line folds: its first line clipped in the summary, its whole body under it", () => {
   const long = 'B'.repeat(DESK_SUMMARY_MAX + 30);
   const body = `\n${long}\n- hold NVDA\n- trim AMD`;

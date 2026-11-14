@@ -64,7 +64,7 @@ export function agentFileNameOf(name: string): AgentFileName | undefined {
  * begins with a dot and is not `..`, the way up. */
 export const isDotName = (name: string): boolean => name.startsWith(".") && name !== "..";
 
-/** The source kinds of the lines the face injects into the conversation - a standing order's firing (`schedule`) and
- * an alert (`alert`). Here, in the leaf, so src/task-relay.ts reads them without loading src/conversation.ts, which
+/** The source kinds of the lines the face injects into the conversation - a standing order's firing (`schedule`), an
+ * alert (`alert`) and a routine's report (`routine`). Here, in the leaf, so src/task-relay.ts reads them without loading src/conversation.ts, which
  * re-exports them and imports the relay's fence. */
-export const INJECTED_KINDS: ReadonlySet<string> = new Set(["schedule", "alert"]);
+export const INJECTED_KINDS: ReadonlySet<string> = new Set(["schedule", "alert", "routine"]);

@@ -283,10 +283,11 @@ function phoneMessage(b, view) {
   const words = typeof view.said === 'string' ? view.said : PROVENANCE.test(first) ? rest.join('\n') : text;
   return { ...b, from: 'you', kind: 'text', text: words, data: { source: 'telegram', ...(typeof view.network === 'string' ? { network: view.network } : {}) } };
 }
-// a firing of the face's clock (`schedule`) or an alert of its watch (`alert`), noted into the conversation
-// (src/conversation.ts noteMessage): its head `[schedule · <order> · <date>]` / `[alert · <symbol> · <label>]` left out,
+// a firing of the face's clock (`schedule`), an alert of its watch (`alert`) or a routine's report (`routine`), noted into
+// the conversation (src/conversation.ts noteMessage): its head `[schedule · <order> · <date>]` / `[alert · <symbol> · <label>]`
+// / `[routine · <name> · <date>]` left out,
 // its body out of the `desk-data` fence; the fields the mapper kept, by name
-const DESK_FIELDS = ['order', 'firing', 'date', 'alert', 'symbol'];
+const DESK_FIELDS = ['order', 'firing', 'date', 'alert', 'symbol', 'routine', 'key'];
 function deskMessage(view) {
   const line = view.line;
   const lines = (view.text ?? '').split('\n');

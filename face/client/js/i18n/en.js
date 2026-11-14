@@ -208,6 +208,7 @@ export const EN = Object.freeze({
   'thread.phone.on': 'Phone · {network}',
   'thread.desk.schedule': 'Scheduled',
   'thread.desk.alert': 'Watch',
+  'thread.desk.routine': 'Routine',
   'thread.context': 'context · {source}',
   'thread.report': 'Report from {child}: {text}',
   'thread.aChild': 'a child',

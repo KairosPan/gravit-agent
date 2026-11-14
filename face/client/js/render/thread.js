@@ -175,11 +175,11 @@ function youMessage(m, conv, state, page) {
   return `<div class="msg you"><div class="you-body">${tag}${files}${bubble}</div>${avatar('you', 28)}</div>`;
 }
 
-// a desk line (host/kinds.js deskMessage): a firing of the face's clock or an alert of its watch, noted into the conversation.
-// A firing's body is the whole brief or report the phone got, so the line folds as a task's report does: its Scheduled or
-// Watch chip and its first line (masked, then clipped at DESK_SUMMARY_MAX) as the summary, the body under it (open across a render by its
+// a desk line (host/kinds.js deskMessage): a firing of the face's clock, an alert of its watch or a routine's report, noted into the conversation.
+// A firing's body is the whole brief or report the phone got, so the line folds as a task's report does: its Scheduled,
+// Watch or Routine chip and its first line (masked, then clipped at DESK_SUMMARY_MAX) as the summary, the body under it (open across a render by its
 // id); a line with no body is the chip alone. Masked as a worker's words are: an agent wrote it, and it may hold a pasted key
-const DESK_CHIP = { schedule: () => t('thread.desk.schedule'), alert: () => t('thread.desk.alert') };
+const DESK_CHIP = { schedule: () => t('thread.desk.schedule'), alert: () => t('thread.desk.alert'), routine: () => t('thread.desk.routine') };
 export const DESK_SUMMARY_MAX = 120;
 function deskLine(m, conv) {
   const line = m.data?.line;

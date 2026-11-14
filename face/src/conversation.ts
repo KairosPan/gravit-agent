@@ -28,7 +28,7 @@
  * (a paused post refuses with the paused line), then the fence, then the key - the message's id - checked against the
  * conversation's log, its inbox and what this handle sent, so a text the bridge sends twice opens one turn; then the
  * message, its provenance line first, and the log flushed. A phone text's turn is the operator's, as the browser's is
- * ({@link OPERATOR_SOURCES}); a schedule or alert line injected into the conversation ({@link INJECTED_KINDS}) never
+ * ({@link OPERATOR_SOURCES}); a schedule, alert or routine line injected into the conversation ({@link INJECTED_KINDS}) never
  * names a turn and never makes one someone else's.
  *
  * THE DESK'S LINES (plan 3). What a firing, an annotation or a watch alert sent the phone is noted in the conversation
@@ -104,25 +104,29 @@ export const ANSWER_WAIT_MS = 5_000;
  * (spec §5.2). The browser's prompt is `user`; the phone's text is `telegram`, for both networks (plan 3). */
 export const OPERATOR_SOURCES: ReadonlySet<string> = new Set(["user", "telegram"]);
 
-/** The source kinds of the lines the face injects into the conversation - a standing order's firing (`schedule`) and
- * an alert (`alert`): context claimed at a turn's next step, never a turn's name and never another speaker in it. */
+/** The source kinds of the lines the face injects into the conversation - a standing order's firing (`schedule`), an
+ * alert (`alert`) and a routine's report (`routine`): context claimed at a turn's next step, never a turn's name and never another speaker in it. */
 export { INJECTED_KINDS };
 
 /** What the desk sent the phone, as a line in the conversation ({@link ConversationHandle.note}): a standing order's
  * firing - its order's id, the firing's key and its date - or an alert - its id (the pass's, for several), its symbol
  * or symbols, and, for an annotation's reply, its pass; `label`, the third part of the line's head (an alert's rule,
- * `annotation`, ...). `text` is what the phone was sent. */
+ * `annotation`, ...). `text` is what the phone was sent. A `routine` line is a routine run's report, which goes to the
+ * Desk page, never the phone (src/routine-run.ts): its routine's id and name, the run's key and New York date, and
+ * `text` its headline, a blank line and its body. */
 export type DeskLine =
   | { kind: "schedule"; order: string; firing: string; date: string; text: string }
-  | { kind: "alert"; alert: string; symbol: string; pass?: string; label?: string; text: string };
+  | { kind: "alert"; alert: string; symbol: string; pass?: string; label?: string; text: string }
+  | { kind: "routine"; routine: string; name: string; key: string; date: string; text: string };
 
 /** The longest text a {@link DeskLine} carries into the conversation; past it, cut with an ellipsis. */
 export const NOTE_TEXT_MAX = 4_000;
 
 /** A {@link DeskLine} as the message the conversation is injected: its fixed id - `note-schedule:<firing key>`,
- * `note-annotation:<pass>` for an annotation's reply, else `note-alert:<alert id>` - its source (the client's shapes:
- * `schedule` with `order`, `firing`, `date`; `alert` with `alert`, `symbol` and the `pass` when there is one), and its
- * text: the desk's bracketed head - `[schedule · <order> · <date>]`, `[alert · <symbol> · <label>]`, every `]` and line
+ * `note-annotation:<pass>` for an annotation's reply, `note-routine:<run key>` for a routine's, else
+ * `note-alert:<alert id>` - its source (the client's shapes: `schedule` with `order`, `firing`, `date`; `alert` with
+ * `alert`, `symbol` and the `pass` when there is one; `routine` with `routine`, `key`, `date`), and its text: the desk's
+ * bracketed head - `[schedule · <order> · <date>]`, `[alert · <symbol> · <label>]`, `[routine · <name> · <date>]`, every `]` and line
  * break in a part a space - then the text sent, cut at {@link NOTE_TEXT_MAX} and quoted as data between
  * `<<<desk-data NONCE>>>` and `<<<end NONCE>>>` (src/task-relay.ts `fenceData`, a fresh nonce per line): an
  * annotation's reply can carry what a web page said, so no line of it may close the quote or forge a head - a line
@@ -152,6 +156,14 @@ export function noteMessage(line: DeskLine, nonce?: string): { id: string; sourc
       id: pass === undefined ? `note-alert:${line.alert}` : `note-annotation:${pass}`,
       source: { kind: "alert", alert: line.alert, symbol: line.symbol, ...(pass === undefined ? {} : { pass }) },
       text: `[alert · ${part(line.symbol)} · ${part(label)}]\n${body}`,
+    };
+  }
+  if (line.kind === "routine") {
+    if (!ok(line.routine) || !ok(line.name) || !ok(line.key) || !ok(line.date)) return undefined;
+    return {
+      id: `note-routine:${line.key}`,
+      source: { kind: "routine", routine: line.routine, key: line.key, date: line.date },
+      text: `[routine · ${part(line.name)} · ${part(line.date)}]\n${body}`,
     };
   }
   return undefined;

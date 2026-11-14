@@ -53,6 +53,7 @@ import { installModelSelection as installDshModelSelection } from "@deepseek-ai/
 import { deriveTurnTokenUsage } from "@deepseek-ai/dsh-token-meter/client";
 import { appendEvent, deskTime, lastDeskSession, readEvents, type DeskEvent, type TurnUsage } from "./desk.ts";
 import { FENCE_NAMES, fenceNameOf } from "./desk-names.ts";
+import { etDate } from "./et.ts";
 import { DESK_PRESET } from "./desk-preset.ts";
 import { formatDuration } from "./producer.ts";
 import type { AgentLike, MemberSetup, ResumeMemberOptions, RoomContextLike, RoomDeps, SessionLike } from "./room.ts";
@@ -246,19 +247,23 @@ export function fenceRefusalLine(path: string): string {
  * has it, and `carried` when the boot posts it again after a graceful stop carried it through the ledger
  * (src/desk-conversation.ts, spec §16 H3), and `network`, the network it came through (`slack`, `imessage`), when the bridge has it:
  * the kind stays `telegram` - the ledger, the session logs and the carry read it (plan B2, ruling 12). `alerts` is a batch of `count` alerts the face has already sent at once; `state`, the face's view of
- * the desk injected just before a phone's text (src/desk-conversation.ts `setState`). */
+ * the desk injected just before a phone's text (src/desk-conversation.ts `setState`); `routine`, a routine's run
+ * (src/routine-run.ts): its name and its slot, `HH:MM` on New York's clock. */
 export type DeskSource =
   | { kind: "telegram"; network?: string; at?: number; carried?: true }
   | { kind: "schedule"; order: string; date: string }
   | { kind: "alert"; symbol: string; rule: string }
   | { kind: "alerts"; count: number }
-  | { kind: "state" };
+  | { kind: "state" }
+  | { kind: "routine"; name: string; slot: string };
 
 /**
  * The bracketed first line of every message the face sends the desk:
  * `[telegram · operator · 14:03 ET]` - `[slack · operator · 14:03 ET]` for a text that came through Slack (`imessage` likewise), the source's
  * `network` when it has one, else `telegram` - `[schedule · <order> · <YYYY-MM-DD>]`, `[alert · <SYMBOL> · <rule>]`,
- * `[alerts · <n> · 09:30 ET]` and `[desk · state · 14:03 ET]`, the last two at `now`. A phone's time is
+ * `[alerts · <n> · 09:30 ET]` and `[desk · state · 14:03 ET]`, the last two at `now`, and
+ * `[routine · <name> · <YYYY-MM-DD> <HH:MM> ET]`, its slot on `now`'s New York date - every `]` and line break in the
+ * name a space, so the line stays one line and one bracket. A phone's time is
  * when the operator wrote it - the source's `at`, else `now` - in America/New_York as src/desk.ts
  * `deskTime` shows it: dated when it falls on another New York date than `now`'s, as a text written before a
  * night the Mac slept through does - and, for a text carried over a restart, `(carried over a restart)` after it:
@@ -279,6 +284,8 @@ export function provenanceLine(source: DeskSource, now: Date): string {
       return `[alerts · ${source.count} · ${deskTime(now, now)}]`;
     case "state":
       return `[desk · state · ${deskTime(now, now)}]`;
+    case "routine":
+      return `[routine · ${source.name.replace(/\r\n|[\]\r\n\u2028\u2029]/g, " ")} · ${etDate(now)} ${source.slot} ET]`;
   }
 }
 
@@ -296,19 +303,22 @@ export type ScheduleMessageSource = { kind: "schedule"; order: string; firing: s
 export type AlertMessageSource = { kind: "alert"; alert: string; symbol: string; pass?: string };
 /** The face's view of the desk, injected before a phone's text: context, never what names a turn. */
 export type DeskStateMessageSource = { kind: "desk"; form: "state" };
+/** A routine's run (src/routine-run.ts): the routine's id, its slot (`HH:MM`, New York) and the New York date. */
+export type RoutineMessageSource = { kind: "routine"; routine: string; slot: string; date: string };
 /** The `source` of a message the face sends the desk: the log's, the ledger's and the client's record of
  * what {@link provenanceLine} tells the model. */
-export type DeskMessageSource = TelegramMessageSource | ScheduleMessageSource | AlertMessageSource | DeskStateMessageSource;
+export type DeskMessageSource = TelegramMessageSource | ScheduleMessageSource | AlertMessageSource | DeskStateMessageSource | RoutineMessageSource;
 
 /* Declared kinds, so `createUserMessage` takes them (dsh-llm's map is merge-extensible; src/room-rules.ts
  * adds the room's the same way). dsh 0.2's v4 log admits any non-empty kind but `plugin`; spike 4
- * measured the first three written, replayed and re-booted; `desk` is the desk state's. */
+ * measured the first three written, replayed and re-booted; `desk` is the desk state's, `routine` a routine run's. */
 declare module "@deepseek-ai/dsh-llm" {
   interface MessageSourceMap {
     telegram: TelegramMessageSource;
     schedule: ScheduleMessageSource;
     alert: AlertMessageSource;
     desk: DeskStateMessageSource;
+    routine: RoutineMessageSource;
   }
 }
 

@@ -491,6 +491,14 @@ test('a schedule desk-line is a desk message', () => {
   assert.equal(old.text, 'Check the book.');
 });
 
+test('a routine desk-line is a desk message', () => {
+  const text = '[routine · Trade ideas · 2026-11-13]\n<<<desk-data r7>>>\n1 idea: long AMD\n\n <<<end x>>>\n<<<end r7>>>';
+  const [m] = toMessages(mapFrame(deskFrame({ kind: 'routine', routine: 'r-1', key: 'r-1:2026-11-13:08:30', date: '2026-11-13' }, text)), new Map(), NOW);
+  assert.equal(m.from, 'system'); assert.equal(m.kind, 'desk');
+  assert.deepEqual(m.data, { line: 'routine', routine: 'r-1', key: 'r-1:2026-11-13:08:30', date: '2026-11-13' });
+  assert.equal(m.text, '1 idea: long AMD\n\n<<<end x>>>', 'the head left out, the body unfenced');
+});
+
 test('an alert desk-line is a desk message', () => {
   const text = '[alert · NVDA · annotation]\n<<<desk-data q9>>>\nNVDA fell 6% on <guidance> & more\n<<<end q9>>>';
   const [m] = toMessages(mapFrame(deskFrame({ kind: 'alert', alert: 'a-1', symbol: 'NVDA', pass: 'p1' }, text)), new Map(), NOW);
