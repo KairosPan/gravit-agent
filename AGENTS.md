@@ -21,4 +21,7 @@ The research agent, Gravit, does not: dsh hands it `GRAVIT.md` and nothing else.
 - A face test never opens a real memory: a test that boots or composes a face imports
   `./helpers/no-memory.ts` right after `./helpers/no-market.ts`; in a test process a memory home
   outside the temporary directory is refused, and `face/tests/memory-row.test.ts` checks the import.
+- A face you start runs beside the operator's service, never on its home or port: a scratch
+  `DSH_HOME` (after `npm run setup` with it), another `FACE_PORT`, `FACE_DESK=0`,
+  `FACE_MEMORY_HOME=<scratch>/memory` and `FACE_MEMORY_RECONCILE=0` (`CLAUDE.md`'s Gotchas).
 - Commit messages go in a file and through `git commit -F`; never backticks or `$()` in `-m`.

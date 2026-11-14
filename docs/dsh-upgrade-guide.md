@@ -113,7 +113,8 @@ inventory's PART 2, so a step can be cited.
 **Rehearse on copies**
 
 13. Rehearse the runbook §7 A checklist on a SECOND copy with the operator's MCP rows mounted
-    (`DSH_HOME=$SCRATCH/dsh-drill FACE_PORT=3091 npm start`) — the README's role drill needs
+    (`DSH_HOME=$SCRATCH/dsh-drill FACE_PORT=3091 FACE_MEMORY_HOME=$SCRATCH/memory FACE_MEMORY_RECONCILE=0
+    npm start`) — the README's role drill needs
     those rows too, so it runs here and not in step 14's fresh home — then delete it.
 14. Run the README drills in a FRESH scratch home (`npm run setup`, `npm start` on 3092): Gate 2
     / approval channel (the approval card drill), ask-user, bots, room (§5).

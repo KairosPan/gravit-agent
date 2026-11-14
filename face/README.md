@@ -342,9 +342,12 @@ with `FACE_ROUTER=0`), each desk turn and each turn it refused ("The desk"
 below).
 
 **A second face uses a scratch home.** A face beside the service — a terminal
-`npm start`, a drill face — runs on its own home and port with the desk off:
-`DSH_HOME=<scratch> FACE_DESK=0 FACE_PORT=3091`, after `npm run setup` with
-that `DSH_HOME`, as the desk drill's step 6 does. Two dsh processes on one
+`npm start`, a drill face — runs on its own home and port with the desk off and
+a memory of its own: `DSH_HOME=<scratch> FACE_DESK=0 FACE_PORT=3091
+FACE_MEMORY_HOME=<scratch>/memory FACE_MEMORY_RECONCILE=0`, after `npm run setup`
+with that `DSH_HOME`, as the desk drill's step 6 does (on a scratch harness home
+with no memory home named, the face opens no memory at all: "The memory"
+below). Two dsh processes on one
 harness home are unexamined, so no second face runs on the service's home —
 where the ledger, too, assumes one desk-enabled face (a second one's `boot`
 would mark the service's run lost; its clock row waits out a firing the service
@@ -803,18 +806,50 @@ those sessions read instructions for tools they cannot call.
 | Env | Default | What |
 |---|---|---|
 | `FACE_MEMORY_HOME` | unset | the memory's home, for the row and the face's own reads; first in the chain |
-| `GRAVIT_MEMORY_HOME` | unset | the home when `FACE_MEMORY_HOME` is unset, else `~/.gravit-memory` — the package's own variable and default, so `npx gravit-memory …` at a terminal finds the same home (it reads no `FACE_MEMORY_HOME`: with that one set, pass `--home`) |
+| `GRAVIT_MEMORY_HOME` | unset | the home when `FACE_MEMORY_HOME` is unset, else `~/.gravit-memory` — the package's own variable and default, so `npx --no gravit-memory …` at a terminal finds the same home (it reads no `FACE_MEMORY_HOME`: with that one set, pass `--home`) |
 | `FACE_MEMORY_DIR` | `face/node_modules/gravit-memory` | another built install (a clone after `npm ci`): the row's door and the face's handle move together |
 | `FACE_MEMORY_RECONCILE` | unset | `0` installs no reconcile clock; anything else leaves it on |
+
+**A face on a scratch harness home opens no memory unless one is named.** With neither
+`FACE_MEMORY_HOME` nor `GRAVIT_MEMORY_HOME` set, the default `~/.gravit-memory` belongs to the face on
+the harness's own default home — the one dsh resolves with no `DSH_HOME`, compared by real path:
+the installed service and the daily `npm start`. A face on any other harness home (a second face, a
+drill face) composes no `mcp-memory` row, so no model in it holds a memory tool; its clock and its
+brief say `the memory is not connected: this face runs on a scratch harness home and no memory home
+is named`, and its boot says it once on stderr with the variable to set. Name a home to give such a
+face one: `FACE_MEMORY_HOME=<scratch>/memory`, with `FACE_MEMORY_RECONCILE=0` ("A second face uses a
+scratch home" above). The docker box names `GRAVIT_MEMORY_HOME`, so it is unchanged. One function
+holds the rule (`namedMemoryHome`, `src/memory.ts`), used by the row's builder and the opener alike;
+in a test process the test guard below still refuses first.
+
+**The service reads none of your terminal's exports.** The launch file `npm run service` writes passes
+PATH, HOME, `DSH_HOME` and `FACE_PORT` alone (`scripts/service.ts`), so the four variables above,
+exported in a shell, do not reach the installed face. (The face does read the harness home's `.env`
+at boot, for any name its launch environment lacks.) The service's way to move the memory's home or
+to switch the row off is the row's patch, in `$DSH_HOME/profiles/face/cordis.patch.yml`:
+
+```yaml
+- id: mcp-memory
+  disabled: true                # the row off; or, to move the home, instead:
+# config:
+#   args: [<install>/dist/cli.js, mcp, --as, gravit, --home, <home>]
+```
+
+The clock and the brief follow the row as patched; a restart takes either in.
 
 **The home is the operator's.** The face never makes it and never writes its `config.json`; with
 no home every tool answers `no memory here: run gravit-memory init`. Make it once, at a terminal:
 
 ```bash
-cd face && npm ci            # installs and builds gravit-memory
-npx gravit-memory init       # "Made the memory at …": ~/.gravit-memory unless GRAVIT_MEMORY_HOME names another
-npx gravit-memory status     # its files, chains, cards and the price source
+cd face && npm ci                 # installs and builds gravit-memory
+npx --no gravit-memory init       # "Made the memory at …": ~/.gravit-memory unless GRAVIT_MEMORY_HOME names another
+npx --no gravit-memory status     # its files, chains, cards and the price source
 ```
+
+Always `npx --no`: gravit-memory is not on the npm registry, and a bare `npx gravit-memory` where
+the install is missing (outside `face/`, before `npm ci`, a stale modules volume in the agent box)
+would fetch and run whatever the registry holds under that name. `--no` fails closed: with no local
+install it refuses to install anything and runs nothing.
 
 `init` refuses a directory inside a git work tree and one that already holds something else. Then
 name the Market as the price source. The package's README: "The price source is named in the
@@ -845,8 +880,9 @@ memory is not connected: the mcp-memory row is disabled`, and the brief's `memor
 A patch that re-points the row's install or `--home` is followed: the clock and the brief open the
 memory as the row was composed (`composedMemoryRow`, `memoryOpener`), not as the environment says.
 A missing install is a spawn failure dsh logs and a row with no tools; the face's own reads say
-`the memory is not connected: gravit-memory is not installed`. None of it fails a boot, a brief or a
-turn.
+`the memory is not connected: gravit-memory is not installed`. An install added while the face runs
+needs a restart: the row gives up after its spawn attempts, and the face keeps a failed load of the
+library for the life of the process. None of it fails a boot, a brief or a turn.
 
 **The reconcile clock** (`src/memory-clock.ts`). `main.ts` installs it beside the desk, whether the
 desk is on or not: one run two minutes after the start, then one every eight hours, each
@@ -858,14 +894,15 @@ gravit-face: memory: reconciled: measured <n>, closed <n>, still due <n>, refuse
 gravit-face: memory: reconcile fresh: the source was asked at <time>, again after <time>
 gravit-face: memory: reconcile skipped: the home's config.json names no price source
 gravit-face: memory: no memory here: run gravit-memory init
-gravit-face: memory: the memory is not connected: <the row is disabled | gravit-memory is not installed>
+gravit-face: memory: the memory is not connected: the mcp-memory row is disabled
+gravit-face: memory: the memory is not connected: gravit-memory is not installed
+gravit-face: memory: the memory is not connected: this face runs on a scratch harness home and no memory home is named
 gravit-face: memory: reconcile failed: <the fault, one line of at most 200 characters>
 gravit-face: memory: reconcile passed its 60 s limit and is left to finish
 ```
 
-A run past its limit is abandoned, not cancelled: it may still hold the package's lock when the
-next one starts, which then says `reconcile failed`; nothing waits on either. A tick that finds a
-run still inside its limit is skipped in silence.
+A run past its limit is abandoned, not cancelled: its late result logs nothing, and nothing waits
+on it. A tick that finds a run still inside its limit is skipped in silence.
 
 **The brief's `memory`** (`src/memory-brief.ts`). When the pre-close brief fires (the desk on and
 the order armed), its JSON carries `memory` right after `session`, read through the same opener —
@@ -879,10 +916,23 @@ the order armed), its JSON carries `memory` right after `session`, read through 
 `prices` is `{ "source": false }` with no price source; `note` (`no lesson is applied until
 gravit-memory reseal`) appears while the owner's chain is broken. It holds numbers and at most five
 changed lesson ids that have a lesson id's shape (any other is counted, not listed), never a card's
-words. Not connected, it is `{ "connected": false, "say": … }` in a fixed sentence: the standing's,
-`no memory here: run gravit-memory init`, `the memory did not answer in 2 s`, or `the memory could
-not be read (<code>)` — a fault is said by its code, never by its message, which stays in the
-face's log. `dsh/profile/desk.md` has the desk say it in one line.
+words. Not connected, it is `{ "connected": false, "say": … }` in a fixed sentence: the standing's
+(one of the three `the memory is not connected: …` lines above), `no memory here: run gravit-memory
+init`, `the memory did not answer in 2 s`, `the memory could not be read (<code>)` for a fault that
+carries the package's code (`E_` and at most 24 more characters), or `the memory could not be read`
+for any other — a fault is said by its code, never by its message, which stays in the face's log.
+`dsh/profile/desk.md` has the desk say it in one line.
+
+**What this does not hold.** The memory's writing tools are open to whatever steers Gravit, and the
+owner has no door of their own inside the face: an owner's decision said in conversation is
+registered by Gravit, so it reads `by: gravit, whose: owner`, and so would one Gravit was steered to
+forge. An instruction planted in text Gravit reads — a page, a filing, a message — can, through the
+tools, register decisions in the owner's name, void such a decision within a day of its
+registration, close any open decision, attach a review in the owner's name, backdate a decision (it
+is then marked backfilled), and file proposals without limit. It cannot arm, change or retire a
+lesson, answer a proposal, write as the owner at the owner's own door (the terminal's acts), touch
+the home's `config.json`, or move money. A forged line and a genuine one read the same; the remedy
+is the owner's `void` at the terminal. No guard on the writing tools is built yet.
 
 **Tests never open a real memory.** `tests/helpers/no-memory.ts`, imported right after
 `./helpers/no-market.ts` by every test that boots or composes a face (`tests/memory-row.test.ts`
@@ -898,7 +948,7 @@ that forgot the helper fails loudly. A test that wants a memory makes one under 
 
 On the operator's face, after the home and its price source are made: the conversation lists the
 seven `mcp__memory__memory_*` tools; `memory_status` answers from the real home; a decision said in
-conversation is registered and `npx gravit-memory show <its id>` reads it back, `by: gravit`; two
+conversation is registered and `npx --no gravit-memory show <its id>` reads it back, `by: gravit`; two
 minutes after a restart `face.err.log` holds the clock's line; the next pre-close brief says the
 memory in one line. Before the price source is set, the clock's line is `memory: reconcile skipped:
 the home's config.json names no price source`.
@@ -4840,10 +4890,10 @@ fresh one will not open the face runs without search. Node prints its `node:sqli
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 35 smoke files (46 real boots), isolated; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 35 smoke files (47 real boots), isolated; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 35 smoke files (46 real boots) listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 35 smoke files (47 real boots) listed below; `FACE_SMOKE=1` runs
 them too (4,539 tests in 292 files on 2026-11-14 with the memory connected: 4,472 pass and 67 skipped offline; 4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
@@ -4901,13 +4951,14 @@ and `node --test` gives each file its own:
 | `readthrough-smoke.test.ts` | the read-through rows on a real boot over a fake quote source and a scratch record: `read_through` registered and both rows active; a `gravit-desk` session sees it, a bot's and the source reader's do not, and the conversation's allow list does not name it; a Gravit root session's call priced, its block carrying the event, recorded as a task's; a desk session with no run refused `ALERT_ONLY`; inside a run opened through `readThroughLane`, accepted with no event line and closed with the run, not given until the lane marks it sent, then given and refused `ALREADY_GIVEN` in a later run of the event; a rival outside the fence refused by name; US shares alone asked of the source and no request leaving the process |
 | `desk-carry-smoke.test.ts` | a graceful stop and a fresh boot, two real boots on one home, each in a child process of its own (the file runs itself as `one`, then `two`): the first face, the desk as `main.ts` installs it on the stub, posts `LONG` (`telegram:1`), whose model call hangs until its abort, and `QUEUED` (`telegram:2`) behind it, then shuts down as `main.ts` does - `desk.dispose(0)`, then the tree's; the ledger holds one `desk-carry` - `QUEUED`'s key, words and time, and `LONG`'s turn 1 as `cut` - before its `shutdown`; the second face's boot posts `QUEUED` again, its provenance line ending `(carried over a restart)`, the model answers it once and `LONG` not at all, the phone gets the restart line and then `echo QUEUED`, and `desk-carried` says `posted: 1, skipped: 0` (spec §16 H3, R93; the guard across dsh upgrades for `.superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md`) |
 | `analog-events-smoke.test.ts` | the analog rows against a stub market (`fakeMarket` on port 0; `analog-views` over a scratch views directory): `analog_events` registered, no `analog_chart`, and the two rows active in the plugin listing; with the repo's two skill packs on the `skill-filesystem` row as the operator's patch has them, the abilities listing (`src/abilities.ts`) reading both shipped declarations On, every declared tool registered, `source-reader` and `analog-guide` present; `role-source-reader` listed whole; a session created on it sees exactly `web_fetch` and `web_search`, the first in its own layer (`src/source-reader.ts`); a Gravit session, a PDF page reader's and a bot's see no `web_fetch`, the last two no analog tool; the reader's `web_fetch` of a loopback URL refused by dsh's provider until the fortieth page, the next refused by the guard; `analog_events` for Gravit measuring one event and storing the view, its source verified only once the page record holds it, and the present case's anchor citing the same page read back verified too; the view served with the cookie, 403 from another site's page, 404 for an unknown id; the reader refused `analog_events`; the stub asked only `/api/candles` on `cboe` |
-| `memory-smoke.test.ts` | the memory row on three boots over one scratch harness home ("The memory"): over a home the package's `initHome` made under the temporary directory, the conversation (`gravit-router`) and a worker (`gravit`) each hold exactly the seven `mcp__memory__memory_*` tools, on the session and in the first request, and a desk session none; `memory_status` from the conversation answers the home's status, one `memory_record` of filler registers a decision whose `by` is `gravit`; the conversation and a worker carry `mcp:memory` and `gravit:memory`, a desk session no `gravit:memory`; then over a home nobody made the boot resolves, the seven tools are there and `memory_status` answers `Error: no memory here: run gravit-memory init`; and with `FACE_MEMORY_DIR` at an empty directory the boot resolves with no memory tool and the face's standing `gravit-memory is not installed` |
+| `memory-smoke.test.ts` | the memory row on four boots over one scratch harness home ("The memory"): over a home the package's `initHome` made under the temporary directory, the conversation (`gravit-router`) and a worker (`gravit`) each hold exactly the seven `mcp__memory__memory_*` tools, on the session and in the first request, and a desk session none; `memory_status` from the conversation answers the home's status, one `memory_record` of filler registers a decision whose `by` is `gravit`; the conversation and a worker carry `mcp:memory` and `gravit:memory`, a desk session no `gravit:memory`; then over a home nobody made the boot resolves, the seven tools are there and `memory_status` answers `Error: no memory here: run gravit-memory init`; with `FACE_MEMORY_DIR` at an empty directory the boot resolves, the row settles with no memory tool and the face's standing is `gravit-memory is not installed`; and with the row disabled by a line in the operator's patch file, no memory tool in the tree, the conversation (on its session and in its first request) or a Gravit session, no `gravit:memory` in their prompts, and the face's standing `the mcp-memory row is disabled` |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
 `observed:` line each (S4, S7), the measurements the bots spec's amendments were
-worded from. `memory-smoke.test.ts` prints two `memory-smoke: measure:` lines: `mcp:memory` in a
-desk session's, a bot's and a role child's prompt (true, true, true on 2026-11-14), and
-`gravit:memory` in a bot's and a role child's (false, false).
+worded from. `memory-smoke.test.ts` prints three `memory-smoke: measure:` lines: `mcp:memory` in a
+desk session's, a bot's and a role child's prompt (true, true, true on 2026-11-14), `gravit:memory`
+in a bot's and a role child's (false, false), and, with the row disabled, `mcp:memory` in the
+conversation's and a Gravit session's (false, false).
 
 Offline, `role-plugin.test.ts` holds the role tool to its contract without a boot: the config
 grammar, one tool that is never concurrent and has no timeout, the child started on the role's
@@ -5801,7 +5852,8 @@ Safari, Chrome and Firefox each), and the other picks join as their plans land. 
 on this shell's `PATH` (`brew install poppler`, "Run"), a CSV, a PNG screenshot and a broker
 report's PDF with a table on one of its pages. Keyed, on a second face from your own terminal:
 `source ../.env.deepseek`, then `npm run setup` and `npm start` with
-`DSH_HOME=<scratch> FACE_DESK=0 FACE_PORT=3091 FACE_ACCOUNT_URL=http://127.0.0.1:9` ("A second
+`DSH_HOME=<scratch> FACE_DESK=0 FACE_PORT=3091 FACE_MEMORY_HOME=<scratch>/memory FACE_MEMORY_RECONCILE=0
+FACE_ACCOUNT_URL=http://127.0.0.1:9` ("A second
 face uses a scratch home"; the dead Account URL keeps this page from pairing with the real
 Account). Open the printed `?token=` URL and hard-reload.
 
@@ -5996,7 +6048,8 @@ not the model, is wrong.
 
 **The drill**, on a face booted against a COPY of the harness home with the
 operator's MCP rows mounted (the go-live runbook's §7 A recipe: `DSH_HOME=$SCRATCH/dsh-drill
-FACE_PORT=3091 npm start`, real keys) — never the operator's own home:
+FACE_PORT=3091 FACE_MEMORY_HOME=$SCRATCH/memory FACE_MEMORY_RECONCILE=0 npm start`, real keys) —
+never the operator's own home:
 
 1. Start a new round in the `room-drill` channel and ask Gravit to use the role on one bounded
    task (for `cn-market-analyst` and `cn-reviewer`: in `cn-market`, the live market run's step 1;
@@ -6525,12 +6578,12 @@ peer that forges `Host`. The same holds for the Account's `PORTFOLIO_BIND` (`../
    (`poppler-utils` from the agent image's one layer, `Dockerfile`), so `GRAVIT.md`'s `## PDFs`
    commands run in Gravit's shell there; `${TMPDIR:-/tmp}` is `/tmp` in the box.
 8. **The memory in the box.** The home is made inside the box, on its volume:
-   `docker compose exec agent npx gravit-memory init` prints `Made the memory at /memory-home.`
+   `docker compose exec agent npx --no gravit-memory init` prints `Made the memory at /memory-home.`
    (the box's working directory is `face/`, and `GRAVIT_MEMORY_HOME` names the volume). Name the
    box's market as the price source — the agent box reaches it at `http://market:4821`, not the
    host's loopback address:
    `docker compose exec agent node -e "const fs=require('fs'),f='/memory-home/config.json',c=JSON.parse(fs.readFileSync(f,'utf8'));c.prices.url='http://market:4821';fs.writeFileSync(f,JSON.stringify(c,null,2)+'\n')"`.
-   `docker compose exec agent npx gravit-memory status` names it; Discover's MCP shelf lists
+   `docker compose exec agent npx --no gravit-memory status` names it; Discover's MCP shelf lists
    `memory` with its 7 tools; Gravit's `memory_status` answers from the box's home; two minutes
    after the box's start `docker compose logs agent` holds the clock's `gravit-face: memory: …`
    line (`reconcile skipped: the home's config.json names no price source` before the source is
@@ -6633,7 +6686,8 @@ you run the face from ("Run as a service"), and no other face on 3090:
    ```bash
    SCRATCH_HOME=$(mktemp -d)
    DSH_HOME="$SCRATCH_HOME" npm run setup
-   FACE_DESK=0 FACE_PORT=3091 DSH_HOME="$SCRATCH_HOME" npm start
+   FACE_DESK=0 FACE_PORT=3091 DSH_HOME="$SCRATCH_HOME" \
+     FACE_MEMORY_HOME="$SCRATCH_HOME/memory" FACE_MEMORY_RECONCILE=0 npm start
    ```
 
    PASS, part six: it boots and prints `gravit-face: desk: rows disabled (FACE_DESK=0)` and its
