@@ -120,7 +120,6 @@ interface LedgerLine {
 const WEEK: readonly Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const ROUTINE_ID = /^r-[0-9a-f]{8}$/;
 const PROPOSAL_ID = /^p-[0-9a-f]{8}$/;
-const SHA = /^[0-9a-f]{64}$/;
 const STATES: readonly Proposal["state"][] = ["pending", "confirmed", "dismissed", "superseded", "expired"];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -150,8 +149,14 @@ function checkText(v: unknown, what: string, min: number, max: number): { ok: tr
   const error = `A routine's ${what} is ${range} characters.`;
   if (typeof v !== "string") return { ok: false, error };
   const text = v.trim();
-  return text.length < min || text.length > max ? { ok: false, error } : { ok: true, text };
+  return within(text, min, max) ? { ok: true, text } : { ok: false, error };
 }
+
+/** Whether `s` is `min` to `max` characters long, counted by code point as task-tools.ts counts its limits. */
+const within = (s: string, min: number, max: number): boolean => {
+  const n = Array.from(s).length;
+  return n >= min && n <= max;
+};
 
 /** `v` as a schedule, parsed and canonical, or undefined. */
 function scheduleOf(v: unknown): RoutineSchedule | undefined {
@@ -162,15 +167,18 @@ function scheduleOf(v: unknown): RoutineSchedule | undefined {
 const isOrigin = (v: unknown): v is Origin =>
   isRecord(v) && (v.kind === "web" || (v.kind === "phone" && typeof v.network === "string"));
 
-/** The fields a routine and a proposal share, checked; their schedule canonical. Undefined when one fails. */
+/** The fields a routine and a proposal share, checked; their schedule canonical and their `sha256` recomputed from
+ * the name, schedule and instruction, so a store edited by hand never carries a stale version id. Undefined when one
+ * fails. */
 function versionOf(v: Record<string, unknown>): Pick<Routine, "name" | "schedule" | "instruction" | "note" | "sha256" | "origin"> | undefined {
   const schedule = scheduleOf(v.schedule);
   if (schedule === undefined) return undefined;
-  if (typeof v.name !== "string" || v.name.length < 1 || v.name.length > NAME_MAX) return undefined;
-  if (typeof v.instruction !== "string" || v.instruction.length < 1 || v.instruction.length > INSTRUCTION_MAX) return undefined;
-  if (v.note !== undefined && (typeof v.note !== "string" || v.note.length > NOTE_MAX)) return undefined;
-  if (typeof v.sha256 !== "string" || !SHA.test(v.sha256) || !isOrigin(v.origin)) return undefined;
-  return { name: v.name, schedule, instruction: v.instruction, ...(v.note === undefined ? {} : { note: v.note }), sha256: v.sha256, origin: v.origin };
+  if (typeof v.name !== "string" || !within(v.name, 1, NAME_MAX)) return undefined;
+  if (typeof v.instruction !== "string" || !within(v.instruction, 1, INSTRUCTION_MAX)) return undefined;
+  if (v.note !== undefined && (typeof v.note !== "string" || !within(v.note, 0, NOTE_MAX))) return undefined;
+  if (!isOrigin(v.origin)) return undefined;
+  const sha256 = versionSha({ name: v.name, schedule, instruction: v.instruction });
+  return { name: v.name, schedule, instruction: v.instruction, ...(v.note === undefined ? {} : { note: v.note }), sha256, origin: v.origin };
 }
 
 /** `v` as a routine, or undefined. */
@@ -278,14 +286,15 @@ export function routineOps(deps: { home: string; now?: () => number; log?: (line
    */
   async function act<T>(change: (store: RoutineStore, t: string) => { result: T; write: boolean; lines: Omit<LedgerLine, "t">[] }): Promise<T> {
     await mkdir(deskDir(home), { recursive: true });
-    const t = new Date(now()).toISOString();
     const done = await withFileLock(path, async () => {
+      const t = new Date(now()).toISOString(); // read under the lock: a queued act is timed when it runs
       const load = await loadRoutines(home);
       if (!load.ok) throw new RoutineError("unreadable", load.error);
       const out = change(load.store, t);
       if (out.write) await writeFileAtomic(path, `${JSON.stringify(load.store, null, 2)}\n`, { mode: 0o600 });
-      return out;
+      return { ...out, t };
     });
+    const { t } = done;
     for (const line of done.lines) await appendRecord(home, ROUTINES_LEDGER, { t, ...line }, { log: deps.log });
     return done.result;
   }

@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deskDir, readRecords } from "../src/desk.ts";
 import {
-  DAILY_TOKENS_DEFAULT, loadRoutines, PROPOSALS_MAX, RoutineError, routineOps, ROUTINES_FILE, ROUTINES_LEDGER, ROUTINES_MAX, versionSha,
+  DAILY_TOKENS_DEFAULT, loadRoutines, NAME_MAX, NOTE_MAX, PROPOSALS_MAX, RoutineError, routineOps, ROUTINES_FILE, ROUTINES_LEDGER, ROUTINES_MAX, versionSha,
   type Origin, type RoutineOps,
 } from "../src/routines.ts";
 
@@ -360,4 +360,101 @@ test("a store whose shape or a routine's schedule fails its check loads unreadab
 
   await writeFile(path, JSON.stringify([]));
   assert.equal((await loadRoutines(home)).ok, false);
+});
+
+/* ---------- the lock ---------- */
+
+test("two confirms at once make one routine and one confirmed line", async () => {
+  const home = freshHome();
+  const ops = routineOps({ home, now: clock().now });
+  const p = await ops.propose(input());
+  const [a, b] = await Promise.all([ops.confirm(p.id), ops.confirm(p.id)]);
+  assert.deepEqual(a, b);
+  assert.equal((await store(home)).routines.length, 1);
+  assert.deepEqual((await ledger(home)).map((l) => l.kind), ["proposed", "confirmed"]);
+});
+
+test("a confirm and a propose at once both land in the store", async () => {
+  const home = freshHome();
+  const ops = routineOps({ home, now: clock().now });
+  const p = await ops.propose(input());
+  const [{ routine }, q] = await Promise.all([ops.confirm(p.id), ops.propose(input({ name: "Second" }))]);
+  const s = await store(home);
+  assert.deepEqual(s.routines.map((r) => r.id), [routine.id]);
+  assert.deepEqual(s.proposals.map((x) => [x.id, x.state]), [[p.id, "confirmed"], [q.id, "pending"]]);
+});
+
+/* ---------- the decisions, pinned ---------- */
+
+test("a confirm whose replaced routine was deleted is refused as unknown and stays pending", async () => {
+  const home = freshHome();
+  const ops = routineOps({ home, now: clock().now });
+  const first = await ops.propose(input());
+  const { routine } = await ops.confirm(first.id);
+  const edit = await ops.propose(input({ name: "Edited", replaces: routine.id }));
+  await ops.remove(routine.id);
+  await refuses(ops.confirm(edit.id), "unknown");
+  const s = await store(home);
+  assert.equal(s.proposals.find((x) => x.id === edit.id)?.state, "pending");
+  assert.deepEqual(s.routines, []);
+});
+
+test("name, instruction and note are trimmed, and a whitespace-only note is stored absent", async () => {
+  const home = freshHome();
+  const ops = routineOps({ home, now: clock().now });
+  const a = await ops.propose(input({ name: "  Movers \n", instruction: "\tList them. ", note: "  why  " }));
+  assert.deepEqual([a.name, a.instruction, a.note], ["Movers", "List them.", "why"]);
+  const b = await ops.propose(input({ note: "   \n " }));
+  assert.equal(b.note, undefined);
+  const stored = JSON.parse(await readFile(join(deskDir(home), ROUTINES_FILE), "utf8"));
+  assert.equal("note" in stored.proposals[1], false);
+});
+
+test("limits count characters by code point", async () => {
+  const ops = routineOps({ home: freshHome(), now: clock().now });
+  const p = await ops.propose(input({ name: "📈".repeat(NAME_MAX), note: "📈".repeat(NOTE_MAX) }));
+  assert.equal(Array.from(p.name).length, NAME_MAX);
+  await refuses(ops.propose(input({ name: "📈".repeat(NAME_MAX + 1) })), "invalid", /name/);
+});
+
+test("dismiss of a dismissed proposal and setEnabled to the current value change no byte and add no line", async () => {
+  const home = freshHome();
+  const ops = routineOps({ home, now: clock().now });
+  const p = await ops.propose(input());
+  const { routine } = await ops.confirm(p.id);
+  const q = await ops.propose(input({ name: "Other" }));
+  const first = await ops.dismiss(q.id);
+  const path = join(deskDir(home), ROUTINES_FILE);
+  const bytes = await readFile(path, "utf8");
+  const lines = (await ledger(home)).length;
+  assert.deepEqual(await ops.dismiss(q.id), first);
+  assert.equal((await ops.setEnabled(routine.id, true)).enabled, true);
+  assert.equal(await readFile(path, "utf8"), bytes);
+  assert.equal((await ledger(home)).length, lines);
+});
+
+test("one schedule in another order proposes the same sha256", async () => {
+  const ops = routineOps({ home: freshHome(), now: clock().now });
+  const a = await ops.propose(input({ schedule: { days: "daily", times: ["16:00", "09:30"] } }));
+  const b = await ops.propose(input({ schedule: { days: "daily", times: ["09:30", "16:00"] } }));
+  assert.equal(a.sha256, b.sha256);
+  const c = await ops.propose(input({ schedule: { days: ["fri", "tue", "mon"], times: ["09:30"] } }));
+  const d = await ops.propose(input({ schedule: { days: ["mon", "tue", "fri"], times: ["09:30"] } }));
+  assert.equal(c.sha256, d.sha256);
+  assert.notEqual(a.sha256, c.sha256);
+});
+
+test("a routine edited by hand loads with the sha256 of its edited content", async () => {
+  const home = freshHome();
+  const ops = routineOps({ home, now: clock().now });
+  const p = await ops.propose(input());
+  await ops.confirm(p.id);
+  const path = join(deskDir(home), ROUTINES_FILE);
+  const raw = JSON.parse(await readFile(path, "utf8"));
+  raw.routines[0].name = "Renamed by hand";
+  await writeFile(path, JSON.stringify(raw));
+  const [routine] = (await store(home)).routines;
+  assert.ok(routine);
+  assert.equal(routine.sha256, versionSha({ name: "Renamed by hand", schedule: routine.schedule, instruction: routine.instruction }));
+  assert.notEqual(routine.sha256, p.sha256);
 });
