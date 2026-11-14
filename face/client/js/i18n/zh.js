@@ -46,6 +46,7 @@ export const ZH = Object.freeze({
   'nav.expand': '展开导航',
   'nav.collapse': '收起导航',
   'nav.messages': '消息',
+  'nav.desk': '值守台',
   'nav.markets': '市场',
   'nav.trade': '交易',
   'nav.discover': '发现',
@@ -1269,6 +1270,10 @@ export const ZH = Object.freeze({
   'desk.requestFailed': '请求失败',
   'desk.notStatus': '不是值守台状态',
   'desk.pauseFailed': '暂停失败：{reason}',
+
+  // the Desk page (render/desk-page.js) and its news read (host/desk-news.js)
+  'desk.page.title': '值守台',
+  'desk.page.notNews': '不是值守台资讯',
 
   // the Markets screen's view (host/market-view.js): its tabs and sorts, the quotes' states, China's lines, a row's words, an
   // A share's facts

@@ -18,6 +18,7 @@ import { fieldsOf } from '../../../client/js/host/sheet-view.js';
 import { askedOf } from '../../../client/js/host/sheet.js';
 import { renderStrategyScreen } from '../../../client/js/render/strategy.js';
 import { renderDiscover, renderPlugin } from '../../../client/js/render/discover.js';
+import { renderDeskScreen } from '../../../client/js/render/desk-page.js';
 import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
 import { newSheet } from '../../../client/js/host/run-sheet-view.js';
@@ -436,6 +437,8 @@ export function namedStates() {
     ['task-event-table', { ...page, analog: { tasks: { wt: read }, views } }],
     ['market-event-window', marketEventWindow()],
     ...abilityStates(),
+    // the Desk page (desk-page plan 1 Task 3): its title alone, until Task 4 draws it
+    ['desk-page', R.nav(emptyState(), { screen: 'desk', id: null })],
   ];
 }
 
@@ -853,7 +856,7 @@ function composerBuild() {
   return { pieces, inputs };
 }
 export const composerPieces = () => composerBuild().pieces;
-export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
+export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'desk' ? renderDeskScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
   : st.route.screen === 'strategy' ? renderStrategyScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
   : st.route.screen === 'history' ? renderHistoryScreen(st, now)

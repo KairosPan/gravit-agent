@@ -735,6 +735,8 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .grid-title { font-size: calc(17px * var(--fs)); font-weight: 700; letter-spacing: -0.01em; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; }
 .back-link { color: var(--dim); font-size: calc(13px * var(--fs)); font-weight: 600; }
+/* the Desk page (#/desk): its own scroll, the head above its columns */
+.main.dk { overflow-y: auto; }
 /* a plugin's and a market's own page: the way back, the head with its keys, then the body */
 .main.plugin-page, .main.mk-page { gap: 18px; }
 .page-back { align-self: flex-start; min-height: 32px; display: inline-flex; align-items: center; }

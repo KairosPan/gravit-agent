@@ -39,7 +39,7 @@ test('Trade is in the first level between Markets and Discover, current on the T
   const base = listed([conv('a')]);
   const h = renderNav(base);
   const keys = [...h.matchAll(/class="nav-item[^"]*"(?: aria-current="page")? href="([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(keys.slice(1), ['#/markets', '#/trade', '#/discover'], 'Messages, then Markets, Trade, Discover');
+  assert.deepEqual(keys.slice(1), ['#/desk', '#/markets', '#/trade', '#/discover'], 'Messages, then Desk, Markets, Trade, Discover');
   assert.match(h, /<a class="nav-item" href="#\/trade"><svg[^>]*>.*?<\/svg><span class="nav-label">Trade<\/span><\/a>/);
   for (const id of [null, 'coin:BTC']) {
     const on = renderNav(R.nav(base, { screen: 'trade', id }));
@@ -48,6 +48,18 @@ test('Trade is in the first level between Markets and Discover, current on the T
   }
   assert.equal(renderSide(R.nav(base, { screen: 'trade', id: null }), NOW), '', 'no side panel beside Trade');
   assert.match(renderNav({ ...base, railCollapsed: true }), /title="Trade"/);
+});
+
+test('Desk follows Messages, links #/desk and is current on the Desk screen alone; no side panel beside it', () => {
+  const base = listed([conv('a')]);
+  assert.match(renderNav(base), /<a class="nav-item" href="#\/desk"><svg[^>]*>.*?<\/svg><span class="nav-label">Desk<\/span><\/a>/);
+  const on = R.nav(base, { screen: 'desk', id: null });
+  const h = renderNav(on);
+  assert.match(h, /<a class="nav-item current" aria-current="page" href="#\/desk">/);
+  assert.doesNotMatch(h, /class="nav-item current" aria-current="page" href="#\/messages"/, 'Messages is not current on the Desk');
+  assert.equal(count(h, /aria-current="page"/g), 1);
+  assert.equal(renderSide(on, NOW), '', 'no side panel beside the Desk');
+  assert.match(renderNav({ ...base, railCollapsed: true }), /title="Desk"/);
 });
 
 test('the Messages badge counts the tasks waiting on you: a worker whose gate came, a failed one; never a session that is no task', () => {

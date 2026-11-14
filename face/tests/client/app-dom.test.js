@@ -1,5 +1,7 @@
 // boot() against a fake window and a fake host: what the person sees after the list lands, opening, sending, answering.
 import { TASKS_POLL_MS } from '../../client/js/host/tasks.js';
+import { DESK_POLL_MS } from '../../client/js/host/desk-view.js';
+import { DESK_NEWS_POLL_MS } from '../../client/js/host/desk-news.js';
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -726,6 +728,41 @@ test("typing in the search box searches; a star watches and writes the face's ke
   assert.equal(f.win.location.hash, '#/markets/cn:600519');
   assert.deepEqual(store.get().route, { screen: 'markets', id: 'cn:600519' });
   store.timers.clear();
+});
+
+// the Desk page (desk-page plan 1 Task 3): the desk's status polls on Markets and on the Desk, the news on the Desk alone,
+// and a hidden tab stops both
+test('the Desk reads its news and the desk status; Markets keeps the status alone; a hidden tab stops both', async () => {
+  const f = fakeWindow({ hash: '#/desk', storage: memoryStorage() });
+  const h = host({ rows: [row('s1')] });
+  const timers = new HeldTimers(ms => ms === DESK_POLL_MS || ms === DESK_NEWS_POLL_MS);
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers, now: () => 1_000_000 });
+  await h.ready();
+  // a clock that stands still, so a screen shown again inside a poll re-arms it whole; counted against Markets, as the tasks'
+  // poll may share the news' period
+  const held = ms => timers.delays().filter(x => x === ms).length;
+  assert.deepEqual(store.get().route, { screen: 'desk', id: null });
+  assert.ok(h.reads.includes('/data/desk/news') && h.reads.includes('/data/desk/status'), 'both read on entering the Desk');
+  assert.equal(held(DESK_POLL_MS), 1, 'the status polls on the Desk');
+  const onDesk = held(DESK_NEWS_POLL_MS);
+  f.win.location.hash = '#/markets';
+  await settle();
+  assert.equal(held(DESK_POLL_MS), 1, 'and on Markets');
+  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 1, 'the news does not poll on Markets');
+  f.win.location.hash = '#/desk';
+  await settle();
+  assert.equal(held(DESK_POLL_MS), 1);
+  assert.equal(held(DESK_NEWS_POLL_MS), onDesk, 'back on the Desk the news polls again');
+  f.doc.hidden = true;
+  f.fire('doc', 'visibilitychange');
+  assert.equal(held(DESK_POLL_MS), 0, 'hidden: the status stops');
+  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 1, 'and the news');
+  f.doc.hidden = false;
+  f.fire('doc', 'visibilitychange');
+  f.win.location.hash = '#/messages';
+  await settle();
+  assert.equal(held(DESK_POLL_MS), 0, 'on Messages neither polls');
+  assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 1);
 });
 
 // the manual look (2026-10-20): the render keeps what an input holds, so Clear must empty the box itself

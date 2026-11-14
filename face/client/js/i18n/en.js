@@ -44,6 +44,7 @@ export const EN = Object.freeze({
   'nav.expand': 'Expand navigation',
   'nav.collapse': 'Collapse navigation',
   'nav.messages': 'Messages',
+  'nav.desk': 'Desk',
   'nav.markets': 'Markets',
   'nav.trade': 'Trade',
   'nav.discover': 'Discover',
@@ -1275,6 +1276,10 @@ export const EN = Object.freeze({
   'desk.requestFailed': 'request failed',
   'desk.notStatus': 'not a desk status',
   'desk.pauseFailed': 'Pause failed: {reason}',
+
+  // the Desk page (render/desk-page.js) and its news read (host/desk-news.js)
+  'desk.page.title': 'Desk',
+  'desk.page.notNews': 'not the desk news',
 
   // the Markets screen's view (host/market-view.js): its tabs and sorts, the quotes' states, China's lines, a row's words, an
   // A share's facts

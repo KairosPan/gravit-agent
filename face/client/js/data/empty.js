@@ -110,6 +110,9 @@ export function emptyState() {
     seat: { status: 'idle', data: null, at: null },
     // the desk's status (host/desk.js): /data/desk/status as last read, read while Markets shows; the sentence of the last failure
     desk: { status: 'idle', data: null, at: null, message: null },
+    // the Desk page (host/desk-news.js): /data/desk/news as last read, read while the Desk shows; the sentence of the last
+    // failure; the symbol filter, the rows opened by id, the watch rules unfolded
+    deskPage: { status: 'idle', data: null, at: null, message: null, filter: 'all', open: {}, rules: false },
     // the list's search (host/search.js): the box, the content read's phase, its items
     search: { query: '', contentPhase: 'idle', content: [], hasMore: false },
     // the open conversation's background jobs (host/jobs.js): the one watched, its rows, the job open in Details, the finished

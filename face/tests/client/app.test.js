@@ -40,6 +40,10 @@ test('parseHash and toHash round-trip; Messages and Markets route, every other s
   // Trade is a screen the face serves
   assert.deepEqual(routeOf('#/trade'), { screen: 'trade', id: null });
   assert.deepEqual(routeOf('#/trade/coin:BTC'), { screen: 'trade', id: 'coin:BTC' });
+  // the Desk (desk-page plan 1 Task 3): a screen of its own, with no id
+  assert.deepEqual(parseHash('#/desk'), { screen: 'desk', id: null });
+  assert.equal(toHash(parseHash('#/desk')), '#/desk');
+  assert.deepEqual(routeOf('#/desk'), { screen: 'desk', id: null });
   // a task, history (the list or one session) and a strategy page take everything after the screen, decoded, as a market does
   for (const h of ['#/task/session-1', '#/history', '#/history/session-1', '#/strategy/cn-market']) assert.equal(toHash(parseHash(h)), h);
   assert.deepEqual(routeOf('#/task/session-1'), { screen: 'task', id: 'session-1' });

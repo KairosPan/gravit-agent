@@ -26,6 +26,7 @@ import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
 import { startMarkets } from './host/markets.js';
 import { startDesk } from './host/desk.js';
+import { startDeskNews } from './host/desk-news.js';
 import { startAccount } from './host/account.js';
 import { startSeat } from './host/seat.js';
 import { startChannels } from './host/channels.js';
@@ -33,6 +34,7 @@ import { startTasks, followUpText } from './host/tasks.js';
 import { renderStrategyScreen } from './render/strategy.js';
 import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
+import { renderDeskScreen } from './render/desk-page.js';
 import { startModules } from './host/modules.js';
 import { renderModule } from './render/modules.js';
 import { startRunSheet } from './host/run-sheet.js';
@@ -173,9 +175,9 @@ export function makeStore(storage, now = Date.now()) {
   return createStore({ initial: initialState(storage, now), reducers, storage, key: PREFS_KEY, accept: () => false, persist: prefsOf });
 }
 
-// Messages (with a task's page, history and a strategy's page), Markets, Trade, Discover (with an item's page) and Account are
+// Messages (with a task's page, history and a strategy's page), the Desk, Markets, Trade, Discover (with an item's page) and Account are
 // served; every other screen the router knows folds to Messages
-const SCREENS = new Set(['messages', 'task', 'history', 'strategy', 'markets', 'trade', 'discover', 'plugin', 'module', 'account']);
+const SCREENS = new Set(['messages', 'task', 'history', 'strategy', 'desk', 'markets', 'trade', 'discover', 'plugin', 'module', 'account']);
 export const routeOf = hash => { const r = parseHash(hash); return SCREENS.has(r.screen) ? r : { screen: 'messages', id: null }; };
 // route by the address bar; a normalised route says which hash the bar should show instead. An old link lands where nav's
 // landing puts it (reducers/messages.js landingOf): a session on the conversation, its task or history, a channel on its strategy
@@ -473,8 +475,11 @@ export function boot(win, host = {}) {
   // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
   // followed on the stream its line is on; the stars in this browser's storage
   const markets = startMarkets({ store, storage, getJson, win, now, stream, marketStream, schedule, cancelTimer, owner, afterAction });
-  // the desk's status beside the markets (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab, and the level marks on the rows
+  // the desk's status beside the markets (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab, and the level marks on the rows;
+  // and on the Desk page (desk-page plan 1), beside its news
   const desk = startDesk({ store, getJson, postJson, schedule, cancelTimer, now });
+  // the Desk page's news: the day's alerts with their reasons, read while the Desk shows
+  const deskNews = startDeskNews({ store, getJson, schedule, cancelTimer, now });
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
@@ -495,8 +500,14 @@ export function boot(win, host = {}) {
   const mac = isMac(win);
   // a room member's trace, read without activating the member's session
   const traces = startTraces({ store, call, loadMemberTrace, now });
-  // the quotes, and the desk's status, run only while Markets is on screen in a visible tab; Trade's picks only while Trade is
-  const showMarkets = () => { const on = store.get().route.screen === 'markets' && !doc.hidden; markets.show(on); desk.show(on); };
+  // the quotes run only while Markets is on screen in a visible tab, the desk's status while Markets or the Desk is, the Desk's
+  // news while the Desk is; Trade's picks only while Trade is
+  const showMarkets = () => {
+    const screen = store.get().route.screen;
+    markets.show(screen === 'markets' && !doc.hidden);
+    desk.show((screen === 'markets' || screen === 'desk') && !doc.hidden);
+    deskNews.show(screen === 'desk' && !doc.hidden);
+  };
   // Embedded browsers may report hidden before their first visibility event. Opening Markets or choosing a source still
   // needs one answer; only the recurring polls depend on visibility.
   const readHiddenMarkets = () => { if (doc.hidden && store.get().route.screen === 'markets') markets.readOnce(); };
@@ -666,7 +677,7 @@ export function boot(win, host = {}) {
     const anchorAt = prepended ? root.querySelector('[data-anchor]')?.offsetTop ?? null : null;
     if (threadSig !== last.thread) { revealed.clear(); rail = freshRail(); }
 
-    const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
+    const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'desk' ? renderDeskScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'strategy' ? renderStrategyScreen(s, now(), { open: tasksOpen }) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'history' ? renderHistoryScreen(s, now(), { revealed, anchor: anchorSeq, rail })
@@ -1900,6 +1911,10 @@ export function boot(win, host = {}) {
     },
     // the Desk tab's one control: Pause (no Resume: a terminal resumes)
     deskPause: () => { void desk.pause(); },
+    // the Desk page's own choices: a symbol's filter (All is `all`), a row opened or folded, the watch rules unfolded
+    dkFilter: el => store.dispatch('deskFilter', { value: el.dataset.value }),
+    dkToggle: el => store.dispatch('deskToggle', { id: el.dataset.id }),
+    dkRules: () => store.dispatch('deskRules'),
     // the render keeps what an input holds, so Clear empties the box before the query; a search still waiting goes with it
     mkClear: () => {
       const box = doc.getElementById('mq');
