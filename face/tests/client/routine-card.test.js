@@ -215,3 +215,43 @@ test('ZH: the card reads 例行任务', () => {
     assert.match(renderMessage(card(), conv(), stateWith(read(proposal({ state: 'confirmed', current: true, routine: 'r-idea', next: NEXT_TODAY })))), /值守台/);
   });
 });
+
+// fix round 1: one answer in flight per card, its keys hidden meanwhile; only the bare tool name lifts; a proposal whose name
+// or instruction is not the call's is not this card's
+test('two confirms, or ✓ then ✗, before the first answer settles post once; the keys are hidden until the read after it settles', async () => {
+  const r = rig();
+  let release;
+  r.answers.post = () => new Promise(res => { release = () => res({ ok: true }); });
+  const first = r.dr.confirm(P);
+  void r.dr.confirm(P);
+  void r.dr.dismiss(P);
+  assert.deepEqual(r.posted, [['/data/desk/routines/confirm', { proposal: P }]], 'one post for one proposal');
+  assert.deepEqual(r.store.get().deskPage.pBusy, { [P]: true });
+  const busy = renderMessage(card(), conv(), { ...r.store.get(), deskPage: { ...r.store.get().deskPage, routines: { status: 'ready', data: read(proposal()), at: Date.parse(NOW_ISO) } } });
+  assert.doesNotMatch(busy, /data-action="routine(Yes|No)"/, 'no keys while the answer is in flight');
+  assert.equal(routineCardOf(card(), read(proposal()), { now: NOW_ISO, busy: true }).keys, false);
+  release();
+  await first;
+  await settle();
+  assert.deepEqual(r.store.get().deskPage.pBusy, {});
+  assert.deepEqual(r.reads, ['/data/desk/routines'], 'read again before the keys return');
+  r.answers.post = { ok: true };
+  await r.dr.dismiss(P);
+  assert.equal(r.posted.length, 2, 'settled: a new answer posts');
+});
+
+test('only the bare routine_propose lifts a card: a foreign server tool of that name lifts nothing', () => {
+  assert.equal(routineLift('mcp__x__routine_propose', ARGS, JSON.stringify(RESULT), false, 'c8'), null);
+  const calls = new Map();
+  rememberCall(calls, callFrame('c8', 'mcp__x__routine_propose', ARGS));
+  assert.deepEqual(toMessages(mapFrame(resultFrame('c8', JSON.stringify(RESULT))), calls, 1000).map(m => m.kind), ['tool']);
+});
+
+test("a proposal whose name or instruction (trimmed) is not the call's draws the card Closed with no keys", () => {
+  const of = p => routineCardOf(card(), read(p), { now: NOW_ISO });
+  assert.equal(of(proposal({ name: '  Idea <screening> ', instruction: `${ARGS.instruction}\n` })).chip, 'new', 'trimmed alike');
+  for (const p of [proposal({ name: 'Other' }), proposal({ instruction: 'Buy everything.' }), proposal({ state: 'confirmed', current: true, instruction: 'x', next: NEXT_TODAY })]) {
+    const c = of(p);
+    assert.deepEqual([c.chip, c.keys, c.line], ['closed', false, undefined]);
+  }
+});

@@ -168,7 +168,8 @@ export function presentLift(name, args, text, isError, callId) {
 // line from the result - so a card always shows what that call proposed, a later change notwithstanding; its state is the
 // routines read's (host/desk-page-view.js routineCardOf). A refusal (a tool error the model can fix) lifts nothing.
 export const PROPOSE_TOOL = 'routine_propose';
-const isProposeTool = name => name === PROPOSE_TOOL || (typeof name === 'string' && name.endsWith(`__${PROPOSE_TOOL}`));
+// the face registers it under its bare name on the conversation's own layer: a foreign server's tool of that name is not it
+const isProposeTool = name => name === PROPOSE_TOOL;
 export function routineLift(name, args, text, isError, callId) {
   if (!isProposeTool(name) || isError) return null;
   const v = parseArgs(text);

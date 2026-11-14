@@ -98,7 +98,8 @@ function routineLine(line) {
 }
 function routineCard(m, state) {
   const routines = state?.deskPage?.routines;
-  const c = routineCardOf(m, routines?.data, { refused: state?.deskPage?.pSaid?.[m.data?.proposal] ?? null, now: routines?.at ?? undefined });
+  const id = m.data?.proposal;
+  const c = routineCardOf(m, routines?.data, { refused: state?.deskPage?.pSaid?.[id] ?? null, busy: state?.deskPage?.pBusy?.[id] === true, now: routines?.at ?? undefined });
   const line = routineLine(c.line);
   const keyOf = (type, label, action) => key(type, label, { title: label, 'data-action': action, 'data-proposal': c.proposal });
   const ask = c.keys ? `<div class="rt-ask"><span class="rt-q">${th('thread.routine.ask')}</span><div class="keys right">${keyOf('no', t('thread.routine.dismiss'), 'routineNo')}${keyOf('yes', t('thread.routine.add'), 'routineYes')}</div></div>` : '';

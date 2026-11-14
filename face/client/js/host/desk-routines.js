@@ -87,16 +87,23 @@ export function startDeskRoutines({ store, getJson, postJson, schedule, cancelTi
       });
   }
 
-  // a routine card's answer on `proposal`: its line cleared, the post, then the routines read again; a refusal is kept by the
-  // proposal's id - `limit` when the face holds twenty routines already, `failed` for any other
+  // a routine card's answer on `proposal`, one at a time (a second click, or ✗ after ✓, while one is in flight does nothing):
+  // its keys hidden and its line cleared, the post, then the routines read again, the keys back only once that read settles;
+  // a refusal is kept by the proposal's id - `limit` when the face holds twenty routines already, `failed` for any other
+  const answering = new Set();
   function respond(proposal, path) {
-    if (closed || typeof proposal !== 'string' || proposal === '') return Promise.resolve();
+    if (closed || typeof proposal !== 'string' || proposal === '' || answering.has(proposal)) return Promise.resolve();
+    answering.add(proposal);
+    store.dispatch('deskProposalBusy', { proposal, busy: true });
     store.dispatch('deskProposalSaid', { proposal, said: null });
     return attempt(() => postJson(path, { proposal })).then(() => (closed ? undefined : reread()), err => {
       if (closed) return undefined;
       const code = err?.body?.error ?? err?.code;
       store.dispatch('deskProposalSaid', { proposal, said: code === 'limit' ? 'limit' : 'failed' });
       return undefined;
+    }).finally(() => {
+      answering.delete(proposal);
+      if (!closed) store.dispatch('deskProposalBusy', { proposal, busy: false });
     });
   }
 
