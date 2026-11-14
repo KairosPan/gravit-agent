@@ -9,9 +9,9 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { appendEvent, appendRecord, clearOff, deskDir, readRecords, writeOff } from "../src/desk.ts";
+import { appendEvent, appendRecord, clearOff, deskDir, readRecords, writeOff, type DeskEvent } from "../src/desk.ts";
 import type { MarketCalendar, MarketSession } from "../src/market-clock.ts";
-import { carryToday, HISTORY_MAX, installRoutineClock, runNote, type RoutineClock } from "../src/routine-clock.ts";
+import { carryToday, dateOfKey, HISTORY_MAX, installRoutineClock, pruneBefore, runNote, type RoutineClock } from "../src/routine-clock.ts";
 import { isRunRecord, type RoutineRunRecord, type RunItem } from "../src/routine-run.ts";
 import type { RoutineSchedule } from "../src/routine-schedule.ts";
 import { routineOps, ROUTINES_FILE, ROUTINES_LEDGER } from "../src/routines.ts";
@@ -161,6 +161,20 @@ test("runNote gives codes: an ended run its headline, other ends their outcome, 
 
 /* ---------- the key and the grace ---------- */
 
+test("dateOfKey reads a slot key's date and a test key's New York day; the day's pruning drops yesterday's keys", () => {
+  assert.equal(dateOfKey("r-00000001:2026-11-13:08:30"), "2026-11-13");
+  assert.equal(dateOfKey("r-00000001:test:2026-11-14T03:00:00.000Z"), "2026-11-13", "22:00 ET on the 13th");
+  assert.equal(dateOfKey("r-00000001:skipped:x"), undefined);
+  const settled = new Map<string, string | undefined>([
+    ["r-00000001:2026-11-13:09:00", "2026-11-13"],
+    ["r-00000001:2026-11-14:09:00", "2026-11-14"],
+  ]);
+  const refused = new Set(["r-00000001:2026-11-13:09:30", "r-00000001:test:2026-11-13T15:00:00.000Z", "r-00000001:2026-11-14:09:30"]);
+  pruneBefore(settled, refused, "2026-11-14");
+  assert.deepEqual([...settled.keys()], ["r-00000001:2026-11-14:09:00"]);
+  assert.deepEqual([...refused], ["r-00000001:2026-11-14:09:30"]);
+});
+
 test("a slot fires once inside its grace, never twice across two ticks or two clock rows on one home", async () => {
   const fx = await fixture();
   await writeStore(fx.home, [routine(1, AT_0900)]);
@@ -226,6 +240,22 @@ test("a slot before the routine was confirmed is settled, never run nor missed",
   await r.rc.dispose();
 });
 
+test("a routine switched on at 11:20 records nothing for the slots it was off across, and runs 11:30", async () => {
+  const fx = await fixture();
+  const MORNING: RoutineSchedule = { days: "daily", every: { minutes: 30, from: "09:00", to: "12:00" } };
+  await writeStore(fx.home, [routine(1, MORNING, { enabled: false })]);
+  const r = rig(fx, "2026-11-13T13:00:00Z");
+  for (const t of ["13:30", "14:10", "15:10", "16:10"]) await at(r, `2026-11-13T${t}:00Z`); // ticking all morning, off
+  r.clock.set("2026-11-13T16:20:00Z"); // 11:20 ET
+  await routineOps({ home: fx.home, now: () => r.clock.now() }).setEnabled("r-00000001", true);
+  await at(r, "2026-11-13T16:30:30Z");
+  assert.deepEqual(await ofKind(fx.home, "missed"), [], "09:00 to 11:00 passed while it was off: nothing is recorded");
+  assert.deepEqual(r.runs.map((x) => x.slot), ["11:30"]);
+  await at(r, "2026-11-13T16:50:00Z");
+  assert.deepEqual(await ofKind(fx.home, "missed"), []);
+  await r.rc.dispose();
+});
+
 /* ---------- the queue ---------- */
 
 test("two routines on one minute run one after the other", async () => {
@@ -280,6 +310,104 @@ test("Review Focus 4: a routine switched off while its slot is queued never runs
   await r.rc.dispose();
 });
 
+test("a routine deleted, and one changed to another version, while queued do not run, and nothing is recorded for them", async () => {
+  const fx = await fixture();
+  await writeStore(fx.home, [routine(1, AT_0900), routine(2, AT_0900), routine(3, AT_0900)]);
+  const r = rig(fx, "2026-11-13T13:00:00Z", { hold: true });
+  r.clock.set("2026-11-13T14:01:00Z");
+  await r.rc.tick();
+  await waitFor("the first run", () => r.runs.length === 1);
+  const ops = routineOps({ home: fx.home, now: () => r.clock.now() });
+  await ops.remove("r-00000002");
+  const change = await ops.propose({ name: "Routine 3, wider", schedule: AT_0900, instruction: "Do more.", replaces: "r-00000003", origin: { kind: "web" } });
+  await ops.confirm(change.id);
+  r.release("r-00000001:2026-11-13:09:00");
+  await idle(r.rc);
+  assert.deepEqual(r.runs.map((x) => x.key), ["r-00000001:2026-11-13:09:00"]);
+  assert.deepEqual((await records(fx.home)).filter((x) => x.routine !== "r-00000001"), []);
+  await r.rc.dispose();
+});
+
+test("a slot another face already recorded missed is not started", async () => {
+  const fx = await fixture();
+  await writeStore(fx.home, [routine(1, AT_0900)]);
+  const r = rig(fx, "2026-11-13T13:00:00Z");
+  await at(r, "2026-11-13T13:50:00Z"); // the ledger read, before the other face's line
+  const key = "r-00000001:2026-11-13:09:00";
+  await appendRecord(fx.home, ROUTINES_LEDGER, {
+    t: "2026-11-13T14:00:30.000Z", kind: "missed", key, routine: "r-00000001", date: "2026-11-13", slot: "09:00", why: "busy", foundAt: "2026-11-13T14:00:30.000Z",
+  } satisfies RoutineRunRecord);
+  await at(r, "2026-11-13T14:01:00Z");
+  assert.equal(r.runs.length, 0);
+  assert.deepEqual(await ofKind(fx.home, "started"), []);
+  await r.rc.dispose();
+});
+
+test("status shows a started with no end that is not the run in hand as failed, interrupted; the one in hand as running", async () => {
+  const fx = await fixture();
+  await writeStore(fx.home, [routine(1, { days: "daily", times: ["08:00", "09:00"] })]);
+  const r = rig(fx, "2026-11-13T12:00:00Z", { hold: true });
+  await at(r, "2026-11-13T12:50:00Z"); // the ledger read, before the other face's line
+  await appendRecord(fx.home, ROUTINES_LEDGER, {
+    t: "2026-11-13T13:00:05.000Z", kind: "started", key: "r-00000001:2026-11-13:08:00", routine: "r-00000001", name: "Routine 1", sha256: "0".repeat(64),
+    date: "2026-11-13", slot: "08:00", at: "2026-11-13T13:00:00.000Z",
+  } satisfies RoutineRunRecord);
+  r.clock.set("2026-11-13T14:01:00Z");
+  await r.rc.tick();
+  await waitFor("the run", () => r.runs.length === 1);
+  const [view] = (await r.rc.status()).routines;
+  assert.deepEqual(view!.runs.map((v) => [v.key, v.status, v.note]), [
+    ["r-00000001:2026-11-13:09:00", "running", ""],
+    ["r-00000001:2026-11-13:08:00", "failed", "interrupted"],
+  ]);
+  r.release("r-00000001:2026-11-13:09:00");
+  await idle(r.rc);
+  await r.rc.dispose();
+});
+
+test("a dispose during a held run aborts it and settles", async () => {
+  const fx = await fixture();
+  await writeStore(fx.home, [routine(1, AT_0900)]);
+  const r = rig(fx, "2026-11-13T13:00:00Z", { hold: true });
+  r.clock.set("2026-11-13T14:01:00Z");
+  await r.rc.tick();
+  await waitFor("the run", () => r.runs.length === 1);
+  const end = await Promise.race([
+    r.rc.dispose().then(() => "settled"),
+    new Promise((done) => { setTimeout(() => { done("hung"); }, 3_000); }),
+  ]);
+  assert.equal(end, "settled");
+  assert.deepEqual(await ofKind(fx.home, "finished"), [], "the aborted run wrote no end of its own");
+});
+
+test("a tick that throws is said once and the next tick is armed regardless", async () => {
+  const fx = await fixture();
+  await writeStore(fx.home, [routine(1, AT_0900), routine(2, { days: "trading", times: ["09:00"] })]);
+  const calendar = fakeCalendar(DAYS);
+  let thrown = false;
+  const throwing: MarketCalendar = {
+    clock: calendar.clock,
+    peek: () => calendar.peek(),
+    window: () => calendar.window(),
+    today: async (n) => {
+      if (!thrown) {
+        thrown = true;
+        throw new Error("the calendar fell over");
+      }
+      return calendar.today(n);
+    },
+  };
+  const r = rig(fx, "2026-11-13T14:01:00Z", { calendar: throwing });
+  await r.clock.advance(0); // the boot tick, which throws
+  assert.equal(r.runs.length, 0);
+  assert.deepEqual(r.lines.filter((l) => l.includes("routines tick")), ["gravit-face: desk: routines tick: the calendar fell over"]);
+  assert.equal(r.clock.pending(), 1, "the next tick is armed");
+  await r.clock.advance(DAY_MS);
+  await idle(r.rc);
+  assert.deepEqual(r.runs.map((x) => x.key), ["r-00000001:2026-11-14:09:00"]);
+  await r.rc.dispose();
+});
+
 /* ---------- the pause and the cap ---------- */
 
 test("a paused desk writes one skipped for three slots, runs nothing, and misses none", async () => {
@@ -301,6 +429,53 @@ test("a paused desk writes one skipped for three slots, runs nothing, and misses
   await writeStore(fx.home, [routine(1, { days: "daily", times: ["10:35"] })]);
   await at(r, "2026-11-13T15:36:00Z");
   assert.equal((await ofKind(fx.home, "skipped")).length, 2);
+  await r.rc.dispose();
+});
+
+test("the spend is right after appends, a half-written last line, a rotation and New York's midnight", async () => {
+  const fx = await fixture();
+  await writeStore(fx.home, [], 1_000_000);
+  const turn = (t: string, n: number, source = "routine"): DeskEvent =>
+    ({ t, kind: "desk-turn", sessionId: "s", source, turn: 1, outcome: "ended", wallMs: 1, usage: { uncachedInputTokens: n, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, routes: [] } });
+  const r = rig(fx, "2026-11-13T20:00:00Z");
+  const used = async (): Promise<number> => (await r.rc.status()).cap.used;
+  assert.equal(await used(), 0, "no events file");
+  await appendEvent(fx.home, turn("2026-11-13T14:00:00.000Z", 100));
+  assert.equal(await used(), 100);
+  await appendEvent(fx.home, turn("2026-11-13T15:00:00.000Z", 50));
+  await appendEvent(fx.home, turn("2026-11-13T15:01:00.000Z", 1_000, "alert"));
+  assert.equal(await used(), 150);
+  /* a line half written: left for the next read, counted once it is whole */
+  const path = join(deskDir(fx.home), "events.jsonl");
+  const whole = JSON.stringify(turn("2026-11-13T16:00:00.000Z", 7));
+  await writeFile(path, whole.slice(0, 40), { flag: "a" });
+  assert.equal(await used(), 150);
+  await writeFile(path, `${whole.slice(40)}\n`, { flag: "a" });
+  assert.equal(await used(), 157);
+  /* a rotation: the new file holds the day's spend from then on */
+  await appendEvent(fx.home, turn("2026-11-13T17:00:00.000Z", 20), { rotateBytes: 1 });
+  assert.equal(await used(), 20);
+  await appendEvent(fx.home, turn("2026-11-13T18:00:00.000Z", 5));
+  assert.equal(await used(), 25);
+  /* New York's midnight (05:00Z on EST): a new day counts from nothing */
+  r.clock.set("2026-11-14T05:00:01Z");
+  assert.equal(await used(), 0);
+  await appendEvent(fx.home, turn("2026-11-14T05:00:30.000Z", 30));
+  assert.equal(await used(), 30);
+  await r.rc.dispose();
+});
+
+test("the spend reads only the bytes appended since its last read", async () => {
+  const fx = await fixture();
+  await writeStore(fx.home, [], 1_000_000);
+  const line = (n: number) => JSON.stringify({ t: "2026-11-13T14:00:00.000Z", kind: "desk-turn", sessionId: "s", source: "routine", turn: 1, outcome: "ended", wallMs: 1, usage: { uncachedInputTokens: n, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, routes: [] } });
+  const path = join(deskDir(fx.home), "events.jsonl");
+  await writeFile(path, `${line(100)}\n`);
+  const r = rig(fx, "2026-11-13T20:00:00Z");
+  assert.equal((await r.rc.status()).cap.used, 100);
+  /* the first line rewritten in place to the same length, then a line appended: the first is not read again */
+  await writeFile(path, `${line(900)}\n${line(1)}\n`);
+  assert.equal((await r.rc.status()).cap.used, 101);
   await r.rc.dispose();
 });
 

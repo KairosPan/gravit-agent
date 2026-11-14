@@ -272,6 +272,47 @@ test("setEnabled and remove, each with its line", async () => {
   ]);
 });
 
+test("switching a routine on stamps enabledAt; off leaves it; a replacement keeps it; it is not in the version", async () => {
+  const home = freshHome();
+  const c = clock();
+  const ops = routineOps({ home, now: c.now });
+  const p = await ops.propose(input());
+  const { routine } = await ops.confirm(p.id);
+  assert.equal(routine.enabledAt, undefined, "a confirmation stamps none: confirmedAt says it");
+  c.advance(60_000);
+  await ops.setEnabled(routine.id, false);
+  assert.equal((await store(home)).routines[0]?.enabledAt, undefined);
+  c.advance(60_000);
+  const on = await ops.setEnabled(routine.id, true);
+  const stamped = new Date(T0 + 120_000).toISOString();
+  assert.equal(on.enabledAt, stamped);
+  assert.equal((await store(home)).routines[0]?.enabledAt, stamped);
+  assert.equal(on.sha256, routine.sha256, "the switch is not part of the version");
+  c.advance(60_000);
+  await ops.setEnabled(routine.id, false);
+  assert.equal((await store(home)).routines[0]?.enabledAt, stamped, "switching off leaves it as it is");
+  const edit = await ops.propose(input({ name: "Movers, wider", replaces: routine.id }));
+  const { routine: replaced } = await ops.confirm(edit.id);
+  assert.equal(replaced.enabledAt, stamped, "a replacement keeps it");
+});
+
+test("a hand-written store without enabledAt loads; one whose enabledAt is not a time loads unreadable", async () => {
+  const home = freshHome();
+  await mkdir(deskDir(home), { recursive: true });
+  const routine = {
+    id: "r-00000001", name: "N", schedule: { days: "daily", times: ["09:00"] }, instruction: "I", sha256: "0".repeat(64),
+    proposal: "p-00000001", origin: WEB, confirmedAt: "2026-11-06T12:00:00.000Z", enabled: true,
+  };
+  const write = (r: object) => writeFile(join(deskDir(home), ROUTINES_FILE), JSON.stringify({ version: 1, budget: { dailyTokens: 1 }, routines: [r], proposals: [] }));
+  await write(routine);
+  assert.equal((await store(home)).routines[0]?.enabledAt, undefined);
+  await write({ ...routine, enabledAt: "2026-11-13T16:20:00.000Z" });
+  assert.equal((await store(home)).routines[0]?.enabledAt, "2026-11-13T16:20:00.000Z");
+  await write({ ...routine, enabledAt: "soon" });
+  const load = await loadRoutines(home);
+  assert.equal(load.ok, false);
+});
+
 test("a proposal past its 7 days is refused as state though no sweep has run, and stays pending", async () => {
   const home = freshHome();
   const c = clock();

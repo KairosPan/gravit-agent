@@ -14,7 +14,8 @@
  * - New York's date, and - when an enabled routine runs on trading days - whether the US calendar holds a session
  *   that day; a calendar that cannot answer makes no trading-days slot due that day, and says so in one line;
  * - each enabled routine's slots today ({@link slotsOn}): one whose key holds a `started` or a `missed` is settled;
- *   before its minute, it waits; one before the routine's `confirmedAt` is settled, never run; within
+ *   before its minute, it waits; one before the later of the routine's `confirmedAt` and its `enabledAt` (src/routines.ts:
+ *   a slot passed while it was off) is passed over with no record, never run; within
  *   {@link SLOT_GRACE_MS} of its minute it is queued unless it is queued or running already; past that, one queued,
  *   running or refused (the pause, the cap, a ledger that would not take its `started`) is settled, any other one
  *   `missed` - `asleep` when the gap since the last tick is over src/desk.ts `ASLEEP_THRESHOLD_MS` and began at or
@@ -33,7 +34,8 @@
  * spent is one `skipped`, `cap`, a routine a New York day; else the `started`, then the run.
  *
  * THE CAP is the store's `budget.dailyTokens` against the four token buckets of the day's `desk-turn` events whose
- * `source` is `routine` - the routines' own spend, from 00:00 New York.
+ * `source` is `routine` - the routines' own spend, from 00:00 New York; only the day's sum is kept, the file's appended
+ * bytes alone read again ({@link spendReader}).
  *
  * FAILURES never reach the face: a tick, a run, a ledger read - each is caught, one
  * `gravit-face: desk: routines <what>: <reason>` line, and the next tick is armed regardless.
@@ -42,10 +44,10 @@
  * loads it lazily, inside `installDesk`, and nothing light imports it.
  * @module
  */
-import { stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  appendRecord, appendRecordOnce, ASLEEP_THRESHOLD_MS, deskDir, EVENTS_FILE, readEvents, readOffState, readRecords, type DeskEvent,
+  appendRecord, appendRecordOnce, ASLEEP_THRESHOLD_MS, deskDir, EVENTS_FILE, readOffState, readRecords,
 } from "./desk.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import type { MarketCalendar } from "./market-clock.ts";
@@ -173,11 +175,21 @@ export function runNote(record: RoutineRunRecord): string {
   }
 }
 
-/** The date a slot's or a test's key names: `r-1:2026-11-13:08:30` is the 13th; a test key names none. */
-const dateOfKey = (key: string): string | undefined => {
-  const parts = key.split(":");
-  return parts.length === 3 && /^\d{4}-\d{2}-\d{2}$/.test(parts[1]!) ? parts[1] : undefined;
+/** The New York date a slot's or a test's key names: `r-1:2026-11-13:08:30` is the 13th, as is
+ * `r-1:test:2026-11-14T03:00:00.000Z` (22:00 ET); any other key names none. */
+export const dateOfKey = (key: string): string | undefined => {
+  const slot = /^[^:]+:(\d{4}-\d{2}-\d{2}):\d{2}:\d{2}$/.exec(key);
+  if (slot !== null) return slot[1];
+  const test = /^[^:]+:test:(.+)$/.exec(key);
+  const ms = test === null ? Number.NaN : Date.parse(test[1]!);
+  return Number.isNaN(ms) ? undefined : etDate(new Date(ms));
 };
+
+/** The day's pruning: the settled keys and the refused keys of days before `today`. */
+export function pruneBefore(settled: Map<string, string | undefined>, refused: Set<string>, today: string): void {
+  for (const [key, date] of settled) if (date !== undefined && date < today) settled.delete(key);
+  for (const key of refused) if ((dateOfKey(key) ?? today) < today) refused.delete(key);
+}
 
 /** A ledger line read back, or undefined for any line that is not a run record. */
 function runRecordOf(line: string): RoutineRunRecord | undefined {
@@ -235,17 +247,78 @@ function cachedFile<T>(path: string, read: () => Promise<T>, empty: T): () => Pr
   };
 }
 
-/** The routines' own tokens on the New York day of `now`: the four buckets of every `desk-turn` of source `routine`. */
-function routineSpend(events: readonly DeskEvent[], now: number): number {
-  const since = iso(etDayStart(now));
-  const count = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
-  let used = 0;
-  for (const e of events) {
-    if (e.kind !== "desk-turn" || e.source !== "routine" || e.t < since) continue;
-    const u = e.usage as Record<string, unknown> | undefined;
-    used += count(u?.uncachedInputTokens) + count(u?.outputTokens) + count(u?.cacheReadTokens) + count(u?.cacheWriteTokens);
+/** How much of the events file the spend reads at once. */
+const SPEND_CHUNK_BYTES = 1 << 20;
+
+/** The routines' own tokens in one `events.jsonl` line: the four buckets of a `desk-turn` of source `routine` stamped
+ * at or after `since` (ISO); 0 for any other line, a torn one included. */
+function lineSpend(line: string, since: string): number {
+  if (line.trim() === "") return 0;
+  let e: unknown;
+  try {
+    e = JSON.parse(line);
+  } catch {
+    return 0;
   }
-  return used;
+  if (typeof e !== "object" || e === null) return 0;
+  const { kind, source, t, usage } = e as Record<string, unknown>;
+  if (kind !== "desk-turn" || source !== "routine" || typeof t !== "string" || t < since) return 0;
+  const u = (typeof usage === "object" && usage !== null ? usage : {}) as Record<string, unknown>;
+  const count = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+  return count(u.uncachedInputTokens) + count(u.outputTokens) + count(u.cacheReadTokens) + count(u.cacheWriteTokens);
+}
+
+/**
+ * The routines' spend on the New York day of `now`, read from `path` (src/desk.ts {@link EVENTS_FILE}), which other
+ * modules append to and which rotates: only the day's sum is kept, never the events. The file is read again only when
+ * its size, mtime or inode moved, and then - when it only grew, on the same day - from the end of the last whole line
+ * read; a file that shrank or is another file (a rotation) or a new New York day is read from its start. A half-written
+ * last line is left for the next read. An absent file is no spend; any other failure rejects.
+ */
+function spendReader(path: string): (now: number) => Promise<number> {
+  let kept: { nyDay: string; size: number; mtimeMs: number; ino: number; offset: number; used: number } | undefined;
+  return async (now) => {
+    let st: { size: number; mtimeMs: number; ino: number };
+    try {
+      st = await stat(path);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        kept = undefined;
+        return 0;
+      }
+      throw err;
+    }
+    const nyDay = etDate(new Date(now));
+    if (kept !== undefined && kept.nyDay === nyDay && kept.size === st.size && kept.mtimeMs === st.mtimeMs && kept.ino === st.ino) return kept.used;
+    const grew = kept !== undefined && kept.nyDay === nyDay && kept.ino === st.ino && st.size > kept.size;
+    let offset = grew ? kept!.offset : 0;
+    let used = grew ? kept!.used : 0;
+    const since = iso(etDayStart(now));
+    const file = await open(path, "r");
+    try {
+      /* the text in hand starts at `offset` in the file; the bytes after its last newline wait for the next chunk */
+      let pending = Buffer.alloc(0);
+      for (let at = offset; at < st.size;) {
+        const chunk = Buffer.alloc(Math.min(SPEND_CHUNK_BYTES, st.size - at));
+        const { bytesRead } = await file.read(chunk, 0, chunk.length, at);
+        if (bytesRead === 0) break;
+        at += bytesRead;
+        const text = Buffer.concat([pending, chunk.subarray(0, bytesRead)]);
+        const end = text.lastIndexOf(0x0a);
+        if (end < 0) {
+          pending = text;
+          continue;
+        }
+        for (const line of text.subarray(0, end).toString("utf8").split("\n")) used += lineSpend(line, since);
+        offset += end + 1;
+        pending = text.subarray(end + 1);
+      }
+    } finally {
+      await file.close();
+    }
+    kept = { nyDay, size: st.size, mtimeMs: st.mtimeMs, ino: st.ino, offset, used };
+    return used;
+  };
 }
 
 /**
@@ -262,7 +335,7 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
   const ledgerOpts = { log, carry: (rotated: string) => carryToday(rotated, etDate(new Date(clock.now()))) };
 
   const readLedgerCached = cachedFile(join(deskDir(home), ROUTINES_LEDGER), async () => (await readRecords(home, ROUTINES_LEDGER, isRunRecord)).records, [] as RoutineRunRecord[]);
-  const readEventsCached = cachedFile(join(deskDir(home), EVENTS_FILE), async () => (await readEvents(home)).events, [] as DeskEvent[]);
+  const readSpend = spendReader(join(deskDir(home), EVENTS_FILE));
 
   /** One line per distinct failure of `what` until it recovers. */
   const failing = new Map<string, string>();
@@ -348,7 +421,7 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
   const capOf = async (dailyTokens: number, now: number): Promise<{ dailyTokens: number; used: number; spent: boolean }> => {
     let used = 0;
     try {
-      used = routineSpend(await readEventsCached(), now);
+      used = await readSpend(now);
     } catch (err) {
       fail("budget", `the desk's events cannot be read (${(err as NodeJS.ErrnoException).code ?? errText(err)}); the cap counts nothing`);
     }
@@ -376,8 +449,7 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
     if (!(await paused())) pausedNoted.clear();
 
     const today = etDate(new Date(now));
-    for (const [key, date] of settled) if (date !== undefined && date < today) settled.delete(key);
-    for (const key of refused) if ((dateOfKey(key) ?? today) < today) refused.delete(key);
+    pruneBefore(settled, refused, today);
 
     const enabled = load.store.routines.filter((r) => r.enabled);
     let trading = false;
@@ -392,10 +464,11 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
     }
 
     for (const routine of enabled) {
-      const confirmedAt = Date.parse(routine.confirmedAt);
+      /* a slot before the routine was confirmed, or before it was last switched on, passed while it could not run */
+      const from = Math.max(Date.parse(routine.confirmedAt), routine.enabledAt === undefined ? -Infinity : Date.parse(routine.enabledAt));
       for (const { slot, at } of slotsOn(routine.schedule, today, trading)) {
         const key = `${routine.id}:${today}:${slot}`;
-        if (settled.has(key) || now < at || at < confirmedAt) continue;
+        if (settled.has(key) || now < at || at < from) continue;
         if (now - at <= SLOT_GRACE_MS) {
           if (!pending(key)) queue.push({ key, routine, date: today, slot, at });
         } else if (!pending(key) && !refused.has(key)) {
@@ -475,15 +548,16 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
       t: iso(clock.now()), kind: "started", key: item.key, routine: routine.id, name: routine.name, sha256: routine.sha256,
       date: item.date, slot: item.slot, at: iso(item.at), ...(item.test === true ? { test: true as const } : {}),
     };
-    const outcome = await appendRecordOnce(home, ROUTINES_LEDGER, record, keyed(["started"], item.key), ledgerOpts);
+    /* a key another face started or recorded missed is settled: this one does not start it */
+    const outcome = await appendRecordOnce(home, ROUTINES_LEDGER, record, keyed(["started", "missed"], item.key), ledgerOpts);
     if (outcome === "failed") {
       refused.add(item.key);
       fail("ledger", `the started record of ${item.key} could not be written; it does not run`);
       return;
     }
-    settle(item.key);
+    if (item.test !== true) settle(item.key); // a test's key is never a slot the tick walks
     if (outcome === "duplicate") {
-      log(`${BIN}: desk: another face on this home started routine run ${item.key}; this one does not run it`);
+      log(`${BIN}: desk: another face on this home started or missed routine run ${item.key}; this one does not run it`);
       return;
     }
     const abort = new AbortController();
@@ -504,7 +578,7 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
         try {
           await fire(item);
         } catch (err) {
-          fail(`run ${item.key}`, errText(err));
+          fail("run", `${item.key}: ${errText(err)}`); // one label: the map never grows a key a run
         } finally {
           inHand = undefined;
         }
@@ -578,6 +652,13 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
           break;
       }
     });
+    /* a started with no end that is not the run in hand was cut off: the boot's ledger read records it so */
+    for (const view of byKey.values()) {
+      if (view.status === "running" && view.key !== inHand?.key) {
+        view.status = "failed";
+        view.note = "interrupted";
+      }
+    }
     const out = new Map<string, RunView[]>();
     for (const [routine, list] of byRoutine) {
       list.sort((a, b) => (a.view.at < b.view.at ? 1 : a.view.at > b.view.at ? -1 : b.order - a.order));

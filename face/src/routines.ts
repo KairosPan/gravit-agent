@@ -40,7 +40,9 @@ export const DAILY_TOKENS_DEFAULT = 10_000_000;
 /** Where a proposal was asked for: the face's page, or a phone network. */
 export type Origin = { kind: "web" } | { kind: "phone"; network: string };
 
-/** A confirmed routine. `sha256` is its version's {@link versionSha}; `proposal` the proposal that set that version. */
+/** A confirmed routine. `sha256` is its version's {@link versionSha}; `proposal` the proposal that set that version;
+ * `enabledAt` when it was last switched on (absent until it is, and left as it is by a switch off or a replacement) -
+ * the clock row never records a slot before it, nor one before `confirmedAt`. Neither is part of the version. */
 export interface Routine {
   id: string;
   name: string;
@@ -52,6 +54,7 @@ export interface Routine {
   origin: Origin;
   confirmedAt: string;
   enabled: boolean;
+  enabledAt?: string;
 }
 
 /** A routine waiting for the operator's confirmation, or settled one way or another. `replaces` names the routine
@@ -99,7 +102,7 @@ export interface RoutineOps {
   confirm(proposal: string): Promise<{ routine: Routine; proposal: Proposal }>;
   /** A pending proposal dismissed; a dismissed one answers itself. */
   dismiss(proposal: string): Promise<Proposal>;
-  /** A routine switched on or off. */
+  /** A routine switched on (stamping its `enabledAt`) or off. */
   setEnabled(id: string, enabled: boolean): Promise<Routine>;
   /** A routine deleted. */
   remove(id: string): Promise<void>;
@@ -191,7 +194,11 @@ function routineOf(v: unknown): Routine | undefined {
   const version = versionOf(v);
   if (version === undefined || typeof v.proposal !== "string" || !PROPOSAL_ID.test(v.proposal)) return undefined;
   if (!isIso(v.confirmedAt) || typeof v.enabled !== "boolean") return undefined;
-  return { id: v.id, ...version, proposal: v.proposal, confirmedAt: v.confirmedAt, enabled: v.enabled };
+  if (v.enabledAt !== undefined && !isIso(v.enabledAt)) return undefined;
+  return {
+    id: v.id, ...version, proposal: v.proposal, confirmedAt: v.confirmedAt, enabled: v.enabled,
+    ...(v.enabledAt === undefined ? {} : { enabledAt: v.enabledAt as string }),
+  };
 }
 
 /** `v` as a proposal, or undefined. */
@@ -372,7 +379,7 @@ export function routineOps(deps: { home: string; now?: () => number; log?: (line
         const index = store.routines.findIndex((r) => r.id === proposal.replaces);
         if (index < 0) throw new RoutineError("unknown", `Routine ${proposal.replaces}, which proposal ${id} replaces, has been deleted.`);
         const old = store.routines[index]!;
-        routine = { id: old.id, ...version, enabled: old.enabled };
+        routine = { id: old.id, ...version, enabled: old.enabled, ...(old.enabledAt === undefined ? {} : { enabledAt: old.enabledAt }) };
         store.routines[index] = routine;
       } else {
         if (store.routines.length >= ROUTINES_MAX) throw new RoutineError("limit", `At most ${ROUTINES_MAX} routines are kept; delete one first.`);
@@ -403,10 +410,11 @@ export function routineOps(deps: { home: string; now?: () => number; log?: (line
       return { result: proposal, write: true, lines: [{ kind: "dismissed", proposal: id }] };
     }),
 
-    setEnabled: (id, enabled) => act((store) => {
+    setEnabled: (id, enabled) => act((store, t) => {
       const routine = routineIn(store, id);
       if (routine.enabled === enabled) return { result: routine, write: false, lines: [] };
       routine.enabled = enabled;
+      if (enabled) routine.enabledAt = t;
       return { result: routine, write: true, lines: [{ kind: "switched", routine: id, enabled }] };
     }),
 

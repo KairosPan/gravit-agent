@@ -180,7 +180,7 @@ function cut(text: string, max: number): string {
  * stamp and timer; `deadlineMs` the turn's deadline, {@link DEFAULT_TURN_DEADLINE_MS} by default; `createAgent` a fresh
  * desk agent (src/desk-session.ts `createDeskAgent`); `resolveRoute` the desk's route (`undefined`: its own); `on` the
  * root bus; `supervise` src/desk-session.ts `superviseDeskTurns`, the default; `state` the desk's state for the wake
- * (none when absent or when it fails, with one line); `note` a report's line into Gravit's one conversation (src/desk.ts
+ * (none when absent, when it fails or when it has not answered by the open's deadline, with one line); `note` a report's line into Gravit's one conversation (src/desk.ts
  * binds it); `log` where a line goes (stderr). */
 export interface RunDeps {
   home: string;
@@ -400,8 +400,11 @@ async function run(deps: RunDeps, item: RunItem, signal: AbortSignal, log: (line
   try {
     let state: string | undefined;
     if (deps.state !== undefined) {
+      /* bounded by the open's deadline: a state that does not answer in time is absent */
       try {
-        state = await deps.state();
+        const read = await bounded(Promise.resolve().then(() => deps.state!()), signal, clock, openBy);
+        if (read === LATE) log(`${BIN}: desk: the desk's state for routine run ${key} did not answer in ${formatDuration(deadlineMs)}; it wakes without it`);
+        else if (read !== ABORTED) state = read;
       } catch (err) {
         log(`${BIN}: desk: the desk's state could not be read for routine run ${key}: ${errText(err)}; it wakes without it`);
       }

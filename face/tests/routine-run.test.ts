@@ -341,6 +341,21 @@ test("the watchdog: no end a minute past the deadline cancels the turn - timed-o
   }
 });
 
+test("a desk state that never answers is cut at the open's deadline: the run wakes without it", async () => {
+  const fx = await fixture();
+  const r = rig(fx, { state: () => new Promise<string>(() => {}) });
+  const running = runRoutine(r.deps, ITEM, signal());
+  await waitFor("the session", () => r.agents.created.length === 1);
+  await r.clock.advance(600_000);
+  await waitFor("the wake", woken(r));
+  const fired = Date.parse(FIRED) + 600_000;
+  assert.equal(r.agents.agents[0].text(0), routineWake(ITEM, fired, 600_000), "no state block");
+  assert.equal(r.lines.filter((l) => /desk's state .* did not answer/.test(l)).length, 1);
+  r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "No ideas" }));
+  await running;
+  assert.equal((await records(fx.home)).find((x) => x.kind === "finished")?.outcome, "ended");
+});
+
 test("an abort cancels the turn and writes nothing more", async () => {
   const fx = await fixture();
   const r = rig(fx);

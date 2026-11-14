@@ -441,3 +441,15 @@ test("after a delete the confirmed proposal is not current and has no next run",
   const read = (await call(rec, "/data/desk/routines")).body.proposals as Record<string, unknown>[];
   assert.deepEqual(read.map((p) => [p.id, p.state, p.routine, p.current, p.next]), [[proposal, "confirmed", id, false, undefined]]);
 });
+
+test("a confirm of a proposal whose routine was deleted answers 400 with the store's sentence, and adds nothing", async () => {
+  const { home, ops, id, proposal } = await withRoutine();
+  const rec = recorder();
+  registerRoutineRoutes(rec, { ops, clock: () => undefined, home });
+  assert.equal((await call(rec, "/data/desk/routines/delete", { id })).status, 200);
+  const again = await call(rec, "/data/desk/routines/confirm", { proposal });
+  assert.deepEqual(again, { status: 400, body: { ok: false, error: `Proposal ${proposal} was confirmed; its routine has since been deleted.` } });
+  const load = await loadRoutines(home);
+  assert.ok(load.ok);
+  assert.deepEqual(load.store.routines, []);
+});
