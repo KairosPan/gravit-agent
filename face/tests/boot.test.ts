@@ -1,3 +1,4 @@
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -10,6 +11,7 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { composeFace, globalInstructionAudit, globalInstructionFiles } from "../src/boot.ts";
 import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
 import { MARKET_ROW_ID } from "../src/market-row.ts";
+import { MEMORY_ROW_ID } from "../src/memory-row.ts";
 import { LUNHUI_ROW_IDS } from "../src/lunhui.ts";
 import { ANALOG_ROW_IDS } from "../src/analog.ts";
 import { READ_THROUGH_ROW_IDS } from "../src/readthrough.ts";
@@ -74,7 +76,7 @@ test("composeFace: patch order ends with the face overlay; root is rewritten emp
 /* The exact layer count, so a lost or duplicated layer is a failure rather
  * than a silent change of shape. With the telemetry switch unset the stack is:
  * dsh-base insert + the policy layer (src/policy.ts) + the
- * Account seat insert + the market row's insert + the Lunhui rows' insert +
+ * Account seat insert + the market row's insert + the memory row's insert + the Lunhui rows' insert +
  * the analog rows' insert + the read-through rows' insert + hmr disable + system-prompt persona +
  * agent-instructions + face overlay. The
  * policy layer is pinned both by size (8 id patches + 1 insert against
@@ -92,17 +94,18 @@ test("composeFace stacks exactly the layers it means to", () => {
     );
     const policy = facePolicyPatches(baseRows);
     assert.equal(policy.length, 8, "7 id patches + 1 insert at dsh-base 0.2.1-rc.5 (D6 keeps the web-fetch-http provider on since 2026-11-07)");
-    assert.equal(patches.length, 10 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
+    assert.equal(patches.length, 11 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
     assert.deepEqual(patches.slice(1, 1 + policy.length), policy, "the policy layer sits right above the bundle layer");
     assert.equal((patches[1 + policy.length] as InsertPatch).insert?.[0]?.id, ACCOUNT_SEAT_ROW_ID, "the Account seat row sits right above the policy layer");
     assert.equal((patches[2 + policy.length] as InsertPatch).insert?.[0]?.id, MARKET_ROW_ID, "the market row sits right after the Account seat row");
-    assert.deepEqual((patches[3 + policy.length] as InsertPatch).insert?.map((row) => row.id), [
+    assert.equal((patches[3 + policy.length] as InsertPatch).insert?.[0]?.id, MEMORY_ROW_ID, "the memory row sits right after the market row");
+    assert.deepEqual((patches[4 + policy.length] as InsertPatch).insert?.map((row) => row.id), [
       "lunhui-runs", "lunhui-freeze-quotes", "lunhui-freeze-limit-up", "lunhui-freeze-boards", "lunhui-freeze-index",
       "lunhui-environment", "lunhui-sentiment", "lunhui-theme", "lunhui-leader", "lunhui-mode", "lunhui-review",
       "lunhui-present",
-    ], "the twelve Lunhui rows sit right after the market row, in one insert: the backbone, the freezes, the modules, then the composed answer");
-    assert.deepEqual((patches[4 + policy.length] as InsertPatch).insert?.map((row) => row.id), ["analog-views", "analog-events"], "the two analog rows sit right after the Lunhui rows, in one insert");
-    assert.deepEqual((patches[5 + policy.length] as InsertPatch).insert?.map((row) => row.id), ["read-through-service", "read-through-tool"], "the two read-through rows sit right after the analog rows, in one insert");
+    ], "the twelve Lunhui rows sit right after the memory row, in one insert: the backbone, the freezes, the modules, then the composed answer");
+    assert.deepEqual((patches[5 + policy.length] as InsertPatch).insert?.map((row) => row.id), ["analog-views", "analog-events"], "the two analog rows sit right after the Lunhui rows, in one insert");
+    assert.deepEqual((patches[6 + policy.length] as InsertPatch).insert?.map((row) => row.id), ["read-through-service", "read-through-tool"], "the two read-through rows sit right after the analog rows, in one insert");
   } finally {
     if (previous === undefined) delete process.env.DSH_TELEMETRY_DISABLED;
     else process.env.DSH_TELEMETRY_DISABLED = previous;
@@ -131,6 +134,7 @@ test("every face row lands in the composed tree exactly once", () => {
   assert.equal(counts.get("approval"), 1);
   assert.equal(counts.get(ACCOUNT_SEAT_ROW_ID), 1, "the Account seat must be registered exactly once");
   assert.equal(counts.get(MARKET_ROW_ID), 1, "the market row must be registered exactly once");
+  assert.equal(counts.get(MEMORY_ROW_ID), 1, "the memory row must be registered exactly once");
   for (const id of LUNHUI_ROW_IDS) assert.equal(counts.get(id), 1, `${id} must be registered exactly once`);
   for (const id of ANALOG_ROW_IDS) assert.equal(counts.get(id), 1, `${id} must be registered exactly once`);
   for (const id of READ_THROUGH_ROW_IDS) assert.equal(counts.get(id), 1, `${id} must be registered exactly once`);
@@ -221,6 +225,24 @@ test("the market row sits right after the seat row, once", () => {
   const rows = composeEntries([patches]).filter((r) => r.id === MARKET_ROW_ID);
   assert.equal(rows.length, 1);
   assert.equal((rows[0].config as { serverName?: string }).serverName, "market");
+});
+
+/* The memory row (src/memory-row.ts): gravit-memory's door, composed in the
+ * same project layer right after the market row and before the first Lunhui
+ * row - so an operator's patch disables it alone. */
+test("the memory row sits right after the market row and before the first Lunhui row; a patch disables it alone", () => {
+  const home = freshHome();
+  const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home });
+  const ids = composeEntries([patches]).flatMap((row) => (typeof row.id === "string" ? [row.id] : []));
+  const market = ids.indexOf(MARKET_ROW_ID);
+  assert.ok(market >= 0, "the market row is composed");
+  assert.equal(ids[market + 1], MEMORY_ROW_ID, "the memory row follows the market row");
+  assert.equal(ids[market + 2], LUNHUI_ROW_IDS[0], "the first Lunhui row follows the memory row");
+  assert.equal(ids.filter((id) => id === MEMORY_ROW_ID).length, 1, "one memory row");
+  writeFileSync(join(home, "profiles", "face", "cordis.patch.yml"), `- id: ${MEMORY_ROW_ID}\n  disabled: true\n`);
+  const disabled = composeEntries([composeFace({ profileName: "face", port: 3090, dshHome: home }).patches]);
+  assert.equal(disabled.find((r) => r.id === MEMORY_ROW_ID)?.disabled, true, "the operator's patch disables the memory row");
+  assert.notEqual(disabled.find((r) => r.id === MARKET_ROW_ID)?.disabled, true, "and leaves the market row alone");
 });
 
 /* The Account seat row (src/account-seat.ts): the seat process of the

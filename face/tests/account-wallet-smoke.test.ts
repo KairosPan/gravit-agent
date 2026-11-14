@@ -20,6 +20,7 @@
  * `bootFace` sets `process.env.DSH_HOME`, so this is its own file; the scratch home is a `mkdtemp` directory, never `~/.dsh`;
  * the stand-in takes a free port, never 4820, and nothing is written under `~/.buyer-agent-demo`. */
 import { DEAD_MARKET_URL } from "./helpers/no-market.ts";
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

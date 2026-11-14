@@ -11,6 +11,7 @@
  * and durable reads use a persistence READ handle (NEW
  * packages/session/session-persistence/src/handle.ts:14-23, 59-83). */
 import "./helpers/no-market.ts";
+import "./helpers/no-memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
