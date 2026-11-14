@@ -1,7 +1,9 @@
 /** The new client on a real boot: the page gravit-face serves at `/`, its
  * modules under `/client`, and the host layer (js/host/live.js over the page's
  * own api.js + mapper.js) listing, opening and reading a session over the
- * real wire — the stage-1 wiring of spec 2026-10-19 end to end. And, over the
+ * real wire — the stage-1 wiring of spec 2026-10-19 end to end. The Desk
+ * screen (desk-page plan 1): `GET /data/desk/news` on the booted face, and
+ * `#/desk` drawn from it with its nav item current. And, over the
  * Account's own stand-in when its install is there (`npm ci` in account/), the
  * page's Account › Identity (plan B1b): the identity read through the face's
  * proxy, drawn as its three cards, and Connect Telegram's modules served.
@@ -33,6 +35,10 @@ import { registerAccountProxy } from "../src/account-proxy.ts";
 import { freePort, standinSkip, startStandin, stopStandin, type Standin } from "./helpers/standin.ts";
 import { renderAccountScreen } from "../client/js/render/account.js";
 import { renderConnectDrawer } from "../client/js/render/identity.js";
+import { installDesk } from "../src/desk.ts";
+import { parseHash } from "../client/js/router.js";
+import { renderNav } from "../client/js/render/rail.js";
+import { renderDeskScreen } from "../client/js/render/desk-page.js";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
@@ -134,7 +140,39 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
     assert.ok(Array.isArray(opened.messages));
     assert.equal(state().status.line, "", "no complaint on the status line");
 
-    // 6. Account › Identity over the stand-in: the identity read through the face's proxy (past its cache too), drawn as the three cards
+    /* 6. the Desk screen (desk-page plan 1): `installDesk` mounts `/data/desk/status` and `/data/desk/news` (a bare bootFace
+     * mounts no /data route); the news read answers on this fresh home, and `#/desk` draws the Desk nav item current and
+     * the screen's two columns from the two reads as the host layer would dispatch them */
+    const desk = installDesk(ctx.webServer, { home, enabled: true, log: () => {} });
+    try {
+      await desk.ready;
+      const newsRes = await realFetch(`${base}/data/desk/news`, { headers: { cookie } });
+      assert.equal(newsRes.status, 200);
+      const news = await newsRes.json();
+      assert.equal(news.ok, true);
+      assert.equal(typeof news.alerts, "object");
+      assert.equal(news.alerts.total, 0, "a fresh home has no alert");
+      const status = await (await realFetch(`${base}/data/desk/status`, { headers: { cookie } })).json();
+      assert.equal(status.ok, true);
+      const deskStore = createStore({ initial: emptyState(), reducers });
+      deskStore.dispatch("nav", parseHash("#/desk"));
+      deskStore.dispatch("deskLoaded", { data: status, at: Date.now() });
+      deskStore.dispatch("deskNewsLoaded", { data: news, at: Date.now() });
+      const nav = renderNav(deskStore.get());
+      assert.match(nav, /<a[^>]*href="#\/desk"[^>]*aria-current="page"|<a[^>]*aria-current="page"[^>]*href="#\/desk"/, "the Desk nav item is current");
+      assert.match(nav, />Desk</);
+      const screen = renderDeskScreen(deskStore.get(), Date.now());
+      for (const column of ["News", "Routines"]) assert.match(screen, new RegExp(`<section class="dk-col" aria-label="${column}">`), column);
+      // the page module and its two host modules are served to the browser too
+      for (const path of ["/client/js/render/desk-page.js", "/client/js/host/desk-page-view.js", "/client/js/host/desk-news.js"]) {
+        const res = await realFetch(base + path);
+        assert.equal(res.status, 200, path);
+      }
+    } finally {
+      await desk.dispose(0);
+    }
+
+    // 7. Account › Identity over the stand-in: the identity read through the face's proxy (past its cache too), drawn as the three cards
     if (standin) {
       const read = await realFetch(`${base}/data/account/identity?fresh=1`, { headers: { cookie } });
       assert.equal(read.status, 200);

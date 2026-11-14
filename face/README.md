@@ -1518,9 +1518,9 @@ Crypto · Stocks · RWAs · Perps · Pre-IPO · Predictions**, with **China** fo
 adding Indices, Commodities
 and FX when its joined All read lists them. Selected-source counts are the market's count plus
 the Account's connected-only rows once All's read has answered, All counting the starred A shares
-too; China is the market's own tab. **Watching** and **Desk** stay available below the source rows,
-Desk being the desk's view ("The watch" under "The desk" below), with
-**All results** first while searching. Watching and Desk remain separate shared entries.
+too; China is the market's own tab. **Watching** stays available below the source rows, with
+**All results** first while searching, and remains a separate shared entry; the desk's view is its
+own screen ("The desk" below).
 Changing a source and category is one state transition and requests the chosen category directly;
 source-filtered paper rows retain their bound data source even when another product uses the same symbol.
 Tokenized-share sources retain RWAs classification in paper rows, so public and paper lines merge under one market key.
@@ -2375,9 +2375,9 @@ holdings with quantities and costs, every `levels.yml` with its plans, the journ
 today's alerts — can be put into a URL by a turn that follows text planted in a page it opened, and
 that page's owner reads it in their logs. So every page a desk turn opens is on the record: one
 `desk-fetch` line in `$DSH_HOME/face/desk/events.jsonl` (the time, the session, the URL as the
-model asked it), written once the guard has let the call through, whatever the page answered, and
-listed under **Pages opened today** on Markets › Desk, as text you read, never a link. Nothing is
-refused for it; it is how you see what was opened. `desk_state` does not show the list to the
+model asked it), written once the guard has let the call through, whatever the page answered; the
+Desk screen counts an alert's reason's pages from these lines (`3 sources read`). Nothing is
+refused for it; the ledger is how you see what was opened. `desk_state` does not show the list to the
 model.
 
 Every turn on the desk session is supervised, whoever opened it — the phone (with
@@ -2596,19 +2596,44 @@ session plants.
 The root `GRAVIT.local.md` is not fenced: it is the operator's own overlay, read by every desk
 turn (`DEVELOPMENT.md` §9).
 
-**In the browser.** Markets › Desk, the Markets screen's last tab (since P3; the old client's Desk
-panel left with that client in the merge): the desk's status and **Pause**, the watch, today's
-alerts, the levels as loaded, the standing orders and their firings, and the runs and sleep gaps,
-read from `GET /data/desk/status` every 10 s ("The watch" below). Since one entry's plan 3 the rail
-beside Messages also draws today's firings and annotations under Running and Done today — never
-under Waiting on you, and never in the badge — and the standing orders as a **Scheduled** (定时)
-group after Done today, each with its next firing (New York time); opened, a firing or an
-annotation shows its kind, its text and its session in History, and a scheduled line its strategy,
-its last outcome and that session — nothing to press: an order's switch stays in `standing.yml`. A
-strategy's page draws its own orders' scheduled lines. The desk's sessions are in History.
-Both desk routes, `GET /data/desk/status` and `POST /data/desk/pause`, keep only the `/data`
-loopback fence and no cookie ("Data routes and caches"), so anything on this machine — a shell
-turn included — can read the status and pause the desk: the safe direction (charter D19).
+**In the browser: the Desk screen** (`#/desk`, 值守台, since the desk page's plan 1, 2026-11-14;
+`client/js/render/desk-page.js` over `js/host/desk-page-view.js` and `js/host/desk-news.js`), the
+rail's item between Messages and Markets. Its head bar reads `Desk` with the desk's state —
+`Monitoring`, `Off hours`, `Paused`, `Muted until …` or `Watch stopped` — the line `US equities
+04:00–20:00 ET · <n> watch rules` and **Pause**; paused, a banner says by whom and since when, and
+that `npm run desk -- resume` lifts it. A desk that is off, or a status that cannot be read, is one
+line and no columns. Below, two columns. **News** (资讯) draws the sources the watch reads — Quotes,
+Headlines, Filings, each with its state, and fund flows and social sentiment as not connected —,
+one line saying no economic calendar or earnings source is connected, a filter (`All`, then each
+symbol), and the day's alerts grouped by symbol, newest first: each group's latest alert with its
+move, its time and its words (`Undelivered`, `cooldown`, `cap`, `muted`, `paused`, `outside its
+window`), the reason Gravit wrote for it — the reply's line for that symbol as the headline, the
+pages its turn opened (`3 sources read`), **Details** opening the whole reply and its session in
+History — and the symbol's earlier alerts under it; then the watch's rules, folded, each with
+today's count, and the price levels as counted. On a day with no alert it shows the last day that
+had one, under its date. **Routines** (例行任务) lists the standing orders as read-only rows, each
+with its state and next firing (New York time); an order's switch stays in `standing.yml`. Every
+text from the ledgers is drawn as written, as text. The screen reads `GET /data/desk/status` every
+10 s and `GET /data/desk/news` every 15 s while it is shown.
+
+`GET /data/desk/news` (`src/desk-news.ts`, mounted with the status route, the desk on or off) is
+one New York day of the watch's alerts read back from the ledgers: `{ ok, date, today, sources,
+alerts: { total, groups }, reports, rules, levels }` — each group a symbol's `latest` alert and its
+`earlier` ones, each alert its `kind`, `movePct`, `nth`, its `delivery` (`sent`, `queued`,
+`undelivered`, `pending` or `held`, with the gate's word) and the `reason` the annotation wrote
+(`headline`, `label`, `text`, `pages`, `sessionId`); `today` is false when an earlier day stands
+in, and a torn or half-written line of `alerts.jsonl` is skipped, never an error.
+
+The Messages rail draws tasks and approvals only, in three groups — Waiting on you, Running, Done
+today; the desk's firings, annotations and standing orders are not on it (since the desk page's
+plan 1). What the desk sent the phone is still a line in the conversation, and a strategy's page
+draws its own orders' scheduled lines. Markets has no Desk tab since that plan; a Markets row with a
+level still shows its nearest level and distance, and its page the plan. The desk's sessions are in
+History.
+The desk routes, `GET /data/desk/status`, `GET /data/desk/news` and `POST /data/desk/pause`, keep
+only the `/data` loopback fence and no cookie ("Data routes and caches"), so anything on this
+machine — a shell turn included — can read the status and the news and pause the desk: the safe
+direction (charter D19).
 
 ### Standing orders (src/schedule.ts + src/firing.ts + src/standing.ts + src/brief.ts + src/market-clock.ts)
 
@@ -2779,9 +2804,8 @@ supersedes the P2 plan's, which has no `cancelled` row.
 line (`budget: 1,234,567 of 2,000,000 tokens today`) and a line per order —
 `standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET`, or what holds
 it (`desk/STANDING.md changed since arming (npm run desk -- rearm preclose)`, `expired after …`,
-`disabled`); an A-share order's line opens `standing <id>: market cn, …`. Markets › Desk's
-Standing orders and Firings show the same, each order linking `its session`, the one its last
-firing woke, in Messages; `firings.jsonl` holds every firing.
+`disabled`); an A-share order's line opens `standing <id>: market cn, …`. The Desk screen's
+Routines column lists the same orders with their state; `firings.jsonl` holds every firing.
 
 ### Strategy reports (src/report.ts, `builtin:report`)
 
@@ -2872,8 +2896,8 @@ that spends it refuses the next morning's A-share report, which fires that eveni
 | the A-share calendar failed | `no A-share standing order runs on <date>: the market calendar failed in <clock> (<error>)` |
 
 A line the pause held reaches the phone once after the lift — after a restart too: a `phoned`
-record follows it in `firings.jsonl`. A firing's session is in History, opened from its rail line
-(since one entry's plan 3), never among the strategy's research; what it sent the phone is a
+record follows it in `firings.jsonl`. A firing's session is in History, never among the
+strategy's research; what it sent the phone is a
 `Scheduled` line in the one conversation.
 
 
@@ -3059,7 +3083,7 @@ reports an event the company has not confirmed), `媒体解读 · 公司没发�
 sentiment, a sector or the market; nothing at the company), or `没找到明确原因` — then the reply says
 what it checked. For an index the group line names the sectors leading the move. A why turn is a
 desk turn: its tokens count in the day's budget (`standing.yml` `budget.dailyTokens`), several
-times a plan check's — the Desk view's budget line shows what one costs, and you may raise the cap.
+times a plan check's — `npm run service -- status`'s budget line shows what one costs, and you may raise the cap.
 
 **The read-through** (since the read-through plan, 2026-11-12; spec
 `docs/superpowers/specs/2026-11-12-read-through-design.md`; charter A2). When a pass holds a US
@@ -3163,15 +3187,12 @@ hold (R75 has the edges); an alert a restart caught before it was sent goes late
 it is younger than 10 minutes, and is named lost in one line otherwise (spec §16 H2, R92). The pre-close brief lists the alerts and filings since the last brief, and `desk_state`
 carries the watch's state.
 
-**In the browser: Markets › Desk.** The Markets screen's last tab, `Desk`, reads
-`/data/desk/status` when Markets is shown and every 10 s: the desk's status and **Pause**, the
-watch by market with today's counts, the mute, the filings' state, today's alerts with their
-feed, outcome and latency (`latencyMs`, from the print's exchange time to the send), the pages
-the desk opened today (since the why-it-moved plan, as text, newest first), the levels
-as loaded with every refused entry, the standing orders and their firings, the runs and sleep
-gaps. A Markets row with a level shows its nearest level and distance (`stop 170 · -1.30%`), and
-its page the plan and its file under the price. `npm run service -- status` and `/status` end
-with the same watch lines.
+**In the browser: the Desk screen** ("In the browser" above). Its head bar carries the watch's
+state and its News the day's alerts with their reasons, the three sources' state, and the rules
+with today's counts and the levels. A Markets row with a level shows its nearest level and
+distance (`stop 170 · -1.30%`), and its page the plan and its file under the price — read from
+`/data/desk/status` while Markets is shown, every 10 s. `npm run service -- status` and `/status`
+end with the watch lines.
 
 **What else the phone gets from the watch:**
 
@@ -3242,8 +3263,9 @@ well as here. What the desk sent the phone — a firing's brief or report, an al
 a line here too, under a `Scheduled` (定时) or `Watch` (盯盘) chip, its first line as the summary and
 the rest folded under it: it starts no turn, it is quoted between `<<<desk-data …>>>` fences that
 the conversation's contract reads as data, never as a request, and a line that arrives while
-Gravit is busy waits for the conversation to go idle. The rail adds today's firings and annotations
-and the read-only **Scheduled** group (`GET /data/tasks`'s `desk`). A restart while a phone text is
+Gravit is busy waits for the conversation to go idle. The rail draws none of them: since the desk
+page's plan 1 it holds tasks and approvals only, and the alerts and the standing orders are on the
+Desk screen ("The desk" above; `GET /data/tasks` still carries its `desk`). A restart while a phone text is
 queued, claimed or being answered answers it once after the boot: a graceful stop writes it to the
 ledger as a `desk-carry`, and the next boot sends it again, `(carried over a restart)`, with the cut
 turn's restart line.
@@ -3359,12 +3381,13 @@ running, and at least one standing order armed. Hard-reload the page first.
    it answers there, and nothing of it reaches the phone. Then `npm run desk -- resume`.
 5. A firing: let an armed standing order fire (or arm one a few minutes ahead). PASS: its brief or
    report reaches the phone; in the browser the conversation shows it as a line under a `Scheduled`
-   chip, folded; the rail shows the firing under Running while it runs, then under Done today, and
-   the order in the Scheduled group with its next firing. Then ask Gravit in the browser "what did
+   chip, folded; the rail shows no line for it, and the Desk screen's Routines lists the order with
+   its next firing. Then ask Gravit in the browser "what did
    the last brief say?". PASS: it answers from that line.
 6. An alert: let a level cross (or wait for one). PASS: the alert on the phone, its line under a
    `Watch` chip in the conversation and, when it asks for an annotation, the annotation's reply on
-   the phone, its line in the conversation and under Done today on the rail.
+   the phone, its line in the conversation, and on the Desk screen the alert under its symbol with
+   the reason; nothing on the rail.
 7. A restart with a text queued: from the phone ask for something long, send a second text at
    once, then `npm run service -- restart`. PASS: after the boot the phone gets `a restart cut your
    message of <time> before it was answered; send it again` for the first and an answer for the
@@ -6415,11 +6438,13 @@ The desk spec's drill (`../docs/superpowers/specs/2026-10-19-always-on-gravit-de
 §12, §15 and §16), in six parts: P0's, the face as a service; P1's, the phone and Markets ›
 Desk; P2's, the clock and the pre-close brief; P3's, the watch; P4's, a strategy's pre-market
 report; the hardening's three steps (§16); and, since plan B1a, the phone through the account.
-**Since the merge onto main (2026-11-01)** the browser's steps read Markets › Desk (`#/markets`,
-the Desk tab, the last), the old client's Desk panel having left with that client: its status,
-Pause, standing orders and firings; it lists no desk conversation and opens no session, so read
+**Since the desk page's plan 1 (2026-11-14)** the browser's steps read the Desk screen (`#/desk`),
+the old client's Desk panel and then Markets' Desk tab having left: its status, Pause, the day's
+alerts and the standing orders; it lists no desk conversation and opens no session, so read
 those in the conversation list, and `npm run service -- status`, the phone's `/status` and the
-ledgers beside it. Two more things read differently on the merged tree: a price asked of the
+ledgers beside it. Where a step below still names Markets › Desk, read the Desk screen, and what
+it does not draw — the phone line, the budget, the firings, refused levels, the pages opened, the
+runs and sleep gaps — from those three. Two more things read differently on the merged tree: a price asked of the
 desk (P1's step 1) and the brief (P2's step 2) come from the Market's reads, so the Account must be
 running (`npm run account`); and the calendar needs no interpreter. The drill is to be run again
 on the merged tree. **Since one entry's plan 3** the phone reaches the one conversation, so P1's
@@ -6553,9 +6578,9 @@ merged code and the browser signed in:
    from the phone"`, and any part of it the phone got ends with `(cut off: stopped from the
    phone)`. A `/stop` that lands after the long answer ended cuts the next turn instead, or finds
    `nothing is running`: try again with a longer ask.
-8. From the browser, Markets › Desk (`#/markets`, then the Desk tab, the last). PASS: it agrees
-   with `npm run service -- status` — the desk on, the phone line (Telegram polling, the
-   account's queue and strangers), today's budget; Pause writes `OFF` with no end (the status reads paused by `page`),
+8. From the browser, the Desk screen (`#/desk`). PASS: its chip agrees with `npm run service --
+   status`, which also gives the phone line (Telegram polling, the account's queue and strangers)
+   and today's budget; Pause writes `OFF` with no end (the status reads paused by `page`),
    a phone text then gets the paused line, and `npm run desk -- resume` in a terminal lifts it
    (`resumed`); the view re-reads every 10 s. The desk conversation opens from the conversation
    list, the phone's texts in it marked ☎.
@@ -6794,7 +6819,7 @@ a real reply looks like on the phone.
 restart`) and the face (`npm run service -- restart`) on this code; set `ALPHA_EDGAR_USER_AGENT`
 (P3, step 6) so the filings read; keep `desk/rules.yml`'s `watch-crwv` and `watch-intc`, and add a
 name of your own if you like. No `HTTP_PROXY` or `HTTPS_PROXY` in the face's environment (charter
-D29). Markets › Desk open, the phone at hand.
+D29). The Desk screen (`#/desk`) open, the phone at hand.
 
 1. **A real move.** Wait for a watch-list name, a holding or the index to cross its threshold —
    after-hours if one comes (an earnings evening is the likeliest). PASS: the alert arrives,
@@ -6811,10 +6836,10 @@ D29). Markets › Desk open, the phone at hand.
 4. **Nothing to find.** On a move with no news — an index day, a thin after-hours print — PASS:
    one reply says `没找到明确原因` and names what it checked: the headline read, the filings, its
    searches.
-5. **The pages.** PASS: Markets › Desk lists, under **Pages opened today**, every page the turns
-   opened, as text; `events.jsonl` has one `desk-fetch` line for each, with the turn's session —
-   the same `sessionId` as the pass's `annotated` record in `alerts.jsonl`.
-6. **The cost.** PASS: read Markets › Desk's budget line before and after one why turn and record
+5. **The pages.** PASS: `events.jsonl` has one `desk-fetch` line for every page the turns opened,
+   with the turn's session — the same `sessionId` as the pass's `annotated` record in
+   `alerts.jsonl` — and the Desk screen's reason for the alert counts them (`<n> sources read`).
+6. **The cost.** PASS: read `npm run service -- status`'s budget line before and after one why turn and record
    the tokens it spent; compare a plan check's, and raise `budget.dailyTokens` in `standing.yml`
    if the day's alerts would spend it.
 7. **The headline lag.** On the first live weekday event, compare the newest headline's time in the
