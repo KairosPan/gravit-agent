@@ -8,7 +8,7 @@ import { CONVERSATION_PRESET } from "../src/desk-names.ts";
 import { SEAT_READ_RAW_NAMES, SEAT_WRITE_RAW_NAMES } from "../src/orders.ts";
 import { BOT_PLUGIN_URL, GRAVIT_PLUGIN_URL, GRAVIT_ROW_ID } from "../src/roles.ts";
 import { ROUTER_ALLOW, routerPresetDefinition } from "../src/router-preset.ts";
-import { MEMORY_TOOLS } from "../src/memory-row.ts";
+import { MEMORY_TOOL_PREFIX, MEMORY_TOOLS } from "../src/memory-row.ts";
 import { readMemoryProtocol } from "../src/protocols.ts";
 import { validateGravitConfig } from "../plugins/gravit.js";
 
@@ -27,9 +27,12 @@ test("the router preset is the gravit row with a router section, and a mask-only
   assert.ok(Object.isFrozen(ROUTER_ALLOW));
 });
 
-test("the allow list reads and never writes", () => {
+test("the allow list holds no shell, no file write and no seat write; only the memory's writers write", () => {
   for (const name of ["bash", "write", "edit", "str_replace_editor", "ask_user_question"])
     assert.equal(ROUTER_ALLOW.includes(name), false, `no ${name}`);
+  const writers = ["memory_record", "memory_amend", "memory_propose", "memory_reconcile"];
+  assert.deepEqual(ROUTER_ALLOW.filter((name) => writers.some((raw) => name.endsWith(raw))),
+    writers.map((raw) => `mcp__memory__${raw}`), "the only entries that can write anything are the memory's four writers, under its server");
   assert.equal(ROUTER_ALLOW.some((name) => name.endsWith("market_akshare")), false, "no market_akshare");
   const seat = ROUTER_ALLOW.filter((name) => name.startsWith("mcp__*__portfolio_"));
   assert.equal(seat.length, 12);
@@ -43,15 +46,18 @@ test("the allow list reads and never writes", () => {
     "mcp__*__market_explore", "mcp__*__market_quotes", "mcp__*__market_candles", "mcp__*__market_book",
     ...["overview", "read", "markets", "quote", "account", "statement", "holdings", "history", "asset", "venues", "live_positions", "live_markets"]
       .map((raw) => `mcp__*__portfolio_${raw}`),
-    "mcp__*__memory_recall", "mcp__*__memory_record", "mcp__*__memory_amend", "mcp__*__memory_propose",
-    "mcp__*__memory_reconcile", "mcp__*__memory_review", "mcp__*__memory_status",
+    "mcp__memory__memory_recall", "mcp__memory__memory_record", "mcp__memory__memory_amend", "mcp__memory__memory_propose",
+    "mcp__memory__memory_reconcile", "mcp__memory__memory_review", "mcp__memory__memory_status",
   ]);
 });
 
-test("the conversation holds the memory's seven tools, by name", () => {
-  assert.deepEqual(ROUTER_ALLOW.slice(-7), ["mcp__*__memory_recall", "mcp__*__memory_record", "mcp__*__memory_amend",
-    "mcp__*__memory_propose", "mcp__*__memory_reconcile", "mcp__*__memory_review", "mcp__*__memory_status"]);
-  assert.deepEqual(ROUTER_ALLOW.slice(-7), MEMORY_TOOLS.map((raw) => `mcp__*__${raw}`), "the row's seven, in the row's order");
+test("the conversation holds the memory's seven tools, by name, under the row's own server", () => {
+  assert.deepEqual(ROUTER_ALLOW.slice(-7), ["mcp__memory__memory_recall", "mcp__memory__memory_record", "mcp__memory__memory_amend",
+    "mcp__memory__memory_propose", "mcp__memory__memory_reconcile", "mcp__memory__memory_review", "mcp__memory__memory_status"]);
+  assert.deepEqual(ROUTER_ALLOW.slice(-7), MEMORY_TOOLS.map((raw) => `${MEMORY_TOOL_PREFIX}${raw}`), "the row's seven, in the row's order");
+  const memoryEntries = ROUTER_ALLOW.filter((name) => MEMORY_TOOLS.some((raw) => name.endsWith(`__${raw}`)));
+  assert.equal(memoryEntries.length, 7);
+  assert.deepEqual(memoryEntries.filter((name) => name.startsWith("mcp__*__")), [], "no memory tool under the wildcard server");
 });
 
 test("the router's row carries the memory's section and no Lunhui protocol", () => {
