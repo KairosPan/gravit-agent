@@ -168,6 +168,11 @@ test("a fault is said by its code in a fixed sentence, never by its message", as
   const odd = Object.assign(new Error(PLANTED), { code: `E_${PLANTED}` });
   assert.deepEqual(await readBriefMemory(failing(odd)), { connected: false, say: "the memory could not be read" });
   assert.deepEqual(await readBriefMemory(failing(PLANTED)), { connected: false, say: "the memory could not be read" });
+  /* a code is at most 24 characters after `E_` */
+  const longest = Object.assign(new Error("x"), { code: `E_${"A".repeat(24)}` });
+  assert.deepEqual(await readBriefMemory(failing(longest)), { connected: false, say: `the memory could not be read (E_${"A".repeat(24)})` });
+  const tooLong = Object.assign(new Error("x"), { code: `E_${"A".repeat(25)}` });
+  assert.deepEqual(await readBriefMemory(failing(tooLong)), { connected: false, say: "the memory could not be read" });
 
   for (const memory of [said, await readBriefMemory(failing(fsError)), await readBriefMemory(failing(odd))]) {
     const text = JSON.stringify(memory);

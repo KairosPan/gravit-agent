@@ -18,7 +18,7 @@
  */
 import { realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import type { Memory } from "gravit-memory";
@@ -96,6 +96,14 @@ function realPathOrAncestor(path: string): string {
   }
 }
 
+/** A home as a refusal shows it, with no account name: from the user's home (`~/.gravit-memory`) when it lies under
+ *  it, else its last two path segments after `…/`. */
+function shownHome(home: string): string {
+  const user = resolve(homedir());
+  if (isUnder(home, user)) return `~/${relative(user, home).split(sep).join("/")}`;
+  return `…/${[basename(dirname(home)), basename(home)].filter(Boolean).join("/")}`;
+}
+
 /** Throws, in a test process, when `home` is not under the system's temporary directory; outside
  *  a test process it allows everything. A home that is not under the temporary directory even
  *  as written is refused without touching the filesystem; one that is, by its real path, so a
@@ -108,9 +116,8 @@ export function assertHomeAllowed(home: string, env: NodeJS.ProcessEnv = process
   const allowed =
     (isUnder(written, tmp) || isUnder(written, realTmp)) && isUnder(realPathOrAncestor(written), realTmp);
   if (allowed) return;
-  const shown = [basename(dirname(written)), basename(written)].filter(Boolean).join("/");
   throw new Error(
-    `memory home …/${shown} refused: it is outside the temporary directory, and a test never opens a real memory - ` +
+    `memory home ${shownHome(written)} refused: it is outside the temporary directory, and a test never opens a real memory - ` +
       "import tests/helpers/no-memory.ts",
   );
 }

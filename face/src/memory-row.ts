@@ -23,6 +23,7 @@
  * install's built `dist/cli.js`, never `npx`; a missing install is a spawn
  * failure dsh logs, and the row stays active with no tools. A reconcile reads
  * several symbols at ten seconds each at worst, so the call timeout is 60 s. */
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { StdioConfig } from "@deepseek-ai/dsh-mcp-client";
 import type { SeatEntryLike } from "./account-seat.ts";
@@ -44,9 +45,16 @@ export type MemoryRowStanding = { disabled: true } | { disabled: false; dir: str
  * re-pointed its install or its home, or disabled it - so the face follows the
  * row, not the environment this module read at boot. A `disabled` getter that
  * throws is read as disabled, as the seat's is. The home is the argument after
- * `--home`, the install two directories above the first argument (its
- * `dist/cli.js`). `undefined`: no such row. */
-export function composedMemoryRow(entries: Iterable<SeatEntryLike>): MemoryRowStanding | undefined {
+ * `--home`; a row patched to name none is read by the door's own rule, so the
+ * face opens the home its child opens: `GRAVIT_MEMORY_HOME` from the row's
+ * `env` over `env` (the child inherits the face's environment), else
+ * `~/.gravit-memory` - never `FACE_MEMORY_HOME`, which the door does not read.
+ * The install is two directories above the first argument (its `dist/cli.js`).
+ * `undefined`: no such row. */
+export function composedMemoryRow(
+  entries: Iterable<SeatEntryLike>,
+  env: NodeJS.ProcessEnv = process.env,
+): MemoryRowStanding | undefined {
   for (const entry of entries) {
     if (entry.options.id !== MEMORY_ROW_ID) continue;
     try {
@@ -58,12 +66,24 @@ export function composedMemoryRow(entries: Iterable<SeatEntryLike>): MemoryRowSt
     const args = config !== null && typeof config === "object" && "args" in config && Array.isArray(config.args)
       ? (config.args as unknown[])
       : [];
-    const cli = typeof args[0] === "string" && args[0] !== "" ? args[0] : join(memoryDir(), "dist", "cli.js");
+    const cli = typeof args[0] === "string" && args[0] !== "" ? args[0] : join(memoryDir(env), "dist", "cli.js");
     const at = args.indexOf("--home");
-    const home = at >= 0 && typeof args[at + 1] === "string" && args[at + 1] !== "" ? (args[at + 1] as string) : memoryHome();
+    const home = at >= 0 && typeof args[at + 1] === "string" && args[at + 1] !== ""
+      ? (args[at + 1] as string)
+      : doorHome(config, env);
     return { disabled: false, dir: dirname(dirname(cli)), home };
   }
   return undefined;
+}
+
+/** The home gravit-memory's door opens when it is given no `--home`: `GRAVIT_MEMORY_HOME` in its environment - the
+ * row's `env` over the face's, as dsh-mcp-client composes the child's - else the package's default. */
+function doorHome(config: unknown, env: NodeJS.ProcessEnv): string {
+  const rowEnv = config !== null && typeof config === "object" && "env" in config && config.env !== null && typeof config.env === "object"
+    ? (config.env as Record<string, unknown>)
+    : {};
+  const named = typeof rowEnv.GRAVIT_MEMORY_HOME === "string" ? rowEnv.GRAVIT_MEMORY_HOME : env.GRAVIT_MEMORY_HOME;
+  return named || join(homedir(), ".gravit-memory");
 }
 
 /** The row, for a face on harness home `dshHome`. In a test process the home

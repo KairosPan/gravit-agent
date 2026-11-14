@@ -61,6 +61,12 @@ test("in a test process only a home under the temporary directory is allowed", (
       return true;
     });
   refused(memoryHome({}));
+  // a home under the user's is named from it, so no account name is printed
+  assert.throws(() => assertHomeAllowed(memoryHome({}), IN_TEST), (e: Error) => {
+    assert.match(e.message, /^memory home ~\/\.gravit-memory refused/);
+    assert.equal(e.message.includes(homedir()), false);
+    return true;
+  });
   refused("/somewhere/else/memory");
   assert.throws(() => assertHomeAllowed("/somewhere/else/memory", IN_TEST), /else\/memory/);
   // a home not made yet is judged by where it would be
@@ -94,7 +100,7 @@ test("a disabled row and a missing install are said, not thrown", async (t) => {
 
 test("a home nobody made answers no memory here", async (t) => {
   const tmp = await scratch(t);
-  const s = await openFaceMemory({ home: join(tmp, "home") });
+  const s = await openFaceMemory({ home: join(tmp, "home"), dir: DEFAULT_MEMORY_DIR });
   assert.equal(s.connected, true);
   if (!s.connected) return;
   await assert.rejects(s.memory.status(), (e) => memoryFaultWords(e) === NO_MEMORY_HERE);
@@ -106,7 +112,7 @@ test("a home that was made answers", async (t) => {
   const tmp = await scratch(t);
   const home = join(tmp, "home");
   await initHome(home);
-  const s = await openFaceMemory({ home });
+  const s = await openFaceMemory({ home, dir: DEFAULT_MEMORY_DIR });
   assert.equal(s.connected, true);
   if (!s.connected) return;
   assert.equal(s.home, home);
@@ -191,6 +197,7 @@ test("a fault is one short line, and no home is said as the door says it", () =>
   assert.equal(memoryFaultWords(Object.assign(new Error("anything"), { code: "E_NO_HOME" })), NO_MEMORY_HERE);
   assert.equal(memoryFaultWords(new Error("first\nsecond")), "first second");
   const long = memoryFaultWords(new Error("x".repeat(500)));
-  assert.ok(long.length <= 200);
+  // cut at 199 characters, the mark the 200th
+  assert.equal(long, `${"x".repeat(199)}…`);
   assert.equal(memoryFaultWords("plain"), "plain");
 });

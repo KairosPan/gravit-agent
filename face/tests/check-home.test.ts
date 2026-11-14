@@ -291,7 +291,7 @@ test("inventory/diffInventory tell added, removed, modified and rewritten apart,
   ]);
 });
 
-test("mcpRowIdsToDisable: every MCP row the composition names, and the face's seat row by id - no alpaca row id expected", () => {
+test("mcpRowIdsToDisable: every MCP row the composition names, and the face's seat, market and memory rows by id - no alpaca row id expected", () => {
   assert.deepEqual(mcpRowIdsToDisable([]), [ACCOUNT_SEAT_ROW_ID, MARKET_ROW_ID, MEMORY_ROW_ID]);
   const rows: Array<{ id?: string; serverName?: string }> = [{ id: "mcp-account", serverName: "account" }, { id: "mcp-mine" }];
   assert.deepEqual(mcpRowIdsToDisable(rows), ["mcp-account", "mcp-mine", "mcp-market", "mcp-memory"]);

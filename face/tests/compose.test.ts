@@ -94,7 +94,7 @@ test("the memory's home is a volume of the agent box alone", async () => {
   for (const name of ["account", "market"]) {
     const service = c.services[name]!;
     assert.ok((service.volumes ?? []).map(String).every((v) => !v.includes("memory-home")), `the ${name} box mounts no memory-home`);
-    assert.equal(service.environment.GRAVIT_MEMORY_HOME, undefined, `the ${name} box is not told of the memory's home`);
+    assert.equal((service.environment ?? {}).GRAVIT_MEMORY_HOME, undefined, `the ${name} box is not told of the memory's home`);
   }
 });
 

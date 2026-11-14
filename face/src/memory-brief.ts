@@ -64,8 +64,8 @@ const DEFAULT_TIMERS: BriefMemoryTimers = {
   clearTimer: (timer) => clearTimeout(timer as NodeJS.Timeout),
 };
 
-/** A package's error code: `E_` then upper-case letters, digits or underscores. */
-const PACKAGE_CODE = /^E_[A-Z0-9_]+$/;
+/** A package's error code: `E_` then 1 to 24 upper-case letters, digits or underscores. */
+const PACKAGE_CODE = /^E_[A-Z0-9_]{1,24}$/;
 
 /**
  * A memory fault as the brief says it: by its code in a fixed sentence, never by its message, which can quote a file

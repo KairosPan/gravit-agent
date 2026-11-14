@@ -110,6 +110,18 @@ test("the composed row: disabled, re-pointed, absent", () => {
   assert.equal(composedMemoryRow([entry("mcp-market", {})]), undefined, "no such row");
 });
 
+test("a patched row with no --home: the home the door itself opens, never FACE_MEMORY_HOME", () => {
+  const noHome = { transport: "stdio", args: [join(OPT, "dist", "cli.js"), "mcp", "--as", "gravit"] };
+  const a = join(tmpdir(), "m", "a");
+  const b = join(tmpdir(), "m", "b");
+  const c = join(tmpdir(), "m", "c");
+  // the door reads GRAVIT_MEMORY_HOME, else the package's default; FACE_MEMORY_HOME is the face's alone
+  assert.deepEqual(composedMemoryRow([entry(MEMORY_ROW_ID, noHome)], { FACE_MEMORY_HOME: a, GRAVIT_MEMORY_HOME: b }), { disabled: false, dir: OPT, home: b });
+  assert.deepEqual(composedMemoryRow([entry(MEMORY_ROW_ID, noHome)], { FACE_MEMORY_HOME: a }), { disabled: false, dir: OPT, home: join(homedir(), ".gravit-memory") });
+  // the row's own env reaches the door over the face's
+  assert.deepEqual(composedMemoryRow([entry(MEMORY_ROW_ID, { ...noHome, env: { GRAVIT_MEMORY_HOME: c } })], { GRAVIT_MEMORY_HOME: b }), { disabled: false, dir: OPT, home: c });
+});
+
 test("what counts as booting a face: an import of bootFace or composeFace as a value, or of the market helper", () => {
   assert.equal(bootsAFace(`import { bootFace } from "../src/boot.ts";`), true);
   assert.equal(bootsAFace(`import {\n  armOrderGate,\n  composeFace as compose,\n} from "../src/boot.ts";`), true, "a multi-line import, renamed");
