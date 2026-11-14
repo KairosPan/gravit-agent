@@ -1,7 +1,7 @@
 // face/tests/desk-news.test.ts
 import test, { after as afterAll } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ALERTS_FILE, EVENTS_FILE, deskDir } from "../src/desk.ts";
@@ -190,6 +190,27 @@ test("deskNews reads the ledgers, re-reading alerts.jsonl when it changes, and c
   const second = await deskNews({ home: h, now: () => FRIDAY });
   assert.equal(second.alerts.total, 2);
   assert.equal(second.alerts.groups[0]!.symbol, "QQQ");
+});
+
+test("deskNews counts a reason's pages from events.jsonl read again only when its size or mtime moved, and after an append", async () => {
+  const h = await home();
+  await ledger(h, ALERTS_FILE, [
+    alert("CRWV", "2026-11-13T15:00:00.000Z", { pass: "pc" }),
+    { t: "2026-11-13T15:03:00.000Z", kind: "annotated", pass: "pc", sessionId: "s-c", outcome: "ended", sent: [], text: "CRWV x" },
+  ]);
+  const fetch = (sessionId: string, url: string) => ({ t: "2026-11-13T15:01:00.000Z", kind: "desk-fetch", sessionId, url });
+  await ledger(h, EVENTS_FILE, [fetch("s-c", "https://a.example"), fetch("s-d", "https://b.example")]);
+  const path = join(deskDir(h), EVENTS_FILE);
+  const pages = async (): Promise<number> => (await deskNews({ home: h, now: () => FRIDAY })).alerts.groups[0]!.latest.reason!.pages;
+  const mtime = 1_763_000_000; // a whole second, which utimes sets exactly
+  await utimes(path, mtime, mtime);
+  assert.equal(await pages(), 1);
+  /* the same bytes' length, another session, the mtime put back: the cached counts stand */
+  await ledger(h, EVENTS_FILE, [fetch("s-c", "https://a.example"), fetch("s-c", "https://b.example")]);
+  await utimes(path, mtime, mtime);
+  assert.equal(await pages(), 1, "events.jsonl is not read again while its size and mtime hold");
+  await writeFile(path, JSON.stringify(fetch("s-c", "https://c.example")) + "\n", { flag: "a" });
+  assert.equal(await pages(), 3, "an append is read: both s-c lines now on file count");
 });
 
 test("rules carry today's count", () => {

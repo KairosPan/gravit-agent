@@ -6,7 +6,8 @@
  * the watch reads with their state. Under them, the routines' reports of the last seven days (the `report` lines of
  * `routines.jsonl`, src/routine-run.ts), grouped by routine.
  *
- * Read-only, and cheap: `alerts.jsonl` and `routines.jsonl` are each parsed again only when its size or mtime moved. Texts are passed through as
+ * Read-only, and cheap: `alerts.jsonl` and `routines.jsonl` are each parsed again, and the pages of `events.jsonl`
+ * counted again, only when its size or mtime moved. Texts are passed through as
  * written - the server never escapes; the client draws them as text. A line this module's guards refuse - torn, half
  * written, of another shape - is skipped, so a bad line never fails the route.
  *
@@ -17,7 +18,7 @@
 import { stat } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
-import { ALERTS_FILE, deskDir, readEvents, readRecords } from "./desk.ts";
+import { ALERTS_FILE, deskDir, EVENTS_FILE, readEvents, readRecords } from "./desk.ts";
 import { ROUTINES_LEDGER } from "./routines.ts";
 import { etDate } from "./et.ts";
 import { fencedGet, isTrustedDataRequest } from "./http.ts";
@@ -201,11 +202,12 @@ function reportsOf(lines: readonly unknown[], now: number): DeskNews["reports"] 
  * has none); a label is read only under a headline of the row's own ticker. The rules are the watch's, each with the day's alerts whose `trigger.rule` - or, a level's, whose
  * `label` - is its id; no watch gives none, and no sources but `off`.
  * @param input - `records`, the lines of `alerts.jsonl` (any line this module's guards refuse is skipped); `fetches`,
- *   the ledger's `desk-fetch` events, every one, since a reason's pages are counted by its session whatever the day;
+ *   the ledger's `desk-fetch` events, every one (or a session once with its `pages` counted), since a reason's pages
+ *   are counted by its session whatever the day;
  *   `watch`, the watch's status when it runs; `reports`, the lines of `routines.jsonl` (any line but a `report` is
  *   skipped; none when absent); `now`, in ms since the epoch.
  */
-export function buildNews(input: { records: unknown[]; fetches: { sessionId: string }[]; watch?: WatchStatus; reports?: unknown[]; now: number }): DeskNews {
+export function buildNews(input: { records: unknown[]; fetches: { sessionId: string; pages?: number }[]; watch?: WatchStatus; reports?: unknown[]; now: number }): DeskNews {
   const { watch, now } = input;
   const alerts: AlertLine[] = [];
   const delivered = new Map<string, DeliveredLine>();
@@ -233,7 +235,7 @@ export function buildNews(input: { records: unknown[]; fetches: { sessionId: str
     symbolsByPass.set(a.pass, list);
   }
   const pagesBySession = new Map<string, number>();
-  for (const f of input.fetches) pagesBySession.set(f.sessionId, (pagesBySession.get(f.sessionId) ?? 0) + 1);
+  for (const f of input.fetches) pagesBySession.set(f.sessionId, (pagesBySession.get(f.sessionId) ?? 0) + (f.pages ?? 1));
 
   const bySymbol = new Map<string, NewsAlert[]>();
   for (const a of ofDay) {
@@ -290,18 +292,35 @@ async function readCached<T>(cache: ParseCache<T>, home: string, file: string, g
 const newsCache: ParseCache<NewsRecord> = new Map();
 const reportCache: ParseCache<ReportLine> = new Map();
 
+/** The pages each session opened - one entry a session, its `desk-fetch` events counted - per home, valid while the
+ * size and mtime of `events.jsonl` hold: the events themselves are never kept. */
+const pagesCache = new Map<string, { key: string; pages: { sessionId: string; pages: number }[] }>();
+async function pagesCached(home: string): Promise<{ sessionId: string; pages: number }[]> {
+  let key = "absent";
+  try {
+    const st = await stat(join(deskDir(home), EVENTS_FILE));
+    key = `${st.size}:${st.mtimeMs}`;
+  } catch { /* absent or unreadable: readEvents decides */ }
+  const hit = pagesCache.get(home);
+  if (hit !== undefined && hit.key === key) return hit.pages;
+  const counts = new Map<string, number>();
+  for (const e of (await readEvents(home)).events) if (e.kind === "desk-fetch") counts.set(e.sessionId, (counts.get(e.sessionId) ?? 0) + 1);
+  const pages = [...counts].map(([sessionId, n]) => ({ sessionId, pages: n }));
+  pagesCache.set(home, { key, pages });
+  return pages;
+}
+
 /**
  * The day's News for `home`: {@link buildNews} over `alerts.jsonl` and the `report` lines of `routines.jsonl` (each
- * parsed again only when its size or mtime moved) and every `desk-fetch` event of the current `events.jsonl`.
+ * parsed again only when its size or mtime moved) and the pages each session opened, counted from the `desk-fetch`
+ * events of the current `events.jsonl` (counted again only when its size or mtime moved).
  * @param deps - `home`, the harness home; `watch`, the watch's status while it runs; `now` (default `Date.now`).
  * @returns rejects when a ledger exists but cannot be read; an absent one is empty.
  */
 export async function deskNews(deps: { home: string; watch?: () => WatchStatus | undefined; now?: () => number }): Promise<DeskNews> {
   const records = await readCached(newsCache, deps.home, ALERTS_FILE, isNewsRecord);
   const reports = await readCached(reportCache, deps.home, ROUTINES_LEDGER, isReportLine);
-  const { events } = await readEvents(deps.home);
-  const fetches: { sessionId: string }[] = [];
-  for (const e of events) if (e.kind === "desk-fetch") fetches.push({ sessionId: e.sessionId });
+  const fetches = await pagesCached(deps.home);
   const watch = deps.watch?.();
   return buildNews({ records, fetches, ...(watch === undefined ? {} : { watch }), reports, now: (deps.now ?? Date.now)() });
 }
