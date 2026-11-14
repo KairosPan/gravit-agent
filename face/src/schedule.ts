@@ -49,7 +49,7 @@
  */
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { briefProducer } from "./brief.ts";
+import { briefProducer, type BriefDeps } from "./brief.ts";
 import {
   appendEvent, appendRecord, appendRecordOnce, ASLEEP_THRESHOLD_MS, deskDir, FIRINGS_FILE, noteBudgetSpent, readBudget, readEvents, readOffState, readRecords,
   type BudgetState,
@@ -1204,16 +1204,17 @@ const hasRoutes = (ctx: Partial<FiringRouteCtx>): ctx is FiringRouteCtx => ctx.a
  * schedule's clock, and `brief`, src/brief.ts `briefProducer`.
  * @param opts - `quotes` the source, src/market-quotes.ts `unwiredMarketQuotes()` when there is none - then each
  *   builtin answers `quotes unavailable: <its reason>`, asking nothing; `root` the repository root; `home` the harness
- *   home the brief's watch blocks read; `now` the schedule's clock.
+ *   home the brief's watch blocks read; `memory` the brief's reader of the memory (src/memory-brief.ts), none when
+ *   absent - then the brief has no `memory` key; `now` the schedule's clock.
  * @param seams - builtins that replace those of the same name, and only those.
  */
 export function deskBuiltins(
-  opts: { quotes?: MarketQuoteSource; root: string; home: string; now: () => number },
+  opts: { quotes?: MarketQuoteSource; root: string; home: string; memory?: BriefDeps["memory"]; now: () => number },
   seams: Partial<Record<BuiltinName, BuiltinProducer>> = {},
 ): Record<BuiltinName, BuiltinProducer> {
   const quotes = opts.quotes ?? unwiredMarketQuotes();
   const builtins: Record<BuiltinName, BuiltinProducer> = {
-    brief: briefProducer({ quotes, root: opts.root, home: opts.home }),
+    brief: briefProducer({ quotes, root: opts.root, home: opts.home, ...(opts.memory === undefined ? {} : { memory: opts.memory }) }),
     report: reportProducer({ quotes, root: opts.root, now: opts.now }),
   };
   for (const name of Object.keys(builtins) as BuiltinName[]) {
@@ -1241,7 +1242,8 @@ const FACE_CLOCK: DeskClock = {
  * (`calendar`), either market's (`calendars`, over it), the script producer's runner, any of the builtins by name, the
  * tick and the grace.
  * @param opts - `home` the harness home; `root` the repository root; `python` the interpreter a `.py` script producer runs
- *   under; `quotes` the desk's quote source, the Market's reads (src/market-quotes.ts); `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
+ *   under; `quotes` the desk's quote source, the Market's reads (src/market-quotes.ts); `memory` the brief's reader of
+ *   the memory ({@link deskBuiltins}); `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
  *   `agentDefaultModel` and `llm` a firing's route needs - a firing on a context without them could not run; `on` the
  *   root bus; `deliver` the desk conversation's; `note`, what a firing sent noted in Gravit's one conversation; `log`, stderr by default; `now`, the owner's clock - the wall clock
  *   by default - under the face's timers; `seams`, for tests.
@@ -1251,6 +1253,7 @@ export function createDeskSchedule(opts: {
   root: string;
   python: string;
   quotes?: MarketQuoteSource;
+  memory?: BriefDeps["memory"];
   session: DeskSessionDeps;
   sessionCtx: Partial<FiringRouteCtx>;
   on: SessionEventsOn;
@@ -1276,7 +1279,11 @@ export function createDeskSchedule(opts: {
     calendar: calendars.us,
     calendars,
     runScript,
-    builtins: deskBuiltins({ ...(opts.quotes === undefined ? {} : { quotes: opts.quotes }), root: opts.root, home: opts.home, now: () => clock.now() }, seams.builtins),
+    builtins: deskBuiltins({
+      ...(opts.quotes === undefined ? {} : { quotes: opts.quotes }),
+      ...(opts.memory === undefined ? {} : { memory: opts.memory }),
+      root: opts.root, home: opts.home, now: () => clock.now(),
+    }, seams.builtins),
     createAgent: (o) => createDeskAgent(opts.session, o),
     resolveRoute: async (raw) => {
       if (!hasRoutes(sessionCtx)) throw new Error("this face's context names no default model to route a standing order on");

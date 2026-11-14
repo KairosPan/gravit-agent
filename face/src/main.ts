@@ -31,6 +31,7 @@ import { registerMarketProxy } from "./market-proxy.ts";
 import { composedMarketRow } from "./market-row.ts";
 import { composedMemoryRow } from "./memory-row.ts";
 import { memoryOpener } from "./memory.ts";
+import { readBriefMemory } from "./memory-brief.ts";
 import { installMemoryClock, memoryClockEnabled, type MemoryClock } from "./memory-clock.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
@@ -512,6 +513,7 @@ desk = installDesk(booted.ctx.webServer, {
   enabled: deskEnabled,
   ctx: booted.ctx,
   quotes,
+  memory: () => readBriefMemory(openMemory),
   root: process.cwd(),
   route: deskRoute,
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,

@@ -86,6 +86,7 @@ import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskFetch
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
+import type { BriefMemory } from "./memory-brief.ts";
 import { readThroughLane } from "./readthrough-lane.ts";
 import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts";
 import type { StandingStatus } from "./standing.ts";
@@ -1869,7 +1870,9 @@ async function readAlertsCached(home: string): Promise<{ records: (RailAlert | R
  *   always the ledger's; `ctx`, the booted ROOT context, and `quotes`, the Market's quote source main.ts owns
  *   (src/market-quotes.ts), the tools' and the brief's -
  *   which the desk tools need both of - the guard needs `ctx`, and judges below `root`; the read-through lane the
- *   annotator and the watch share reads `ctx`'s `readThrough` service;
+ *   annotator and the watch share reads `ctx`'s `readThrough` service; `memory`, the pre-close brief's reader of
+ *   the memory (src/memory-brief.ts `readBriefMemory` over main.ts's opener), handed to the clock row's brief - the
+ *   brief has no `memory` key without it;
  *   `root`, the repository whose `desk/journal/` the desk session runs in, `route`, its model route
  *   (src/desk-session.ts `resolveDeskRoute`), `sessionCtx`, the booted ROOT context as the
  *   conversation reads it - and its default model and model calls, which a standing order's route
@@ -1908,6 +1911,7 @@ export function installDesk(
     watch?: Partial<Omit<AsleepWatchOptions, "append">>;
     ctx?: DeskGuardCtxLike & { get?(key: string): unknown };
     quotes?: MarketQuoteSource;
+    memory?: () => Promise<BriefMemory>;
     root?: string;
     route?: { provider: string; model: string };
     sessionCtx?: DeskConversationCtxLike & Partial<FiringRouteCtx>;
@@ -2092,6 +2096,7 @@ export function installDesk(
         root: wiring.root,
         python: deps.python ?? (process.env.FACE_PYTHON || "python3"),
         quotes: deps.quotes,
+        ...(deps.memory === undefined ? {} : { memory: deps.memory }),
         session: wiring.session,
         sessionCtx: wiring.sessionCtx,
         on: wiring.on,
