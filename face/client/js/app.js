@@ -476,7 +476,7 @@ export function boot(win, host = {}) {
   const jobs = host.jobs ?? startJobs({ store, mux: live.mux, call, timers, onOutput: () => writeOutput() });
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), activate: id => live.activate(id) });
   // the lessons a seat card draws, asked once per call id after a render; a red line's override, posted before its approval
-  const memoryGate = startMemoryGate({ store, getJson, postJson });
+  const memoryGate = startMemoryGate({ store, getJson, postJson, now });
   const overriding = new Set();
   // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
   // followed on the stream its line is on; the stars in this browser's storage
