@@ -281,7 +281,12 @@ late answers (`api.test.ts`, `client-mux-smoke`); D13 the client's answer vocabu
 (`smoke.test.ts`); D16 sandbox escalations as the other card producer, refusals inside tool
 content (`bot-sandbox-smoke`, `mapper.test.ts`); D17 the `read-only` pin inside `setup` before
 `session/created` (`room-smoke`, `room-engine`); D18 approval events in the catalog, questions
-as plain tool pairs (`room-engine.test.ts`).
+as plain tool pairs (`room-engine.test.ts`); and, unnumbered, the memory's owner-name fence, a
+plain listener prepended to the root's `tools/pre-execute` inside `prepare` beside D3 and refusing
+mid-boot until `main.ts` binds it (`order-gate-midboot-smoke`, `memory-guard.test.ts`,
+`memory-smoke`): its deny stands only while every listener a row prepends later hands `next()`'s
+decision back, as the room's member guard, the desk's guard, dsh-tool-jobs's and Gate 2's ask
+listener do today, so re-read each `tools/pre-execute` listener in the composed tree at every pin.
 
 **E · sessions and the wire.** E1 the unary envelope and its refusals (`api.test.ts`,
 `smoke.test.ts`); E2 every Remote method the page calls and its argument shape

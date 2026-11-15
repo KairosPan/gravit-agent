@@ -177,8 +177,9 @@ export async function openFaceMemory(
  *  (src/memory-row.ts), typed here by its shape alone: a disabled row, or no such row, is the
  *  disabled standing - or, on a scratch harness home naming no memory home, where the builder
  *  composed no row, "no home named" ({@link namedMemoryHome}); otherwise the row's install and home
- *  are opened. Built once by main.ts and handed to the reconcile clock and the brief, so both
- *  follow the row an operator patch may have re-pointed or disabled, not the environment. */
+ *  are opened. Built once by main.ts and handed to the owner-name fence (bound through
+ *  `BootedFace.bindMemoryFence`, src/memory-guard.ts), the reconcile clock and the brief, so all
+ *  three follow the row an operator patch may have re-pointed or disabled, not the environment. */
 export function memoryOpener(
   row: { disabled: true } | { disabled: false; dir: string; home: string } | undefined,
   env: NodeJS.ProcessEnv = process.env,
