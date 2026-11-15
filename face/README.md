@@ -943,8 +943,9 @@ for any other — a fault is said by its code, never by its message, which stays
 Gravit's one conversation, in a turn the operator's own message opened: the calling session is the
 conversation's held session and its turn is the operator's, both read when the call arrives.
 `main.ts` installs one listener in front of the root's `tools/pre-execute`, always — the router on or
-off, the memory connected or not — before the router and removed after the conversation is
-disposed. Out of that place it refuses four calls: a `memory_record` whose `whose` is `owner`, a
+off, the memory connected or not — as soon as the memory's opener is built, in the same synchronous
+stretch as the boot's return, so no session runs a tool before it; it is removed after the
+conversation is disposed. Out of that place it refuses four calls: a `memory_record` whose `whose` is `owner`, a
 `memory_amend` review whose `whose` is `owner`, and a `memory_amend` void or close of a decision the
 memory holds as the owner's. For a void or a close it reads the target's `whose` from the memory, the
 newest 200 decisions a page, at most 25 pages within 10 s; a target it cannot read — a read that

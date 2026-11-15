@@ -290,8 +290,19 @@ const marketProxy = registerMarketProxy(booted.ctx.webServer, marketRow === unde
 disposeMarketProxy = marketProxy.dispose;
 /* The memory as the tree composed its `mcp-memory` row (src/memory-row.ts): an operator patch may have re-pointed its
  * install or its home, or disabled it, and the face's own reads follow the row, not the environment. Built once, for
- * the reconcile clock below and the brief. */
+ * the owner-name fence right after it, the reconcile clock below and the brief. */
 const openMemory = memoryOpener(seatLoader === undefined ? undefined : composedMemoryRow(seatLoader.entries()));
+/* The memory's owner-name fence (src/memory-guard.ts): a decision in the owner's name is written only from the
+ * conversation, in a turn the operator's own message opened. It goes on at the first point its parts exist, in the
+ * same synchronous stretch as the boot's return (no `await` between them), so no session runs a tool without it; the
+ * router on or off and the memory connected or not. It reads the conversation when each call arrives, so with no
+ * conversation nothing qualifies. Both exits remove it after the conversation is disposed. */
+memoryGuard = installMemoryGuard({
+  ctx: booted.ctx as unknown as MemoryGuardCtxLike,
+  conversation: () => conversation,
+  open: openMemory,
+  log: (line) => { console.error(`${BIN}: ${line}`); },
+});
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here
@@ -533,17 +544,6 @@ desk = installDesk(booted.ctx.webServer, {
   watchRow: {},
 });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
-/* The memory's owner-name fence (src/memory-guard.ts): a decision in the owner's name is written only from the
- * conversation, in a turn the operator's own message opened. It goes on before the router, router on or off and the
- * memory connected or not, so neither the conversation nor any worker of it runs without it; it reads the
- * conversation when each call arrives, so with no conversation nothing qualifies. Both exits remove it after the
- * conversation is disposed. */
-memoryGuard = installMemoryGuard({
-  ctx: booted.ctx as unknown as MemoryGuardCtxLike,
-  conversation: () => conversation,
-  open: openMemory,
-  log: (line) => { console.error(`${BIN}: ${line}`); },
-});
 /* The memory's reconcile clock (src/memory-clock.ts), beside the desk: two minutes from now and every eight hours, as
  * `gravit-face`, each run one line on the face's stderr; it never holds up or fails anything. */
 if (memoryClockEnabled()) {
