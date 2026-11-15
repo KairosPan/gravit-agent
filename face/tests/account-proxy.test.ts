@@ -1447,3 +1447,15 @@ test("a disabled mcp-account row answers the identity routes 503 disabled", asyn
   }
   assert.equal(fetched.length, 0, "a disabled seat row asks nothing");
 });
+
+test("positions and market in process: the routes' own reads, through the same caches", async () => {
+  const positions = '{"ok":true,"positions":[{"symbol":"NVDA","side":"long","qty":5}]}';
+  const market = '{"ok":true,"market":{"kind":"stock"}}';
+  const { routes, fetched, proxy } = proxyWith(async (url) => ok(new URL(url).pathname.endsWith("/positions") ? positions : market));
+  assert.deepEqual(await proxy.positions("venue=paper-1"), { status: 200, body: positions });
+  assert.deepEqual(await proxy.market("venue=paper-1&symbol=NVDA"), { status: 200, body: market });
+  assert.deepEqual(fetched, [`${URL_}/api/account/positions?venue=paper-1`, `${URL_}/api/account/market?venue=paper-1&symbol=NVDA`]);
+  assert.equal((await call(routes, "/data/account/positions?venue=paper-1")).body, positions);
+  assert.equal((await call(routes, "/data/account/market?venue=paper-1&symbol=NVDA")).body, market);
+  assert.equal(fetched.length, 2, "each route is served the in-process read's kept answer: one cache");
+});
