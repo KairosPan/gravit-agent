@@ -16,7 +16,9 @@
     "render:roles": "tsx scripts/render-roles.ts",
     "service": "tsx scripts/service.ts",
     "watchdog": "tsx scripts/watchdog.ts",
-    "desk": "tsx scripts/desk.ts"
+    "desk": "tsx scripts/desk.ts",
+    "dev:ui": "npm run dev --prefix ui",
+    "check:ui": "npm run check --prefix ui"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.5",
