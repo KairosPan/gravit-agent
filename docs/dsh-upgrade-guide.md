@@ -613,7 +613,8 @@ The next upgrade's breaks live here; none is the face's yet (the upgrade spec's 
   `gravit.js`'s `canCall`) re-checks against it.
 - **Native and PTC execution split into agent-scoped plugins** (`tools.mode`,
   `DSH_TOOLS_MODE`): Gate 2's `tools/pre-execute` listener and guard (D1–D3 of §3.2), the desk
-  guard and the never-list's `run_code` entry re-check against the split.
+  guard, the memory's owner-name fence (`face/src/memory-guard.ts`, which reads the calling
+  agent's id) and the never-list's `run_code` entry re-check against the split.
 - **`@deepseek-ai/dsh-official-bundles`** replacing app-boot's lists: the boot mirror (A9), the
   install anchor and the policy layer's row ids move with it.
 - **Retained session-projection handles**: the room projection (E16) and the client's
