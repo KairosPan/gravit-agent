@@ -310,14 +310,38 @@ function toolMessages(view, calls) {
   return lift ? [row, { ...base(view), from: 'gravit', ...lift }] : [row];
 }
 
+// a staged card rides on the reason only, after the line a person reads: `<<<staged {…}>>>`. displayReason has no fence.
+const STAGED_FENCE = /\n<<<staged (\{.*\})>>>$/s;
+function stagedOf(reason) {
+  if (typeof reason !== 'string') return { line: '', staged: null };
+  const m = STAGED_FENCE.exec(reason);
+  if (!m) return { line: reason, staged: null };
+  try {
+    const staged = JSON.parse(m[1]);
+    return { line: reason.slice(0, m.index), staged: staged && typeof staged === 'object' ? staged : null };
+  } catch {
+    return { line: reason, staged: null };
+  }
+}
+
 function gate(view, now) {
-  const data = { eventId: view.id, sessionId: view.sessionId, toolName: view.toolName, callId: view.callId, reason: view.reason, displayReason: view.displayReason };
-  const line = view.displayReason ?? view.reason ?? '';
+  const split = stagedOf(view.reason);
+  const staged = split.staged;
+  const order = staged && staged.order && typeof staged.order === 'object' ? staged.order : undefined;
+  const data = {
+    eventId: view.id, sessionId: view.sessionId, toolName: view.toolName, callId: view.callId,
+    reason: split.line, displayReason: view.displayReason,
+    ...(typeof staged?.id === 'string' ? { id: staged.id, hash: typeof staged.hash === 'string' ? staged.hash : '' } : {}),
+    ...(typeof staged?.expiresAt === 'string' ? { expiresAt: staged.expiresAt } : {}),
+    ...(typeof staged?.createdAt === 'string' ? { createdAt: staged.createdAt } : {}),
+    ...(order ? { order } : {}),
+  };
+  const line = view.displayReason ?? split.line;
   // anything not the seat's — an old session's alpaca-kit order included — is the plain approval card: its name and reason
   if (!isSeatGate(view.toolName)) return { id: view.id, at: now, from: 'gravit', kind: 'approval', text: line, data };
   // the title is made from the host's own reason line and nothing else (reasonArgs): never from a tool/call frame, which may
   // reach the page after the gate or come later under the same id; a line that names another tool, or no pair, titles nothing
-  const read = reasonArgs(view.reason ?? view.displayReason);
+  const read = reasonArgs(split.line || view.displayReason);
   const args = read.tool === view.toolName && Object.keys(read.args).length > 0 ? read.args : null;
   // a seat card: the seat line, and the line's venue as the chip — a batch's venues, or the seat itself when the tool names none
   const venue = args && typeof args.venue === 'string' && args.venue !== '' ? args.venue : (venuesOf(args?.legs) || t('thread.seat.venue'));

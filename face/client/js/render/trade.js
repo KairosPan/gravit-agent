@@ -218,7 +218,9 @@ function ticketPanel(state, now) {
     : '';
   const kept = s?.status === 'refused' ? sayOf(s.message) : s?.status === 'done' ? sayOf(s.said) : s?.status === 'signing' ? t('trade.placing') : '';
   const again = s?.status === 'refused' && s.again ? `<div class="btn-row"><button type="button" class="btn-sm" data-action="sheetAgain">${th('sheet.quote.again')}</button></div>` : '';
-  const go = `<button${attrs({ type: 'submit', class: 'btn-primary tk-go', disabled: !live })}>${esc(goWord('order'))}</button>`;
+  const go = s?.status === 'lapsed'
+    ? `<button type="button" class="btn-primary tk-go" data-action="sheetAgain">${esc(t('sheet.signAgain'))}</button>`
+    : `<button${attrs({ type: 'submit', class: 'btn-primary tk-go', disabled: !live })}>${esc(goWord('order'))}</button>`;
   return `${head}<form class="tk-form" data-action="placeOrder" novalidate autocomplete="off">${pickedHtml}${outs}${whereHtml(tk, venue)}` +
     `<div class="tk-stack">${sideHtml}${amount}${order}${extended}${quoteBox(s, leg?.venueName || leg?.venue, stale)}${left ? `<p class="tk-left">${esc(left)}</p>` : ''}${signs}` +
     `${kept ? `<p class="tk-msg" role="status">${esc(kept)}</p>` : ''}${again}${go}</div>${hand}</form>`;

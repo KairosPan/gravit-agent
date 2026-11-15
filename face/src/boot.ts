@@ -133,6 +133,7 @@ import { installSourceReader, SOURCE_READER_ROLE } from "./source-reader.ts";
 import { readProtocols } from "./protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { accountSeatPatches } from "./account-seat.ts";
+import { isLiveOrderTool, reasonWithStaged, type StagedPayload } from "./order-stage.ts";
 import { marketRowPatches } from "./market-row.ts";
 import { lunhuiPatches } from "./lunhui.ts";
 import { analogPatches } from "./analog.ts";
@@ -273,6 +274,8 @@ export interface FaceBootOptions {
    * it only with the desk on (plan B1a ruling 10), to send the phone a card notice in words only
    * (src/card-notice.ts); unset, nothing is told. */
   onCardAsked?: (name: string, args: unknown) => void;
+  /** Stage a live order's signable card before Gate 2 asks. Unset, the ask is the old card. */
+  stageOrder?: (name: string, args: unknown) => Promise<StagedPayload | undefined>;
 }
 
 /** What {@link bootFace} hands back. */
@@ -798,11 +801,19 @@ interface GateEventsLike {
  * CARD NOTICE. When the decision is `ask` - a card is about to be raised - the listener tells
  * `onCardAsked` the name and arguments, without awaiting it, before it hands the decision back; a
  * throw is one line and the card is asked the same. Nothing else - a denial, a read, `next()` - is told.
+ * STAGED CARD. `stageOrder`, when set, is awaited before the ask. What it returns is fenced onto
+ * `reason` only (`reasonWithStaged`); `displayReason` stays the line a person reads. A timeout, a
+ * refusal or a throw asks with no fence, which is the old card.
  * @param hostCtx - the root context `boot()` hands `prepare`.
  * @param onCardAsked - {@link FaceBootOptions.onCardAsked}, if any.
+ * @param stageOrder - stage a live order's signable card before the ask, or return nothing.
  * @returns the two fibers, for {@link assertOrderGateArmed} once `boot()` settles.
  */
-export function armOrderGate(hostCtx: Context, onCardAsked?: (name: string, args: unknown) => void): OrderGateFibers {
+export function armOrderGate(
+  hostCtx: Context,
+  onCardAsked?: (name: string, args: unknown) => void,
+  stageOrder?: (name: string, args: unknown) => Promise<StagedPayload | undefined>,
+): OrderGateFibers {
   const listener = hostCtx.inject(["approval"], function orderGateAskListener(gateCtx) {
     const approval = gateCtx.get("approval") as GateApprovalLike | undefined;
     /* The inject guarantees it (a fiber runs only for the epoch its services
@@ -838,6 +849,10 @@ export function armOrderGate(hostCtx: Context, onCardAsked?: (name: string, args
         } catch (err) {
           console.error(`${BIN}: a card notice failed: ${err instanceof Error ? err.message : String(err)}`);
         }
+      }
+      if (decision?.kind === "ask" && stageOrder !== undefined && isLiveOrderTool(exec.name)) {
+        const staged = await stageOrder(exec.name, exec.arguments).catch(() => undefined);
+        if (staged) return { ...decision, reason: reasonWithStaged(decision.reason ?? "", staged) };
       }
       return decision ?? next();
     }, { prepend: true });
@@ -989,7 +1004,7 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
        * each will the moment its service does, instead of once boot() has
        * settled, by which time a slow row may have let unary `/api` drive a
        * turn into a live order tool with nothing listening. */
-      gate = armOrderGate(hostCtx, opts.onCardAsked);
+      gate = armOrderGate(hostCtx, opts.onCardAsked, opts.stageOrder);
     });
     app.current = ctx;
     await assertEntriesActive(ctx);

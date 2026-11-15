@@ -62,6 +62,7 @@ import { HOST_NAME } from './wire/speaker.js';
 import { startAttachments } from './host/attachments.js';
 import { startComposerReads } from './host/composer.js';
 import { startOwner, postVia } from './host/owner.js';
+import { refusedAt, whyOf } from './host/owner-view.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
 import { startIdentity } from './host/identity.js';
 import { identityOf, routingOf, SPOKEN } from './host/identity-view.js';
@@ -282,6 +283,9 @@ export function boot(win, host = {}) {
     // a quote for the ticket's line re-prepares it once the market moved; a fill is said on Trade
     if (ev.type === 'quote' || ev.type === 'fill') trade.onStreamEvent(ev);
     if (ev.type === 'card' && ev.data?.waits === undefined) void seat.load({ fresh: true });
+    if (ev.type === 'card' && typeof ev.data?.id === 'string' && (ev.data.outcome === 'approved' || ev.data.outcome === 'rejected')) {
+      store.dispatch('hostCardSettled', { id: ev.data.id, outcome: ev.data.outcome });
+    }
   }, status => {
     if ((status === 'open') === streamWasOpen) return;
     streamWasOpen = status === 'open';
@@ -470,6 +474,49 @@ export function boot(win, host = {}) {
   let outEpoch = -1; // the words' epoch the open job's pre was last written under
   const jobs = host.jobs ?? startJobs({ store, mux: live.mux, call, timers, onOutput: () => writeOutput() });
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), activate: id => live.activate(id) });
+  // a staged card is one record: Approve signs it and then answers allowed-once; Decline closes it and answers rejected.
+  // A page that does not sign, or a card with no hash, answers the gate alone — the old flow, and Account → Cards still signs.
+  async function postOrder(path, body) {
+    try {
+      const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const parsed = await r.json().catch(() => ({}));
+      return { status: r.status, body: parsed && typeof parsed === 'object' ? parsed : {} };
+    } catch {
+      return { status: 0, body: {} };
+    }
+  }
+  async function signStaged(card, hash) {
+    const prep = await owner.prepare({ type: 'approveCard', card, action: hash, decision: 'approve' });
+    if (refusedAt(prep) || !prep.body?.action || !Array.isArray(prep.body?.shown)) {
+      store.dispatch('hostStatus', { line: whyOf(prep) || said('owner.refused'), bad: true });
+      return false;
+    }
+    const sent = await owner.submit(prep.body);
+    if (!(sent?.status >= 200 && sent.status < 300 && !refusedAt(sent))) {
+      store.dispatch('hostStatus', { line: whyOf(sent) || said('owner.refused'), bad: true });
+      return false;
+    }
+    return true;
+  }
+  async function answerStaged(el) {
+    const value = el.dataset.value;
+    const card = el.dataset.card;
+    if (value === 'allowed-once' && el.dataset.sign === '1') {
+      if (!(await signStaged(card, el.dataset.hash))) return;
+    }
+    if (value === 'rejected' && card) await postOrder('/data/orders/drop', { id: card });
+    await actions.answer(el.dataset.msg, value);
+  }
+  async function restageCard(card, msg) {
+    const r = await postOrder('/data/orders/restage', { id: card });
+    const body = r.body ?? {};
+    if (!(r.status >= 200 && r.status < 300) || body.ok === false || typeof body.id !== 'string') {
+      const refusal = body.refusal && typeof body.refusal === 'object' ? body.refusal.message : body.error;
+      store.dispatch('hostStatus', { line: refusal || said('owner.refused'), bad: true });
+      return;
+    }
+    store.dispatch('hostStaged', { eventId: msg, id: body.id, hash: body.hash, expiresAt: body.expiresAt, createdAt: body.createdAt, order: body.order });
+  }
   // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
   // followed on the stream its line is on; the stars in this browser's storage
   const markets = startMarkets({ store, storage, getJson, win, now, stream, marketStream, schedule, cancelTimer, owner, afterAction });
@@ -1693,7 +1740,8 @@ export function boot(win, host = {}) {
     cancelConfirm: () => store.dispatch('cancelConfirm'),
     suggest: el => putWords(el.dataset.text),
     // the gates: a card's ✗ / ✓, a question card's Answer
-    answer: el => { void actions.answer(el.dataset.msg, el.dataset.value); },
+    answer: el => { void answerStaged(el); },
+    restageCard: el => { void restageCard(el.dataset.card, el.dataset.msg); },
     // the batch is read from the pressed card alone; one with a question left blank is refused before it can settle the gate
     answerQuestion: el => {
       const conv = store.get().conversations.find(c => c.id === el.dataset.conv);

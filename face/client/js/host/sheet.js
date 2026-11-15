@@ -56,7 +56,7 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
     tickTimer = null;
     const s = current();
     if (!s || s.deadline === null) return;
-    if (s.deadline - now() <= 0) { prepareNow(); return; }
+    if (s.deadline - now() <= 0) { store.dispatch('sheetLapsed'); return; }
     store.dispatch('sheetTick');
     tickTimer = schedule(tick, TICK_MS);
   }

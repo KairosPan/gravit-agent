@@ -208,7 +208,10 @@ export function renderSheet(state, now) {
   // and an earn's (what it is worth, its yield and lock, where it lands taken out: plan 4b Task 3)
   const says = s.status === 'ready' || s.status === 'signing' ? [...moveSaysOf(s), ...earnSaysOf(s)].map(l => `<p class="sheet-hint">${esc(l)}</p>`).join('') : '';
   const routes = r ? `<p class="sheet-hint sheet-routes">${r.chosen ? `<b>${esc(r.lead)}</b>` : esc(r.lead)}${r.others ? `<br>${esc(r.others)}` : ''}</p>` : '';
-  const keys = `<div class="btn-row">${key('sheetClose', t('common.cancel'))}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed, s.fields))}</button></div>`;
+  const go = s.status === 'lapsed'
+    ? `<button type="button" class="btn-primary" data-action="sheetAgain">${esc(t('sheet.signAgain'))}</button>`
+    : `<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed, s.fields))}</button>`;
+  const keys = `<div class="btn-row">${key('sheetClose', t('common.cancel'))}${go}</div>`;
   // a granting sheet's line under its title: the ask in the Account's words (plan 4b Task 6)
   const askedWords = sayOf(s.seed?.askedWords);
   const asked = askedWords ? `<p class="sheet-hint">${esc(askedWords)}</p>` : '';

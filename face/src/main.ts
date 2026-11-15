@@ -52,6 +52,7 @@ import { hasExec, lunhuiMounted, panelDeps, readAgentsMeta, registerPanelRoutes 
 import { installRoom, placeOf, registerRoomRoutes, type RoomContextLike } from "./room.ts";
 import { ensureRoster } from "./roster.ts";
 import { registerRosterRoutes } from "./roster-routes.ts";
+import { registerOrderStageRoutes, stageLiveOrder, STAGE_DEADLINE_MS } from "./order-stage.ts";
 
 /** Diagnostic label, the same string boot.ts uses for `BIN`. Not imported
  * because boot.ts does not export it, and it is a label rather than a contract:
@@ -198,6 +199,8 @@ let booted: BootedFace;
  * scratch home (FACE_DESK=0) never does. The notice is words only (src/card-notice.ts): no button, no link. */
 const deskEnabled = process.env.FACE_DESK !== "0";
 let cardPhone: PhoneClient | undefined;
+/** The Account the gate stages orders on. Reassigned once the composed seat row is known, before the gateway admits a client. */
+let accountBase = seatUrl();
 try {
   /* `deferReady`: the gateway admits no `/api/remote.mux` stream until this
    * entry calls `booted.commitReady()` - LAST, after every route below is
@@ -210,6 +213,11 @@ try {
     port,
     deferReady: true,
     ...(deskEnabled ? { onCardAsked: (name: string, args: unknown) => announceCard(cardPhone, name, args) } : {}),
+    stageOrder: (_name, args) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), STAGE_DEADLINE_MS);
+      return stageLiveOrder(accountBase, args, controller.signal).finally(() => clearTimeout(timer));
+    },
   });
 } catch (err) {
   if (err instanceof StartupError) {
@@ -258,6 +266,8 @@ disposeData = () => { disposeView(); disposeAnalogView(); };
  * key or a home. */
 const seatLoader = booted.ctx.get("loader") as { entries(): Iterable<SeatEntryLike> } | undefined;
 const seatRow = seatLoader === undefined ? undefined : composedSeatRow(seatLoader.entries());
+if (seatRow && !seatRow.disabled) accountBase = seatRow.url;
+registerOrderStageRoutes(booted.ctx.webServer, () => accountBase);
 const proxy = registerAccountProxy(booted.ctx.webServer, seatRow === undefined ? {} : seatRow.disabled ? { disabled: true } : { url: seatRow.url });
 disposeProxy = proxy.dispose;
 registerSeatRoute(

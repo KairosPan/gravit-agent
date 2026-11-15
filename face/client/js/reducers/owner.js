@@ -67,6 +67,8 @@ export const reducers = {
   sheetRefused: (s, { message, again } = {}) => sheet(s, {
     status: 'refused', ...UNPREPARED, message: isLine(message) ? message : said('owner.refused'), again: again === true,
   }),
+  // the signature window lapsed: nothing is prepared again until Sign again
+  sheetLapsed: s => sheet(s, { status: 'lapsed' }),
   sheetSigning: s => sheet(s, { status: 'signing' }),
   sheetDone: (s, { said: words } = {}) => sheet(s, { status: 'done', deadline: null, said: isLine(words, { empty: true }) ? words : '' }),
   // the countdown's second: a new state, so subscribers draw the words from deadline − now

@@ -1127,6 +1127,7 @@ export const ZH = Object.freeze({
   'sheet.quote.fillIn': '填写后即可看到结果。',
   'sheet.quote.asking': '正在询问…',
   'sheet.quote.again': '重新准备',
+  'sheet.signAgain': '重新签名',
   'sheet.whatYouSign': '你签署的内容',
   'sheet.connect.use': '使用 {wallet}',
   'sheet.connect.openPage': '打开 {who} 的登录页面',
