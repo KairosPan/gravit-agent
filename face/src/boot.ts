@@ -6,7 +6,7 @@
  * the 0.2.0-rc.2 source; the chunk is byte-for-byte that logic). Re-diffed at
  * 0.2.1-rc.5 (the chunk was `profile-boot-BZ2ZjNWi.js` at 0.2.0-rc.2):
  * `runProfile`, `composeProfile` and `createAppReady` are unchanged and the
- * first ten divergences below stand (the eleventh is a later one of the face's own). The CLI now also publishes them as
+ * first ten divergences below stand (the eleventh and twelfth are later ones of the face's own). The CLI now also publishes them as
  * `@deepseek-ai/dsh/profile-boot`, a reading aid and NOT a dependency: taking
  * `runProfile` would bring `profileContext`, its own signal and fail-loud
  * handlers, an `appReady` committed before Gate 2 exists, and the whole CLI
@@ -93,6 +93,14 @@
  *    in the owner's name and every amendment of a decision is refused. Like
  *    Gate 2's listener it is in front of nothing a later row prepends, and its
  *    deny stands only while every outer listener hands `next()`'s decision back.
+ * 12. Gate 2 reads the memory gate (src/memory-gate.ts) through parts bound
+ *    after the boot ({@link BootedFace.bindOrderRecall}), read at each call.
+ *    On a call it is about to ask, the ask listener awaits the memory's check
+ *    inside its own `try`, bounded at {@link ORDER_RECALL_MS}, and hands its
+ *    note to `onCardAsked`; the decision is the one it made before the check.
+ *    The guard, after the grant check and only for a granted order call,
+ *    refuses a red-lined call with no override on record. Unbound, or on any
+ *    fault in the memory's code, Gate 2 behaves as it does without a memory.
  * The telemetry opt-out is honored exactly as the CLI honors it.
  *
  * LAYERING, and the one place the face inverts the CLI's: {@link faceOverlay}
@@ -148,6 +156,7 @@ import { marketRowPatches } from "./market-row.ts";
 import { memoryRowPatches } from "./memory-row.ts";
 import { MEMORY_NO_HOME_NOTICE } from "./memory.ts";
 import { installMemoryGuard, type MemoryGuardCtxLike, type MemoryGuardDeps } from "./memory-guard.ts";
+import type { GateNote, MemoryGate } from "./memory-gate.ts";
 import { lunhuiPatches } from "./lunhui.ts";
 import { analogPatches } from "./analog.ts";
 import { readThroughPatches } from "./readthrough.ts";
@@ -286,8 +295,9 @@ export interface FaceBootOptions {
    * arguments, never for a call it denies or a tool it is not about ({@link armOrderGate}). Called
    * and never awaited: the card is asked whatever it does, and a throw is one line. `main.ts` sets
    * it only with the desk on (plan B1a ruling 10), to send the phone a card notice in words only
-   * (src/card-notice.ts); unset, nothing is told. */
-  onCardAsked?: (name: string, args: unknown) => void;
+   * (src/card-notice.ts); unset, nothing is told. Its third argument is the memory's note on the call, when the
+   * memory gate is bound and its check answered one in time ({@link BootedFace.bindOrderRecall}). */
+  onCardAsked?: (name: string, args: unknown, note?: GateNote) => void;
 }
 
 /** What {@link bootFace} hands back. */
@@ -316,6 +326,10 @@ export interface BootedFace {
    * owner through. `main.ts` binds it once its memory opener exists; a later bind replaces both parts. The
    * fence itself leaves with the tree. */
   bindMemoryFence(parts: MemoryFenceParts): void;
+  /** Bind the memory gate's parts Gate 2 reads (divergence 12): the check its ask listener awaits before a card
+   * and the red line its guard refuses a granted call on. Unbound, Gate 2 behaves as it does without a memory;
+   * a later bind replaces both parts. */
+  bindOrderRecall(parts: OrderRecallParts): void;
 }
 
 /** The two parts of the memory's owner-name fence that exist only after the boot: the conversation's handle
@@ -760,6 +774,25 @@ interface GateToolsLike {
   guard(check: (exec: { name: string; callId?: unknown; agent?: { session: unknown } }) => string | undefined): () => void;
 }
 
+/** The memory gate's two halves Gate 2 reads (src/memory-gate.ts): the check it awaits before a card is asked, and
+ * the red line its guard refuses a granted call on ({@link armOrderGate}, {@link BootedFace.bindOrderRecall}). */
+export type OrderRecallParts = Pick<MemoryGate, "check" | "redLineReason">;
+
+/** How long the ask listener waits on the memory's check before it asks without a note: the gate's own bound, over
+ * the check's three seconds (src/memory-gate.ts `GATE_CHECK_MS`). */
+export const ORDER_RECALL_MS = 4_000;
+
+/** A note as the check answers it: a lesson count and a red-line flag, or nothing to pass on. */
+const isGateNote = (v: unknown): v is GateNote =>
+  typeof v === "object" && v !== null &&
+  typeof (v as GateNote).lessons === "number" && typeof (v as GateNote).redLine === "boolean";
+
+/** The timer the ask listener bounds the check with; tests inject their own. */
+export interface OrderRecallTimers {
+  setTimer?: (run: () => void, ms: number) => unknown;
+  clearTimer?: (timer: unknown) => void;
+}
+
 /** `ctx.on`, narrowed to the one event the ask listener handles, in the face's
  * own structural terms. dsh-tools' declarations do augment cordis's event map
  * with this event, but they reach this compilation only transitively - the
@@ -769,7 +802,7 @@ interface GateEventsLike {
   on(
     name: "tools/pre-execute",
     listener: (
-      exec: { name: string; arguments?: unknown; agent?: { session: unknown } },
+      exec: { name: string; callId?: unknown; arguments?: unknown; agent?: { session: unknown; id?: unknown } },
       next: () => Promise<PreToolDecision>,
     ) => Promise<PreToolDecision>,
     options?: { prepend?: boolean },
@@ -838,11 +871,90 @@ interface GateEventsLike {
  * CARD NOTICE. When the decision is `ask` - a card is about to be raised - the listener tells
  * `onCardAsked` the name and arguments, without awaiting it, before it hands the decision back; a
  * throw is one line and the card is asked the same. Nothing else - a denial, a read, `next()` - is told.
+ * THE MEMORY'S CHECK. When the decision is `ask`, and only then, the listener first awaits the memory gate's
+ * `check` of the call (src/memory-gate.ts) - its id, name, arguments and the calling agent's session id - inside
+ * its own `try`, raced against {@link ORDER_RECALL_MS}, and hands the note it answers to `onCardAsked`. A recall
+ * unbound, a check that throws, rejects or does not settle in time is no note (a fault is one line), and the same
+ * `ask` follows: the decision is `orderApprovalDecision`'s whatever the check does. `recall` is read at each call.
+ * THE RED LINE. The guard's reason is the grant's own when there is one; for a granted order call it is then the
+ * memory gate's `redLineReason` - a red-lined call with no override on record is refused in the owner's lesson's
+ * words. A recall unbound or a read that throws passes the call as before (a throw is one line).
  * @param hostCtx - the root context `boot()` hands `prepare`.
  * @param onCardAsked - {@link FaceBootOptions.onCardAsked}, if any.
+ * @param recall - the memory gate's parts as bound now ({@link BootedFace.bindOrderRecall}), read at each call.
+ * @param timers - the timer the check is bounded with; the process's own by default.
  * @returns the two fibers, for {@link assertOrderGateArmed} once `boot()` settles.
  */
-export function armOrderGate(hostCtx: Context, onCardAsked?: (name: string, args: unknown) => void): OrderGateFibers {
+export function armOrderGate(
+  hostCtx: Context,
+  onCardAsked?: (name: string, args: unknown, note?: GateNote) => void,
+  recall?: () => OrderRecallParts | undefined,
+  timers: OrderRecallTimers = {},
+): OrderGateFibers {
+  const setTimer = timers.setTimer ?? ((run: () => void, ms: number): unknown => setTimeout(run, ms));
+  const clearTimer = timers.clearTimer ?? ((timer: unknown): void => clearTimeout(timer as ReturnType<typeof setTimeout>));
+  const fault = (what: string, err: unknown): void => {
+    try {
+      console.error(`${BIN}: ${what}: ${err instanceof Error ? err.message : String(err)}`);
+    } catch {
+      /* a fault that cannot be told costs the gate nothing */
+    }
+  };
+  /* The memory's note for a call about to be carded, or undefined. Never rejects: every fault inside is caught here,
+   * the check's own promise is always handled, and the race ends at ORDER_RECALL_MS whatever the check does. */
+  const noteFor = async (
+    exec: { name: string; callId?: unknown; arguments?: unknown; agent?: { id?: unknown } },
+  ): Promise<GateNote | undefined> => {
+    try {
+      if (recall === undefined || typeof exec.callId !== "string") return undefined;
+      const parts = recall();
+      if (parts === undefined) return undefined;
+      const sessionId = typeof exec.agent?.id === "string" ? exec.agent.id : "";
+      const checking = parts.check({ callId: exec.callId, name: exec.name, args: exec.arguments, sessionId });
+      return await new Promise<GateNote | undefined>((resolve) => {
+        let done = false;
+        let timer: unknown;
+        const settle = (note: GateNote | undefined): void => {
+          if (done) return;
+          done = true;
+          try {
+            clearTimer(timer);
+          } catch {
+            /* the timer fires into a settled race */
+          }
+          resolve(note);
+        };
+        Promise.resolve(checking).then((note) => settle(isGateNote(note) ? note : undefined), (err: unknown) => {
+          if (!done) fault("the memory's check of an order card failed", err);
+          settle(undefined);
+        });
+        try {
+          timer = setTimer(() => {
+            if (!done) fault("the memory's check of an order card", `did not settle in ${ORDER_RECALL_MS} ms`);
+            settle(undefined);
+          }, ORDER_RECALL_MS);
+        } catch (err) {
+          fault("the memory's check of an order card could not be timed", err);
+          settle(undefined);
+        }
+      });
+    } catch (err) {
+      fault("the memory's check of an order card failed", err);
+      return undefined;
+    }
+  };
+  /* The red line for a granted order call, or undefined. Never throws. */
+  const redLineFor = (callId: unknown): string | undefined => {
+    try {
+      const parts = recall?.();
+      if (parts === undefined) return undefined;
+      const reason = parts.redLineReason(typeof callId === "string" ? callId : undefined);
+      return typeof reason === "string" ? reason : undefined;
+    } catch (err) {
+      fault("the memory gate's red line could not be read", err);
+      return undefined;
+    }
+  };
   const listener = hostCtx.inject(["approval"], function orderGateAskListener(gateCtx) {
     const approval = gateCtx.get("approval") as GateApprovalLike | undefined;
     /* The inject guarantees it (a fiber runs only for the epoch its services
@@ -872,11 +984,15 @@ export function armOrderGate(hostCtx: Context, onCardAsked?: (name: string, args
         exec.arguments,
         visible,
       );
-      if (decision?.kind === "ask" && onCardAsked !== undefined) {
-        try {
-          onCardAsked(exec.name, exec.arguments);
-        } catch (err) {
-          console.error(`${BIN}: a card notice failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (decision?.kind === "ask") {
+        /* the memory's check, awaited before the card and never in its way (THE MEMORY'S CHECK, above) */
+        const note = await noteFor(exec);
+        if (onCardAsked !== undefined) {
+          try {
+            onCardAsked(exec.name, exec.arguments, note);
+          } catch (err) {
+            console.error(`${BIN}: a card notice failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
       }
       return decision ?? next();
@@ -901,7 +1017,12 @@ export function armOrderGate(hostCtx: Context, onCardAsked?: (name: string, args
      * since a full snapshot copies the log once per append and this runs on
      * every allow of every tool - and gives an UNREADABLE log its own denial,
      * distinct from a missing grant. */
-    tools.guard((exec) => orderGuardReasonForSession(exec.name, exec.agent?.session, exec.callId));
+    tools.guard((exec) => {
+      const reason = orderGuardReasonForSession(exec.name, exec.agent?.session, exec.callId);
+      /* the red line only AFTER the grant check, and only for an order call it passed (THE RED LINE, above) */
+      if (reason !== undefined || !isOrderTool(exec.name)) return reason;
+      return redLineFor(exec.callId);
+    });
   });
   return { listener, guard };
 }
@@ -1003,6 +1124,8 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
   let gate: OrderGateFibers | undefined;
   /* The memory fence's parts, read at each call; bound by the caller through `bindMemoryFence`. */
   let memoryFence: MemoryFenceParts = UNBOUND_MEMORY_FENCE;
+  /* The memory gate's parts Gate 2 reads, at each call; bound by the caller through `bindOrderRecall`. */
+  let orderRecall: OrderRecallParts | undefined;
   try {
     const ctx = await boot(BIN, rootConfig, structuredClone(patches), async (hostCtx) => {
       app.current = hostCtx;
@@ -1031,7 +1154,7 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
        * each will the moment its service does, instead of once boot() has
        * settled, by which time a slow row may have let unary `/api` drive a
        * turn into a live order tool with nothing listening. */
-      gate = armOrderGate(hostCtx, opts.onCardAsked);
+      gate = armOrderGate(hostCtx, opts.onCardAsked, () => orderRecall);
       /* The memory's owner-name fence arms HERE too (divergence 11), for the same reason: the memory row's tools
        * register as it activates and unary `/api` serves before boot() settles. It needs no service to decide, so
        * it is a plain listener on the root rather than an inject fiber, and the root's disposal removes it. Its
@@ -1250,7 +1373,8 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
     };
     if (opts.deferReady !== true) commitReady();
     const bindMemoryFence = (parts: MemoryFenceParts): void => { memoryFence = parts; };
-    return { ctx, dispose, botPresets, roles, commitReady, bindMemoryFence };
+    const bindOrderRecall = (parts: OrderRecallParts): void => { orderRecall = parts; };
+    return { ctx, dispose, botPresets, roles, commitReady, bindMemoryFence, bindOrderRecall };
   } catch (error) {
     /* Every failure path lands here: the tree is disposed and appReady is never
      * committed. `boot()` disposes its own context before it throws; a repeat

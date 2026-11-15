@@ -13,6 +13,11 @@
  *
  * `check` never rejects and settles within {@link GATE_CHECK_MS}; at most {@link GATE_KEPT} calls are kept, the
  * oldest out first. {@link gateAccount} is the gate's Account over the Account proxy's in-process reads.
+ *
+ * A kept call is red-lined when a lesson with `strength: "red-line"` and `says: "dont"` applies to one of its lines.
+ * Gate 2's guard reads `redLineReason` on every granted seat write: a red-lined call with no override on record is
+ * refused with {@link redLineRefusal} of its first red line, in line order. `override` keeps the owner's words for a
+ * red-lined card that is still waiting; a card answered takes none.
  * @module
  */
 import type { RecallAnswer } from "gravit-memory";
@@ -76,21 +81,49 @@ export interface MemoryGateDeps {
   now?: () => number; setTimer?: (run: () => void, ms: number) => unknown; clearTimer?: (timer: unknown) => void;
 }
 
+/** The owner's override of a red-lined card, in their own words. */
+export interface GateOverride { reason: string; wrongIf?: string }
+
 export interface MemoryGate {
   /** Asks the memory for an order card about to be raised and keeps the answer by callId. Never rejects; settles within GATE_CHECK_MS. */
   check(call: GateCall): Promise<GateNote | undefined>;
   view(callId: string): GateView | undefined;
+  /** Keeps the owner's override for a red-lined card that is still waiting. */
+  override(callId: string, body: GateOverride): "kept" | "no such card" | "no red line" | "answered";
+  /** The guard's read: words when the call is red-lined with no override on record, else undefined. Synchronous; never throws. */
+  redLineReason(callId: string | undefined): string | undefined;
   dispose(): void;
 }
 
 /** A line's fault when its recall loses the race. */
 const LATE = "the memory did not answer in time";
 
+/** How much of a lesson's words the guard's refusal quotes. */
+const REFUSAL_WORDS_MAX = 200;
+
+/** The guard's refusal of a red-lined call with no override on record; the lesson's words cut to 200 characters. */
+export function redLineRefusal(words: string): string {
+  const cut = [...String(words)].slice(0, REFUSAL_WORDS_MAX).join("");
+  return `a red line applies to this order - "${cut}" - and no override is on record: the owner opens the card and overrides it in their own words`;
+}
+
 /** One line of a kept call: the order as read, the position it was read against, and what the card draws. */
 interface LineEntry { order: OrderLine; position: Position | null | undefined; view: GateLine }
 
-/** One kept call: the call, its state, and its lines. `pending` while the check runs. */
-interface Entry { call: GateCall; state: GateView["state"] | "pending"; words?: string; lines: LineEntry[] }
+/** One kept call: the call, its state, and its lines. `pending` while the check runs. `override` is the owner's, kept
+ * only for a red-lined card; `answered` is set once the card is answered, after which no override is taken. */
+interface Entry {
+  call: GateCall; state: GateView["state"] | "pending"; words?: string; lines: LineEntry[];
+  override?: GateOverride; answered?: boolean;
+}
+
+/** The words of the entry's first red-line lesson, in line order, or undefined. */
+function firstRedLine(entry: Entry): string | undefined {
+  for (const line of entry.lines) {
+    for (const lesson of line.view.lessons) if (isRedLine(lesson)) return lesson.words;
+  }
+  return undefined;
+}
 
 /** A read's outcome against its timer. */
 type Raced<T> = { kind: "ok"; value: T } | { kind: "late" } | { kind: "fault"; error: unknown };
@@ -281,8 +314,32 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
       const lines = entry.lines.map((line) => structuredClone(line.view));
       return {
         callId, state: entry.state, ...(entry.words === undefined ? {} : { words: entry.words }), lines,
-        redLine: lines.some((line) => line.lessons.some(isRedLine)), overridden: false,
+        redLine: lines.some((line) => line.lessons.some(isRedLine)), overridden: entry.override !== undefined,
       };
+    },
+    override(callId, body) {
+      const entry = entries.get(callId);
+      if (entry === undefined || entry.state === "pending") return "no such card";
+      if (entry.answered === true) return "answered";
+      if (firstRedLine(entry) === undefined) return "no red line";
+      entry.override = { reason: String(body.reason), ...(body.wrongIf === undefined ? {} : { wrongIf: String(body.wrongIf) }) };
+      return "kept";
+    },
+    redLineReason(callId) {
+      try {
+        if (typeof callId !== "string") return undefined;
+        const entry = entries.get(callId);
+        if (entry === undefined || entry.state !== "checked" || entry.override !== undefined) return undefined;
+        const words = firstRedLine(entry);
+        return words === undefined ? undefined : redLineRefusal(words);
+      } catch (error) {
+        try {
+          say(`${callId}: the red line could not be read: ${memoryFaultWords(error)}`);
+        } catch {
+          /* an error that throws as it is read costs the guard nothing */
+        }
+        return undefined;
+      }
     },
     dispose() {
       disposed = true;

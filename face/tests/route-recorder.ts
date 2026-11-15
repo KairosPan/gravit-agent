@@ -33,7 +33,9 @@ export function recorder(): RouteRecorder {
     register(route: WebRoute): void { routes.push(route); },
     paths(): string[] { return routes.map((route) => route.path); },
     async call(path: string, options: RouteCall = {}): Promise<string> {
-      const route = routes.find((r) => r.path === path);
+      /* a query string is the request's, not the route's: matched without it, handed over as `req.url` */
+      const bare = path.split("?")[0];
+      const route = routes.find((r) => r.path === bare);
       if (route === undefined) throw new Error(`no route is registered at ${path}`);
       const body = options.json === undefined ? options.body : JSON.stringify(options.json);
       const headers: Record<string, string> = {
@@ -43,8 +45,8 @@ export function recorder(): RouteRecorder {
       };
       const method = options.method ?? "GET";
       const req = (body === undefined
-        ? { headers, method }
-        : Object.assign(Readable.from([Buffer.from(body)]), { headers, method })) as unknown as IncomingMessage;
+        ? { headers, method, url: path }
+        : Object.assign(Readable.from([Buffer.from(body)]), { headers, method, url: path })) as unknown as IncomingMessage;
       const out = { status: 0, body: "" };
       const res = {
         writeHead(status: number) { out.status = status; return res; },

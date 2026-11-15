@@ -33,6 +33,9 @@ import { composedMemoryRow } from "./memory-row.ts";
 import { memoryOpener } from "./memory.ts";
 import { readBriefMemory } from "./memory-brief.ts";
 import { installMemoryClock, memoryClockEnabled, type MemoryClock } from "./memory-clock.ts";
+import { createMemoryGate, gateAccount, type GateNote, type MemoryGate } from "./memory-gate.ts";
+import { registerMemoryGateRoutes } from "./memory-gate-routes.ts";
+import { priceFacts } from "./memory-facts.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { claimsOf, deskDir, installDesk, type DeskHandle } from "./desk.ts";
@@ -133,6 +136,8 @@ let disposeProxy: (() => void) | undefined;
 let searchIndex: SearchIndex | undefined;
 /** The market proxy's own unwind (src/market-proxy.ts), run beside the account's, for the same reason. */
 let disposeMarketProxy: (() => void) | undefined;
+/** The memory gate (src/memory-gate.ts), disposed beside the proxies it reads through: its kept calls and races. */
+let memoryGate: MemoryGate | undefined;
 /** The memory's reconcile clock (src/memory-clock.ts), unless `FACE_MEMORY_RECONCILE=0`: both exits clear its timers
  * first, before anything is torn down, and wait for no run. */
 let memoryClock: MemoryClock | undefined;
@@ -156,6 +161,7 @@ async function shutdown(code: number): Promise<void> {
     await dispose?.();
     disposeProxy?.();
     disposeMarketProxy?.();
+    memoryGate?.dispose();
   } catch (err) {
     console.error(`${BIN}: dispose failed during shutdown:`, err);
     code ||= 1;
@@ -193,6 +199,7 @@ installFailLoud(BIN, process, async () => {
   await dispose?.();
   disposeProxy?.();
   disposeMarketProxy?.();
+  memoryGate?.dispose();
 });
 
 /* A `StartupError` is dsh's own grouped diagnostic for a required entry that
@@ -219,7 +226,7 @@ try {
     profileName,
     port,
     deferReady: true,
-    ...(deskEnabled ? { onCardAsked: (name: string, args: unknown) => announceCard(cardPhone, name, args) } : {}),
+    ...(deskEnabled ? { onCardAsked: (name: string, args: unknown, note?: GateNote) => announceCard(cardPhone, name, args, note) } : {}),
   });
 } catch (err) {
   if (err instanceof StartupError) {
@@ -290,6 +297,20 @@ const openMemory = memoryOpener(seatLoader === undefined ? undefined : composedM
  * with nothing in place and nothing checkable; its parts are bound here, where they first exist. It reads the
  * conversation when each call arrives, so with no conversation (FACE_ROUTER=0, or not yet opened) nothing qualifies. */
 booted.bindMemoryFence({ conversation: () => conversation, open: openMemory });
+/* The memory gate (src/memory-gate.ts): before Gate 2 asks a seat write's card it asks the memory which lessons apply
+ * to the order, over the Account proxy's in-process reads and the price facts from the Market's quote and daily bars
+ * (src/memory-facts.ts); Gate 2 reads it through the parts bound here (boot.ts divergence 12), and its two routes serve
+ * the kept view and take the owner's override. */
+const gateFactReads = { quotes: marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes }), candles: marketProxy.candles };
+const gate = createMemoryGate({
+  open: openMemory,
+  facts: (symbol, market) => priceFacts(gateFactReads, symbol, market),
+  account: gateAccount({ reader: proxy.reader, positions: proxy.positions, market: proxy.market }),
+  log: (line) => { console.error(`${BIN}: ${line}`); },
+});
+memoryGate = gate;
+booted.bindOrderRecall(gate);
+registerMemoryGateRoutes(booted.ctx.webServer, { gate: () => gate });
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here

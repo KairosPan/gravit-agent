@@ -12,6 +12,7 @@ import {
   GATE_KEPT,
   createMemoryGate,
   gateAccount,
+  redLineRefusal,
   type GateAccount,
   type GateCall,
   type MemoryGateDeps,
@@ -399,4 +400,74 @@ test("gateAccount.kind: the listing's kind; undefined on anything else", async (
   assert.deepEqual(r.asked.market, ["venue=paper-1&symbol=NVDA"]);
   assert.equal(await readsOf({ market: ok({ ok: false }) }).account.kind("paper-1", "NVDA"), undefined);
   assert.equal(await readsOf({}).account.kind("paper-1", "NVDA"), undefined);
+});
+
+/* ---------- the guard's read and the owner's override ---------- */
+
+/** The guard's refusal for `words`, word for word as the plan's Global Constraints give it. */
+const refusalOf = (words: string): string =>
+  `a red line applies to this order - "${words}" - and no override is on record: the owner opens the card and overrides it in their own words`;
+
+test("redLineRefusal: the Global Constraints' sentence, the lesson's words cut to 200 characters", () => {
+  assert.equal(redLineRefusal("never add to a loser"), refusalOf("never add to a loser"));
+  assert.equal(redLineRefusal("w".repeat(260)), refusalOf("w".repeat(200)));
+});
+
+test("redLineReason: undefined with no entry, no red line or no callId; the first red line's refusal until an override is kept", async () => {
+  const lessons = [
+    lessonOf("L-0003", "caveat", "careful"), lessonOf("L-0002", "red-line", "dont", "never add to a loser"),
+    lessonOf("L-0004", "red-line", "dont", "the second red line"),
+  ];
+  const red = rig({ recall: async () => answerOf({ applies: lessons }) });
+  assert.equal(red.gate.redLineReason("call_1"), undefined, "no entry");
+  assert.equal(red.gate.redLineReason(undefined), undefined, "no callId");
+  await red.clock.run(red.gate.check(callOf(BUY_NVDA)));
+  assert.equal(red.gate.redLineReason("call_1"), refusalOf("never add to a loser"));
+  assert.equal(red.gate.view("call_1")!.overridden, false);
+  assert.equal(red.gate.override("call_1", { reason: "Earnings are out and the gap filled." }), "kept");
+  assert.equal(red.gate.redLineReason("call_1"), undefined);
+  assert.equal(red.gate.view("call_1")!.overridden, true);
+
+  const caveat = rig();
+  await caveat.clock.run(caveat.gate.check(callOf(BUY_NVDA)));
+  assert.equal(caveat.gate.redLineReason("call_1"), undefined, "an entry with no red line");
+});
+
+test("redLineReason: the first red line in line order, across a batch's lines, whichever recall answers first", async () => {
+  const legs = [{ venue: "paper-1", symbol: "AMD", side: "buy", qty: 1 }, BUY_NVDA];
+  const { gate, clock } = rig({
+    recall: async (_by, input) => {
+      const symbol = (input as { symbol?: string }).symbol;
+      if (symbol === "AMD") for (let i = 0; i < 3; i++) await Promise.resolve();
+      return answerOf({ applies: [lessonOf("L-0009", "red-line", "dont", `no more ${symbol}`)] });
+    },
+  });
+  await clock.run(gate.check(callOf({ legs }, "call_b", BATCH)));
+  assert.equal(gate.view("call_b")!.redLine, true);
+  assert.equal(gate.redLineReason("call_b"), refusalOf("no more AMD"));
+});
+
+test("override: no such card, no red line; a later override replaces an earlier one", async () => {
+  const red = rig({ recall: async () => answerOf({ applies: [lessonOf("L-0002", "red-line", "dont")] }) });
+  assert.equal(red.gate.override("call_9", { reason: "why" }), "no such card");
+  await red.clock.run(red.gate.check(callOf(BUY_NVDA)));
+  assert.equal(red.gate.override("call_1", { reason: "first" }), "kept");
+  assert.equal(red.gate.override("call_1", { reason: "second", wrongIf: "it gaps down" }), "kept");
+  assert.equal(red.gate.view("call_1")!.overridden, true);
+  assert.equal(red.gate.redLineReason("call_1"), undefined);
+
+  const caveat = rig();
+  await caveat.clock.run(caveat.gate.check(callOf(BUY_NVDA)));
+  assert.equal(caveat.gate.override("call_1", { reason: "why" }), "no red line");
+  assert.equal(caveat.gate.view("call_1")!.overridden, false);
+});
+
+test("redLineReason on an entry that throws on read: undefined, and one line", async () => {
+  const tampered = new Proxy({}, { get() { throw new Error("tampered"); } }) as unknown as string;
+  const { gate, asked, clock } = rig({ recall: async () => answerOf({ applies: [lessonOf("L-0002", "red-line", "dont", tampered)] }) });
+  await clock.run(gate.check(callOf(BUY_NVDA)));
+  const before = asked.logs.length;
+  assert.equal(gate.redLineReason("call_1"), undefined);
+  assert.equal(asked.logs.length, before + 1);
+  assert.match(asked.logs.at(-1)!, /^memory gate: /);
 });
