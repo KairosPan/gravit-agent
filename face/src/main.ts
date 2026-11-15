@@ -33,7 +33,7 @@ import { composedMemoryRow } from "./memory-row.ts";
 import { memoryOpener } from "./memory.ts";
 import { readBriefMemory } from "./memory-brief.ts";
 import { installMemoryClock, memoryClockEnabled, type MemoryClock } from "./memory-clock.ts";
-import { createMemoryGate, gateAccount, type GateNote, type MemoryGate } from "./memory-gate.ts";
+import { createMemoryGate, followAnswers, gateAccount, type GateNote, type MemoryGate } from "./memory-gate.ts";
 import { registerMemoryGateRoutes } from "./memory-gate-routes.ts";
 import { priceFacts } from "./memory-facts.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
@@ -138,6 +138,9 @@ let searchIndex: SearchIndex | undefined;
 let disposeMarketProxy: (() => void) | undefined;
 /** The memory gate (src/memory-gate.ts), disposed beside the proxies it reads through: its kept calls and races. */
 let memoryGate: MemoryGate | undefined;
+/** The gate's following of the owner's answers and the seat's results (src/memory-gate.ts `followAnswers`), undone
+ * right before the gate is disposed. */
+let stopFollowingAnswers: (() => void) | undefined;
 /** The memory's reconcile clock (src/memory-clock.ts), unless `FACE_MEMORY_RECONCILE=0`: both exits clear its timers
  * first, before anything is torn down, and wait for no run. */
 let memoryClock: MemoryClock | undefined;
@@ -161,6 +164,7 @@ async function shutdown(code: number): Promise<void> {
     await dispose?.();
     disposeProxy?.();
     disposeMarketProxy?.();
+    stopFollowingAnswers?.();
     memoryGate?.dispose();
   } catch (err) {
     console.error(`${BIN}: dispose failed during shutdown:`, err);
@@ -199,6 +203,7 @@ installFailLoud(BIN, process, async () => {
   await dispose?.();
   disposeProxy?.();
   disposeMarketProxy?.();
+  stopFollowingAnswers?.();
   memoryGate?.dispose();
 });
 
@@ -300,16 +305,19 @@ booted.bindMemoryFence({ conversation: () => conversation, open: openMemory });
 /* The memory gate (src/memory-gate.ts): before Gate 2 asks a seat write's card it asks the memory which lessons apply
  * to the order, over the Account proxy's in-process reads and the price facts from the Market's quote and daily bars
  * (src/memory-facts.ts); Gate 2 reads it through the parts bound here (boot.ts divergence 12), and its two routes serve
- * the kept view and take the owner's override. */
+ * the kept view and take the owner's override. It follows the root's session events and tool results, so the owner's
+ * answer to each card it checked is registered in the memory by the face's own code; the Account's overview is the
+ * in-process read it watches a Guard-mode card through. */
 const gateFactReads = { quotes: marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes }), candles: marketProxy.candles };
 const gate = createMemoryGate({
   open: openMemory,
   facts: (symbol, market) => priceFacts(gateFactReads, symbol, market),
-  account: gateAccount({ reader: proxy.reader, positions: proxy.positions, market: proxy.market }),
+  account: gateAccount({ reader: proxy.reader, positions: proxy.positions, market: proxy.market, overview: proxy.overview }),
   log: (line) => { console.error(`${BIN}: ${line}`); },
 });
 memoryGate = gate;
 booted.bindOrderRecall(gate);
+stopFollowingAnswers = followAnswers(booted.ctx, gate);
 registerMemoryGateRoutes(booted.ctx.webServer, { gate: () => gate });
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it

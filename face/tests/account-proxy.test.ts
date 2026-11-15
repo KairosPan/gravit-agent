@@ -24,6 +24,7 @@ import {
   STREAM_BODY_LIMIT,
   STREAM_CLIENT,
   FACE_ORIGIN_HEADER,
+  OVERVIEW_ABORT_MS,
   WRITE_ABORT_MS,
   WRITE_BODY_LIMIT,
   createAccountReader,
@@ -1458,4 +1459,24 @@ test("positions and market in process: the routes' own reads, through the same c
   assert.equal((await call(routes, "/data/account/positions?venue=paper-1")).body, positions);
   assert.equal((await call(routes, "/data/account/market?venue=paper-1&symbol=NVDA")).body, market);
   assert.equal(fetched.length, 2, "each route is served the in-process read's kept answer: one cache");
+});
+
+test("overview in process: GET /api/overview, never kept, `disabled` honoured, and no route of its own", async () => {
+  const overview = '{"approvals":[{"id":"ap-1","status":"pending"}]}';
+  const { routes, fetched, inits, proxy } = proxyWith(answering(overview));
+  assert.deepEqual(await proxy.overview(), { status: 200, body: overview });
+  assert.deepEqual(await proxy.overview(), { status: 200, body: overview });
+  assert.deepEqual(fetched, [`${URL_}/api/overview`, `${URL_}/api/overview`], "asked each time: never kept");
+  assert.equal(inits[0].method ?? "GET", "GET");
+  assert.equal(routes.some((r) => r.path.includes("overview")), false, "no face route reaches the overview");
+  const disabled = proxyWith(answering(overview), () => NOW, { disabled: true });
+  assert.deepEqual(await disabled.proxy.overview(), { unreachable: "disabled" });
+  assert.equal(disabled.fetched.length, 0, "a disabled row asks nothing");
+});
+
+test("overview in process: asked with an abort signal, its bound OVERVIEW_ABORT_MS of 7,000 ms; a failed fetch is its code", async () => {
+  assert.equal(OVERVIEW_ABORT_MS, 7_000);
+  const { inits, proxy } = proxyWith(async () => { throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" }); });
+  assert.deepEqual(await proxy.overview(), { unreachable: "ECONNREFUSED" });
+  assert.ok(inits[0].signal instanceof AbortSignal);
 });

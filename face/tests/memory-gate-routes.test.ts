@@ -18,6 +18,9 @@ function stubGate(answer: ReturnType<MemoryGate["override"]> = "kept") {
     view: (callId) => (callId === "call_1" ? structuredClone(VIEW) : undefined),
     override: (callId, body) => { overrides.push([callId, body]); return answer; },
     redLineReason: () => undefined,
+    answered: () => {},
+    settled: () => {},
+    idle: async () => {},
     dispose: () => {},
   };
   return { gate, overrides };

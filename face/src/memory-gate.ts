@@ -23,20 +23,37 @@
  * {@link HELD_BY_ANOTHER}, and a red-lined call with no override on record with {@link redLineRefusal} of its first
  * red line, in line order. `override` keeps the owner's words for a red-lined card that is still waiting; a card
  * answered takes none.
+ *
+ * The owner's answer is registered by this code, in the owner's name, as {@link FACE_MEMORY_NAME} ({@link followAnswers}
+ * feeds it): its trigger is the session's own `approval/decided` for the call, the seat's result and the Account's card
+ * status, and its content the validated line, the override form and those answers' shapes - never a tool argument or a
+ * model's text. Every decided card is marked answered, and only from the session it was checked for. Declined at
+ * Gate 2, each checked line is written at once, `pass` or `hold`. Approved, each line's position is read again as the
+ * approval lands (under {@link GATE_POSITION_MS}: the position the order meets, not the one a fill leaves) and the line
+ * is written once the seat's result says
+ * it was placed, as the one action that position settles - or nothing, with why, when it settles none. A line the seat
+ * answers with the Account's card (Guard mode) is watched through the Account's overview every
+ * {@link GATE_WATCH_EVERY_MS} until that card is answered, or {@link GATE_WATCH_GRACE_MS} past its expiry. A line not
+ * registered says why on the card and in one log line. Each call is registered once; nothing is kept across a
+ * restart, and after `dispose` nothing more is read or written.
  * @module
  */
 import type { RecallAnswer } from "gravit-memory";
 import type { AccountReader } from "./account-proxy.ts";
 import { heldFacts, type Facts } from "./memory-facts.ts";
 import {
-  consideringOf, gateOrdersOf, marketOfKind, memorySymbol, orderWords, VENUE_ID,
+  approvedAction, consideringOf, declinedAction, gateOrdersOf, marketOfKind, memorySymbol, orderWords, VENUE_ID,
   type Action, type OrderLine, type Position,
 } from "./memory-order.ts";
-import { FACE_MEMORY_NAME, memoryFaultWords, type MemoryStanding } from "./memory.ts";
+import { AGENT_MEMORY_NAME, FACE_MEMORY_NAME, memoryFaultWords, type MemoryStanding } from "./memory.ts";
 import type { UpstreamAnswer, UpstreamRouteRead } from "./upstream-proxy.ts";
 
 /** The whole check's bound, the Account reads' and the price facts'; and how many calls are kept. */
 export const GATE_CHECK_MS = 3_000, GATE_ACCOUNT_MS = 1_000, GATE_FACTS_MS = 1_500, GATE_KEPT = 200;
+
+/** The position read again for an approval's action; how often the Account's card is polled and how long past its
+ * expiry it is watched; how recent Gravit's own decision on the symbol is to be the approval's evidence. */
+export const GATE_POSITION_MS = 5_000, GATE_WATCH_EVERY_MS = 5_000, GATE_WATCH_GRACE_MS = 60_000, GATE_OWN_CALL_MS = 600_000;
 
 /** A tool call's id the gate keeps an answer by. */
 export const CALL_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
@@ -76,6 +93,8 @@ export interface GateAccount {
   paperVenue(): Promise<string | undefined>;
   position(venue: string, symbol: string): Promise<Position | null | undefined>;
   kind(venue: string, symbol: string): Promise<string | undefined>;
+  /** The Account's card `cardId` as its overview lists it; undefined when it is not there or not read. */
+  approval(cardId: string): Promise<"pending" | "approved" | "rejected" | undefined>;
 }
 
 export interface MemoryGateDeps {
@@ -98,8 +117,20 @@ export interface MemoryGate {
   /** The guard's read for the calling execution's session: words when the call is red-lined with no override on
    * record, held by another session's card, or still being checked again; else undefined. Synchronous; never throws. */
   redLineReason(callId: string | undefined, sessionId: string | undefined): string | undefined;
+  /** Gate 2's answer for a kept call, from the session it was checked for: `rejected` is written at once,
+   * `allowed-once` waits for {@link MemoryGate.settled}; every answer marks the card answered. Never throws. */
+  answered(callId: string, outcome: string, sessionId: string | undefined): void;
+  /** The seat call's final result for a kept call answered `allowed-once`, from the session it was checked for.
+   * Never throws. */
+  settled(callId: string, result: { isError: boolean; text: string }, sessionId: string | undefined): void;
+  /** Resolves when no registration is in flight (tests). */
+  idle(): Promise<void>;
   dispose(): void;
 }
+
+/** What a seat answer says of one line. */
+export type SeatOutcome =
+  | { kind: "placed" } | { kind: "pending"; card: string; expiresAt?: number } | { kind: "refused" } | { kind: "unreadable" };
 
 /** A line's fault when its recall loses the race. */
 const LATE = "the memory did not answer in time";
@@ -119,15 +150,85 @@ export const HELD_BY_ANOTHER = "this call id is held by another order card: the 
 /** The guard's refusal of a call whose id is being checked again. */
 export const CHECK_NOT_FINISHED = "the memory's check of this call is not finished: the order is not run - place it again";
 
-/** One line of a kept call: the order as read, the position it was read against, and what the card draws. */
-interface LineEntry { order: OrderLine; position: Position | null | undefined; view: GateLine }
+/** The registered theses' leads, each followed by `: <order words>.`, and an approval's price source. */
+const APPROVED = "Approved Gravit's order card", DECLINED = "Declined Gravit's order card";
+const ACCOUNT_DECLINED = "Declined the Account's card for Gravit's order";
+const PRICE_SOURCE = "the order card's limit price";
+
+/** Why nothing was registered for a line, as `not registered: <why>` on the card and in the log. */
+const POSITION_UNREAD = "the position could not be read - tell Gravit what you decided";
+const SELLS_UNSAID = "the order does not say how much of the position it sells - tell Gravit what you decided";
+const SEAT_REFUSED = "the seat refused the order";
+const SEAT_UNREADABLE = "the seat's answer could not be read";
+const CARD_EXPIRED = "the Account's card expired";
+const CARD_UNREAD = "the Account's card could not be read";
+
+/** A card id the seat's answer may give; a decision id the memory's decisions may hold. */
+const CARD_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
+const DECISION_ID = /^d-\d{8}-[0-9a-f]{8}$/;
+/** How many of the symbol's newest decisions are looked through for Gravit's own; the memory's longest note. */
+const OWN_CALL_LOOK = 20, NOTE_MAX = 500;
+
+/** One line of a kept call: the order as read, the venue the check resolved, the position it was read against, and
+ * what the card draws. */
+interface LineEntry { order: OrderLine; venue?: string; position: Position | null | undefined; view: GateLine }
 
 /** One kept call: the call (its session among it), its state, and its lines. `pending` while the check runs.
  * `override` is the owner's, kept only for a red-lined card; `answered` is set once the card is answered, after which
- * no override is taken. `checking` marks a placeholder standing for a kept callId checked again. */
+ * no override is taken. `checking` marks a placeholder standing for a kept callId checked again. `approval` holds,
+ * once Gate 2 approved the card, each line's position as read again then; `settled` marks the seat's result taken. */
 interface Entry {
   call: GateCall; state: GateView["state"] | "pending"; words?: string; lines: LineEntry[];
   override?: GateOverride; answered?: boolean; checking?: boolean;
+  approval?: Array<Promise<Position | null | undefined>>; settled?: boolean;
+}
+
+/** A plain object, not an array and not null. */
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** One answer of the seat's, as one line's outcome. */
+function outcomeOf(body: unknown): SeatOutcome {
+  if (!isRecord(body)) return { kind: "unreadable" };
+  if (body.ok === false) return { kind: "refused" };
+  if (body.ok !== true) return { kind: "unreadable" };
+  if (body.pending === true) {
+    const card = body.card;
+    if (!isRecord(card) || typeof card.id !== "string" || !CARD_ID.test(card.id)) return { kind: "unreadable" };
+    const at = typeof card.expiresAt === "string" ? Date.parse(card.expiresAt) : Number.NaN;
+    return Number.isFinite(at) ? { kind: "pending", card: card.id, expiresAt: at } : { kind: "pending", card: card.id };
+  }
+  return isRecord(body.order) ? { kind: "placed" } : { kind: "unreadable" };
+}
+
+/** What a seat call's final result says of each of its `lines`: an error result is a refusal of every line; otherwise
+ * the text is the seat's JSON - one answer for one line, or a batch's `legs`, one per line in leg order. Anything
+ * else is `unreadable` for every line. Pure. */
+export function seatOutcomes(result: { isError: boolean; text: string }, lines: number): SeatOutcome[] {
+  const count = Number.isInteger(lines) && lines > 0 ? lines : 0;
+  const every = (kind: "refused" | "unreadable"): SeatOutcome[] => Array.from({ length: count }, () => ({ kind }));
+  if (result?.isError === true) return every("refused");
+  let body: unknown;
+  try {
+    body = JSON.parse(typeof result?.text === "string" ? result.text : "");
+  } catch {
+    return every("unreadable");
+  }
+  if (isRecord(body) && Array.isArray(body.legs)) {
+    const legs = body.legs;
+    if (legs.length !== count || legs.some((leg, i) => !isRecord(leg) || leg.leg !== i + 1)) return every("unreadable");
+    return legs.map(outcomeOf);
+  }
+  return count === 1 ? [outcomeOf(body)] : every("unreadable");
+}
+
+/** A number as the order's words show it, with no `+` (an exponent's sign). */
+const numberWords = (n: number): string => String(n).replace("+", "");
+
+/** An approval's `size`: the quantity, or the dollars as `$100`; none for a close of the whole position. */
+function sizeOf(order: OrderLine): string | undefined {
+  if (order.qty !== undefined) return numberWords(order.qty);
+  if (order.usd !== undefined && !order.close) return `$${numberWords(order.usd)}`;
+  return undefined;
 }
 
 /** An entry never evicted: a placeholder whose check runs, or a checked entry that is red-lined, with no override on
@@ -185,6 +286,9 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
   const entries = new Map<string, Entry>();
   /** Every race still running, by the function that ends it as late. */
   const running = new Set<() => void>();
+  /** Every registration in flight; every watch's next poll, by its timer. */
+  const flights = new Set<Promise<void>>();
+  const watches = new Set<unknown>();
   let disposed = false;
 
   const say = (line: string): void => {
@@ -290,7 +394,7 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
       view.fault = recalled.kind === "late" ? LATE : memoryFaultWords(recalled.error);
     }
     if (view.fault !== undefined) say(`${view.order}: ${view.fault}`);
-    return { order, position, view };
+    return { order, ...(venue === undefined ? {} : { venue }), position, view };
   }
 
   async function run(call: GateCall, entry: Entry): Promise<GateNote | undefined> {
@@ -323,6 +427,150 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
       lessons: views.reduce((n, view) => n + view.lessons.length + view.lessonsMore, 0),
       redLine: views.some((view) => view.lessons.some(isRedLine)),
     };
+  }
+
+  /** Runs `work` as a registration in flight; it never rejects. */
+  function track(work: () => Promise<void>): void {
+    const flight = (async (): Promise<void> => {
+      try {
+        await work();
+      } catch (error) {
+        say(`a registration failed: ${memoryFaultWords(error)}`);
+      }
+    })();
+    flights.add(flight);
+    void flight.then(() => { flights.delete(flight); });
+  }
+
+  /** The kept entry `callId` names, when it stands checked or told for the session `sessionId` and the gate is live;
+   * a placeholder, an entry still pending and another session's entry are none. */
+  function ownEntry(callId: unknown, sessionId: unknown): Entry | undefined {
+    if (disposed || typeof callId !== "string" || typeof sessionId !== "string") return undefined;
+    const entry = entries.get(callId);
+    if (entry === undefined || entry.checking === true || entry.state === "pending") return undefined;
+    return entry.call.sessionId === sessionId ? entry : undefined;
+  }
+
+  /** Nothing is registered for `line`: the card says why, and the log does. */
+  function notRegistered(entry: Entry, line: LineEntry, why: string): void {
+    line.view.registered = `not registered: ${why}`;
+    say(`${entry.call.callId}: ${line.view.order}: not registered: ${why}`);
+  }
+
+  /** A record's common fields, from the validated line and the gate's own call alone: the action, the owner's, the
+   * thesis around the order's words, the symbol and market the check placed, its recall, the session and the call. */
+  function recordOf(entry: Entry, line: LineEntry, action: Action, lead: string): Record<string, unknown> {
+    const input: Record<string, unknown> = { action, whose: "owner", thesis: `${lead}: ${line.view.order}.` };
+    const symbol = memorySymbol(line.order, line.view.market);
+    if (symbol !== undefined) Object.assign(input, { symbol, market: "US" });
+    if (typeof line.view.recall === "string") input.recall = line.view.recall;
+    input.evidence = [`session ${entry.call.sessionId}`.slice(0, NOTE_MAX), `call ${entry.call.callId}`];
+    return input;
+  }
+
+  /** Gravit's own decision on `symbol` within GATE_OWN_CALL_MS of now, by id; undefined on anything else. */
+  async function ownCall(memory: MemoryStanding & { connected: true }, symbol: string): Promise<string | undefined> {
+    const read = await within(() => memory.memory.decisions({ symbol, limit: OWN_CALL_LOOK }), GATE_CHECK_MS);
+    const items = read.kind === "ok" ? (read.value as { items?: unknown } | null)?.items : undefined;
+    if (!Array.isArray(items)) return undefined;
+    for (const item of items) {
+      const view = (item as { view?: { line?: unknown; void?: unknown } } | null)?.view;
+      const line = view?.line as Record<string, unknown> | undefined;
+      if (line === undefined || view?.void === true) continue;
+      if (line.by !== AGENT_MEMORY_NAME || line.whose !== "agent" || line.symbol !== symbol) continue;
+      const age = now() - (typeof line.t === "string" ? Date.parse(line.t) : Number.NaN);
+      if (!(age >= 0 && age <= GATE_OWN_CALL_MS)) continue;
+      if (typeof line.id === "string" && DECISION_ID.test(line.id)) return line.id;
+    }
+    return undefined;
+  }
+
+  /** Writes `input` for `line` as FACE_MEMORY_NAME, through the face's own handle; an approval looks for Gravit's
+   * own call first. A memory not connected, or a write that fails, leaves the line not registered with why. */
+  async function write(entry: Entry, line: LineEntry, input: Record<string, unknown>, approval: boolean): Promise<void> {
+    const opened = await within(() => deps.open(), GATE_CHECK_MS);
+    if (disposed) return;
+    const standing = valueOf(opened);
+    if (standing?.connected !== true) {
+      notRegistered(entry, line, standing !== undefined ? String(standing.say) : opened.kind === "fault" ? memoryFaultWords(opened.error) : LATE);
+      return;
+    }
+    if (approval && typeof input.symbol === "string") {
+      const id = await ownCall(standing, input.symbol);
+      if (disposed) return;
+      if (id !== undefined) (input.evidence as string[]).push(`decision ${id}`);
+    }
+    try {
+      await standing.memory.record(FACE_MEMORY_NAME, input);
+    } catch (error) {
+      notRegistered(entry, line, memoryFaultWords(error));
+      return;
+    }
+    line.view.registered = `registered: ${String(input.action)}`;
+  }
+
+  /** A decline, Gate 2's or the Account's: `pass` for a buy, `hold` for a sell or a close. */
+  function declined(entry: Entry, line: LineEntry, lead: string): Promise<void> {
+    return write(entry, line, recordOf(entry, line, declinedAction(line.order), lead), false);
+  }
+
+  /** An approval of line `i`, the seat having placed it: its action from the position read again when Gate 2 approved,
+   * nothing when that does not settle it; its price, its size, and the owner's override's words. */
+  async function approved(entry: Entry, i: number): Promise<void> {
+    const line = entry.lines[i];
+    const position = await entry.approval?.[i];
+    if (disposed || line === undefined) return;
+    const action = approvedAction(line.order, position);
+    if (action === undefined) {
+      notRegistered(entry, line, position === undefined ? POSITION_UNREAD : SELLS_UNSAID);
+      return;
+    }
+    const input = recordOf(entry, line, action, APPROVED);
+    if (line.order.limitPrice !== undefined) Object.assign(input, { price: line.order.limitPrice, price_source: PRICE_SOURCE });
+    const size = sizeOf(line.order);
+    if (size !== undefined) input.size = size;
+    if (entry.override !== undefined) {
+      input.words = entry.override.reason;
+      if (entry.override.wrongIf !== undefined) input.wrong_if = entry.override.wrongIf;
+    }
+    await write(entry, line, input, true);
+  }
+
+  /** Watches the Account's card `card` for line `i`, a poll every GATE_WATCH_EVERY_MS until it is answered, or until
+   * GATE_WATCH_GRACE_MS past its expiry (past the first poll's time when it gave none). Approved there, the approval;
+   * rejected before its expiry, the Account's decline; rejected at or after it, an expiry - the Account closes an
+   * expired card as rejected. */
+  function watch(entry: Entry, i: number, card: string, expiresAt: number | undefined): void {
+    const line = entry.lines[i];
+    if (line === undefined) return;
+    const deadline = (expiresAt ?? now()) + GATE_WATCH_GRACE_MS;
+    const poll = async (): Promise<void> => {
+      const read = await within(() => deps.account.approval(card), GATE_WATCH_EVERY_MS);
+      if (disposed) return;
+      const status = valueOf(read);
+      if (status === "approved") return approved(entry, i);
+      if (status === "rejected") {
+        if (expiresAt !== undefined && now() < expiresAt) return declined(entry, line, ACCOUNT_DECLINED);
+        return notRegistered(entry, line, CARD_EXPIRED);
+      }
+      if (now() >= deadline) return notRegistered(entry, line, status === "pending" ? CARD_EXPIRED : CARD_UNREAD);
+      next();
+    };
+    const next = (): void => {
+      if (disposed) return;
+      let timer: unknown;
+      const fire = (): void => {
+        watches.delete(timer);
+        track(poll);
+      };
+      try {
+        timer = setTimer(fire, GATE_WATCH_EVERY_MS);
+        watches.add(timer);
+      } catch {
+        notRegistered(entry, line, CARD_UNREAD);
+      }
+    };
+    next();
   }
 
   return {
@@ -390,9 +638,58 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
         return undefined;
       }
     },
+    answered(callId, outcome, sessionId) {
+      try {
+        const entry = ownEntry(callId, sessionId);
+        if (entry === undefined || entry.answered === true) return;
+        entry.answered = true;
+        if (entry.state !== "checked") return;
+        if (outcome === "rejected") {
+          for (const line of entry.lines) track(() => declined(entry, line, DECLINED));
+        } else if (outcome === "allowed-once") {
+          /* read as the approval lands, ahead of the seat's run: the action is the order's against the position it
+           * meets, never against one its own fill left (a buy from flat read after its fill would be an add) */
+          entry.approval = entry.lines.map((line) => {
+            const { venue } = line;
+            return venue === undefined
+              ? Promise.resolve(undefined)
+              : within(() => deps.account.position(venue, line.order.symbol), GATE_POSITION_MS).then(valueOf);
+          });
+        }
+      } catch (error) {
+        say(`${String(callId)}: the answer could not be taken: ${memoryFaultWords(error)}`);
+      }
+    },
+    settled(callId, result, sessionId) {
+      try {
+        const entry = ownEntry(callId, sessionId);
+        if (entry === undefined || entry.approval === undefined || entry.settled === true) return;
+        entry.settled = true;
+        const outcomes = seatOutcomes(result, entry.lines.length);
+        entry.lines.forEach((line, i) => {
+          const outcome = outcomes[i] ?? { kind: "unreadable" };
+          if (outcome.kind === "placed") track(() => approved(entry, i));
+          else if (outcome.kind === "pending") watch(entry, i, outcome.card, outcome.expiresAt);
+          else notRegistered(entry, line, outcome.kind === "refused" ? SEAT_REFUSED : SEAT_UNREADABLE);
+        });
+      } catch (error) {
+        say(`${String(callId)}: the seat's result could not be taken: ${memoryFaultWords(error)}`);
+      }
+    },
+    async idle() {
+      while (flights.size > 0) await Promise.all([...flights]);
+    },
     dispose() {
       disposed = true;
       entries.clear();
+      for (const timer of [...watches]) {
+        try {
+          clearTimer(timer);
+        } catch {
+          /* a watch whose timer cannot be cleared polls into a disposed gate, which writes nothing */
+        }
+      }
+      watches.clear();
       for (const late of [...running]) late();
     },
   };
@@ -411,8 +708,10 @@ function okBody(answer: UpstreamAnswer | undefined): Record<string, unknown> | u
 
 const positiveOf = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
 
-/** `GateAccount` over the Account proxy's reads. */
-export function gateAccount(reads: { reader: AccountReader; positions: UpstreamRouteRead; market: UpstreamRouteRead }): GateAccount {
+/** `GateAccount` over the Account proxy's reads; `approval` reads the overview's `approvals`. */
+export function gateAccount(reads: {
+  reader: AccountReader; positions: UpstreamRouteRead; market: UpstreamRouteRead; overview: () => Promise<UpstreamAnswer>;
+}): GateAccount {
   const read = async (ask: () => Promise<UpstreamAnswer>): Promise<UpstreamAnswer | undefined> => {
     try {
       return await ask();
@@ -444,5 +743,73 @@ export function gateAccount(reads: { reader: AccountReader; positions: UpstreamR
       const kind = body?.ok === true ? (body.market as { kind?: unknown } | null | undefined)?.kind : undefined;
       return typeof kind === "string" ? kind : undefined;
     },
+    async approval(cardId) {
+      const approvals = okBody(await read(() => reads.overview()))?.approvals;
+      if (!Array.isArray(approvals)) return undefined;
+      const status = (approvals.find((a) => (a as { id?: unknown } | null)?.id === cardId) as { status?: unknown } | undefined)?.status;
+      return status === "pending" || status === "approved" || status === "rejected" ? status : undefined;
+    },
+  };
+}
+
+/** A context's `on`, as the root bus offers it: `session/event` and dsh's `tools/result`. */
+interface AnswersCtx { on(name: string, listener: (...args: never[]) => unknown): () => unknown }
+
+/** How many asked approvals are held for their answer; the oldest leaves first. */
+const ASKED_KEPT = GATE_KEPT;
+
+/**
+ * Subscribes `gate` to a root context's events; returns the disposer. The owner's answer comes from the session's own
+ * events alone: an `approval/asked` naming a kept callId pairs its approval id, in that session, with the callId, and
+ * that approval's `approval/decided` gives `answered` its outcome and the session. The seat's result comes from dsh's
+ * `tools/result` - emitted scoped to the calling agent, and seen by a root listener for every agent - for a kept callId:
+ * `settled` takes its error flag, its first text block and the agent's id. A listener's fault is contained.
+ */
+export function followAnswers(ctx: AnswersCtx, gate: Pick<MemoryGate, "answered" | "settled" | "view">): () => void {
+  /** `<session id>\0<approval id>` to the callId it was asked for. */
+  const asked = new Map<string, string>();
+  const kept = (callId: unknown): callId is string => typeof callId === "string" && CALL_ID.test(callId) && gate.view(callId) !== undefined;
+  const onEvent = (session: unknown, event: unknown): void => {
+    try {
+      const sessionId = (session as { id?: unknown } | null)?.id;
+      const { type, data } = (event ?? {}) as { type?: unknown; data?: Record<string, unknown> | null };
+      const id = data?.id;
+      if (typeof sessionId !== "string" || typeof id !== "string") return;
+      const key = `${sessionId}\0${id}`;
+      if (type === "approval/asked") {
+        const callId = data?.callId;
+        if (!kept(callId)) return;
+        asked.delete(key);
+        asked.set(key, callId);
+        if (asked.size > ASKED_KEPT) asked.delete(asked.keys().next().value as string);
+      } else if (type === "approval/decided") {
+        const callId = asked.get(key);
+        if (callId === undefined) return;
+        asked.delete(key);
+        if (typeof data?.outcome === "string") gate.answered(callId, data.outcome, sessionId);
+      }
+    } catch {
+      /* the gate's own methods say their faults; a malformed event costs the session nothing */
+    }
+  };
+  const onResult = (exec: unknown, result: unknown): void => {
+    try {
+      const { callId, agent } = (exec ?? {}) as { callId?: unknown; agent?: { id?: unknown } | null };
+      if (!kept(callId)) return;
+      const { isError, content } = (result ?? {}) as { isError?: unknown; content?: unknown };
+      const block = Array.isArray(content)
+        ? (content as Array<{ type?: unknown; text?: unknown } | null>).find((b) => b?.type === "text" && typeof b.text === "string")
+        : undefined;
+      const sessionId = typeof agent?.id === "string" ? agent.id : undefined;
+      gate.settled(callId, { isError: isError === true, text: typeof block?.text === "string" ? block.text : "" }, sessionId);
+    } catch {
+      /* as above */
+    }
+  };
+  const offEvents = ctx.on("session/event", onEvent as (...args: never[]) => unknown);
+  const offResults = ctx.on("tools/result", onResult as (...args: never[]) => unknown);
+  return () => {
+    offEvents();
+    offResults();
   };
 }

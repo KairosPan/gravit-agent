@@ -105,6 +105,7 @@ function rig(over: {
     paperVenue: () => { asked.paperVenue += 1; return (over.paperVenue ?? (async () => "paper-1"))(); },
     position: (venue, symbol) => { asked.positions.push([venue, symbol]); return (over.position ?? (async () => ({ side: "long", qty: 5, entryPrice: 100 }) as Position))(venue, symbol); },
     kind: (venue, symbol) => { asked.kinds.push([venue, symbol]); return (over.kind ?? (async () => "stock"))(venue, symbol); },
+    approval: async () => undefined,
   };
   const deps: MemoryGateDeps = {
     open: () => { asked.open += 1; return (over.open ?? (async (): Promise<MemoryStanding> => ({ connected: true, memory, home: "/tmp/m" })))(); },
@@ -468,7 +469,7 @@ test("check never rejects: each stub throwing synchronously in turn", async () =
   }
   const gate = createMemoryGate({
     open: async () => ({ connected: false, why: "disabled", say: "x" }), facts: async () => PRICE,
-    account: { paperVenue: async () => undefined, position: async () => undefined, kind: async () => undefined },
+    account: { paperVenue: async () => undefined, position: async () => undefined, kind: async () => undefined, approval: async () => undefined },
     log: () => {}, now: () => { throw new Error("no clock"); },
   });
   assert.equal(await gate.check(callOf(BUY_NVDA)), undefined, "a clock that throws");
@@ -495,6 +496,7 @@ function readsOf(answers: { account?: UpstreamAnswer; positions?: UpstreamAnswer
       reader,
       positions: async (q) => { asked.positions.push(q); return answers.positions ?? { unreachable: "ECONNREFUSED" }; },
       market: async (q) => { asked.market.push(q); return answers.market ?? { unreachable: "ECONNREFUSED" }; },
+      overview: async () => ({ unreachable: "ECONNREFUSED" }),
     }),
   };
 }

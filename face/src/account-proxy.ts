@@ -28,8 +28,9 @@
  * `main.ts` hands to `seat.ts`: `/data/seat.json` and `/data/account` share
  * one upstream read. {@link createAccountReader} is that read without a
  * route, for a seat route handed none. Beside it are the `positions` and
- * `market` reads in process, through their routes' caches, which the memory
- * gate reads (src/memory-gate.ts `gateAccount`).
+ * `market` reads in process, through their routes' caches, and the
+ * `overview` read, in process alone and never kept, which the memory gate
+ * reads (src/memory-gate.ts `gateAccount`).
  *
  * The rules, the seat route's generalised (since plan A2 they live in the proxy core, src/upstream-proxy.ts,
  * which the market's half, src/market-proxy.ts, is built on too; the writes and the callback stay here):
@@ -196,6 +197,9 @@ export const CALLBACK_QUERY: ReadonlyMap<string, number> = new Map([
 
 /** How long the Account may take to finish a sign-in, headers and body: it trades the code at the venue. */
 export const CALLBACK_ABORT_MS = 30_000;
+
+/** How long the Account may take on `GET /api/overview`, the in-process read the memory gate watches a card through. */
+export const OVERVIEW_ABORT_MS = 7_000;
 
 /** The callback's answer headers: the callback's page, never kept, never sniffed, its URL (which carried the code)
  * never sent on as a referrer — and, since the page is served on the face's own origin beside the owner's key in
@@ -382,12 +386,14 @@ const originHeader = (req: IncomingMessage): Record<string, string> => {
  * callback (`signin/callback`, behind `isTrustedNavigation`) — forty-six in all — on the host webserver, over the
  * proxy core (src/upstream-proxy.ts). The reader returned is the `account` route's own: it and `/data/account` read
  * through one cache, so the seat route `main.ts` hands it to shares that route's upstream read. `positions` and
- * `market` are those routes' reads in process, through the same caches their routes are served from. `dispose`
+ * `market` are those routes' reads in process, through the same caches their routes are served from. `overview` is
+ * `GET /api/overview` in process alone - no face route reaches it - asked afresh each time, cut at
+ * {@link OVERVIEW_ABORT_MS}, `{ unreachable: "disabled" }` with nothing asked under a disabled row. `dispose`
  * forgets every kept answer and aborts every open stream's upstream. */
 export function registerAccountProxy(
   webServer: RouteRegistrar,
   deps: AccountProxyDeps = {},
-): { reader: AccountReader; positions: UpstreamRouteRead; market: UpstreamRouteRead; dispose(): void } {
+): { reader: AccountReader; positions: UpstreamRouteRead; market: UpstreamRouteRead; overview: () => Promise<UpstreamAnswer>; dispose(): void } {
   const s = settingsOf(deps);
   const reads = READ_ROUTES.map((route) => readOf(route, s.abortMs));
   const accountRead = reads[READ_ROUTES.indexOf("account")]!;
@@ -409,6 +415,7 @@ export function registerAccountProxy(
     reader: readerOf(accountReads),
     positions: mounted.read.get("/data/account/positions")!,
     market: mounted.read.get("/data/account/market")!,
+    overview: () => (s.disabled ? Promise.resolve({ unreachable: "disabled" }) : askUpstream(s.doFetch, `${s.url}/api/overview`, OVERVIEW_ABORT_MS)),
     dispose: () => {
       mounted.clear();
       stream.abortAll();
