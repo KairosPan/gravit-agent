@@ -44,6 +44,8 @@ import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
 import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCursors, marketKey, stockCode } from './host/lunhui.js';
 import { ensureAnalog } from './host/analog.js';
+import { startMemoryGate } from './host/memory-gate.js';
+import { needsAnswer } from './messages.js';
 import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn, venuesOf } from './host/account-view.js';
@@ -473,6 +475,9 @@ export function boot(win, host = {}) {
   let outEpoch = -1; // the words' epoch the open job's pre was last written under
   const jobs = host.jobs ?? startJobs({ store, mux: live.mux, call, timers, onOutput: () => writeOutput() });
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), activate: id => live.activate(id) });
+  // the lessons a seat card draws, asked once per call id after a render; a red line's override, posted before its approval
+  const memoryGate = startMemoryGate({ store, getJson, postJson });
+  const overriding = new Set();
   // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
   // followed on the stream its line is on; the stars in this browser's storage
   const markets = startMarkets({ store, storage, getJson, win, now, stream, marketStream, schedule, cancelTimer, owner, afterAction });
@@ -871,6 +876,8 @@ export function boot(win, host = {}) {
     // an event table's task or view not read yet, likewise; called on every render so it sees each screen entered (a task
     // read that failed is read once more there), reading nothing when nothing is wanted
     void ensureAnalog(store, getJson);
+    // a seat card's lessons not asked yet, likewise: each call id once (a scan skipped while nothing it reads moved)
+    void memoryGate.ensure();
     // the operator's images the thread drew still to read: each asked once (thumb keeps its own in-flight set), its answer
     // landing through the store (hostThumb), which draws it
     if (open) for (const thumb of thumbsNeeded(open, s.thumbs)) void attachments.thumb(thumb.sessionId, thumb.attachmentId);
@@ -1717,6 +1724,21 @@ export function boot(win, host = {}) {
       const batch = answersFrom(el.closest?.('[data-gate]') ?? root, m.data?.questions, m.id);
       if (!complete(batch)) { store.dispatch('hostStatus', { line: said('status.answerAll'), bad: true }); return; }
       void actions.answer(m.id, batch);
+    },
+    // a red-lined order card's form: the owner's reason is required; the override is posted first, and the card approved once
+    // the face kept it — a refusal approves nothing and says so. One post per card while one is in flight
+    overrideGate: el => {
+      const { conv: convId, msg, call: callId } = el.dataset;
+      const m = store.get().conversations.find(c => c.id === convId)?.messages.find(x => x.id === msg);
+      if (!m || !needsAnswer(m) || m.data?.callId !== callId || overriding.has(msg)) return;
+      const reason = String(doc.getElementById(`mg-${msg}-reason`)?.value ?? '').trim();
+      if (!reason) { store.dispatch('hostStatus', { line: said('thread.memory.reasonMissing'), bad: true }); return; }
+      const wrongIf = String(doc.getElementById(`mg-${msg}-wrongIf`)?.value ?? '');
+      overriding.add(msg);
+      void memoryGate.override(callId, reason, wrongIf).then(kept => {
+        if (kept) void actions.answer(msg, 'allowed-once');
+        else store.dispatch('hostStatus', { line: said('thread.memory.overrideRefused'), bad: true });
+      }).finally(() => overriding.delete(msg));
     },
     // a line of the rail of tasks: opened or folded by the page (its summary toggled first), held by its task id; Stop and
     // Continue post once while one is in flight (host/tasks.js). A gate on a line is answered by answer and answerQuestion

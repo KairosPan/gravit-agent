@@ -325,6 +325,12 @@
   "messages-routine-added": "e290b4f37f35969ab86a62c0f560f22633327108863a652ca3704bafae0c7e70",
   "messages-routine-change": "c82112abc72c4ac926192dd7e1285f8b7fe57373ab04cbdfc81820f51b89fbde",
   "messages-routine-limit": "5741d489b384356050e0cedc6feb7a88a0e05883fdc3296f454eb937d1612516",
+  "task-memory-caveat": "9df99ab891d288986ac9767726dc304add36875d1e94dfae6a6bffb9427dcb1e",
+  "task-memory-red-line": "4bdb617519b7ae23e94a61de54947c85934c402a3c36f5499b2e01677ef86f67",
+  "task-memory-untold": "4e6a1136f5750695cda2a7208b29fe28b6166fdefb07717bc688c5763200c830",
+  "task-memory-fault": "e82096bb60dbe7c0eaa88558782335eed2ca7a1ac3d22c81a2cf8aa0c90a2c32",
+  "task-memory-registered": "c65178fbf4cac9436f7b842f5c671df0154a0bdf90364638da308b046747b229",
+  "messages-memory-rail": "0403599355dd3c89e62d2ab0cd3307c4bd9bdcf5ffd6ffc217f31c8945203dd1",
   "composer-menu-0": "42f90e115688a622d841584aa4bbd990cc52debdb88eb69092e6985ac5c8c522",
   "composer-menu-1": "54a409f70cf434460da7f9fe1c9a17b8c50efe1125f148895abccf6f53a79c2e",
   "composer-menu-2": "290606dc9493b556acd950379d908cbd41a61d1eaa35e04a99b3dfe7aae161ea",
@@ -339,5 +345,7 @@
   "composer-editor": "0a7952b97205ff30eda02587d961c7f6dd384a5218a0496f0c7f19fa90034c0b",
   "host-run-sheet-failed": "1cb896daac238a6a8b321e7b8b00f1871abeee800c9300d356aa40b81bbba26c",
   "host-run-sheet-no-conversation": "ff5b040e1bd5f38ea8277095bb407e3a4c7642712a4f2a3e8a12d91d3d824f17",
-  "host-app-answer-first": "6f47e3bc3aeddbaa1eec83ae18dfbcad3763500071d34ea2f2f23c611bb75a77"
+  "host-app-answer-first": "6f47e3bc3aeddbaa1eec83ae18dfbcad3763500071d34ea2f2f23c611bb75a77",
+  "host-app-override-no-reason": "3fed73a018535d13d367f702906339a2954780c31dc69d9f08f0b5c2ed7b7f67",
+  "host-app-override-refused": "b69e117c59b1d2b89d5403d7f4f3496bd3b398bbe93e084e025b284bc7896204"
 }

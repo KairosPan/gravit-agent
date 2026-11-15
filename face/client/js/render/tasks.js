@@ -78,7 +78,7 @@ export function taskLineHtml({ task, gate, status }, group, state, open) {
   const dot = dotOf({ task, gate }, group);
   const strategy = strategyRow(task.strategy);
   const steps = Array.isArray(task.steps) && task.steps.length ? `<ol class="task-steps">${task.steps.map(s => `<li>${esc(maskExcerpt(String(s)))}</li>`).join('')}</ol>` : '';
-  const end = record ? `<div class="task-gate">${gateHtml(record, gate, state)}</div>`
+  const end = record ? `<div class="task-gate">${gateHtml(record, gate, state, { rail: true })}</div>`
     // a gate the read says waits but this page has not seen (after a reload, until the worker is opened): its full process
     : task.waitingFor && group !== 'running' ? `<div class="task-gate-there">${th('tasks.gateThere')}</div>`
     : task.result?.text ? `<div class="task-result">${esc(maskExcerpt(task.result.text))}</div>` : '';

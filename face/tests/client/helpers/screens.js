@@ -450,6 +450,36 @@ export function namedStates() {
     // the routine card in Messages (desk-page plan 3 Task 3): pending, with the turn's closing words left out; added, with its
     // first run; a change waiting, with the routine it replaces; a confirm refused for the limit
     ...routineCardStates(),
+    // the memory's lessons on an order card (memory order card Task 6): on a task's page, a caveat; a red line with its
+    // override form over a batch of two lines; an untold lesson beside a position not read; a memory not connected and a
+    // line's fault; an answered card with what was registered; and the rail's line pointing at the task
+    ...memoryGateStates(),
+  ];
+}
+
+// the order card's lessons (memory order card Task 6), each drawn on a task's page from the gate the face kept for its call,
+// and the rail's line of a card a lesson applies to
+function memoryGateStates() {
+  const card = (id, callId, over = {}) => m(id, { seq: 2, kind: 'card', text: 'Your call: buy 2 NVDA · limit 120 · paper-us', ...over, data: { eventId: id, sessionId: 'wm', toolName: 'mcp__account__portfolio_place_order', callId, venue: 'paper-us', line: 'Account seat - mcp__account__portfolio_place_order: side=buy qty=2 symbol=NVDA type=limit limit=120 venue=paper-us' } });
+  const lesson = (over = {}) => ({ id: 'L-1', strength: 'caveat', says: 'careful', words: 'Do not chase a gap up on the open', fired: 3, followed: 2, overridden: 1, ...over });
+  const red = lesson({ id: 'L-2', strength: 'red-line', says: 'dont', words: 'Never add to a position down more than 8%', fired: 2, followed: 2, overridden: 0 });
+  const line = (over = {}) => ({ order: 'buy 2 NVDA limit 120', considering: ['add'], positionRead: true, market: 'US', lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, ...over });
+  const gate = (callId, over = {}) => ({ callId, state: 'checked', lines: [line()], redLine: false, overridden: false, ...over });
+  const task = { id: 'wm', title: 'Buy a little NVDA', origin: 'web', state: 'waiting', group: 'you', steps: ['Read the tape'], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 2, waitingFor: { kind: 'approval', id: 'm1', tool: 'mcp__account__portfolio_place_order' } };
+  const page = (cards, gates) => {
+    const worker = conv('wm', { title: 'Buy a little NVDA', loaded: true, messages: [m('wm1', { text: 'Placing the order' }), ...cards] });
+    const s = R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('mg'), worker], channels: [], bots: [] }), { conversation: 'mg', tasks: [task], at: NOW }), { screen: 'task', id: 'wm' });
+    return gates.reduce((st, g) => R.memoryGateLoaded(st, { callId: g.callId, gate: g }), s);
+  };
+  const rail = R.nav(R.memoryGateLoaded(R.hostGate(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('mg'), conv('wm', { title: 'Buy a little NVDA' })], channels: [], bots: [] }), { conversation: 'mg', tasks: [task], at: NOW }),
+    { convId: 'wm', message: card('m1', 'm1') }), { callId: 'm1', gate: gate('m1', { lines: [line({ lessons: [lesson()] })] }) }), { screen: 'messages', id: null });
+  return [
+    ['task-memory-caveat', page([card('m1', 'm1')], [gate('m1', { lines: [line({ lessons: [lesson()], lessonsMore: 2 })] })])],
+    ['task-memory-red-line', page([card('m1', 'm1')], [gate('m1', { redLine: true, lines: [line({ leg: 0, lessons: [red] }), line({ leg: 1, order: 'sell 1 AMD limit 150', considering: ['trim'], lessons: [lesson()] })] })])],
+    ['task-memory-untold', page([card('m1', 'm1')], [gate('m1', { lines: [line({ positionRead: false, untold: [{ id: 'L-3', needs: ['change_5d_pct', 'market'] }], untoldMore: 1 })] })])],
+    ['task-memory-fault', page([card('m1', 'm1'), card('m2', 'm2', { seq: 3 })], [gate('m1', { state: 'not connected', words: 'no memory here', lines: [] }), gate('m2', { lines: [line({ fault: 'the memory did not answer in time' })] })])],
+    ['task-memory-registered', page([card('m1', 'm1', { answer: 'approved' })], [gate('m1', { redLine: true, overridden: true, lines: [line({ lessons: [red], registered: 'registered: add' })] })])],
+    ['messages-memory-rail', rail],
   ];
 }
 
@@ -983,6 +1013,37 @@ export async function hostCorpus() {
       store.timers.clear();
     }
   }
+  // a red-lined order card's override pressed with no reason, then refused by the face (memory order card Task 6, app.js)
+  {
+    const f = fakeWindow({ hash: '' });
+    let opts = null;
+    const mux = { stream: () => ({ cancel() {} }), answer: async () => {}, close() {} };
+    const rows = [{ sessionId: 's1', updatedAt: 5, agentAvailable: false, running: false, blank: false }];
+    const call = async endpoint => (endpoint === 'session/list' ? { items: rows } : endpoint === 'session/projections' ? { asOfSeq: 20, values: {} } : endpoint === 'session/page' ? { records: [] } : undefined);
+    const gate = { callId: 'c9', state: 'checked', redLine: true, overridden: false, lines: [{ order: 'buy $10 of BTC/USD', considering: ['open'], positionRead: true, lessons: [{ id: 'L-1', strength: 'red-line', says: 'dont', words: 'Never buy a gap', fired: 1, followed: 1, overridden: 0 }], lessonsMore: 0, untold: [], untoldMore: 0 }] };
+    const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }], ungrouped: [], archived: [], presets: {} }
+      : path === '/data/sessions-meta.json' ? { ok: true, archived: [], deleted: [] } : path === '/data/tasks' ? { ok: true, conversation: 's1', tasks: [] }
+        : path === '/data/memory/gate?callId=c9' ? { ok: true, gate } : { ok: true, bots: [] });
+    const postJson = async path => { if (path === '/data/memory/gate/override') throw Object.assign(new Error('this card is answered'), { status: 409 }); return { ok: true }; };
+    const store = boot(f.win, { editor: valueEditor, openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, now: () => NOW });
+    try {
+      await settle();
+      opts.onReady({});
+      await settle();
+      opts.onGate({ type: 'waterfall', event: 'approval/request', eventId: 'ev-9', agentId: 's1', request: { toolName: 'mcp__account__portfolio_live_order', callId: 'c9', reason: 'Account seat - mcp__account__portfolio_live_order: side=buy usd=10 symbol=BTC/USD venue=paper-1' } });
+      await settle();
+      const press = () => f.click({ tagName: 'BUTTON', dataset: { action: 'overrideGate', conv: 's1', msg: 'ev-9', call: 'c9' } });
+      press();
+      await settle();
+      entries.push(['host-app-override-no-reason', pageHtml(store.get())]);
+      f.withId('mg-ev-9-reason', { tagName: 'INPUT', type: 'text' }).value = 'I sized it small';
+      press();
+      await settle();
+      entries.push(['host-app-override-refused', pageHtml(store.get())]);
+    } finally {
+      store.timers.clear();
+    }
+  }
   return entries;
 }
 
@@ -1036,8 +1097,9 @@ const CONTENT_FIELDS = new Set([
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); an event analog view and its
 // task as the face read them (the worker's and web pages' words); the desk's news as the face answered it (its ledgers' and
 // Gravit's words), and a routine's when line and instruction (the face's line, the operator's words), a routine card's too
-// (Gravit's call and the face's when line) and a proposal's the read holds; `*` is any one key
-const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
+// (Gravit's call and the face's when line) and a proposal's the read holds; the gate the face kept for an order card's call
+// (the face's order words and sentences, the memory's lessons); `*` is any one key
+const CONTENT = [['memoryGate', '*', 'gate'],['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data'],
   ['deskPage', 'routines', 'data', 'routines', 'when'], ['deskPage', 'routines', 'data', 'routines', 'instruction'],
   ['conversations', 'messages', 'data', 'when'], ['conversations', 'messages', 'data', 'instruction'],
