@@ -75,7 +75,7 @@ function group(g, today) {
   const r = a.reason && typeof a.reason === 'object' ? a.reason : null;
   const words = wordsOf(a);
   const top = `<div class="dk-top"><div class="dk-row"><span class="dk-sym">${esc(g.symbol)}</span>${moveChip(a)}` +
-    `<span class="dk-dim">${esc(t('desk.et', { time: alertTime(a) }))}</span><span class="dk-dim">${esc(nthWord(a.nth))}</span></div>${words ? `<div class="dk-row">${words}</div>` : ''}</div>`;
+    `<span class="dk-dim">${esc(t('desk.et', { time: alertTime(a) }))}</span><span class="dk-dim">${esc(nthWord(a.nth, today))}</span></div>${words ? `<div class="dk-row">${words}</div>` : ''}</div>`;
   const headline = r && r.headline ? `<p class="dk-headline">${esc(r.headline)}</p>` : '';
   const toggle = r ? `<button type="button" class="btn-sm" data-action="dkToggle" data-id="${esc(a.id)}" aria-expanded="${g.open}">${g.open ? th('desk.news.hide') : th('desk.news.details')}</button>` : '';
   const meta = r ? `<div class="dk-top"><div class="dk-row dk-dim">${r.label ? `<span>${esc(r.label)}</span>` : ''}<span>${thn('desk.news.pages', Number(r.pages) || 0)}</span></div>${toggle}</div>` : '';
@@ -104,7 +104,7 @@ function rulesFold(view) {
   const key = `<button type="button" class="dk-fold" data-action="dkRules" aria-expanded="${view.rulesOpen}"><span>${th('desk.news.rules', { n: view.rules.length })}</span>` +
     `<span class="dk-dim">${view.rulesOpen ? th('desk.news.hide') : th('desk.news.details')}</span></button>`;
   if (!view.rulesOpen) return key;
-  const rows = view.rules.map(ruleRowOf).map(r => `<div class="dk-rule"><span><strong>${esc(r.names)}</strong> <span class="dk-dim">${esc(r.what)}</span></span><span class="dk-dim">${esc(r.today)}</span></div>`);
+  const rows = view.rules.map(rule => ruleRowOf(rule, view.today)).map(r => `<div class="dk-rule"><span><strong>${esc(r.names)}</strong> <span class="dk-dim">${esc(r.what)}</span></span><span class="dk-dim">${esc(r.today)}</span></div>`);
   return `${key}<div class="dk-rules">${rows.join('')}<div class="dk-rule"><span>${th('desk.news.levels', { n: view.levels })}</span></div></div>`;
 }
 

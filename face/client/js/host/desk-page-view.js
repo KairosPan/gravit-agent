@@ -111,10 +111,20 @@ export function rowWordsOf(alert) {
 }
 
 const ORDINAL = new Intl.PluralRules('en-US', { type: 'ordinal' });
-/** `nth alert today` (or of the day shown), its ordinal by English's rules - every form one sentence in Chinese. */
-export function nthWord(n) {
+/** `nth alert today`, its ordinal by English's rules - every form one sentence in Chinese; `nth alert that day` when
+ *  `today` is false, the day shown being an earlier one that stands in (only the boolean false: a caller's index does not). */
+export function nthWord(n, today = true) {
   const nth = Number.isInteger(n) && n > 0 ? n : 1;
-  switch (ORDINAL.select(nth)) {
+  const form = ORDINAL.select(nth);
+  if (today === false) {
+    switch (form) {
+      case 'one': return t('desk.news.nthStDay', { n: nth });
+      case 'two': return t('desk.news.nthNdDay', { n: nth });
+      case 'few': return t('desk.news.nthRdDay', { n: nth });
+      default: return t('desk.news.nthThDay', { n: nth });
+    }
+  }
+  switch (form) {
     case 'one': return t('desk.news.nthSt', { n: nth });
     case 'two': return t('desk.news.nthNd', { n: nth });
     case 'few': return t('desk.news.nthRd', { n: nth });
@@ -123,8 +133,8 @@ export function nthWord(n) {
 }
 
 /** A watch rule's row: `names` what it watches (its symbols, Holdings, Levels; No symbols for none), `what` its threshold
- *  or its forms, `today` its alerts today. */
-export function ruleRowOf(rule) {
+ *  or its forms, `today` its alerts today - of that day when `today` is false, as {@link nthWord}. */
+export function ruleRowOf(rule, today = true) {
   const names = [...(Array.isArray(rule.symbols) ? rule.symbols.filter(s => typeof s === 'string') : [])];
   if (rule.holdings === true) names.push(t('desk.rule.holdings'));
   if (rule.levels === true) names.push(t('desk.rule.levels'));
@@ -132,7 +142,7 @@ export function ruleRowOf(rule) {
   const what = rule.kind === 'filing' ? t('desk.rule.filing', { forms: forms.join(t('common.list.sep')) })
     : rule.kind === 'gap' ? t('desk.rule.gap', { pct: typeof rule.pct === 'number' ? rule.pct : '' })
       : t('desk.rule.move', { pct: typeof rule.pct === 'number' ? rule.pct : '' });
-  return { names: names.length ? names.join(t('common.list.sep')) : t('desk.rule.none'), what, today: tn('desk.rule.today', count(rule.alertsToday)) };
+  return { names: names.length ? names.join(t('common.list.sep')) : t('desk.rule.none'), what, today: today === false ? tn('desk.rule.thatDay', count(rule.alertsToday)) : tn('desk.rule.today', count(rule.alertsToday)) };
 }
 
 // ---- the Routines column (plan 2 Task 7, spec 2026-11-14 §6.7)

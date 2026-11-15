@@ -82,6 +82,11 @@ test('an empty day reads No alerts today.; an earlier day stands under its date'
   const friday = draw(onDesk(deskPageStatus(), deskNews({ today: false })));
   assert.match(friday, /2026-11-13/);
   assert.doesNotMatch(friday, /Earlier today/);
+  assert.match(friday, /4th alert that day/);
+  assert.doesNotMatch(friday, /alert today/, 'no count says today under another day');
+  const fridayRules = draw(R.deskRules(onDesk(deskPageStatus(), deskNews({ today: false }))));
+  assert.match(fridayRules, /4 alerts that day/);
+  assert.doesNotMatch(fridayRules, /alerts today/);
 });
 
 test('paused: the chip and the banner, no Pause key; muted: its time; stopped: the watch line; off hours', () => {

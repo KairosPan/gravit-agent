@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { deskHeadOf, newsViewOf, moveOf, rowWordsOf, nthWord, ruleRowOf, routinesViewOf, runNoteOf, reportId } from '../../client/js/host/desk-page-view.js';
 import { deskNews, deskPageStatus, deskRoutines, deskNewsWithReports } from './helpers/desk-news.js';
 import { deskStatus, DESK_NOW } from './helpers/desk-status.js';
+import { withTable } from '../../client/js/i18n/words.js';
+import { ZH } from '../../client/js/i18n/zh.js';
 
 const NOW = new Date(DESK_NOW).toISOString();
 const withWatch = patch => { const s = deskPageStatus(); return { ...s, watch: { ...s.watch, ...patch } }; };
@@ -64,6 +66,20 @@ test("an alert's move, its row word and its count of the day", () => {
   for (const [held, word] of [['cap', 'cap'], ['muted', 'muted'], ['off', 'paused'], ['window', 'outside its window']]) assert.deepEqual(rowWordsOf({ delivery: 'held', held }), [{ text: word, tone: 'held' }]);
   assert.deepEqual([1, 2, 3, 4, 11, 12, 13, 21, 22].map(nthWord), ['1st alert today', '2nd alert today', '3rd alert today', '4th alert today', '11th alert today',
     '12th alert today', '13th alert today', '21st alert today', '22nd alert today']);
+});
+
+test('on a day that stands in for today the counts say that day, in both languages', () => {
+  assert.deepEqual([1, 2, 3, 4, 11].map(n => nthWord(n, false)), ['1st alert that day', '2nd alert that day', '3rd alert that day', '4th alert that day', '11th alert that day']);
+  assert.equal(nthWord(2, true), '2nd alert today');
+  const [move] = deskNews().rules;
+  assert.equal(ruleRowOf(move, false).today, '4 alerts that day');
+  assert.equal(ruleRowOf({ kind: 'gap', pct: 3, symbols: [], alertsToday: 1 }, false).today, '1 alert that day');
+  assert.equal(ruleRowOf(move, true).today, '4 alerts today');
+  withTable(ZH, () => {
+    assert.equal(nthWord(2, false), '当天第 2 条提醒');
+    assert.equal(ruleRowOf(move, false).today, '当天 4 条提醒');
+    assert.equal(nthWord(2), '今天第 2 条提醒');
+  });
 });
 
 test("a rule's row", () => {
