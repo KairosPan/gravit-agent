@@ -15,9 +15,11 @@
  *   that day; a calendar that cannot answer makes no trading-days slot due that day, and says so in one line;
  * - each enabled routine's slots today ({@link slotsOn}): one whose key holds a `started` or a `missed` is settled;
  *   before its minute, it waits; one before the later of the routine's `confirmedAt` and its `enabledAt` (src/routines.ts:
- *   a slot passed while it was off) is passed over with no record, never run; within
+ *   a slot passed while it was off) is passed over with no record, never run; one the runner skipped for the pause or
+ *   the cap is settled for the day, never run and never missed - a desk resumed inside the slot's grace does not run it
+ *   late, since its `skipped` already says it did not run; within
  *   {@link SLOT_GRACE_MS} of its minute it is queued unless it is queued or running already; past that, one queued,
- *   running or refused (the pause, the cap, a ledger that would not take its `started`) is settled, any other one
+ *   running or refused (a ledger that would not take its `started`) is settled, any other one
  *   `missed` - `asleep` when the gap since the last tick is over src/desk.ts `ASLEEP_THRESHOLD_MS` and began at or
  *   before the slot, `down` when the slot came before this run began (`bootedAt`), else `late`.
  *
@@ -353,8 +355,10 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
   /* ---- what the ledger and this face know ---- */
   /** Each settled key - a `started` or a `missed` - with the date it names; earlier days are pruned at each tick. */
   const settled = new Map<string, string | undefined>();
-  /** Keys the runner refused (the pause, the cap, an unwritten `started`): past the grace, settled, never missed. */
+  /** Keys the runner refused for an unwritten `started`: queued again inside the grace, past it settled, never missed. */
   const refused = new Set<string>();
+  /** Keys the runner skipped for the pause or the cap: settled at once, so a resume inside the grace runs none of them. */
+  const skipped = new Set<string>();
   /** The routines whose `skipped`, `paused`, the pause in force already has. */
   const pausedNoted = new Set<string>();
   /** Each routine's New York date whose `skipped`, `cap`, is recorded. */
@@ -450,6 +454,7 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
 
     const today = etDate(new Date(now));
     pruneBefore(settled, refused, today);
+    pruneBefore(settled, skipped, today);
 
     const enabled = load.store.routines.filter((r) => r.enabled);
     let trading = false;
@@ -468,7 +473,7 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
       const from = Math.max(Date.parse(routine.confirmedAt), routine.enabledAt === undefined ? -Infinity : Date.parse(routine.enabledAt));
       for (const { slot, at } of slotsOn(routine.schedule, today, trading)) {
         const key = `${routine.id}:${today}:${slot}`;
-        if (settled.has(key) || now < at || at < from) continue;
+        if (settled.has(key) || skipped.has(key) || now < at || at < from) continue;
         if (now - at <= SLOT_GRACE_MS) {
           if (!pending(key)) queue.push({ key, routine, date: today, slot, at });
         } else if (!pending(key) && !refused.has(key)) {
@@ -526,7 +531,7 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
     if (!load.ok || routine === undefined || routine.sha256 !== item.routine.sha256 || (!routine.enabled && item.test !== true)) return;
 
     if (await paused()) {
-      refused.add(item.key);
+      skipped.add(item.key);
       if (!pausedNoted.has(routine.id)) {
         pausedNoted.add(routine.id);
         await appendRecord(home, ROUTINES_LEDGER, { t: iso(clock.now()), kind: "skipped", routine: routine.id, why: "paused" } satisfies RoutineRunRecord, ledgerOpts);
@@ -535,7 +540,7 @@ export function installRoutineClock(deps: RoutineClockDeps): RoutineClock {
     }
     const today = etDate(new Date(clock.now()));
     if ((await capOf(load.store.budget.dailyTokens, clock.now())).spent) {
-      refused.add(item.key);
+      skipped.add(item.key);
       if (capNoted.get(routine.id) !== today) {
         capNoted.set(routine.id, today);
         await appendRecord(home, ROUTINES_LEDGER, { t: iso(clock.now()), kind: "skipped", routine: routine.id, why: "cap" } satisfies RoutineRunRecord, ledgerOpts);

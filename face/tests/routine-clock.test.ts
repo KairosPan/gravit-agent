@@ -432,6 +432,26 @@ test("a paused desk writes one skipped for three slots, runs nothing, and misses
   await r.rc.dispose();
 });
 
+/* the routines drill, 2026-11-15: 12:42 was skipped for the pause, and ran 63 s after the resume, inside its grace */
+test("a slot the pause skipped does not run when the desk is resumed inside its grace; the next slot does", async () => {
+  const fx = await fixture();
+  await writeStore(fx.home, [routine(1, { days: "daily", times: ["09:00", "09:10"] })]);
+  const r = rig(fx, "2026-11-13T13:58:00Z");
+  await writeOff(fx.home, { by: "terminal" }, () => r.clock.now());
+  await at(r, "2026-11-13T14:00:05Z");
+  assert.deepEqual((await ofKind(fx.home, "skipped")).map((s) => [s.routine, s.why]), [["r-00000001", "paused"]]);
+  await clearOff(fx.home, "terminal", () => r.clock.now());
+  await at(r, "2026-11-13T14:01:05Z");
+  await at(r, "2026-11-13T14:04:35Z");
+  assert.deepEqual(r.runs.map((x) => x.key), [], "the skipped slot is not run late");
+  await at(r, "2026-11-13T14:06:05Z");
+  assert.deepEqual(await ofKind(fx.home, "missed"), [], "nor is it missed past its grace");
+  await at(r, "2026-11-13T14:10:05Z");
+  assert.deepEqual(r.runs.map((x) => x.key), ["r-00000001:2026-11-13:09:10"]);
+  assert.equal((await ofKind(fx.home, "skipped")).length, 1);
+  await r.rc.dispose();
+});
+
 test("the spend is right after appends, a half-written last line, a rotation and New York's midnight", async () => {
   const fx = await fixture();
   await writeStore(fx.home, [], 1_000_000);

@@ -191,11 +191,15 @@ function liftOf(name, args, text, isError, callId) {
   return lift && { id: `${prefix}${callId}`, ...lift };
 }
 
+// who a line is from when it is not Gravit's: the operator, and the face's own lines
+const NOT_GRAVIT = new Set(['you', 'system']);
 /** The ids of the Gravit words the thread does not draw (spec 2026-11-14 §6.5, "the reply is the card alone"): a turn whose
  *  last tool call is an ok `routine_propose` ends on its card, so Gravit's words after the card - up to the next message that
  *  is not Gravit's (the next turn's opening line), or the list's end - are its closing text. Another tool call after the card
  *  makes them that call's, kept; words before the call are kept; a refused proposal lifts no card and hides nothing. The
- *  messages stay in the store (the preview, the turn rail's excerpt and the phone keep them); only the thread leaves them out. */
+ *  messages stay in the store (the preview, the turn rail's excerpt and the phone keep them); only the thread leaves them out.
+ *  Gravit's words are told by who did NOT say them: the one conversation runs on the `gravit-router` preset, so its words
+ *  carry that preset as `from` (host/live.js speakerOf), never `gravit`; the operator's are `you`, the face's own `system`. */
 export function routineClosings(messages) {
   const out = new Set();
   let held = null;   // the words after a card, while no other call has followed it
@@ -204,7 +208,7 @@ export function routineClosings(messages) {
     if (m.kind === 'routine') { held = []; continue; }
     if (held === null) continue;
     if (m.kind === 'tool') held = null;
-    else if (m.from !== 'gravit') flush();
+    else if (NOT_GRAVIT.has(m.from)) flush();
     else if (m.kind === 'text') held.push(m.id);
   }
   flush();
