@@ -11,14 +11,18 @@
  * the model's arguments is passed on as text, and a fact the model supplied is not carried over. A read that loses
  * its race is left to finish and ignored; the kept view never changes once the check settles.
  *
- * `check` never rejects and settles within {@link GATE_CHECK_MS}; a callId checked again replaces its entry whole. At
- * most {@link GATE_KEPT} calls are kept, the oldest out first, save a red line still waiting (no override on record,
- * not answered), which is never evicted. {@link gateAccount} is the gate's Account over the Account proxy's in-process reads.
+ * `check` never rejects and settles within {@link GATE_CHECK_MS}. Each entry records the session it was checked for;
+ * a callId checked again is held by a placeholder until the new check settles, then replaced whole. At most
+ * {@link GATE_KEPT} calls are kept, the oldest out first, save a red line still waiting (no override on record, not
+ * answered) and a placeholder whose check runs, which are never evicted. {@link gateAccount} is the gate's Account
+ * over the Account proxy's in-process reads.
  *
  * A kept call is red-lined when a lesson with `strength: "red-line"` and `says: "dont"` applies to one of its lines.
- * Gate 2's guard reads `redLineReason` on every granted seat write: a red-lined call with no override on record is
- * refused with {@link redLineRefusal} of its first red line, in line order. `override` keeps the owner's words for a
- * red-lined card that is still waiting; a card answered takes none.
+ * Gate 2's guard reads `redLineReason` on every granted seat write, with the calling execution's session: a callId
+ * being checked again is refused with {@link CHECK_NOT_FINISHED}, one kept for another session with
+ * {@link HELD_BY_ANOTHER}, and a red-lined call with no override on record with {@link redLineRefusal} of its first
+ * red line, in line order. `override` keeps the owner's words for a red-lined card that is still waiting; a card
+ * answered takes none.
  * @module
  */
 import type { RecallAnswer } from "gravit-memory";
@@ -91,8 +95,9 @@ export interface MemoryGate {
   view(callId: string): GateView | undefined;
   /** Keeps the owner's override for a red-lined card that is still waiting. */
   override(callId: string, body: GateOverride): "kept" | "no such card" | "no red line" | "answered";
-  /** The guard's read: words when the call is red-lined with no override on record, else undefined. Synchronous; never throws. */
-  redLineReason(callId: string | undefined): string | undefined;
+  /** The guard's read for the calling execution's session: words when the call is red-lined with no override on
+   * record, held by another session's card, or still being checked again; else undefined. Synchronous; never throws. */
+  redLineReason(callId: string | undefined, sessionId: string | undefined): string | undefined;
   dispose(): void;
 }
 
@@ -108,18 +113,27 @@ export function redLineRefusal(words: string): string {
   return `a red line applies to this order - "${cut}" - and no override is on record: the owner opens the card and overrides it in their own words`;
 }
 
+/** The guard's refusal of a call whose id is kept for another session's card. */
+export const HELD_BY_ANOTHER = "this call id is held by another order card: the order is not run - place it again";
+
+/** The guard's refusal of a call whose id is being checked again. */
+export const CHECK_NOT_FINISHED = "the memory's check of this call is not finished: the order is not run - place it again";
+
 /** One line of a kept call: the order as read, the position it was read against, and what the card draws. */
 interface LineEntry { order: OrderLine; position: Position | null | undefined; view: GateLine }
 
-/** One kept call: the call, its state, and its lines. `pending` while the check runs. `override` is the owner's, kept
- * only for a red-lined card; `answered` is set once the card is answered, after which no override is taken. */
+/** One kept call: the call (its session among it), its state, and its lines. `pending` while the check runs.
+ * `override` is the owner's, kept only for a red-lined card; `answered` is set once the card is answered, after which
+ * no override is taken. `checking` marks a placeholder standing for a kept callId checked again. */
 interface Entry {
   call: GateCall; state: GateView["state"] | "pending"; words?: string; lines: LineEntry[];
-  override?: GateOverride; answered?: boolean;
+  override?: GateOverride; answered?: boolean; checking?: boolean;
 }
 
-/** A checked entry that is red-lined, with no override on record and not answered: never evicted. */
-function waitingRedLine(entry: Entry): boolean {
+/** An entry never evicted: a placeholder whose check runs, or a checked entry that is red-lined, with no override on
+ * record and not answered. */
+function unevictable(entry: Entry): boolean {
+  if (entry.checking === true) return true;
   return entry.state === "checked" && entry.override === undefined && entry.answered !== true && firstRedLine(entry) !== undefined;
 }
 
@@ -215,16 +229,16 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     });
   }
 
-  /** Keeps `entry` as its callId's only entry, the newest; past GATE_KEPT the oldest entry that is not a waiting red
-   * line goes first. `entry` itself and a waiting red line are never evicted, so the map may stay over the cap while
-   * every other entry is one. */
+  /** Keeps `entry` as its callId's only entry, the newest; past GATE_KEPT the oldest evictable entry goes first.
+   * `entry` itself, a waiting red line and a placeholder whose check runs are never evicted, so the map may stay over
+   * the cap while every other entry is one of them. */
   function keep(entry: Entry): void {
     entries.delete(entry.call.callId);
     entries.set(entry.call.callId, entry);
     while (entries.size > GATE_KEPT) {
       let victim: string | undefined;
       for (const [callId, kept] of entries) {
-        if (kept !== entry && !waitingRedLine(kept)) {
+        if (kept !== entry && !unevictable(kept)) {
           victim = callId;
           break;
         }
@@ -316,17 +330,23 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
       try {
         if (disposed || typeof call?.callId !== "string" || !CALL_ID.test(call.callId)) return undefined;
         /* A kept callId is checked again: each check is one execution about to raise its own card. The old entry -
-         * its lines, its red line, its override, its answered mark - is dropped as the new check starts, and the new
-         * one stands pending in its place: `view`, `override` and `redLineReason` treat a pending entry as unknown,
-         * so it is seen only once it settles, and the old one is never read for the new call. */
+         * its lines, its red line, its override, its answered mark - is replaced at once by a placeholder that holds
+         * the new call's session and is being checked: no view, no override, and the guard refuses it for any caller
+         * (CHECKING). When the new check settles, its entry takes the placeholder's place, unless a later check took
+         * the callId meanwhile. A callId never kept before gets no placeholder: its own entry stands pending, seen as
+         * unknown until it settles - its guard cannot run before its check has, and an order never waits on the
+         * memory. */
         const entry: Entry = { call, state: "pending", lines: [] };
-        keep(entry);
+        const holder: Entry = entries.has(call.callId) ? { call, state: "pending", lines: [], checking: true } : entry;
+        keep(holder);
         try {
           return await run(call, entry);
         } catch (error) {
           Object.assign(entry, { state: "not checked", words: memoryFaultWords(error), lines: [] });
           say(`${call.callId}: ${memoryFaultWords(error)}`);
           return undefined;
+        } finally {
+          if (holder !== entry && entries.get(call.callId) === holder) keep(entry);
         }
       } catch {
         return undefined;
@@ -349,11 +369,16 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
       entry.override = { reason: String(body.reason), ...(body.wrongIf === undefined ? {} : { wrongIf: String(body.wrongIf) }) };
       return "kept";
     },
-    redLineReason(callId) {
+    redLineReason(callId, sessionId) {
       try {
         if (typeof callId !== "string") return undefined;
         const entry = entries.get(callId);
-        if (entry === undefined || entry.state !== "checked" || entry.override !== undefined) return undefined;
+        if (entry === undefined) return undefined;
+        /* CHECKING: a callId checked again refuses every caller until its new entry stands; a kept entry refuses a
+         * caller of another session (an undefined one among them), since grants are per session and ids are not */
+        if (entry.checking === true) return CHECK_NOT_FINISHED;
+        if (entry.call.sessionId !== sessionId) return HELD_BY_ANOTHER;
+        if (entry.state !== "checked" || entry.override !== undefined) return undefined;
         const words = firstRedLine(entry);
         return words === undefined ? undefined : redLineRefusal(words);
       } catch (error) {

@@ -99,7 +99,8 @@
  *    inside its own `try`, bounded at {@link ORDER_RECALL_MS}, and hands its
  *    note to `onCardAsked`; the decision is the one it made before the check.
  *    The guard, after the grant check and only for a granted order call,
- *    refuses a red-lined call with no override on record. Unbound, or on any
+ *    refuses a red-lined call with no override on record, and a call id kept
+ *    for another session's card or still being checked again. Unbound, or on any
  *    fault in the memory's code, Gate 2 behaves as it does without a memory.
  * The telemetry opt-out is honored exactly as the CLI honors it.
  *
@@ -771,7 +772,7 @@ interface GateApprovalLike {
  * the calling scope sees the tool at all. */
 interface GateToolsLike {
   get(name: string, scope?: unknown): unknown;
-  guard(check: (exec: { name: string; callId?: unknown; agent?: { session: unknown } }) => string | undefined): () => void;
+  guard(check: (exec: { name: string; callId?: unknown; agent?: { session: unknown; id?: unknown } }) => string | undefined): () => void;
 }
 
 /** The memory gate's two halves Gate 2 reads (src/memory-gate.ts): the check it awaits before a card is asked, and
@@ -786,6 +787,11 @@ export const ORDER_RECALL_MS = 4_000;
 const isGateNote = (v: unknown): v is GateNote =>
   typeof v === "object" && v !== null &&
   typeof (v as GateNote).lessons === "number" && typeof (v as GateNote).redLine === "boolean";
+
+/** The calling agent's session id, as the face reads it for an execution (src/memory-guard.ts reads it the same way):
+ * the same for the ask listener's check and the guard's red line. */
+const sessionIdOf = (exec: { agent?: { id?: unknown } }): string | undefined =>
+  typeof exec.agent?.id === "string" ? exec.agent.id : undefined;
 
 /** The timer the ask listener bounds the check with; tests inject their own. */
 export interface OrderRecallTimers {
@@ -877,8 +883,10 @@ interface GateEventsLike {
  * unbound, a check that throws, rejects or does not settle in time is no note (a fault is one line), and the same
  * `ask` follows: the decision is `orderApprovalDecision`'s whatever the check does. `recall` is read at each call.
  * THE RED LINE. The guard's reason is the grant's own when there is one; for a granted order call it is then the
- * memory gate's `redLineReason` - a red-lined call with no override on record is refused in the owner's lesson's
- * words. A recall unbound or a read that throws passes the call as before (a throw is one line).
+ * memory gate's `redLineReason`, read with the execution's session id (the one its check was given): a red-lined
+ * call with no override on record is refused in the owner's lesson's words, a call id kept for another session's
+ * card or still being checked again is refused too. A recall unbound or a read that throws passes the call as
+ * before (a throw is one line). An execution with no session id is not checked.
  * @param hostCtx - the root context `boot()` hands `prepare`.
  * @param onCardAsked - {@link FaceBootOptions.onCardAsked}, if any.
  * @param recall - the memory gate's parts as bound now ({@link BootedFace.bindOrderRecall}), read at each call.
@@ -906,10 +914,11 @@ export function armOrderGate(
     exec: { name: string; callId?: unknown; arguments?: unknown; agent?: { id?: unknown } },
   ): Promise<GateNote | undefined> => {
     try {
-      if (recall === undefined || typeof exec.callId !== "string") return undefined;
+      const sessionId = sessionIdOf(exec);
+      /* no call id or no session id: nothing the guard could tell apart, so nothing is checked or kept */
+      if (recall === undefined || typeof exec.callId !== "string" || sessionId === undefined) return undefined;
       const parts = recall();
       if (parts === undefined) return undefined;
-      const sessionId = typeof exec.agent?.id === "string" ? exec.agent.id : "";
       const checking = parts.check({ callId: exec.callId, name: exec.name, args: exec.arguments, sessionId });
       return await new Promise<GateNote | undefined>((resolve) => {
         let done = false;
@@ -943,12 +952,13 @@ export function armOrderGate(
       return undefined;
     }
   };
-  /* The red line for a granted order call, or undefined. Never throws. */
-  const redLineFor = (callId: unknown): string | undefined => {
+  /* The red line for a granted order call, read for the execution's own session (the id the listener gives `check`),
+   * or undefined. Never throws. */
+  const redLineFor = (exec: { callId?: unknown; agent?: { id?: unknown } }): string | undefined => {
     try {
       const parts = recall?.();
       if (parts === undefined) return undefined;
-      const reason = parts.redLineReason(typeof callId === "string" ? callId : undefined);
+      const reason = parts.redLineReason(typeof exec.callId === "string" ? exec.callId : undefined, sessionIdOf(exec));
       return typeof reason === "string" ? reason : undefined;
     } catch (err) {
       fault("the memory gate's red line could not be read", err);
@@ -1021,7 +1031,7 @@ export function armOrderGate(
       const reason = orderGuardReasonForSession(exec.name, exec.agent?.session, exec.callId);
       /* the red line only AFTER the grant check, and only for an order call it passed (THE RED LINE, above) */
       if (reason !== undefined || !isOrderTool(exec.name)) return reason;
-      return redLineFor(exec.callId);
+      return redLineFor(exec);
     });
   });
   return { listener, guard };

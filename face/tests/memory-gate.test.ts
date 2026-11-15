@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import type { Memory, RecallAnswer } from "gravit-memory";
 import {
   CALL_ID,
+  CHECK_NOT_FINISHED,
+  HELD_BY_ANOTHER,
   GATE_ACCOUNT_MS,
   GATE_CHECK_MS,
   GATE_FACTS_MS,
@@ -330,42 +332,100 @@ const AMD_BUY = { venue: "paper-1", symbol: "AMD", side: "buy", qty: 1 };
 test("a callId first with no red line, then again with an order that meets one: the red line is refused", async () => {
   const { gate, clock } = redFor("AMD");
   await clock.run(gate.check(callOf(BUY_NVDA)));
-  assert.equal(gate.redLineReason("call_1"), undefined);
+  assert.equal(gate.redLineReason("call_1", "s-1"), undefined);
   assert.deepEqual(await clock.run(gate.check(callOf(AMD_BUY))), { lessons: 1, redLine: true });
-  assert.equal(gate.redLineReason("call_1"), redLineRefusal("never touch AMD"));
+  assert.equal(gate.redLineReason("call_1", "s-1"), redLineRefusal("never touch AMD"));
 });
 
 test("a red-lined callId overridden, then checked again with a red line: no override carried, refused again", async () => {
   const { gate, clock } = redFor("AMD");
   await clock.run(gate.check(callOf(AMD_BUY)));
   assert.equal(gate.override("call_1", { reason: "the first card's reason" }), "kept");
-  assert.equal(gate.redLineReason("call_1"), undefined);
+  assert.equal(gate.redLineReason("call_1", "s-1"), undefined);
   await clock.run(gate.check(callOf({ ...AMD_BUY, qty: 5 })));
   assert.equal(gate.view("call_1")!.overridden, false);
-  assert.equal(gate.redLineReason("call_1"), redLineRefusal("never touch AMD"));
+  assert.equal(gate.redLineReason("call_1", "s-1"), redLineRefusal("never touch AMD"));
 });
 
-test("while a callId's second check runs, its first entry is gone: unknown, never the first call's answer", async () => {
+/** A rig whose first recall answers `first`, and every later one waits for `release()` and answers `later`. */
+function heldRig(first: RecallAnswer, later: RecallAnswer) {
+  const held: { release?: () => void; calls: number } = { calls: 0 };
+  const r = rig({
+    recall: async () => {
+      held.calls += 1;
+      if (held.calls === 1) return first;
+      await new Promise<void>((resolve) => { held.release = resolve; });
+      return later;
+    },
+  });
+  return { ...r, held };
+}
+
+test("while a callId's second check runs, a placeholder holds it: no view, no override, not finished for any caller", async () => {
+  const { gate, clock, held } = heldRig(CAREFUL, answerOf({ applies: [lessonOf("L-0002", "red-line", "dont", "never add")] }));
+  await clock.run(gate.check(callOf(BUY_NVDA)));
+  const second = gate.check(callOf({ ...BUY_NVDA, qty: 2 }));
+  await clock.flush();
+  assert.equal(held.calls, 2, "the second recall is running");
+  assert.equal(gate.view("call_1"), undefined, "the first entry is replaced by the placeholder");
+  assert.equal(gate.redLineReason("call_1", "s-1"), CHECK_NOT_FINISHED);
+  assert.equal(gate.redLineReason("call_1", "s-other"), CHECK_NOT_FINISHED);
+  assert.equal(gate.redLineReason("call_1", undefined), CHECK_NOT_FINISHED);
+  assert.equal(gate.override("call_1", { reason: "why" }), "no such card");
+  held.release!();
+  assert.deepEqual(await clock.run(second), { lessons: 1, redLine: true });
+  assert.equal(gate.redLineReason("call_1", "s-1"), redLineRefusal("never add"));
+});
+
+test("the exact words of the two refusals", () => {
+  assert.equal(HELD_BY_ANOTHER, "this call id is held by another order card: the order is not run - place it again");
+  assert.equal(CHECK_NOT_FINISHED, "the memory's check of this call is not finished: the order is not run - place it again");
+});
+
+test("session A's red-lined callId checked again by session B: not finished while B's check runs; then held from A, clear for B", async () => {
+  const { gate, clock, held } = heldRig(answerOf({ applies: [lessonOf("L-0002", "red-line", "dont", "never add")] }), CAREFUL);
+  await clock.run(gate.check({ callId: "call_1", name: ORDER, args: BUY_NVDA, sessionId: "A" }));
+  assert.equal(gate.redLineReason("call_1", "A"), redLineRefusal("never add"));
+  const fromB = gate.check({ callId: "call_1", name: ORDER, args: { ...BUY_NVDA, qty: 1 }, sessionId: "B" });
+  await clock.flush();
+  assert.equal(gate.redLineReason("call_1", "A"), CHECK_NOT_FINISHED);
+  assert.equal(gate.redLineReason("call_1", "B"), CHECK_NOT_FINISHED);
+  held.release!();
+  assert.deepEqual(await clock.run(fromB), { lessons: 1, redLine: false });
+  assert.equal(gate.redLineReason("call_1", "A"), HELD_BY_ANOTHER);
+  assert.equal(gate.redLineReason("call_1", "B"), undefined);
+  assert.equal(gate.redLineReason("call_1", undefined), HELD_BY_ANOTHER, "no session against a kept entry is a mismatch");
+  assert.equal(gate.redLineReason("call_9", undefined), undefined, "no entry: undefined");
+});
+
+test("a callId never kept before gets no placeholder: undefined while its own check runs", async () => {
   let release: (() => void) | undefined;
-  let calls = 0;
   const { gate, clock } = rig({
     recall: async () => {
-      calls += 1;
-      if (calls === 1) return CAREFUL;
       await new Promise<void>((resolve) => { release = resolve; });
       return answerOf({ applies: [lessonOf("L-0002", "red-line", "dont", "never add")] });
     },
   });
-  await clock.run(gate.check(callOf(BUY_NVDA)));
-  const second = gate.check(callOf({ ...BUY_NVDA, qty: 2 }));
+  const first = gate.check(callOf(BUY_NVDA));
   await clock.flush();
-  assert.equal(calls, 2, "the second recall is running");
-  assert.equal(gate.view("call_1"), undefined, "the first entry was removed when the second check started");
-  assert.equal(gate.redLineReason("call_1"), undefined);
-  assert.equal(gate.override("call_1", { reason: "why" }), "no such card");
+  assert.notEqual(release, undefined, "the recall is running");
+  assert.equal(gate.redLineReason("call_1", "s-1"), undefined);
   release!();
-  assert.deepEqual(await clock.run(second), { lessons: 1, redLine: true });
-  assert.equal(gate.redLineReason("call_1"), redLineRefusal("never add"));
+  await clock.run(first);
+  assert.equal(gate.redLineReason("call_1", "s-1"), redLineRefusal("never add"));
+});
+
+test("a placeholder whose check runs is never evicted", async () => {
+  const { gate, clock, held } = heldRig(CAREFUL, CAREFUL);
+  await clock.run(gate.check(callOf(BUY_NVDA, "reused")));
+  const again = gate.check(callOf(BUY_NVDA, "reused"));
+  await clock.flush();
+  for (let i = 0; i < GATE_KEPT + 5; i++) await clock.run(gate.check(callOf({}, `p${i}`, "mcp__account__portfolio_balance")));
+  assert.equal(gate.redLineReason("reused", "s-1"), CHECK_NOT_FINISHED, "still held");
+  held.release!();
+  await clock.run(again);
+  assert.equal(gate.redLineReason("reused", "s-1"), undefined);
+  assert.notEqual(gate.view("reused"), undefined, "its entry took the placeholder's place");
 });
 
 test("at most GATE_KEPT entries are kept; the oldest goes first", async () => {
@@ -383,7 +443,7 @@ test("a red line still waiting is never evicted; overridden, it goes in its turn
   for (let i = 0; i < GATE_KEPT; i++) await clock.run(gate.check(callOf({}, plain(i), "mcp__account__portfolio_balance")));
   const keptPlain = (): number => Array.from({ length: GATE_KEPT + 2 }, (_, i) => gate.view(plain(i))).filter((v) => v !== undefined).length;
   assert.notEqual(gate.view("red"), undefined, "the waiting red line is kept");
-  assert.equal(gate.redLineReason("red"), redLineRefusal("never touch AMD"));
+  assert.equal(gate.redLineReason("red", "s-1"), redLineRefusal("never touch AMD"));
   assert.equal(keptPlain() + 1, GATE_KEPT, "the cap holds, the oldest plain entry out");
   assert.equal(gate.view(plain(0)), undefined);
 
@@ -488,18 +548,18 @@ test("redLineReason: undefined with no entry, no red line or no callId; the firs
     lessonOf("L-0004", "red-line", "dont", "the second red line"),
   ];
   const red = rig({ recall: async () => answerOf({ applies: lessons }) });
-  assert.equal(red.gate.redLineReason("call_1"), undefined, "no entry");
-  assert.equal(red.gate.redLineReason(undefined), undefined, "no callId");
+  assert.equal(red.gate.redLineReason("call_1", "s-1"), undefined, "no entry");
+  assert.equal(red.gate.redLineReason(undefined, "s-1"), undefined, "no callId");
   await red.clock.run(red.gate.check(callOf(BUY_NVDA)));
-  assert.equal(red.gate.redLineReason("call_1"), refusalOf("never add to a loser"));
+  assert.equal(red.gate.redLineReason("call_1", "s-1"), refusalOf("never add to a loser"));
   assert.equal(red.gate.view("call_1")!.overridden, false);
   assert.equal(red.gate.override("call_1", { reason: "Earnings are out and the gap filled." }), "kept");
-  assert.equal(red.gate.redLineReason("call_1"), undefined);
+  assert.equal(red.gate.redLineReason("call_1", "s-1"), undefined);
   assert.equal(red.gate.view("call_1")!.overridden, true);
 
   const caveat = rig();
   await caveat.clock.run(caveat.gate.check(callOf(BUY_NVDA)));
-  assert.equal(caveat.gate.redLineReason("call_1"), undefined, "an entry with no red line");
+  assert.equal(caveat.gate.redLineReason("call_1", "s-1"), undefined, "an entry with no red line");
 });
 
 test("redLineReason: the first red line in line order, across a batch's lines, whichever recall answers first", async () => {
@@ -513,7 +573,7 @@ test("redLineReason: the first red line in line order, across a batch's lines, w
   });
   await clock.run(gate.check(callOf({ legs }, "call_b", BATCH)));
   assert.equal(gate.view("call_b")!.redLine, true);
-  assert.equal(gate.redLineReason("call_b"), refusalOf("no more AMD"));
+  assert.equal(gate.redLineReason("call_b", "s-1"), refusalOf("no more AMD"));
 });
 
 test("override: no such card, no red line; a later override replaces an earlier one", async () => {
@@ -523,7 +583,7 @@ test("override: no such card, no red line; a later override replaces an earlier 
   assert.equal(red.gate.override("call_1", { reason: "first" }), "kept");
   assert.equal(red.gate.override("call_1", { reason: "second", wrongIf: "it gaps down" }), "kept");
   assert.equal(red.gate.view("call_1")!.overridden, true);
-  assert.equal(red.gate.redLineReason("call_1"), undefined);
+  assert.equal(red.gate.redLineReason("call_1", "s-1"), undefined);
 
   const caveat = rig();
   await caveat.clock.run(caveat.gate.check(callOf(BUY_NVDA)));
@@ -536,7 +596,7 @@ test("redLineReason on an entry that throws on read: undefined, and one line", a
   const { gate, asked, clock } = rig({ recall: async () => answerOf({ applies: [lessonOf("L-0002", "red-line", "dont", tampered)] }) });
   await clock.run(gate.check(callOf(BUY_NVDA)));
   const before = asked.logs.length;
-  assert.equal(gate.redLineReason("call_1"), undefined);
+  assert.equal(gate.redLineReason("call_1", "s-1"), undefined);
   assert.equal(asked.logs.length, before + 1);
   assert.match(asked.logs.at(-1)!, /^memory gate: /);
 });

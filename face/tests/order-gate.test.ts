@@ -323,6 +323,19 @@ test("the memory's check: awaited before the card with the call's id, name, argu
   }
 });
 
+test("an execution with no session id is asked about as today and not checked: the guard could not tell it apart", async () => {
+  const checks: unknown[] = [];
+  const g = await armed({ recall: () => recallOf({ check: async (call) => { checks.push(call); return { lessons: 1, redLine: true }; } }) });
+  try {
+    const exec = pending(SEAT_ORDER, SEAT_ARGS);
+    assert.deepEqual(await firePreExecute(g.root, exec), await baseline(exec));
+    assert.deepEqual(checks, []);
+    assert.equal(g.asked[0]![2], undefined);
+  } finally {
+    await g.done();
+  }
+});
+
 test("a check that rejects or throws, a recall unbound or throwing: the same ask, no note, one line for each fault", async () => {
   const exec = carded();
   const want = await baseline(exec);
@@ -434,14 +447,14 @@ test("the guard: a red line refuses a granted call; no grant keeps the grant's r
   const RED = 'a red line applies to this order - "never add to a loser" - and no override is on record: the owner opens the card and overrides it in their own words';
 
   const consulted: unknown[] = [];
-  const red = await armed({ recall: () => recallOf({ redLineReason: (callId) => { consulted.push(callId); return RED; } }) });
+  const red = await armed({ recall: () => recallOf({ redLineReason: (callId, sessionId) => { consulted.push([callId, sessionId]); return RED; } }) });
   try {
     assert.equal(red.guardCheck(granted), RED);
-    assert.deepEqual(consulted, [exec.callId]);
+    assert.deepEqual(consulted, [[exec.callId, "s-worker"]], "the guard passes the execution's own session id");
     assert.equal(red.guardCheck(ungranted), orderGuardReasonForSession(SEAT_ORDER, ungranted.agent.session, exec.callId));
     assert.match(red.guardCheck(ungranted) ?? "", /without a logged allowed-once/);
     assert.equal(red.guardCheck({ name: "bash", callId: exec.callId, agent: granted.agent }), undefined, "another tool is never consulted");
-    assert.deepEqual(consulted, [exec.callId], "with no grant, or for another tool, the red line is not consulted");
+    assert.deepEqual(consulted, [[exec.callId, "s-worker"]], "with no grant, or for another tool, the red line is not consulted");
   } finally {
     await red.done();
   }
