@@ -65,7 +65,7 @@ export function KitchenSink() {
           <p className="text-caption text-muted-foreground">gravit. — tokens</p>
           <h1 className="text-title">Kitchen sink</h1>
           <p className="mt-2 max-w-xl text-body-lg text-muted-foreground">
-            Light first. Cyan is a fill; text on it is the ink. Green is up and red is down.
+            System is the default. Cyan is a fill; text on it is the ink. Green is up and red is down.
           </p>
         </div>
         <div className="flex items-center gap-2" role="group" aria-label="Theme">
