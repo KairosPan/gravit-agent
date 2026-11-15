@@ -298,7 +298,7 @@ test("time: a recall that never answers settles the check at GATE_CHECK_MS; its 
   assert.equal(clock.live(), 0);
 });
 
-test("a callId off CALL_ID, or one already kept: undefined, and nothing is asked", async () => {
+test("a callId off CALL_ID: undefined, and nothing is asked", async () => {
   assert.equal(CALL_ID.test("call_1:a.b-c"), true);
   assert.equal(CALL_ID.test("x".repeat(129)), false);
   const { gate, asked, clock } = rig();
@@ -308,12 +308,64 @@ test("a callId off CALL_ID, or one already kept: undefined, and nothing is asked
   }
   assert.equal(await clock.run(gate.check({ callId: 7, name: ORDER, args: BUY_NVDA, sessionId: "s" } as unknown as GateCall)), undefined);
   assert.equal(asked.open, 0);
+});
+
+test("a kept callId is checked again: the memory is asked for the new call and the entry replaced whole", async () => {
+  const { gate, asked, clock } = rig();
   await clock.run(gate.check(callOf(BUY_NVDA)));
-  const kept = gate.view("call_1");
-  assert.equal(await clock.run(gate.check(callOf({ ...BUY_NVDA, qty: 99 }))), undefined);
-  assert.equal(asked.open, 1);
-  assert.equal(asked.recalls.length, 1);
-  assert.deepEqual(gate.view("call_1"), kept);
+  assert.deepEqual(await clock.run(gate.check(callOf({ ...BUY_NVDA, qty: 99 }))), { lessons: 1, redLine: false });
+  assert.equal(asked.open, 2);
+  assert.equal(asked.recalls.length, 2);
+  assert.equal(gate.view("call_1")!.lines[0]!.order, "buy 99 NVDA · paper-1");
+});
+
+/** A rig whose recall answers a red line for `symbol` alone, a caveat for the rest. */
+const redFor = (symbol: string) => rig({
+  recall: async (_by, input) => ((input as { symbol?: string }).symbol === symbol
+    ? answerOf({ applies: [lessonOf("L-0002", "red-line", "dont", `never touch ${symbol}`)] })
+    : CAREFUL),
+});
+const AMD_BUY = { venue: "paper-1", symbol: "AMD", side: "buy", qty: 1 };
+
+test("a callId first with no red line, then again with an order that meets one: the red line is refused", async () => {
+  const { gate, clock } = redFor("AMD");
+  await clock.run(gate.check(callOf(BUY_NVDA)));
+  assert.equal(gate.redLineReason("call_1"), undefined);
+  assert.deepEqual(await clock.run(gate.check(callOf(AMD_BUY))), { lessons: 1, redLine: true });
+  assert.equal(gate.redLineReason("call_1"), redLineRefusal("never touch AMD"));
+});
+
+test("a red-lined callId overridden, then checked again with a red line: no override carried, refused again", async () => {
+  const { gate, clock } = redFor("AMD");
+  await clock.run(gate.check(callOf(AMD_BUY)));
+  assert.equal(gate.override("call_1", { reason: "the first card's reason" }), "kept");
+  assert.equal(gate.redLineReason("call_1"), undefined);
+  await clock.run(gate.check(callOf({ ...AMD_BUY, qty: 5 })));
+  assert.equal(gate.view("call_1")!.overridden, false);
+  assert.equal(gate.redLineReason("call_1"), redLineRefusal("never touch AMD"));
+});
+
+test("while a callId's second check runs, its first entry is gone: unknown, never the first call's answer", async () => {
+  let release: (() => void) | undefined;
+  let calls = 0;
+  const { gate, clock } = rig({
+    recall: async () => {
+      calls += 1;
+      if (calls === 1) return CAREFUL;
+      await new Promise<void>((resolve) => { release = resolve; });
+      return answerOf({ applies: [lessonOf("L-0002", "red-line", "dont", "never add")] });
+    },
+  });
+  await clock.run(gate.check(callOf(BUY_NVDA)));
+  const second = gate.check(callOf({ ...BUY_NVDA, qty: 2 }));
+  await clock.flush();
+  assert.equal(calls, 2, "the second recall is running");
+  assert.equal(gate.view("call_1"), undefined, "the first entry was removed when the second check started");
+  assert.equal(gate.redLineReason("call_1"), undefined);
+  assert.equal(gate.override("call_1", { reason: "why" }), "no such card");
+  release!();
+  assert.deepEqual(await clock.run(second), { lessons: 1, redLine: true });
+  assert.equal(gate.redLineReason("call_1"), redLineRefusal("never add"));
 });
 
 test("at most GATE_KEPT entries are kept; the oldest goes first", async () => {
@@ -322,6 +374,23 @@ test("at most GATE_KEPT entries are kept; the oldest goes first", async () => {
   assert.equal(gate.view("c0"), undefined);
   assert.notEqual(gate.view("c1"), undefined);
   assert.notEqual(gate.view(`c${GATE_KEPT}`), undefined);
+});
+
+test("a red line still waiting is never evicted; overridden, it goes in its turn", async () => {
+  const { gate, clock } = redFor("AMD");
+  await clock.run(gate.check(callOf(AMD_BUY, "red")));
+  const plain = (i: number): string => `p${i}`;
+  for (let i = 0; i < GATE_KEPT; i++) await clock.run(gate.check(callOf({}, plain(i), "mcp__account__portfolio_balance")));
+  const keptPlain = (): number => Array.from({ length: GATE_KEPT + 2 }, (_, i) => gate.view(plain(i))).filter((v) => v !== undefined).length;
+  assert.notEqual(gate.view("red"), undefined, "the waiting red line is kept");
+  assert.equal(gate.redLineReason("red"), redLineRefusal("never touch AMD"));
+  assert.equal(keptPlain() + 1, GATE_KEPT, "the cap holds, the oldest plain entry out");
+  assert.equal(gate.view(plain(0)), undefined);
+
+  assert.equal(gate.override("red", { reason: "the owner's reason" }), "kept");
+  await clock.run(gate.check(callOf({}, plain(GATE_KEPT), "mcp__account__portfolio_balance")));
+  assert.equal(gate.view("red"), undefined, "overridden, it is the oldest evictable and goes");
+  assert.equal(keptPlain(), GATE_KEPT);
 });
 
 test("check never rejects: each stub throwing synchronously in turn", async () => {

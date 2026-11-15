@@ -11,8 +11,9 @@
  * the model's arguments is passed on as text, and a fact the model supplied is not carried over. A read that loses
  * its race is left to finish and ignored; the kept view never changes once the check settles.
  *
- * `check` never rejects and settles within {@link GATE_CHECK_MS}; at most {@link GATE_KEPT} calls are kept, the
- * oldest out first. {@link gateAccount} is the gate's Account over the Account proxy's in-process reads.
+ * `check` never rejects and settles within {@link GATE_CHECK_MS}; a callId checked again replaces its entry whole. At
+ * most {@link GATE_KEPT} calls are kept, the oldest out first, save a red line still waiting (no override on record,
+ * not answered), which is never evicted. {@link gateAccount} is the gate's Account over the Account proxy's in-process reads.
  *
  * A kept call is red-lined when a lesson with `strength: "red-line"` and `says: "dont"` applies to one of its lines.
  * Gate 2's guard reads `redLineReason` on every granted seat write: a red-lined call with no override on record is
@@ -117,6 +118,11 @@ interface Entry {
   override?: GateOverride; answered?: boolean;
 }
 
+/** A checked entry that is red-lined, with no override on record and not answered: never evicted. */
+function waitingRedLine(entry: Entry): boolean {
+  return entry.state === "checked" && entry.override === undefined && entry.answered !== true && firstRedLine(entry) !== undefined;
+}
+
 /** The words of the entry's first red-line lesson, in line order, or undefined. */
 function firstRedLine(entry: Entry): string | undefined {
   for (const line of entry.lines) {
@@ -209,9 +215,23 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     });
   }
 
+  /** Keeps `entry` as its callId's only entry, the newest; past GATE_KEPT the oldest entry that is not a waiting red
+   * line goes first. `entry` itself and a waiting red line are never evicted, so the map may stay over the cap while
+   * every other entry is one. */
   function keep(entry: Entry): void {
+    entries.delete(entry.call.callId);
     entries.set(entry.call.callId, entry);
-    while (entries.size > GATE_KEPT) entries.delete(entries.keys().next().value!);
+    while (entries.size > GATE_KEPT) {
+      let victim: string | undefined;
+      for (const [callId, kept] of entries) {
+        if (kept !== entry && !waitingRedLine(kept)) {
+          victim = callId;
+          break;
+        }
+      }
+      if (victim === undefined) break;
+      entries.delete(victim);
+    }
   }
 
   /** One line, checked: its account reads, its facts, its recall. */
@@ -294,7 +314,11 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
   return {
     async check(call) {
       try {
-        if (disposed || typeof call?.callId !== "string" || !CALL_ID.test(call.callId) || entries.has(call.callId)) return undefined;
+        if (disposed || typeof call?.callId !== "string" || !CALL_ID.test(call.callId)) return undefined;
+        /* A kept callId is checked again: each check is one execution about to raise its own card. The old entry -
+         * its lines, its red line, its override, its answered mark - is dropped as the new check starts, and the new
+         * one stands pending in its place: `view`, `override` and `redLineReason` treat a pending entry as unknown,
+         * so it is seen only once it settles, and the old one is never read for the new call. */
         const entry: Entry = { call, state: "pending", lines: [] };
         keep(entry);
         try {
