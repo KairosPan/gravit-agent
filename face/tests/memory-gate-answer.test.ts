@@ -104,7 +104,7 @@ function rig(over: Over = {}) {
     approvals: [] as string[], logs: [] as string[], opens: 0,
   };
   const state = {
-    position: async (): Promise<Position | null | undefined> => null,
+    position: async (_symbol?: string): Promise<Position | null | undefined> => null,
     approval: async (): Promise<Status> => "pending",
   };
   const memory = {
@@ -114,7 +114,7 @@ function rig(over: Over = {}) {
   } as unknown as Memory;
   const account: GateAccount = {
     paperVenue: async () => "paper-1",
-    position: (venue, symbol) => { asked.positions.push([venue, symbol]); return state.position(); },
+    position: (venue, symbol) => { asked.positions.push([venue, symbol]); return state.position(symbol); },
     kind: async () => over.kind ?? "stock",
     approval: (card) => { asked.approvals.push(card); return state.approval(); },
   };
@@ -265,32 +265,110 @@ test("Gravit's own call: an older one, the owner's, another symbol's, a void one
   }
 });
 
-test("the position at registration: long 10 is an add", async () => {
+/** A position read that answers when the test says. */
+function deferred() {
+  let answer: (p: Position | null | undefined) => void = () => {};
+  const read = (): Promise<Position | null | undefined> => new Promise((resolve) => { answer = resolve; });
+  return { read, answer: (p: Position | null | undefined) => answer(p) };
+}
+const LONG_10: Position = { side: "long", qty: 10 };
+
+test("(a) the approval's read answers before the seat's result: it is used - long 10 at the approval, flat at the check, is an add", async () => {
   const r = rig();
   await r.check();
-  r.state.position = async () => ({ side: "long", qty: 10 });
+  r.state.position = async () => LONG_10;
   r.gate.answered("c-1", "allowed-once", "s-1");
+  await r.clock.flush();
   r.gate.settled("c-1", PLACED, "s-1");
   await r.idle();
   assert.equal(r.asked.records[0].input.action, "add");
   assert.deepEqual(r.registered(), ["registered: add"]);
 });
 
-test("the position not read within GATE_POSITION_MS: nothing written, the card says why, one log line", async () => {
-  assert.equal(GATE_POSITION_MS, 5_000);
+test("(b) the approval's read answers after the seat's result: the check's flat stands - a buy - and the late answer changes nothing", async () => {
   const r = rig();
   await r.check();
-  r.state.position = never;
-  const logs = r.asked.logs.length;
-  const at = r.clock.now();
+  const late = deferred();
+  r.state.position = late.read;
   r.gate.answered("c-1", "allowed-once", "s-1");
   r.gate.settled("c-1", PLACED, "s-1");
+  late.answer(LONG_10);
   await r.idle();
-  assert.equal(r.clock.now() - at, GATE_POSITION_MS);
+  await r.clock.flush();
+  assert.deepEqual(r.asked.records, [{ by: "gravit-face", input: APPROVED_BUY }]);
+  assert.deepEqual(r.registered(), ["registered: buy"]);
+  assert.equal(r.clock.live(), 0);
+});
+
+test("(c) the approval's read answers after the seat's result and the check read no position: nothing written, the card says why, one log line", async () => {
+  const r = rig();
+  r.state.position = never;
+  await r.check();
+  assert.equal(r.gate.view("c-1")?.lines[0].positionRead, false);
+  const late = deferred();
+  r.state.position = late.read;
+  const logs = r.asked.logs.length;
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  r.gate.settled("c-1", PLACED, "s-1");
+  late.answer(LONG_10);
+  await r.idle();
   assert.equal(r.asked.records.length, 0);
   assert.deepEqual(r.registered(), [POSITION_UNREAD]);
   assert.equal(r.asked.logs.length - logs, 1);
   assert.match(r.asked.logs.at(-1)!, /c-1: buy 10 NVDA · limit 183 · paper-1: not registered: the position could not be read/);
+});
+
+test("(d) the approval's read never answers: the check's position, once GATE_POSITION_MS passes or the result comes, and no timer left", async () => {
+  assert.equal(GATE_POSITION_MS, 5_000);
+  const passes = rig();
+  await passes.check();
+  passes.state.position = never;
+  passes.gate.answered("c-1", "allowed-once", "s-1");
+  await passes.clock.advance(GATE_POSITION_MS);
+  assert.equal(passes.clock.live(), 0, "the read's timer has run out");
+  passes.gate.settled("c-1", PLACED, "s-1");
+  await passes.idle();
+  assert.equal(passes.asked.records[0].input.action, "buy");
+  assert.equal(passes.clock.live(), 0);
+
+  const comes = rig();
+  await comes.check();
+  comes.state.position = never;
+  comes.gate.answered("c-1", "allowed-once", "s-1");
+  assert.equal(comes.clock.live(), 1, "the read is racing its timer");
+  const at = comes.clock.now();
+  comes.gate.settled("c-1", PLACED, "s-1");
+  await comes.idle();
+  assert.equal(comes.clock.live(), 0, "the result ended the read and cleared its timer");
+  assert.equal(comes.clock.now(), at, "nothing waited on the read");
+  assert.equal(comes.asked.records[0].input.action, "buy");
+});
+
+test("(e) a batch: each line by the same rule - one read answered before the result, one after", async () => {
+  const r = rig();
+  await r.check({ legs: [BUY, { venue: "paper-1", symbol: "AMD", side: "buy", qty: 4 }] }, "c-1", BATCH);
+  const amd = deferred();
+  r.state.position = (symbol?: string) => (symbol === "NVDA" ? Promise.resolve(LONG_10) : amd.read());
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  await r.clock.flush();
+  r.gate.settled("c-1", json({ ok: true, legs: [{ leg: 1, ok: true, order: { id: "o-1" } }, { leg: 2, ok: true, order: { id: "o-2" } }] }), "s-1");
+  amd.answer({ side: "long", qty: 4 });
+  await r.idle();
+  assert.deepEqual(r.asked.records.map((x) => [x.input.symbol, x.input.action]), [["NVDA", "add"], ["AMD", "buy"]]);
+});
+
+test("Guard mode: the seat's pending result is the moment - a read answering after it is dropped", async () => {
+  const r = rig();
+  await r.check();
+  const late = deferred();
+  r.state.position = late.read;
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  r.gate.settled("c-1", PENDING, "s-1");
+  late.answer(LONG_10);
+  r.state.approval = async () => "approved";
+  await r.clock.advance(GATE_WATCH_EVERY_MS);
+  await r.idle();
+  assert.deepEqual(r.asked.records, [{ by: "gravit-face", input: APPROVED_BUY }]);
 });
 
 test("a usd sell of a long: no single action, nothing written, the card says why", async () => {
@@ -483,19 +561,41 @@ test("dispose while a poll's answer is on its way: nothing is written", async ()
   assert.equal(r.clock.live(), 0);
 });
 
-test("dispose while the position is being read again: nothing is written", async () => {
+test("dispose while the position is being read again: the read's timer is cleared, and a result after it writes nothing", async () => {
   const r = rig();
   await r.check();
-  let answer: (p: Position | null) => void = () => {};
-  r.state.position = () => new Promise((resolve) => { answer = resolve; });
+  const late = deferred();
+  r.state.position = late.read;
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  r.gate.dispose();
+  assert.equal(r.clock.live(), 0);
+  late.answer(LONG_10);
+  r.gate.settled("c-1", PLACED, "s-1");
+  await r.clock.flush();
+  await r.gate.idle();
+  assert.equal(r.asked.records.length, 0);
+});
+
+test("dispose while the memory is being opened for an approval: nothing is written", async () => {
+  let opening: (s: MemoryStanding) => void = () => {};
+  let calls = 0;
+  const memory = { recall: async () => answerOf(), record: async () => { throw new Error("never written"); } } as unknown as Memory;
+  const r = rig({
+    open: () => {
+      calls += 1;
+      return calls === 1 ? Promise.resolve({ connected: true, memory, home: "/tmp/m" }) : new Promise<MemoryStanding>((resolve) => { opening = resolve; });
+    },
+  });
+  await r.check();
   r.gate.answered("c-1", "allowed-once", "s-1");
   r.gate.settled("c-1", PLACED, "s-1");
   await r.clock.flush();
   r.gate.dispose();
-  answer(null);
+  opening({ connected: true, memory, home: "/tmp/m" });
   await r.clock.flush();
   await r.gate.idle();
-  assert.equal(r.asked.records.length, 0);
+  assert.deepEqual(r.registered(), []);
+  assert.equal(r.asked.logs.length, 0, "no write was tried");
   assert.equal(r.clock.live(), 0);
 });
 

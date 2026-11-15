@@ -29,9 +29,11 @@
  * status, and its content the validated line, the override form and those answers' shapes - never a tool argument or a
  * model's text. Every decided card is marked answered, and only from the session it was checked for. Declined at
  * Gate 2, each checked line is written at once, `pass` or `hold`. Approved, each line's position is read again as the
- * approval lands (under {@link GATE_POSITION_MS}: the position the order meets, not the one a fill leaves) and the line
- * is written once the seat's result says
- * it was placed, as the one action that position settles - or nothing, with why, when it settles none. A line the seat
+ * approval lands, under {@link GATE_POSITION_MS}; that read counts only when it answered before the seat's result
+ * came - one still running then is dropped, so a read a fill could have reached is never used - and otherwise the
+ * position the check read stands in, when it read one. The line is written once the seat's result says it was
+ * placed, as the one action that position settles - or nothing, with why, when there is no position or it settles
+ * none. A line the seat
  * answers with the Account's card (Guard mode) is watched through the Account's overview every
  * {@link GATE_WATCH_EVERY_MS} until that card is answered, or {@link GATE_WATCH_GRACE_MS} past its expiry. A line not
  * registered says why on the card and in one log line. Each call is registered once; nothing is kept across a
@@ -176,12 +178,17 @@ interface LineEntry { order: OrderLine; venue?: string; position: Position | nul
 /** One kept call: the call (its session among it), its state, and its lines. `pending` while the check runs.
  * `override` is the owner's, kept only for a red-lined card; `answered` is set once the card is answered, after which
  * no override is taken. `checking` marks a placeholder standing for a kept callId checked again. `approval` holds,
- * once Gate 2 approved the card, each line's position as read again then; `settled` marks the seat's result taken. */
+ * once Gate 2 approved the card, each line's read of the position begun then; `positions` is each line's position as
+ * the seat's result found it, fixed when that result is taken (`settled`). */
 interface Entry {
   call: GateCall; state: GateView["state"] | "pending"; words?: string; lines: LineEntry[];
   override?: GateOverride; answered?: boolean; checking?: boolean;
-  approval?: Array<Promise<Position | null | undefined>>; settled?: boolean;
+  approval?: Reread[]; positions?: Array<Position | null | undefined>; settled?: boolean;
 }
+
+/** A line's position read again as Gate 2's approval lands: `read` once a readable answer came, while it still counts;
+ * `closed` once the seat's result was taken, after which an answer is ignored; `end` ends the read's race. */
+interface Reread { read: boolean; value?: Position | null; closed: boolean; end?: () => void }
 
 /** A plain object, not an array and not null. */
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -299,8 +306,9 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     }
   };
 
-  /** `read` raced against its own timer of `ms`; no time left asks nothing. Never rejects. */
-  function within<T>(read: () => Promise<T>, ms: number): Promise<Raced<T>> {
+  /** `read` raced against its own timer of `ms`; no time left asks nothing. Never rejects. `hold` is handed the
+   * function that ends the race at once as late, its timer cleared. */
+  function within<T>(read: () => Promise<T>, ms: number, hold?: (end: () => void) => void): Promise<Raced<T>> {
     if (disposed || !(ms > 0)) return Promise.resolve({ kind: "late" });
     let pending: Promise<T>;
     try {
@@ -330,6 +338,7 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
       } catch {
         late();
       }
+      hold?.(late);
     });
   }
 
@@ -514,11 +523,11 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     return write(entry, line, recordOf(entry, line, declinedAction(line.order), lead), false);
   }
 
-  /** An approval of line `i`, the seat having placed it: its action from the position read again when Gate 2 approved,
-   * nothing when that does not settle it; its price, its size, and the owner's override's words. */
+  /** An approval of line `i`, the seat having placed it: its action from the position fixed when the seat's result was
+   * taken, nothing when there is none or it does not settle one; its price, its size, and the owner's override's words. */
   async function approved(entry: Entry, i: number): Promise<void> {
     const line = entry.lines[i];
-    const position = await entry.approval?.[i];
+    const position = entry.positions?.[i];
     if (disposed || line === undefined) return;
     const action = approvedAction(line.order, position);
     if (action === undefined) {
@@ -648,12 +657,20 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
           for (const line of entry.lines) track(() => declined(entry, line, DECLINED));
         } else if (outcome === "allowed-once") {
           /* read as the approval lands, ahead of the seat's run: the action is the order's against the position it
-           * meets, never against one its own fill left (a buy from flat read after its fill would be an add) */
+           * meets, never against one its own fill left (a buy from flat read after its fill would be an add). The
+           * read counts only if it answers before the seat's result is taken (`settled` closes it). */
           entry.approval = entry.lines.map((line) => {
+            const reread: Reread = { read: false, closed: false };
             const { venue } = line;
-            return venue === undefined
-              ? Promise.resolve(undefined)
-              : within(() => deps.account.position(venue, line.order.symbol), GATE_POSITION_MS).then(valueOf);
+            if (venue !== undefined) {
+              void within(() => deps.account.position(venue, line.order.symbol), GATE_POSITION_MS, (end) => { reread.end = end; })
+                .then((answer) => {
+                  if (reread.closed || answer.kind !== "ok" || answer.value === undefined) return;
+                  reread.read = true;
+                  reread.value = answer.value;
+                });
+            }
+            return reread;
           });
         }
       } catch (error) {
@@ -665,6 +682,15 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
         const entry = ownEntry(callId, sessionId);
         if (entry === undefined || entry.approval === undefined || entry.settled === true) return;
         entry.settled = true;
+        /* each line's position as of now: the approval's read when it already answered, else the check's when it read
+         * one, else none; a read still running is dropped - left to finish, its answer ignored, its timer cleared */
+        entry.positions = entry.lines.map((line, i) => {
+          const reread = entry.approval?.[i];
+          if (reread === undefined) return line.position;
+          reread.closed = true;
+          reread.end?.();
+          return reread.read ? reread.value : line.position;
+        });
         const outcomes = seatOutcomes(result, entry.lines.length);
         entry.lines.forEach((line, i) => {
           const outcome = outcomes[i] ?? { kind: "unreadable" };
