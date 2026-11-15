@@ -939,36 +939,40 @@ carries the package's code (`E_` and at most 24 more characters), or `the memory
 for any other — a fault is said by its code, never by its message, which stays in the face's log.
 `dsh/profile/desk.md` has the desk say it in one line.
 
-**The owner's name** (`src/memory-guard.ts`). A decision is written in the owner's name only from
-Gravit's one conversation, in a turn the operator's own message opened: the calling session is the
-conversation's held session and its turn is the operator's, both read when the call arrives.
-`main.ts` installs one listener in front of the root's `tools/pre-execute`, always — the router on or
-off, the memory connected or not — as soon as the memory's opener is built, in the same synchronous
-stretch as the boot's return, so no session runs a tool before it; it is removed after the
-conversation is disposed. Out of that place it refuses four calls: a `memory_record` whose `whose` is `owner`, a
-`memory_amend` review whose `whose` is `owner`, and a `memory_amend` void or close of a decision the
-memory holds as the owner's. For a void or a close it reads the target's `whose` from the memory, the
-newest 200 decisions a page, at most 25 pages within 10 s; a target it cannot read — a read that
-fails, a memory not connected, the limit passed, the pages run out — is refused too, and one the
-memory does not hold is handed on for the package to answer. With no conversation (`FACE_ROUTER=0`,
-or none opened) nothing qualifies, so nothing is written in the owner's name. Every other call —
-`whose: agent`, a `ref`, a `correction`, a malformed call — is handed on untouched; the fence only
-refuses, and a refused call reaches the model as an error that says to register its own call with
-`whose: agent`, or to tell the owner. Each refusal is one line on the face's stderr, no argument's
-text in it:
+**The owner's name** (`src/memory-guard.ts`). A decision is written in the owner's name, and the
+owner's decision amended, only from Gravit's one conversation, in a turn the operator's own message
+opened: the calling session is the conversation's held session and its turn is the operator's, both
+read when the call arrives. `main.ts` installs one listener in front of the root's
+`tools/pre-execute`, always — the router on or off, the memory connected or not — as soon as the
+memory's opener is built, with no `await` between the boot's return and it, and the gateway admits
+no browser stream until every route is mounted (`deferReady`, `commitReady` last); it is removed
+after the conversation is disposed. Out of that place it refuses a record or a review in the owner's
+name — a `memory_record` or a `memory_amend` review whose `whose` is `owner` — and every amendment
+(`ref`, `close`, `review`, `correction`, `void`) of a decision the memory holds as the owner's. A
+review in Gravit's name is among them because it marks the decision reviewed, which takes it off the
+owner's past-horizon list; a `ref` and a `correction` write under the owner's decision. For an
+amendment it reads the target's `whose` from the memory, the newest 200 decisions a page, at most 25
+pages within 10 s; a target it cannot read — a read that fails, a memory not connected, the limit
+passed, the pages run out — is refused too, and one the memory does not hold is handed on for the
+package to answer. With no conversation (`FACE_ROUTER=0`, or none opened) nothing qualifies, so
+nothing is written in the owner's name and no owner's decision is amended. Every other call — a
+record in Gravit's name, an amendment of Gravit's own decision, a malformed call — is handed on
+untouched; the fence only refuses. A refused call reaches the model as an error: the owner's-name
+refusal says to register its own call with `whose: agent`, or to tell the owner; the owner's-decision
+refusal says to tell the owner; the unchecked one says to try again, or to tell the owner. Each
+refusal is one line on the face's stderr, no argument's text in it:
 
 ```
-gravit-face: memory: refused <tool> (<record|review|void|close>) from session <session id, or unknown>: not the operator's turn in the conversation
-gravit-face: memory: refused <tool> (<void|close>) from session <session id, or unknown>: the decision could not be checked
+gravit-face: memory: refused <tool> (<record|review|ref|close|correction|void>) from session <session id, or unknown>: not the operator's turn in the conversation
+gravit-face: memory: refused <tool> (<ref|close|review|correction|void>) from session <session id, or unknown>: the decision could not be checked
 ```
 
 **What this does not hold.** The owner has no door of their own inside the face: an owner's
 decision said in conversation is registered by Gravit, so it reads `by: gravit, whose: owner`. An
 instruction planted in text Gravit reads — a page, a filing, a message — can still, through the
-tools, register calls in Gravit's own name, attach a `ref` or a `correction` to any decision, review
-in Gravit's name, void or close Gravit's own decisions within the package's rules, and file proposals
-without limit; each reads as Gravit's, and a proposal does nothing until the owner arms it. A forged
-owner-name line now needs the operator's own turn in the conversation, where the operator's message
+tools, register calls in Gravit's own name, amend Gravit's own decisions within the package's rules,
+and file proposals without limit; each reads as Gravit's, and a proposal does nothing until the owner arms it. A forged
+owner-name line, or an amendment of the owner's decision, now needs the operator's own turn in the conversation, where the operator's message
 is the thing being answered. Steered text cannot arm, change or retire a lesson, answer a proposal,
 write as the owner at the owner's own door (the terminal's acts), touch the home's `config.json`, or
 move money. The fence is a rule on the tool call: what a session's shell can reach is the sandbox's

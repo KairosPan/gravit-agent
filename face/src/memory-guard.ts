@@ -1,13 +1,16 @@
-/** The memory's owner-name fence: a decision is written in the owner's name in one place only -
- * Gravit's one conversation, in a turn the operator's own message opened ("in place": the calling
- * session is the conversation's held session and its turn is the operator's, both read when the
- * call arrives).
+/** The memory's owner-name fence: the owner's name is written, and the owner's decision amended, in one
+ * place only - Gravit's one conversation, in a turn the operator's own message opened ("in place": the
+ * calling session is the conversation's held session and its turn is the operator's, both read when
+ * the call arrives).
  *
  * The table is the whole rule. A `memory_record` whose `whose` is exactly "owner", and a
- * `memory_amend` review whose `whose` is exactly "owner", are refused unless in place. A
- * `memory_amend` void or close of a decision id is handed on in place with no read; elsewhere the
+ * `memory_amend` review whose `whose` is exactly "owner", are refused unless in place. Every other
+ * `memory_amend` of a decision id - a `ref`, a `close`, a `review` (an agent's, or any `whose` but
+ * exactly "owner"), a `correction`, a `void` - is handed on in place with no read; elsewhere the
  * target's `whose` is read from the memory ({@link decisionOwner}) - the owner's is refused, an
- * agent's and one the memory does not hold are handed on (the package answers the latter). Anything
+ * agent's and one the memory does not hold are handed on (the package answers the latter). A review
+ * in an agent's name is among them since it marks the decision reviewed, which takes it off the
+ * owner's past-horizon list; a `ref` and a `correction` write under the owner's decision. Anything
  * else, a malformed call among it, is handed on: the package's own schema answers it.
  *
  * It only refuses: a call it does not refuse is handed on through `next()`, and it never answers
@@ -34,14 +37,14 @@ export const OWNER_NAME_REFUSED =
   "the owner's name is written only in the conversation, in a turn the owner's own message opened; " +
   "register your own call with whose \"agent\", or tell the owner";
 
-/** What a call is told when it voids or closes the owner's decision out of place. */
+/** What a call is told when it amends the owner's decision out of place. */
 export function ownerDecisionRefused(id: string): string {
-  return `decision ${id} is the owner's: it is voided or closed only in the conversation, in a turn the owner's own message opened; tell the owner`;
+  return `decision ${id} is the owner's: it is amended only in the conversation, in a turn the owner's own message opened; tell the owner`;
 }
 
-/** What a call is told when the decision it voids or closes could not be read. */
+/** What a call is told when the decision it amends could not be read. */
 export function ownerDecisionUnchecked(id: string): string {
-  return `decision ${id} could not be checked against the memory, so it is not voided or closed here; try again, or tell the owner`;
+  return `decision ${id} could not be checked against the memory, so it is not amended here; try again, or tell the owner`;
 }
 
 /** How long the look-up of a decision's owner is waited for, every read together: 10 s. */
@@ -53,11 +56,18 @@ const PAGE = 200;
 const WHY_TURN = "not the operator's turn in the conversation";
 const WHY_UNCHECKED = "the decision could not be checked";
 
-/** What a call asks of the owner's name: nothing; the name itself; or the standing of a decision. */
+/** What a call asks of the owner's name: nothing; the name itself; or an amendment of a decision. */
 export type OwnerWrite =
   | { kind: "none" }
   | { kind: "name"; what: "record" | "review" }
-  | { kind: "standing"; what: "void" | "close"; decision: string };
+  | { kind: "amend"; what: "ref" | "close" | "review" | "correction" | "void"; decision: string };
+
+/** The five amendments of a decision, as the package names them. */
+const AMEND_KINDS: readonly unknown[] = ["ref", "close", "review", "correction", "void"];
+
+function isAmendKind(what: unknown): what is "ref" | "close" | "review" | "correction" | "void" {
+  return AMEND_KINDS.includes(what);
+}
 
 /** A call's arguments as a plain object, or undefined. */
 function argsObject(args: unknown): Record<string, unknown> | undefined {
@@ -70,10 +80,11 @@ export function ownerWriteOf(name: string, args: unknown): OwnerWrite {
   const a = argsObject(args);
   if (tool === undefined || a === undefined) return { kind: "none" };
   if (tool === "record") return a.whose === "owner" ? { kind: "name", what: "record" } : { kind: "none" };
-  if (a.what === "review") return a.whose === "owner" ? { kind: "name", what: "review" } : { kind: "none" };
-  if ((a.what === "void" || a.what === "close") && typeof a.decision === "string" && DECISION_ID.test(a.decision)) {
-    return { kind: "standing", what: a.what, decision: a.decision };
-  }
+  const what = a.what;
+  if (!isAmendKind(what)) return { kind: "none" };
+  if (what === "review" && a.whose === "owner") return { kind: "name", what: "review" };
+  const decision = a.decision;
+  if (typeof decision === "string" && DECISION_ID.test(decision)) return { kind: "amend", what, decision };
   return { kind: "none" };
 }
 
@@ -151,18 +162,22 @@ function unrefTimer(fn: () => void, ms: number): unknown {
 type Refusal = { reason: string; what: string; why: string };
 
 /** The refusal for a matched call whose judging threw: the unchecked reason for an amend whose `decision`
- *  fits the shape, else the owner's-name reason. It cannot throw. */
+ *  fits the shape, else the owner's-name reason. Its line names the call's kind as far as it could be
+ *  read - "record" for a record, an amend's own `what` when it is one of the five, else "review". It
+ *  cannot throw. */
 function failClosed(name: string, args: unknown): Refusal {
+  let what = "review";
   try {
     const tool = MEMORY_WRITE_TOOL.exec(name)?.[1];
+    if (tool === "record") what = "record";
     const a = argsObject(args);
-    const what = tool === "record" ? "record" : a?.what === "void" || a?.what === "close" ? a.what : "review";
+    if (tool === "amend" && isAmendKind(a?.what)) what = a.what;
     if (tool === "amend" && typeof a?.decision === "string" && DECISION_ID.test(a.decision)) {
       return { reason: ownerDecisionUnchecked(a.decision), what, why: WHY_UNCHECKED };
     }
     return { reason: OWNER_NAME_REFUSED, what, why: WHY_TURN };
   } catch {
-    return { reason: OWNER_NAME_REFUSED, what: "record", why: WHY_TURN };
+    return { reason: OWNER_NAME_REFUSED, what, why: WHY_TURN };
   }
 }
 
@@ -173,7 +188,7 @@ export function installMemoryGuard(deps: MemoryGuardDeps): () => unknown {
   const limitMs = deps.limitMs ?? MEMORY_GUARD_LIMIT_MS;
 
   /** The owner of decision `id`, or a throw once {@link MEMORY_GUARD_LIMIT_MS} has passed; the timer is
-   *  cleared when the reads settle first. */
+   *  cleared when the reads settle first, and a clear that throws does not keep the look-up from settling. */
   function ownerWithinLimit(id: string): Promise<"owner" | "agent" | "absent"> {
     return new Promise((resolve, reject) => {
       let done = false;
@@ -185,7 +200,11 @@ export function installMemoryGuard(deps: MemoryGuardDeps): () => unknown {
       const settle = (fn: () => void): void => {
         if (done) return;
         done = true;
-        clearTimer(timer);
+        try {
+          clearTimer(timer);
+        } catch {
+          // a timer left set fires into a settled look-up, which ignores it
+        }
         fn();
       };
       decisionOwner(deps.open, id).then(

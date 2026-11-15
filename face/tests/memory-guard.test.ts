@@ -36,11 +36,18 @@ test("ownerWriteOf: what each call asks of the owner's name", () => {
     ["mcp__memory__memory_record", "whose owner", { kind: "none" }],
     ["mcp__memory__memory_record", [{ whose: "owner" }], { kind: "none" }],
     ["mcp__memory__memory_amend", { decision: D, what: "review", whose: "owner", thesis_held: "yes", wrong_if_hit: "no" }, { kind: "name", what: "review" }],
-    ["mcp__memory__memory_amend", { decision: D, what: "review", whose: "agent", thesis_held: "yes", wrong_if_hit: "no" }, { kind: "none" }],
-    ["mcp__memory__memory_amend", { decision: D, what: "void", reason: "r" }, { kind: "standing", what: "void", decision: D }],
-    ["mcp__memory__memory_amend", { decision: D, what: "close", closed_at: "2026-03-03T15:00:00Z" }, { kind: "standing", what: "close", decision: D }],
-    ["mcp__memory__memory_amend", { decision: D, what: "ref", ref: "o-1" }, { kind: "none" }],
-    ["mcp__memory__memory_amend", { decision: D, what: "correction", field: "thesis", value: "v" }, { kind: "none" }],
+    ["mcp__memory__memory_amend", { decision: D, what: "review", whose: "agent", thesis_held: "yes", wrong_if_hit: "no" }, { kind: "amend", what: "review", decision: D }],
+    ["mcp__memory__memory_amend", { decision: D, what: "review", whose: "Owner", thesis_held: "yes", wrong_if_hit: "no" }, { kind: "amend", what: "review", decision: D }],
+    ["mcp__memory__memory_amend", { decision: D, what: "review", thesis_held: "yes", wrong_if_hit: "no" }, { kind: "amend", what: "review", decision: D }],
+    ["mcp__memory__memory_amend", { decision: "d-1", what: "review", whose: "owner" }, { kind: "name", what: "review" }],
+    ["mcp__memory__memory_amend", { decision: "d-1", what: "review", whose: "agent" }, { kind: "none" }],
+    ["mcp__memory__memory_amend", { decision: D, what: "void", reason: "r" }, { kind: "amend", what: "void", decision: D }],
+    ["mcp__memory__memory_amend", { decision: D, what: "close", closed_at: "2026-03-03T15:00:00Z" }, { kind: "amend", what: "close", decision: D }],
+    ["mcp__memory__memory_amend", { decision: D, what: "ref", ref: "o-1" }, { kind: "amend", what: "ref", decision: D }],
+    ["mcp__memory__memory_amend", { decision: D, what: "correction", field: "thesis", value: "v" }, { kind: "amend", what: "correction", decision: D }],
+    ["mcp__memory__memory_amend", { decision: D, what: "Void", reason: "r" }, { kind: "none" }],
+    ["mcp__memory__memory_amend", { decision: D, what: ["void"] }, { kind: "none" }],
+    ["mcp__memory__memory_amend", { decision: D }, { kind: "none" }],
     ["mcp__memory__memory_amend", { decision: "d-1", what: "void", reason: "r" }, { kind: "none" }],
     ["mcp__memory__memory_amend", { decision: 7, what: "close" }, { kind: "none" }],
     ["mcp__memory__memory_amend", { what: "void", reason: "r" }, { kind: "none" }],
@@ -62,11 +69,11 @@ test("the reasons, word for word, and the limits", () => {
   );
   assert.equal(
     ownerDecisionRefused(D),
-    "decision d-20260302-0f3a9c21 is the owner's: it is voided or closed only in the conversation, in a turn the owner's own message opened; tell the owner",
+    "decision d-20260302-0f3a9c21 is the owner's: it is amended only in the conversation, in a turn the owner's own message opened; tell the owner",
   );
   assert.equal(
     ownerDecisionUnchecked(D),
-    "decision d-20260302-0f3a9c21 could not be checked against the memory, so it is not voided or closed here; try again, or tell the owner",
+    "decision d-20260302-0f3a9c21 could not be checked against the memory, so it is not amended here; try again, or tell the owner",
   );
   assert.equal(MEMORY_GUARD_LIMIT_MS, 10_000);
   assert.equal(MEMORY_GUARD_PAGES, 25);
@@ -180,6 +187,7 @@ function rig(opts: {
   conversation?: MemoryGuardDeps["conversation"];
   operatorTurn?: () => boolean;
   open?: () => Promise<GuardStanding>;
+  clearTimer?: (timer: unknown) => void;
 } = {}): Rig {
   const ctx = fakeCtx();
   let nexts = 0;
@@ -202,7 +210,10 @@ function rig(opts: {
       timers.push(timer);
       return timer;
     },
-    clearTimer: (timer) => cleared.push(timer),
+    clearTimer: (timer) => {
+      cleared.push(timer);
+      opts.clearTimer?.(timer);
+    },
   });
   return {
     async call(name, args, agentId = WORKER) {
@@ -226,6 +237,11 @@ const OWNER_RECORD = { whose: "owner", action: "buy", thesis: "t" };
 const OWNER_REVIEW = { decision: D, what: "review", whose: "owner", thesis_held: "yes", wrong_if_hit: "no" };
 const VOID = { decision: D, what: "void", reason: "r" };
 const CLOSE = { decision: D, what: "close", closed_at: "2026-03-03T15:00:00Z" };
+const REF = { decision: D, what: "ref", ref: "o-1" };
+const CORRECTION = { decision: D, what: "correction", field: "thesis", value: "v" };
+const AGENT_REVIEW = { decision: D, what: "review", whose: "agent", thesis_held: "yes", wrong_if_hit: "no" };
+/** Every amendment of a decision, by its kind. */
+const AMENDS = [["ref", REF], ["close", CLOSE], ["review", AGENT_REVIEW], ["correction", CORRECTION], ["void", VOID]] as const;
 const REC = "mcp__memory__memory_record";
 const AMEND = "mcp__memory__memory_amend";
 const DENY_NAME = { kind: "deny", reason: OWNER_NAME_REFUSED };
@@ -240,10 +256,11 @@ test("installMemoryGuard: one listener, in front; the disposer removes it", () =
 
 test("in place: every owner write is handed on, with no read and no line", async () => {
   const r = rig();
-  for (const [name, args] of [[REC, OWNER_RECORD], [AMEND, OWNER_REVIEW], [AMEND, VOID], [AMEND, CLOSE]] as const) {
+  const calls = [[REC, OWNER_RECORD], [AMEND, OWNER_REVIEW], [AMEND, VOID], [AMEND, CLOSE], [AMEND, REF], [AMEND, CORRECTION], [AMEND, AGENT_REVIEW]] as const;
+  for (const [name, args] of calls) {
     assert.deepEqual(await r.call(name, args, CONV), { kind: "allow" });
   }
-  assert.equal(r.nexts(), 4);
+  assert.equal(r.nexts(), calls.length);
   assert.equal(r.opens(), 0);
   assert.deepEqual(r.lines, []);
 });
@@ -282,8 +299,6 @@ test("calls that ask nothing of the owner's name are handed on from anywhere", a
   const r = rig();
   const calls: [string, unknown][] = [
     [REC, { whose: "agent", action: "buy", thesis: "t" }],
-    [AMEND, { decision: D, what: "ref", ref: "o-1" }],
-    [AMEND, { decision: D, what: "correction", field: "thesis", value: "v" }],
     ["mcp__memory__memory_propose", { whose: "owner" }],
     ["web_fetch", { whose: "owner" }],
   ];
@@ -303,21 +318,35 @@ test("the place is read at the call", async () => {
   assert.deepEqual(await r.call(REC, OWNER_RECORD, CONV), DENY_NAME);
 });
 
-test("a worker's void outside the place reads the target's owner", async () => {
-  const list = [{ id: D, whose: "owner" }];
-  const owner = rig({ open: fakeMemory(list).open });
-  assert.deepEqual(await owner.call(AMEND, VOID, WORKER), { kind: "deny", reason: ownerDecisionRefused(D) });
-  assert.deepEqual(owner.lines, [
-    "memory: refused mcp__memory__memory_amend (void) from session session-worker: not the operator's turn in the conversation",
-  ]);
-  assert.equal(owner.nexts(), 0);
+test("a worker's ref and correction read the target's owner once each, and an agent's are handed on", async () => {
+  const r = rig({ open: fakeMemory([{ id: D, whose: "agent" }]).open });
+  assert.deepEqual(await r.call(AMEND, REF, WORKER), { kind: "allow" });
+  assert.equal(r.opens(), 1);
+  assert.deepEqual(await r.call(AMEND, CORRECTION, WORKER), { kind: "allow" });
+  assert.equal(r.opens(), 2);
+  assert.equal(r.nexts(), 2);
+  assert.deepEqual(r.lines, []);
+});
 
+test("a worker out of place is refused every amendment of the owner's decision", async () => {
+  const r = rig({ open: fakeMemory([{ id: D, whose: "owner" }]).open });
+  for (const [what, args] of AMENDS) {
+    assert.deepEqual(await r.call(AMEND, args, WORKER), { kind: "deny", reason: ownerDecisionRefused(D) }, what);
+  }
+  assert.equal(r.nexts(), 0);
+  assert.deepEqual(r.lines, AMENDS.map(([what]) =>
+    `memory: refused mcp__memory__memory_amend (${what}) from session session-worker: not the operator's turn in the conversation`));
+});
+
+test("a worker out of place amends an agent's decision, and one the memory does not hold is handed on", async () => {
   const agent = rig({ open: fakeMemory([{ id: D, whose: "agent" }]).open });
-  assert.deepEqual(await agent.call(AMEND, VOID, WORKER), { kind: "allow" });
+  for (const [what, args] of AMENDS) assert.deepEqual(await agent.call(AMEND, args, WORKER), { kind: "allow" }, what);
+  assert.equal(agent.nexts(), AMENDS.length);
+  assert.equal(agent.opens(), AMENDS.length);
   assert.deepEqual(agent.lines, []);
 
   const absent = rig({ open: fakeMemory([{ id: "d-20260301-00000001", whose: "owner" }]).open });
-  assert.deepEqual(await absent.call(AMEND, CLOSE, WORKER), { kind: "allow" });
+  assert.deepEqual(await absent.call(AMEND, VOID, WORKER), { kind: "allow" });
   assert.deepEqual(absent.lines, []);
 });
 
@@ -326,10 +355,12 @@ test("a void that cannot be checked is refused: not connected, a throw, or past 
 
   const offline = rig({ open: async () => ({ connected: false }) });
   assert.deepEqual(await offline.call(AMEND, VOID, WORKER), unchecked);
-  assert.equal(offline.lines.length, 1);
+  assert.deepEqual(await offline.call(AMEND, REF, WORKER), unchecked);
+  assert.equal(offline.lines.length, 2);
+  assert.match(offline.lines[1]!, /\(ref\) from session session-worker: the decision could not be checked$/);
   assert.ok(offline.lines[0]!.endsWith("the decision could not be checked"));
-  assert.equal(offline.timers.length, 1);
-  assert.deepEqual(offline.cleared, [offline.timers[0]]);
+  assert.equal(offline.timers.length, 2);
+  assert.deepEqual(offline.cleared, offline.timers);
 
   const broken = rig({ open: async () => ({ connected: true, memory: { decisions: async () => { throw new Error("broken"); } } }) });
   assert.deepEqual(await broken.call(AMEND, VOID, WORKER), unchecked);
@@ -345,6 +376,17 @@ test("a void that cannot be checked is refused: not connected, a throw, or past 
   assert.deepEqual(await pending, unchecked);
   assert.ok(hung.lines[0]!.endsWith("the decision could not be checked"));
   assert.equal(hung.nexts(), 0);
+  assert.deepEqual(hung.cleared, []);
+});
+
+test("a clearTimer that throws does not leave the call unsettled", async () => {
+  const throws = () => { throw new Error("clear"); };
+  const agent = rig({ open: fakeMemory([{ id: D, whose: "agent" }]).open, clearTimer: throws });
+  assert.deepEqual(await agent.call(AMEND, VOID, WORKER), { kind: "allow" });
+  assert.equal(agent.cleared.length, 1);
+  const owner = rig({ open: fakeMemory([{ id: D, whose: "owner" }]).open, clearTimer: throws });
+  assert.deepEqual(await owner.call(AMEND, VOID, WORKER), { kind: "deny", reason: ownerDecisionRefused(D) });
+  assert.equal(owner.cleared.length, 1);
 });
 
 test("no argument's text is logged", async () => {
@@ -362,4 +404,13 @@ test("a throw while judging a matched call refuses it; an unmatched call never r
   assert.equal(r.nexts(), 0);
   assert.deepEqual(await r.call("web_fetch", { whose: "owner" }, CONV), { kind: "allow" });
   assert.equal(r.nexts(), 1);
+});
+
+test("the fail-closed line names the call's own kind, even when its arguments throw", async () => {
+  const r = rig();
+  const args = { what: "void", get decision(): string { throw new Error("boom"); } };
+  assert.deepEqual(await r.call(AMEND, args, WORKER), DENY_NAME);
+  assert.deepEqual(r.lines, [
+    "memory: refused mcp__memory__memory_amend (void) from session session-worker: not the operator's turn in the conversation",
+  ]);
 });

@@ -12,8 +12,8 @@
  * sections `mcp:memory` (dsh-mcp-client's server instructions) and `gravit:memory` (dsh/profile/memory.md, gated on the
  * recall tool). On the same tree the owner-name fence (src/memory-guard.ts), installed as main.ts installs it over the
  * real conversation's held session with whose turn it is set by the test, refuses the owner's name from a worker and
- * from the conversation out of the operator's turn, refuses a worker's void of the owner's decision, and hands on the
- * rest to the real row. The second boots over a home nobody made: healthy, and the tool says "no memory here". The third points
+ * from the conversation out of the operator's turn, refuses a worker's void, ref, own-name review and correction of the
+ * owner's decision, and hands on the rest to the real row. The second boots over a home nobody made: healthy, and the tool says "no memory here". The third points
  * `FACE_MEMORY_DIR` at an empty directory, an install that is not there: healthy, no memory tool, the face's own
  * standing "not installed". The fourth disables the row by a line in the operator's own patch file: no memory tool in
  * the tree, the conversation or a Gravit session, no `gravit:memory` in their prompts, the face's standing "disabled".
@@ -409,6 +409,27 @@ test("the owner's name is written only from the conversation in the operator's t
     assert.ok(voidOwned.text.includes(ownerDecisionRefused(OWNED)), voidOwned.text);
     assert.equal((await viewOf(OWNED))?.void, false, "the owner's decision is not void");
 
+    /* 5a. the worker's ref, its review in its own name and its correction on the owner's decision: each refused */
+    const refOwned = await callMemory(f.booted, worker, "memory_amend", { decision: OWNED, what: "ref", ref: "o-1" });
+    assert.equal(refOwned.isError, true, refOwned.text);
+    assert.ok(refOwned.text.includes(ownerDecisionRefused(OWNED)), refOwned.text);
+    const reviewOwned = await callMemory(f.booted, worker, "memory_amend", { decision: OWNED, what: "review", whose: "agent", thesis_held: "yes", wrong_if_hit: "no" });
+    assert.equal(reviewOwned.isError, true, reviewOwned.text);
+    assert.ok(reviewOwned.text.includes(ownerDecisionRefused(OWNED)), reviewOwned.text);
+    assert.equal((await viewOf(OWNED))?.reviewed, false, "the owner's decision is not reviewed");
+    const correctOwned = await callMemory(f.booted, worker, "memory_amend", { decision: OWNED, what: "correction", field: "thesis", value: "v" });
+    assert.equal(correctOwned.isError, true, correctOwned.text);
+    assert.ok(correctOwned.text.includes(ownerDecisionRefused(OWNED)), correctOwned.text);
+
+    /* 5b. the worker's ref on its own decision: handed on, and registered */
+    const refOwn = await callMemory(f.booted, worker, "memory_amend", { decision: own, what: "ref", ref: "o-1" });
+    assert.equal(refOwn.isError, false, refOwn.text);
+    assert.deepEqual((await viewOf(own))?.amends.map((a) => a.what), ["ref"]);
+
+    /* 5c. the conversation, in the operator's turn, refs the owner's decision: registered */
+    const refInPlace = await callMemory(f.booted, conversation, "memory_amend", { decision: OWNED, what: "ref", ref: "o-1" });
+    assert.equal(refInPlace.isError, false, refInPlace.text);
+
     /* 6. the worker voids its own: handed on, and registered */
     const voidOwn = await callMemory(f.booted, worker, "memory_amend", { decision: own, what: "void", reason: "r" });
     assert.equal(voidOwn.isError, false, voidOwn.text);
@@ -418,12 +439,16 @@ test("the owner's name is written only from the conversation in the operator's t
     const close = await callMemory(f.booted, conversation, "memory_amend", { decision: OWNED, what: "close", closed_at: new Date().toISOString() });
     assert.equal(close.isError, false, close.text);
     assert.equal((await viewOf(OWNED))?.open, false, "the owner's decision is closed");
+    assert.deepEqual((await viewOf(OWNED))?.amends.map((a) => a.what), ["ref", "close"], "only the conversation's amendments");
 
     /* one line per refusal, naming the caller and never an argument's text */
     assert.deepEqual(lines, [
       `memory: refused mcp__memory__memory_record (record) from session ${worker.id}: not the operator's turn in the conversation`,
       `memory: refused mcp__memory__memory_record (record) from session ${conversation.id}: not the operator's turn in the conversation`,
       `memory: refused mcp__memory__memory_amend (void) from session ${worker.id}: not the operator's turn in the conversation`,
+      `memory: refused mcp__memory__memory_amend (ref) from session ${worker.id}: not the operator's turn in the conversation`,
+      `memory: refused mcp__memory__memory_amend (review) from session ${worker.id}: not the operator's turn in the conversation`,
+      `memory: refused mcp__memory__memory_amend (correction) from session ${worker.id}: not the operator's turn in the conversation`,
     ]);
   } finally {
     dispose();
