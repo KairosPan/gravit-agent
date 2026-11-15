@@ -33,7 +33,6 @@ import { composedMemoryRow } from "./memory-row.ts";
 import { memoryOpener } from "./memory.ts";
 import { readBriefMemory } from "./memory-brief.ts";
 import { installMemoryClock, memoryClockEnabled, type MemoryClock } from "./memory-clock.ts";
-import { installMemoryGuard, type MemoryGuardCtxLike } from "./memory-guard.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { claimsOf, deskDir, installDesk, type DeskHandle } from "./desk.ts";
@@ -137,9 +136,6 @@ let disposeMarketProxy: (() => void) | undefined;
 /** The memory's reconcile clock (src/memory-clock.ts), unless `FACE_MEMORY_RECONCILE=0`: both exits clear its timers
  * first, before anything is torn down, and wait for no run. */
 let memoryClock: MemoryClock | undefined;
-/** The memory's owner-name fence (src/memory-guard.ts), always installed: both exits remove it after the conversation is
- * disposed, so no session outlives it. */
-let memoryGuard: (() => unknown) | undefined;
 
 /** Tear the tree down, then leave with `code`. A dispose that rejects still
  * exits, and says why: a signal the process has already acknowledged must not
@@ -153,7 +149,6 @@ async function shutdown(code: number): Promise<void> {
     await desk?.quiesce();
     await tasks?.dispose();
     await conversation?.dispose();
-    memoryGuard?.();
     await desk?.dispose(code);
     disposeRoom?.();
     disposeData?.();
@@ -191,7 +186,6 @@ installFailLoud(BIN, process, async () => {
   await desk?.quiesce();
   await tasks?.dispose();
   await conversation?.dispose();
-  memoryGuard?.();
   await desk?.dispose(1);
   disposeRoom?.();
   disposeData?.();
@@ -290,19 +284,12 @@ const marketProxy = registerMarketProxy(booted.ctx.webServer, marketRow === unde
 disposeMarketProxy = marketProxy.dispose;
 /* The memory as the tree composed its `mcp-memory` row (src/memory-row.ts): an operator patch may have re-pointed its
  * install or its home, or disabled it, and the face's own reads follow the row, not the environment. Built once, for
- * the owner-name fence right after it, the reconcile clock below and the brief. */
+ * the owner-name fence's binding right after it, the reconcile clock below and the brief. */
 const openMemory = memoryOpener(seatLoader === undefined ? undefined : composedMemoryRow(seatLoader.entries()));
-/* The memory's owner-name fence (src/memory-guard.ts): a decision in the owner's name is written only from the
- * conversation, in a turn the operator's own message opened. It goes on at the first point its parts exist, in the
- * same synchronous stretch as the boot's return (no `await` between them), so no session runs a tool without it; the
- * router on or off and the memory connected or not. It reads the conversation when each call arrives, so with no
- * conversation nothing qualifies. Both exits remove it after the conversation is disposed. */
-memoryGuard = installMemoryGuard({
-  ctx: booted.ctx as unknown as MemoryGuardCtxLike,
-  conversation: () => conversation,
-  open: openMemory,
-  log: (line) => { console.error(`${BIN}: ${line}`); },
-});
+/* The memory's owner-name fence (src/memory-guard.ts) was armed inside the boot's `prepare` (boot.ts divergence 11),
+ * with nothing in place and nothing checkable; its parts are bound here, where they first exist. It reads the
+ * conversation when each call arrives, so with no conversation (FACE_ROUTER=0, or not yet opened) nothing qualifies. */
+booted.bindMemoryFence({ conversation: () => conversation, open: openMemory });
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here

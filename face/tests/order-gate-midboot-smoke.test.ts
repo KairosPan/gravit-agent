@@ -29,7 +29,9 @@
  *    order tool live - the reviewer's exact call is HELD for a card (logged
  *    `approval/asked`, body not run), an agentless call is DENIED by the
  *    listener, and the same order with its ask swallowed by an outer listener
- *    is DENIED by the guard alone. Then the boot is released, and the normal path runs on the same
+ *    is DENIED by the guard alone; and the memory's owner-name fence, armed
+ *    beside Gate 2 and not yet bound, refuses a record in the owner's name and
+ *    an amendment of a decision as unchecked. Then the boot is released, and the normal path runs on the same
  *    order: the held card reaches the first tab once the streams open, and
  *    `allowed-once` from it dispatches the order exactly once. Finally the
  *    real `approval` row is restarted - the listener re-arms exactly once -
@@ -52,6 +54,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Context, Service } from "@deepseek-ai/cordis";
 import { setupFaceProfile } from "../src/setup.ts";
 import { armOrderGate, bootFace, type BootedFace } from "../src/boot.ts";
+import { OWNER_NAME_REFUSED, ownerDecisionUnchecked } from "../src/memory-guard.ts";
 import type { PreToolDecision } from "../src/orders.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { boundPort, mountClient, remote, remoteResult, signIn } from "./remote.ts";
@@ -447,7 +450,25 @@ test("mid-boot: while a slow row holds boot() open, a live order tool is held fo
       swallow();
     }
     assert.deepEqual(drill.ran, [], "no order body ran mid-boot");
-    assertStillBooting("after the three mid-boot calls");
+
+    /* M4. THE MEMORY'S OWNER-NAME FENCE, armed beside Gate 2 inside `prepare` (src/boot.ts divergence 11) and not
+     * yet bound (main.ts binds it after the boot): nothing is in place and no decision can be checked, so a write in
+     * the owner's name is refused, and an amendment of a decision is refused as unchecked. The fence decides before
+     * visibility resolves, so the memory row need not be up. */
+    const ownerRecord = await tools.execute({
+      callId: "midboot-owner-record", name: "mcp__memory__memory_record",
+      arguments: { action: "buy", thesis: "t", whose: "owner" }, agent, signal: new AbortController().signal,
+    });
+    assert.equal(ownerRecord.isError, true, "a mid-boot record in the owner's name is refused");
+    assert.ok((ownerRecord.content?.[0]?.text ?? "").includes(OWNER_NAME_REFUSED), JSON.stringify(ownerRecord.content));
+    const DECISION = "d-20260302-0f3a9c21";
+    const ownerVoid = await tools.execute({
+      callId: "midboot-owner-void", name: "mcp__memory__memory_amend",
+      arguments: { decision: DECISION, what: "void", reason: "r" }, agent, signal: new AbortController().signal,
+    });
+    assert.equal(ownerVoid.isError, true, "a mid-boot amendment is refused");
+    assert.ok((ownerVoid.content?.[0]?.text ?? "").includes(ownerDecisionUnchecked(DECISION)), JSON.stringify(ownerVoid.content));
+    assertStillBooting("after the three mid-boot calls and the two memory writes");
     const rel = (at: number | undefined): string => (at === undefined ? "never" : `+${at - t0}ms`);
     console.log(
       `midboot observed: order stand-in registered ${rel(drill.standinRegistered)}, unary /api served ${rel(firstServed)},` +

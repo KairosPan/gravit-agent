@@ -12,6 +12,7 @@ import {
   ownerWriteOf,
   type GuardStanding,
   type MemoryGuardDeps,
+  type MemoryPreDecision,
   type OwnerWrite,
 } from "../src/memory-guard.ts";
 import type { MemoryStanding } from "../src/memory.ts";
@@ -188,6 +189,11 @@ function rig(opts: {
   operatorTurn?: () => boolean;
   open?: () => Promise<GuardStanding>;
   clearTimer?: (timer: unknown) => void;
+  /** What `next()` answers; `allow` by default. */
+  next?: MemoryPreDecision;
+  /** Make every log line throw (after it is kept) and every timer's setting throw. */
+  logThrows?: boolean;
+  setTimerThrows?: boolean;
 } = {}): Rig {
   const ctx = fakeCtx();
   let nexts = 0;
@@ -204,8 +210,12 @@ function rig(opts: {
       opens += 1;
       return baseOpen();
     },
-    log: (line) => lines.push(line),
+    log: (line) => {
+      lines.push(line);
+      if (opts.logThrows === true) throw new Error("log");
+    },
     setTimer: (fn, ms) => {
+      if (opts.setTimerThrows === true) throw new Error("setTimer");
       const timer = { fn, ms };
       timers.push(timer);
       return timer;
@@ -220,7 +230,7 @@ function rig(opts: {
       const exec = agentId === null ? { name, arguments: args } : { name, arguments: args, agent: { id: agentId } };
       return ctx.listeners[0]!.listener(exec, async () => {
         nexts += 1;
-        return { kind: "allow" };
+        return opts.next ?? { kind: "allow" };
       });
     },
     nexts: () => nexts,
@@ -270,7 +280,7 @@ test("the conversation outside the operator's turn is refused the owner's name",
   assert.deepEqual(await r.call(REC, OWNER_RECORD, CONV), DENY_NAME);
   assert.equal(r.nexts(), 0);
   assert.deepEqual(r.lines, [
-    "memory: refused mcp__memory__memory_record (record) from session session-conv: not the operator's turn in the conversation",
+    "memory: refused memory_record (record) from session session-conv: not the operator's turn in the conversation",
   ]);
 });
 
@@ -291,7 +301,7 @@ test("no conversation, no held session, or no agent: not in place", async () => 
   const noAgent = rig();
   assert.deepEqual(await noAgent.call(REC, OWNER_RECORD, null), DENY_NAME);
   assert.deepEqual(noAgent.lines, [
-    "memory: refused mcp__memory__memory_record (record) from session unknown: not the operator's turn in the conversation",
+    "memory: refused memory_record (record) from session unknown: not the operator's turn in the conversation",
   ]);
 });
 
@@ -335,7 +345,7 @@ test("a worker out of place is refused every amendment of the owner's decision",
   }
   assert.equal(r.nexts(), 0);
   assert.deepEqual(r.lines, AMENDS.map(([what]) =>
-    `memory: refused mcp__memory__memory_amend (${what}) from session session-worker: not the operator's turn in the conversation`));
+    `memory: refused memory_amend (${what}) from session session-worker: not the operator's turn in the conversation`));
 });
 
 test("a worker out of place amends an agent's decision, and one the memory does not hold is handed on", async () => {
@@ -350,7 +360,7 @@ test("a worker out of place amends an agent's decision, and one the memory does 
   assert.deepEqual(absent.lines, []);
 });
 
-test("a void that cannot be checked is refused: not connected, a throw, or past the limit", async () => {
+test("an amendment that cannot be checked is refused: not connected, a throw, or past the limit", async () => {
   const unchecked = { kind: "deny", reason: ownerDecisionUnchecked(D) };
 
   const offline = rig({ open: async () => ({ connected: false }) });
@@ -400,8 +410,10 @@ test("no argument's text is logged", async () => {
 test("a throw while judging a matched call refuses it; an unmatched call never reaches the throw", async () => {
   const r = rig({ conversation: () => { throw new Error("boom"); } });
   assert.deepEqual(await r.call(REC, OWNER_RECORD, CONV), DENY_NAME);
-  assert.equal(r.lines.length, 1);
+  assert.deepEqual(r.lines, ["memory: refused memory_record (record) from session session-conv: the call could not be judged"]);
   assert.equal(r.nexts(), 0);
+  assert.deepEqual(await r.call(AMEND, VOID, CONV), { kind: "deny", reason: ownerDecisionUnchecked(D) });
+  assert.equal(r.lines[1], "memory: refused memory_amend (void) from session session-conv: the call could not be judged");
   assert.deepEqual(await r.call("web_fetch", { whose: "owner" }, CONV), { kind: "allow" });
   assert.equal(r.nexts(), 1);
 });
@@ -411,6 +423,36 @@ test("the fail-closed line names the call's own kind, even when its arguments th
   const args = { what: "void", get decision(): string { throw new Error("boom"); } };
   assert.deepEqual(await r.call(AMEND, args, WORKER), DENY_NAME);
   assert.deepEqual(r.lines, [
-    "memory: refused mcp__memory__memory_amend (void) from session session-worker: not the operator's turn in the conversation",
+    "memory: refused memory_amend (void) from session session-worker: the call could not be judged",
   ]);
+});
+
+test("the line names the raw tool, never the server as the model spelled it", async () => {
+  const r = rig();
+  assert.deepEqual(await r.call("mcp__made-up_server-9__memory_record", OWNER_RECORD, WORKER), DENY_NAME);
+  assert.deepEqual(r.lines, ["memory: refused memory_record (record) from session session-worker: not the operator's turn in the conversation"]);
+});
+
+test("a deny or an ask from next() is handed back unchanged", async () => {
+  for (const decision of [{ kind: "deny", reason: "an outer reason" }, { kind: "ask", reason: "a card" }] as MemoryPreDecision[]) {
+    const r = rig({ next: decision });
+    assert.deepEqual(await r.call(REC, OWNER_RECORD, CONV), decision, "in place");
+    assert.deepEqual(await r.call(REC, { whose: "agent", action: "buy", thesis: "t" }, WORKER), decision, "not the fence's");
+    assert.equal(r.nexts(), 2);
+    assert.deepEqual(r.lines, []);
+  }
+});
+
+test("a log that throws still yields the deny", async () => {
+  const r = rig({ logThrows: true });
+  assert.deepEqual(await r.call(REC, OWNER_RECORD, WORKER), DENY_NAME);
+  assert.equal(r.lines.length, 1);
+  assert.equal(r.nexts(), 0);
+});
+
+test("a timer that cannot be set refuses an out-of-place amendment as unchecked", async () => {
+  const r = rig({ open: fakeMemory([{ id: D, whose: "agent" }]).open, setTimerThrows: true });
+  assert.deepEqual(await r.call(AMEND, VOID, WORKER), { kind: "deny", reason: ownerDecisionUnchecked(D) });
+  assert.equal(r.nexts(), 0);
+  assert.deepEqual(r.lines, ["memory: refused memory_amend (void) from session session-worker: the decision could not be checked"]);
 });

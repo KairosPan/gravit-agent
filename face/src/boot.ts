@@ -6,7 +6,7 @@
  * the 0.2.0-rc.2 source; the chunk is byte-for-byte that logic). Re-diffed at
  * 0.2.1-rc.5 (the chunk was `profile-boot-BZ2ZjNWi.js` at 0.2.0-rc.2):
  * `runProfile`, `composeProfile` and `createAppReady` are unchanged and the
- * ten divergences below stand. The CLI now also publishes them as
+ * first ten divergences below stand (the eleventh is a later one of the face's own). The CLI now also publishes them as
  * `@deepseek-ai/dsh/profile-boot`, a reading aid and NOT a dependency: taking
  * `runProfile` would bring `profileContext`, its own signal and fail-loud
  * handlers, an `appReady` committed before Gate 2 exists, and the whole CLI
@@ -82,6 +82,17 @@
  *    guard exists from the first moment the tool registry does, whatever order
  *    the rows activate in. Only the registrations moved: every audit still
  *    runs after `boot()`, plus {@link assertOrderGateArmed}.
+ * 11. The memory's owner-name fence (src/memory-guard.ts) arms INSIDE
+ *    `prepare` too, right after Gate 2 and for the same window: the memory
+ *    row's tools register as it activates, while unary `/api` already serves.
+ *    It needs no service to decide, so it is one plain `tools/pre-execute`
+ *    listener on the root, prepended, and leaves with the root. Its two parts,
+ *    the conversation's handle and the memory's opener, exist only after the
+ *    boot: `main.ts` binds them ({@link BootedFace.bindMemoryFence}); until
+ *    then nothing is in place and no decision can be checked, so every write
+ *    in the owner's name and every amendment of a decision is refused. Like
+ *    Gate 2's listener it is in front of nothing a later row prepends, and its
+ *    deny stands only while every outer listener hands `next()`'s decision back.
  * The telemetry opt-out is honored exactly as the CLI honors it.
  *
  * LAYERING, and the one place the face inverts the CLI's: {@link faceOverlay}
@@ -136,6 +147,7 @@ import { accountSeatPatches } from "./account-seat.ts";
 import { marketRowPatches } from "./market-row.ts";
 import { memoryRowPatches } from "./memory-row.ts";
 import { MEMORY_NO_HOME_NOTICE } from "./memory.ts";
+import { installMemoryGuard, type MemoryGuardCtxLike, type MemoryGuardDeps } from "./memory-guard.ts";
 import { lunhuiPatches } from "./lunhui.ts";
 import { analogPatches } from "./analog.ts";
 import { readThroughPatches } from "./readthrough.ts";
@@ -299,7 +311,23 @@ export interface BootedFace {
    * @throws when the root stopped (disposed, or failed) since the boot - a
    * face that would never stream is refused, not committed. */
   commitReady(): void;
+  /** Bind the memory's owner-name fence (src/memory-guard.ts), armed inside `prepare` with nothing bound
+   * (divergence 11): the conversation's handle it reads for "in place", and the opener it reads a decision's
+   * owner through. `main.ts` binds it once its memory opener exists; a later bind replaces both parts. The
+   * fence itself leaves with the tree. */
+  bindMemoryFence(parts: MemoryFenceParts): void;
 }
+
+/** The two parts of the memory's owner-name fence that exist only after the boot: the conversation's handle
+ * and the memory's opener ({@link BootedFace.bindMemoryFence}). */
+export type MemoryFenceParts = Pick<MemoryGuardDeps, "conversation" | "open">;
+
+/** The fence's parts until `main.ts` binds them: no conversation, so nothing is in place, and a memory that is
+ * not connected, so no decision can be checked. */
+const UNBOUND_MEMORY_FENCE: MemoryFenceParts = {
+  conversation: () => undefined,
+  open: async () => ({ connected: false }),
+};
 
 /** Top-level row ids of the tree these layers compose to, through the include's
  * own patch algorithm — the same single `applyEntryPatches` call boot makes, so
@@ -973,6 +1001,8 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
   })();
   /* Gate 2's two fibers, set inside `prepare` and audited once boot() settles. */
   let gate: OrderGateFibers | undefined;
+  /* The memory fence's parts, read at each call; bound by the caller through `bindMemoryFence`. */
+  let memoryFence: MemoryFenceParts = UNBOUND_MEMORY_FENCE;
   try {
     const ctx = await boot(BIN, rootConfig, structuredClone(patches), async (hostCtx) => {
       app.current = hostCtx;
@@ -1002,6 +1032,19 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
        * settled, by which time a slow row may have let unary `/api` drive a
        * turn into a live order tool with nothing listening. */
       gate = armOrderGate(hostCtx, opts.onCardAsked);
+      /* The memory's owner-name fence arms HERE too (divergence 11), for the same reason: the memory row's tools
+       * register as it activates and unary `/api` serves before boot() settles. It needs no service to decide, so
+       * it is a plain listener on the root rather than an inject fiber, and the root's disposal removes it. Its
+       * two parts are read at each call and bound later (`bindMemoryFence`); until then nothing is in place and
+       * no decision can be checked, so a write in the owner's name and an amendment of a decision are refused.
+       * ORDER as Gate 2's: prepended from here it is in front of nothing, so a row that prepends later sits outside
+       * it, and its deny stands while every outer listener hands `next()`'s decision back, as the tree's do. */
+      installMemoryGuard({
+        ctx: hostCtx as unknown as MemoryGuardCtxLike,
+        conversation: () => memoryFence.conversation(),
+        open: () => memoryFence.open(),
+        log: (line) => { console.error(`${BIN}: ${line}`); },
+      });
     });
     app.current = ctx;
     await assertEntriesActive(ctx);
@@ -1206,7 +1249,8 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
       appReady.commit();
     };
     if (opts.deferReady !== true) commitReady();
-    return { ctx, dispose, botPresets, roles, commitReady };
+    const bindMemoryFence = (parts: MemoryFenceParts): void => { memoryFence = parts; };
+    return { ctx, dispose, botPresets, roles, commitReady, bindMemoryFence };
   } catch (error) {
     /* Every failure path lands here: the tree is disposed and appReady is never
      * committed. `boot()` disposes its own context before it throws; a repeat

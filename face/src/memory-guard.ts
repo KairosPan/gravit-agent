@@ -19,9 +19,16 @@
  * {@link MEMORY_GUARD_PAGES} refuses that call, with one line; nothing throws out of the listener.
  * It never writes to the memory, and never opens it for a call that is in place.
  *
- * It is a rule on the tool call, not containment: a shell turn can reach the memory's home by other
- * means. One listener on the ROOT context's `tools/pre-execute`, in front, as the member guard's
- * (src/room.ts `installMemberGuard`); main.ts installs it.
+ * It is a rule on the tool call, not containment: what a session's shell can reach is the sandbox's
+ * to bound. One listener on the ROOT context's `tools/pre-execute`, prepended, as the member guard's
+ * (src/room.ts `installMemberGuard`). src/boot.ts arms it inside the boot's `prepare`, beside Gate 2,
+ * before any row mounts, with parts main.ts binds once the boot returns; it leaves with the tree.
+ *
+ * ORDER. Registered from `prepare` with `prepend`, it is in front of nothing: a listener a later row
+ * prepends sits outside it, and the fence's refusal stands only while every outer listener hands
+ * `next()`'s decision back - as the four in the tree do (the room's member guard, the desk's guard,
+ * dsh-tool-jobs's and Gate 2's ask listener). That is re-checked on every dsh upgrade
+ * (docs/dsh-upgrade-guide.md).
  * @module
  */
 
@@ -55,6 +62,8 @@ const PAGE = 200;
 
 const WHY_TURN = "not the operator's turn in the conversation";
 const WHY_UNCHECKED = "the decision could not be checked";
+/** The line's why when judging the call itself threw (a throwing `conversation()`, say). */
+const WHY_FAULT = "the call could not be judged";
 
 /** What a call asks of the owner's name: nothing; the name itself; or an amendment of a decision. */
 export type OwnerWrite =
@@ -162,22 +171,26 @@ function unrefTimer(fn: () => void, ms: number): unknown {
 type Refusal = { reason: string; what: string; why: string };
 
 /** The refusal for a matched call whose judging threw: the unchecked reason for an amend whose `decision`
- *  fits the shape, else the owner's-name reason. Its line names the call's kind as far as it could be
- *  read - "record" for a record, an amend's own `what` when it is one of the five, else "review". It
- *  cannot throw. */
+ *  fits the shape, else the owner's-name reason; its line's why is {@link WHY_FAULT}. Its line names the
+ *  call's kind as far as it could be read - "record" for a record, an amend's own `what` when it is one
+ *  of the five, else "review". It cannot throw. */
 function failClosed(name: string, args: unknown): Refusal {
   let what = "review";
   try {
     const tool = MEMORY_WRITE_TOOL.exec(name)?.[1];
     if (tool === "record") what = "record";
     const a = argsObject(args);
-    if (tool === "amend" && isAmendKind(a?.what)) what = a.what;
-    if (tool === "amend" && typeof a?.decision === "string" && DECISION_ID.test(a.decision)) {
-      return { reason: ownerDecisionUnchecked(a.decision), what, why: WHY_UNCHECKED };
+    if (tool === "amend" && a !== undefined) {
+      const kind = a.what;
+      if (isAmendKind(kind)) what = kind;
+      const decision = a.decision;
+      if (typeof decision === "string" && DECISION_ID.test(decision)) {
+        return { reason: ownerDecisionUnchecked(decision), what, why: WHY_FAULT };
+      }
     }
-    return { reason: OWNER_NAME_REFUSED, what, why: WHY_TURN };
+    return { reason: OWNER_NAME_REFUSED, what, why: WHY_FAULT };
   } catch {
-    return { reason: OWNER_NAME_REFUSED, what, why: WHY_TURN };
+    return { reason: OWNER_NAME_REFUSED, what, why: WHY_FAULT };
   }
 }
 
@@ -246,7 +259,9 @@ export function installMemoryGuard(deps: MemoryGuardDeps): () => unknown {
     }
     if (refusal === undefined) return next();
     try {
-      deps.log(`memory: refused ${exec.name} (${refusal.what}) from session ${exec.agent?.id ?? "unknown"}: ${refusal.why}`);
+      /* the raw tool, never the server's name as the model spelled it: a made-up one reaches here too */
+      const tool = `memory_${MEMORY_WRITE_TOOL.exec(exec.name)?.[1] ?? "record"}`;
+      deps.log(`memory: refused ${tool} (${refusal.what}) from session ${exec.agent?.id ?? "unknown"}: ${refusal.why}`);
     } catch {
       // a log that throws does not undo the refusal
     }

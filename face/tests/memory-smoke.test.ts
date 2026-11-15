@@ -10,10 +10,13 @@
  * through the tree's tool registry as the order-gate smokes call their stand-ins, opens with the status's own first
  * line, and one `memory_record` lands in the home as written `by: "gravit"`; and the assembled prompts are read for the
  * sections `mcp:memory` (dsh-mcp-client's server instructions) and `gravit:memory` (dsh/profile/memory.md, gated on the
- * recall tool). On the same tree the owner-name fence (src/memory-guard.ts), installed as main.ts installs it over the
- * real conversation's held session with whose turn it is set by the test, refuses the owner's name from a worker and
- * from the conversation out of the operator's turn, refuses a worker's void, ref, own-name review and correction of the
- * owner's decision, and hands on the rest to the real row. The second boots over a home nobody made: healthy, and the tool says "no memory here". The third points
+ * recall tool). On the same tree the boot's own owner-name fence (src/memory-guard.ts, armed inside `prepare`), bound
+ * over the real conversation's held session with whose turn it is set by the test, refuses the owner's name from a
+ * worker and from the conversation out of the operator's turn, refuses a worker's void, ref, own-name review and
+ * correction of the owner's decision, and hands on the rest to the real row; then, bound over the real conversation's
+ * handle as main.ts binds it, real turns on the stub: the operator's prompt recalls and records in the owner's name
+ * (registered), a worker's brief turn and the conversation's turn on its relayed report each record in it (both
+ * refused), and the operator's next turn closes the decision (registered). The second boots over a home nobody made: healthy, and the tool says "no memory here". The third points
  * `FACE_MEMORY_DIR` at an empty directory, an install that is not there: healthy, no memory tool, the face's own
  * standing "not installed". The fourth disables the row by a line in the operator's own patch file: no memory tool in
  * the tree, the conversation or a Gravit session, no `gravit:memory` in their prompts, the face's standing "disabled".
@@ -58,7 +61,7 @@ import { createDeskAgent, type DeskSessionDeps } from "../src/desk-session.ts";
 import { isTrustedDataRequest } from "../src/http.ts";
 import { listBots } from "../src/bots.ts";
 import { NO_MEMORY_HERE, memoryOpener } from "../src/memory.ts";
-import { OWNER_NAME_REFUSED, installMemoryGuard, ownerDecisionRefused, type MemoryGuardCtxLike } from "../src/memory-guard.ts";
+import { OWNER_NAME_REFUSED, ownerDecisionRefused } from "../src/memory-guard.ts";
 import { MEMORY_ROW_ID, MEMORY_TOOL_PREFIX, MEMORY_TOOLS, composedMemoryRow } from "../src/memory-row.ts";
 import { DEFAULT_PRESET } from "../src/overlay.ts";
 import { MEMORY_SECTION } from "../src/protocols.ts";
@@ -88,6 +91,36 @@ const ROLE_MARK = "ROLE_FIXTURE_MEMORY";
 const BOT = "memory-bot";
 /** The filler decision the record registers: no symbol, nothing real. */
 const FILLER = { action: "pass", whose: "agent", thesis: "A filler note for the smoke: nothing here is a real decision." };
+/** The real-turn test's prompts and markers: the operator decides (the conversation recalls, then records in the
+ * owner's name); the operator starts a task whose worker records in the owner's name in its brief turn and reports,
+ * and the conversation records in the owner's name again in the relayed report's turn; the operator closes. */
+const OWNER_DECIDES = "OWNER_DECIDES_MEMORY";
+const START_OWNER = "START_OWNER_TASK";
+const BRIEF_OWNER = "BRIEF_OWNER_MEMORY: record the owner's call and report.";
+const REPORT_OWNER = "REPORT_OWNER_MEMORY";
+const OWNER_CLOSES = "OWNER_CLOSES_MEMORY";
+/** The call every one of those turns records in the owner's name: filler, no symbol. */
+const OWNER_CALL = { action: "buy", whose: "owner", thesis: "The owner's call in the real-turn smoke: filler." };
+/** The decision the operator's closing turn closes, set by the test. */
+let closeTarget: string | undefined;
+/** The boot's prefix on the fence's lines (src/boot.ts `BIN`). */
+const FENCE_LINE = "gravit-face: memory: refused ";
+
+/** Keeps the booted fence's lines (it writes them through `console.error`, read at each call) and passes every other
+ * line on; `restore` puts `console.error` back. */
+function fenceLines(): { lines: string[]; restore(): void } {
+  const lines: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    const text = args.map(String).join(" ");
+    if (text.startsWith(FENCE_LINE)) lines.push(text.slice("gravit-face: ".length));
+    else original.apply(console, args);
+  };
+  return { lines, restore: () => { console.error = original; } };
+}
+
+/** The fence's parts as an unbound boot holds them: nothing in place, no decision checkable. */
+const UNBOUND = { conversation: () => undefined, open: async () => ({ connected: false as const }) };
 
 type Message = GenerateOptions["messages"][number];
 const sourceOf = (m: { source?: unknown }): { kind?: unknown } => (m.source ?? {}) as { kind?: unknown };
@@ -246,7 +279,26 @@ async function bootWithConversation(): Promise<Face> {
       if (kind === "user" && said.includes(START)) {
         return results === 0 ? { kind: "tool", name: "task_start", args: { title: "Memory probe", brief: BRIEF, strategy: "fx" } } : { kind: "text", text: "STARTED" };
       }
+      /* the real-turn test's three turns, and the relayed report's: see OWNER_DECIDES */
+      if (kind === "user" && said.includes(OWNER_DECIDES)) {
+        if (results === 0) return { kind: "tool", name: `${MEMORY_TOOL_PREFIX}memory_recall`, args: { considering: ["buy"] } };
+        return results === 1 ? { kind: "tool", name: `${MEMORY_TOOL_PREFIX}memory_record`, args: OWNER_CALL } : { kind: "text", text: "RECORDED" };
+      }
+      if (kind === "user" && said.includes(START_OWNER)) {
+        return results === 0 ? { kind: "tool", name: "task_start", args: { title: "Owner probe", brief: BRIEF_OWNER, strategy: "fx" } } : { kind: "text", text: "STARTED" };
+      }
+      if (kind === "task" && said.includes(REPORT_OWNER)) {
+        return results === 0 ? { kind: "tool", name: `${MEMORY_TOOL_PREFIX}memory_record`, args: OWNER_CALL } : { kind: "text", text: "RELAYED" };
+      }
+      if (kind === "user" && said.includes(OWNER_CLOSES) && closeTarget !== undefined) {
+        const close = { decision: closeTarget, what: "close", closed_at: new Date().toISOString() };
+        return results === 0 ? { kind: "tool", name: `${MEMORY_TOOL_PREFIX}memory_amend`, args: close } : { kind: "text", text: "CLOSED" };
+      }
       return { kind: "text", text: "OK" };
+    }
+    if (header?.parentSession !== undefined && kind === "task" && said.includes(BRIEF_OWNER)) {
+      if (results === 0) return { kind: "tool", name: `${MEMORY_TOOL_PREFIX}memory_record`, args: OWNER_CALL };
+      return results === 1 ? { kind: "tool", name: "task_report", args: { status: "ready", text: `${REPORT_OWNER}: done.` } } : { kind: "text", text: "WORKER_DONE" };
     }
     if (header?.parentSession !== undefined && kind === "task") {
       return results === 0 ? { kind: "tool", name: "task_report", args: { status: "ready", text: "REPORT_MEMORY: nothing yet." } } : { kind: "text", text: "WORKER_DONE" };
@@ -358,14 +410,13 @@ test("the owner's name is written only from the conversation in the operator's t
   const conversation = conversationAgent(f);
   const worker = workerOf(f);
   assert.ok(worker !== undefined, "the worker from the first test");
-  /* The fence as main.ts installs it, over the real conversation's held session; whose turn is running is a flag this
-   * test sets, since no model runs offline and so no real turn opens. The look-up opens the memory as the row runs. */
+  /* The tree's own fence, armed inside the boot, bound here over the real conversation's held session; whose turn is
+   * running is a flag this test sets (the next test drives real turns). The look-up opens the memory as the row runs. */
   let operatorTurn = false;
   const handle = { current: () => f.conversation.current(), operatorTurn: () => operatorTurn };
-  const lines: string[] = [];
-  const dispose = installMemoryGuard({
-    ctx: f.booted.ctx as unknown as MemoryGuardCtxLike, conversation: () => handle, open: memoryOpener(rowOf(f.booted)), log: (line) => { lines.push(line); },
-  });
+  const captured = fenceLines();
+  const lines = captured.lines;
+  f.booted.bindMemoryFence({ conversation: () => handle, open: memoryOpener(rowOf(f.booted)) });
   try {
     const memory = openMemory(memoryHome);
     const all = async () => (await memory.decisions()).items.map((item) => item.view);
@@ -443,15 +494,63 @@ test("the owner's name is written only from the conversation in the operator's t
 
     /* one line per refusal, naming the caller and never an argument's text */
     assert.deepEqual(lines, [
-      `memory: refused mcp__memory__memory_record (record) from session ${worker.id}: not the operator's turn in the conversation`,
-      `memory: refused mcp__memory__memory_record (record) from session ${conversation.id}: not the operator's turn in the conversation`,
-      `memory: refused mcp__memory__memory_amend (void) from session ${worker.id}: not the operator's turn in the conversation`,
-      `memory: refused mcp__memory__memory_amend (ref) from session ${worker.id}: not the operator's turn in the conversation`,
-      `memory: refused mcp__memory__memory_amend (review) from session ${worker.id}: not the operator's turn in the conversation`,
-      `memory: refused mcp__memory__memory_amend (correction) from session ${worker.id}: not the operator's turn in the conversation`,
+      `memory: refused memory_record (record) from session ${worker.id}: not the operator's turn in the conversation`,
+      `memory: refused memory_record (record) from session ${conversation.id}: not the operator's turn in the conversation`,
+      `memory: refused memory_amend (void) from session ${worker.id}: not the operator's turn in the conversation`,
+      `memory: refused memory_amend (ref) from session ${worker.id}: not the operator's turn in the conversation`,
+      `memory: refused memory_amend (review) from session ${worker.id}: not the operator's turn in the conversation`,
+      `memory: refused memory_amend (correction) from session ${worker.id}: not the operator's turn in the conversation`,
     ]);
   } finally {
-    dispose();
+    f.booted.bindMemoryFence(UNBOUND);
+    captured.restore();
+  }
+});
+
+test("on the real conversation: the operator's turn writes the owner's name; a worker's brief and a relayed report do not", { skip, timeout: 120_000 }, async () => {
+  const f = held();
+  const conversation = conversationAgent(f);
+  const firstWorker = workerOf(f);
+  /* the tree's own fence over the REAL handle, as main.ts binds it: whose turn it is comes from the conversation */
+  const captured = fenceLines();
+  f.booted.bindMemoryFence({ conversation: () => f.conversation, open: memoryOpener(rowOf(f.booted)) });
+  try {
+    const memory = openMemory(memoryHome);
+    const owned = async () => (await memory.decisions()).items.map((item) => item.view).filter((view) => view.line.thesis === OWNER_CALL.thesis);
+    const prompt = (text: string) => remote(f.base, f.cookie, "session/prompt", {
+      request: { requestId: `memory-${crypto.randomUUID()}`, sessionId: f.sessionId, mode: "queue", content: [{ type: "text", text }] },
+    });
+
+    /* 1. the operator's prompt: the turn recalls, then records in the owner's name - registered */
+    await prompt(OWNER_DECIDES);
+    await waitFor("the owner's decision from the operator's turn", async () => (await owned()).length === 1);
+    await conversation.whenIdle();
+    const [decision] = await owned();
+    assert.equal(decision!.line.whose, "owner");
+    assert.deepEqual(captured.lines, [], "nothing refused in the operator's turn");
+
+    /* 2. a worker's brief turn, then the conversation's turn on its relayed report: each refused */
+    await prompt(START_OWNER);
+    await waitFor("the worker's refusal and the relayed report's", () => captured.lines.length >= 2);
+    const worker = f.booted.ctx.agents.list().find((a) => a.session.header.parentSession === f.sessionId && a.id !== firstWorker?.id);
+    assert.ok(worker !== undefined, "the owner probe's worker");
+    await conversation.whenIdle();
+    assert.deepEqual(captured.lines, [
+      `memory: refused memory_record (record) from session ${worker.id}: not the operator's turn in the conversation`,
+      `memory: refused memory_record (record) from session ${conversation.id}: not the operator's turn in the conversation`,
+    ]);
+    assert.equal((await owned()).length, 1, "neither landed");
+
+    /* 3. the operator's next turn closes the owner's decision - registered */
+    closeTarget = decision!.line.id;
+    await prompt(OWNER_CLOSES);
+    await waitFor("the owner's decision closed", async () => (await owned())[0]?.open === false);
+    await conversation.whenIdle();
+    assert.equal(captured.lines.length, 2, "nothing more refused");
+  } finally {
+    closeTarget = undefined;
+    f.booted.bindMemoryFence(UNBOUND);
+    captured.restore();
   }
 });
 
