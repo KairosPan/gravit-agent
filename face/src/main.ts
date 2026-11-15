@@ -33,6 +33,7 @@ import { composedMemoryRow } from "./memory-row.ts";
 import { memoryOpener } from "./memory.ts";
 import { readBriefMemory } from "./memory-brief.ts";
 import { installMemoryClock, memoryClockEnabled, type MemoryClock } from "./memory-clock.ts";
+import { installMemoryGuard, type MemoryGuardCtxLike } from "./memory-guard.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { claimsOf, deskDir, installDesk, type DeskHandle } from "./desk.ts";
@@ -136,6 +137,9 @@ let disposeMarketProxy: (() => void) | undefined;
 /** The memory's reconcile clock (src/memory-clock.ts), unless `FACE_MEMORY_RECONCILE=0`: both exits clear its timers
  * first, before anything is torn down, and wait for no run. */
 let memoryClock: MemoryClock | undefined;
+/** The memory's owner-name fence (src/memory-guard.ts), always installed: both exits remove it after the conversation is
+ * disposed, so no session outlives it. */
+let memoryGuard: (() => unknown) | undefined;
 
 /** Tear the tree down, then leave with `code`. A dispose that rejects still
  * exits, and says why: a signal the process has already acknowledged must not
@@ -149,6 +153,7 @@ async function shutdown(code: number): Promise<void> {
     await desk?.quiesce();
     await tasks?.dispose();
     await conversation?.dispose();
+    memoryGuard?.();
     await desk?.dispose(code);
     disposeRoom?.();
     disposeData?.();
@@ -186,6 +191,7 @@ installFailLoud(BIN, process, async () => {
   await desk?.quiesce();
   await tasks?.dispose();
   await conversation?.dispose();
+  memoryGuard?.();
   await desk?.dispose(1);
   disposeRoom?.();
   disposeData?.();
@@ -527,6 +533,17 @@ desk = installDesk(booted.ctx.webServer, {
   watchRow: {},
 });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
+/* The memory's owner-name fence (src/memory-guard.ts): a decision in the owner's name is written only from the
+ * conversation, in a turn the operator's own message opened. It goes on before the router, router on or off and the
+ * memory connected or not, so neither the conversation nor any worker of it runs without it; it reads the
+ * conversation when each call arrives, so with no conversation nothing qualifies. Both exits remove it after the
+ * conversation is disposed. */
+memoryGuard = installMemoryGuard({
+  ctx: booted.ctx as unknown as MemoryGuardCtxLike,
+  conversation: () => conversation,
+  open: openMemory,
+  log: (line) => { console.error(`${BIN}: ${line}`); },
+});
 /* The memory's reconcile clock (src/memory-clock.ts), beside the desk: two minutes from now and every eight hours, as
  * `gravit-face`, each run one line on the face's stderr; it never holds up or fails anything. */
 if (memoryClockEnabled()) {

@@ -10,7 +10,10 @@
  * through the tree's tool registry as the order-gate smokes call their stand-ins, opens with the status's own first
  * line, and one `memory_record` lands in the home as written `by: "gravit"`; and the assembled prompts are read for the
  * sections `mcp:memory` (dsh-mcp-client's server instructions) and `gravit:memory` (dsh/profile/memory.md, gated on the
- * recall tool). The second boots over a home nobody made: healthy, and the tool says "no memory here". The third points
+ * recall tool). On the same tree the owner-name fence (src/memory-guard.ts), installed as main.ts installs it over the
+ * real conversation's held session with whose turn it is set by the test, refuses the owner's name from a worker and
+ * from the conversation out of the operator's turn, refuses a worker's void of the owner's decision, and hands on the
+ * rest to the real row. The second boots over a home nobody made: healthy, and the tool says "no memory here". The third points
  * `FACE_MEMORY_DIR` at an empty directory, an install that is not there: healthy, no memory tool, the face's own
  * standing "not installed". The fourth disables the row by a line in the operator's own patch file: no memory tool in
  * the tree, the conversation or a Gravit session, no `gravit:memory` in their prompts, the face's standing "disabled".
@@ -55,6 +58,7 @@ import { createDeskAgent, type DeskSessionDeps } from "../src/desk-session.ts";
 import { isTrustedDataRequest } from "../src/http.ts";
 import { listBots } from "../src/bots.ts";
 import { NO_MEMORY_HERE, memoryOpener } from "../src/memory.ts";
+import { OWNER_NAME_REFUSED, installMemoryGuard, ownerDecisionRefused, type MemoryGuardCtxLike } from "../src/memory-guard.ts";
 import { MEMORY_ROW_ID, MEMORY_TOOL_PREFIX, MEMORY_TOOLS, composedMemoryRow } from "../src/memory-row.ts";
 import { DEFAULT_PRESET } from "../src/overlay.ts";
 import { MEMORY_SECTION } from "../src/protocols.ts";
@@ -347,6 +351,83 @@ test("memory_status answers through the row as gravit", { skip, timeout: 120_000
   assert.equal(items.length, 1, "one decision in the home");
   assert.equal(items[0]!.view.line.by, "gravit", "written by the row's agent");
   assert.equal(items[0]!.view.line.thesis, FILLER.thesis);
+});
+
+test("the owner's name is written only from the conversation in the operator's turn", { skip, timeout: 120_000 }, async () => {
+  const f = held();
+  const conversation = conversationAgent(f);
+  const worker = workerOf(f);
+  assert.ok(worker !== undefined, "the worker from the first test");
+  /* The fence as main.ts installs it, over the real conversation's held session; whose turn is running is a flag this
+   * test sets, since no model runs offline and so no real turn opens. The look-up opens the memory as the row runs. */
+  let operatorTurn = false;
+  const handle = { current: () => f.conversation.current(), operatorTurn: () => operatorTurn };
+  const lines: string[] = [];
+  const dispose = installMemoryGuard({
+    ctx: f.booted.ctx as unknown as MemoryGuardCtxLike, conversation: () => handle, open: memoryOpener(rowOf(f.booted)), log: (line) => { lines.push(line); },
+  });
+  try {
+    const memory = openMemory(memoryHome);
+    const all = async () => (await memory.decisions()).items.map((item) => item.view);
+    const viewOf = async (id: string) => (await all()).find((view) => view.line.id === id);
+    const before = (await all()).length;
+    const decision = { action: "buy", thesis: "t", symbol: "NVDA", market: "US" };
+    const idOf = (text: string): string => /^Registered decision (d-\d{8}-[0-9a-f]{8}):/.exec(text)?.[1] ?? assert.fail(text);
+
+    /* 1. a worker, in the operator's turn: the owner's name is refused, and nothing lands */
+    operatorTurn = true;
+    const workerOwner = await callMemory(f.booted, worker, "memory_record", { ...decision, whose: "owner" });
+    assert.equal(workerOwner.isError, true, workerOwner.text);
+    assert.ok(workerOwner.text.includes(OWNER_NAME_REFUSED), workerOwner.text);
+    assert.equal((await all()).length, before, "nothing registered");
+
+    /* 2. the worker in its own name: registered */
+    const workerOwn = await callMemory(f.booted, worker, "memory_record", { ...decision, whose: "agent" });
+    assert.equal(workerOwn.isError, false, workerOwn.text);
+    const own = idOf(workerOwn.text);
+    assert.equal((await all()).length, before + 1);
+    assert.equal((await viewOf(own))?.line.whose, "agent");
+
+    /* 3. the conversation, out of the operator's turn: refused */
+    operatorTurn = false;
+    const outOfTurn = await callMemory(f.booted, conversation, "memory_record", { ...decision, whose: "owner" });
+    assert.equal(outOfTurn.isError, true, outOfTurn.text);
+    assert.ok(outOfTurn.text.includes(OWNER_NAME_REFUSED), outOfTurn.text);
+    assert.equal((await all()).length, before + 1, "still one more");
+
+    /* 4. the conversation, in the operator's turn: registered in the owner's name */
+    operatorTurn = true;
+    const inPlace = await callMemory(f.booted, conversation, "memory_record", { ...decision, whose: "owner" });
+    assert.equal(inPlace.isError, false, inPlace.text);
+    const OWNED = idOf(inPlace.text);
+    assert.equal((await all()).length, before + 2);
+    assert.equal((await viewOf(OWNED))?.line.whose, "owner");
+
+    /* 5. the worker voids the owner's decision: refused after the look-up, and it stands */
+    const voidOwned = await callMemory(f.booted, worker, "memory_amend", { decision: OWNED, what: "void", reason: "r" });
+    assert.equal(voidOwned.isError, true, voidOwned.text);
+    assert.ok(voidOwned.text.includes(ownerDecisionRefused(OWNED)), voidOwned.text);
+    assert.equal((await viewOf(OWNED))?.void, false, "the owner's decision is not void");
+
+    /* 6. the worker voids its own: handed on, and registered */
+    const voidOwn = await callMemory(f.booted, worker, "memory_amend", { decision: own, what: "void", reason: "r" });
+    assert.equal(voidOwn.isError, false, voidOwn.text);
+    assert.equal((await viewOf(own))?.void, true, "the worker's own decision is void");
+
+    /* 7. the conversation, in the operator's turn, closes the owner's decision */
+    const close = await callMemory(f.booted, conversation, "memory_amend", { decision: OWNED, what: "close", closed_at: new Date().toISOString() });
+    assert.equal(close.isError, false, close.text);
+    assert.equal((await viewOf(OWNED))?.open, false, "the owner's decision is closed");
+
+    /* one line per refusal, naming the caller and never an argument's text */
+    assert.deepEqual(lines, [
+      `memory: refused mcp__memory__memory_record (record) from session ${worker.id}: not the operator's turn in the conversation`,
+      `memory: refused mcp__memory__memory_record (record) from session ${conversation.id}: not the operator's turn in the conversation`,
+      `memory: refused mcp__memory__memory_amend (void) from session ${worker.id}: not the operator's turn in the conversation`,
+    ]);
+  } finally {
+    dispose();
+  }
 });
 
 test("where the two sections reach", { skip, timeout: 120_000 }, async () => {
