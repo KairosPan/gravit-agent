@@ -1133,6 +1133,7 @@ export const EN = Object.freeze({
   'sheet.quote.fillIn': 'Fill it in to see what it would be.',
   'sheet.quote.asking': 'Asking…',
   'sheet.quote.again': 'Prepare again',
+  'sheet.signAgain': 'Sign again',
   'sheet.whatYouSign': 'What you sign',
   'sheet.connect.use': 'Use {wallet}',
   'sheet.connect.openPage': "Open {who}'s sign-in page",

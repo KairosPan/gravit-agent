@@ -58,7 +58,7 @@ import { BUCKET_MS, paperCurve, paperRangeStart, type PaperHistory, type PaperVe
 import { paperBarsWanted, paperBookStart, rebuildEquity, type PriceSeries } from "./live/paper-history.ts";
 import { loadBook, PAPER_MAX_CASH, paperBookPath, paperBooksOnDisk, paperDir, parsePaperCash, resetBookOnDisk, summaryOf, type PaperBook, type PaperBookSummary, type PaperChange } from "./live/paper.ts";
 import { costBasis, ordersOf, type CostBasis, type LoggedOrder, type VenuePosition } from "./account/costbasis.ts";
-import type { AutonomyHook, LiveOrder } from "./account/live-orders.ts";
+import type { AutonomyHook, LiveOrder, StagedOrder } from "./account/live-orders.ts";
 import type { LiveEarn } from "./account/live-earn.ts";
 import type { Payment } from "./account/payments.ts";
 import { exploreAcross, type Exploration, type ExploreSort, type ExploreVenue } from "./live/explore.ts";
@@ -96,7 +96,7 @@ import { termsHere, VENUE_TERMS } from "./live/eligibility.ts";
 import { locator, type Locator } from "./live/location.ts";
 import { isStable, realHttp, type PaperControls } from "./live/types.ts";
 import { isPlain } from "./account/state.ts";
-import type { AgentAction, Envelope, Hex, OwnerAction } from "./account/sign.ts";
+import { seatOrderAction, type AgentAction, type Envelope, type Hex, type OwnerAction, type SeatOrder } from "./account/sign.ts";
 import { Desk, type Brain, type BrainStatus, type BrainTest, type DeskWorld } from "./account/desk.ts";
 import { AccountStream } from "./account/stream.ts";
 import { applyBrainKey, BrainKeyStage, envBlocksOf, envWinsOf, type BrainKeyDone } from "./account/brain-keys.ts";
@@ -2689,6 +2689,34 @@ export class PortfolioService {
       if (asked) this.adapters.get(v)?.wake?.();
     }
     return r;
+  }
+
+  /** Raise the Guard card for a seat's live order before Gate 2 is answered, or say Beast would place it with no card. Nothing is placed. */
+  async stageSeatOrder(seatName: string, order: SeatOrder): Promise<StagedOrder | Refusal> {
+    if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted on this service" });
+    const now = Date.parse(this.now());
+    const agent = this.account.state.agents.find((k) => k.revokedAt === undefined && k.validUntil > now && k.name.toLowerCase() === seatName.trim().toLowerCase());
+    if (!agent) return no("E_ACCOUNT_BAD_ACTION", { message: `no live seat named ${seatName.trim() || "that"}` });
+    const action = seatOrderAction(order);
+    if (typeof action === "string") return no("E_ACCOUNT_BAD_ACTION", { message: action });
+    return this.account.trade.stage({ ...action, nonce: 0 }, { signer: agent.address, agent });
+  }
+
+  /** Close a card staged for Gate 2 that is still pending. A card the tool raised on its own is left for the owner's signature. */
+  dropStagedOrder(id: string): boolean {
+    return this.account?.trade.dropStaged(id) === true;
+  }
+
+  /** A lapsed staged card, asked again: the old one is closed when it is still pending, and a new card is raised from the same instruction. */
+  async restageSeatOrder(id: string): Promise<StagedOrder | Refusal> {
+    if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted on this service" });
+    const card = this.approvals.find((c) => c.id === id);
+    if (!card || card.action?.type !== "agentLiveOrder" || !card.signer) return no("E_ACCOUNT_BAD_ACTION", { message: "no staged order to sign again" });
+    if (card.status === "approved") return no("E_ACCOUNT_BAD_ACTION", { message: "that order was already signed" });
+    const agent = this.account.state.agents.find((k) => k.address === card.signer && k.revokedAt === undefined);
+    if (!agent) return no("E_ACCOUNT_BAD_ACTION", { message: "the seat that asked is no longer let in" });
+    if (card.status === "pending" && !this.account.trade.dropStaged(id)) return no("E_ACCOUNT_BAD_ACTION", { message: "that card was not staged for Gate 2" });
+    return this.account.trade.stage(card.action, { signer: agent.address, agent });
   }
 
   /** THE UNSIGNED DOOR (account/unsigned.ts): Identity's four and opening a paper account, taken with no signature. Neither writes at a

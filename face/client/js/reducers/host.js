@@ -176,6 +176,21 @@ export const reducers = {
 
   // the gate is over: this tab's own answer stands against a plain withdrawal ('closed'); a lost race ('elsewhere')
   // overrides it, because then this tab's answer is not the one the host took
+  // a staged card was signed again: the same gate message, the new card's id, hash and window
+  hostStaged(s, { eventId, id, hash, expiresAt, createdAt, order } = {}) {
+    if (typeof eventId !== 'string' || typeof id !== 'string') return s;
+    const patch = { id, ...(typeof hash === 'string' ? { hash } : {}), ...(typeof expiresAt === 'string' ? { expiresAt } : {}), ...(typeof createdAt === 'string' ? { createdAt } : {}), ...(order && typeof order === 'object' ? { order } : {}) };
+    return { ...s, conversations: s.conversations.map(c => (c.messages.some(m => m.id === eventId)
+      ? { ...c, messages: c.messages.map(m => (m.id === eventId ? { ...m, answer: undefined, data: { ...(m.data ?? {}), ...patch } } : m)) }
+      : c)) };
+  },
+  // the Account card this gate staged was answered on another surface
+  hostCardSettled(s, { id, outcome } = {}) {
+    if (typeof id !== 'string' || (outcome !== 'approved' && outcome !== 'rejected')) return s;
+    return { ...s, conversations: s.conversations.map(c => (c.messages.some(m => m.data?.id === id && !m.answer)
+      ? { ...c, messages: c.messages.map(m => (m.data?.id === id && !m.answer ? { ...m, answer: outcome } : m)) }
+      : c)) };
+  },
   hostGateGone(s, { eventId, outcome }) {
     const { [eventId]: _gone, ...orphans } = s.orphanGates ?? {};
     const conversations = s.conversations.map(c => (c.messages.some(m => m.id === eventId)

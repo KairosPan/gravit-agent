@@ -199,6 +199,36 @@ interface Plan {
   maxUsd: number;
 }
 
+/** the structured order a staged card carries. Absent fields are absent on purpose: lot, T+1 and a CNY rate are not on this read. */
+export interface OrderFacts {
+  symbol: string;
+  name: string;
+  market: "us" | "cn";
+  side: Side;
+  type: OrderType;
+  tif: TimeInForce | "day";
+  quantity: number;
+  limitPrice: number | null;
+  stopPrice?: number;
+  currency: "USD" | "CNY";
+  estCost: number;
+  estCostBasis: "limit" | "last";
+  paper: boolean;
+  /** a CNY market's own size step, when the venue states one. Never a guessed board lot. */
+  lotSize?: number;
+}
+
+/** a card raised before Gate 2, or the news that Beast would place this with no card */
+export interface StagedOrder {
+  ok: true;
+  wouldBe: "card" | "at once";
+  createdAt: string;
+  order?: OrderFacts | undefined;
+  id?: string | undefined;
+  hash?: string | undefined;
+  expiresAt?: string | undefined;
+}
+
 /** what a card showed the owner: the owner's yes places this, and nothing else */
 interface Shown {
   symbol: string;
@@ -261,6 +291,12 @@ export class LiveOrders {
   private readonly polled = new Map<string, number>();
   /** what each waiting card showed, by card id */
   private readonly shown = new Map<string, Shown>();
+  /** a card raised before Gate 2, by a print of the order the seat asked, so the tool that runs after the answer is the same card */
+  private readonly staged = new Map<string, string>();
+  /** what releasing a staged card placed, so the tool that follows the signature does not place it again */
+  private readonly released = new Map<string, Outcome>();
+  /** the order facts shown for a staged card, so a second stage of the same order returns the same record */
+  private readonly stagedOrder = new Map<string, OrderFacts>();
   /** what each waiting card for an AMEND showed: the order as it would be */
   private readonly shownAmend = new Map<string, { order: string; qty: number; limitPrice?: number | undefined; stopPrice?: number | undefined; maxUsd: number }>();
   /** what each close card showed the owner: the market and the size, which an approval releases exactly */
@@ -276,6 +312,11 @@ export class LiveOrders {
 
   private money() {
     return this.e.host.liveMoney?.();
+  }
+
+  /** the flight board's cards. The engine that builds this door has them; the structural host this file is typed against does not. */
+  private board(): { card(id: string): CardLike | undefined; closeCard(id: string, status: "rejected", note: string): void } {
+    return this.e.host as never;
   }
 
   /** the refusal that holds a venue back now: the account's own hold for it where the host shares one (the venue's reads keep it, and a
@@ -618,9 +659,74 @@ export class LiveOrders {
     return typeof words === "string" && words.trim() !== "" ? words : undefined;
   }
 
+  /** Raise the Guard card for an order before the seat's tool runs, or say Beast would place it with no card. Nothing is placed here. */
+  async stage(a: AgentLiveOrderAction, who: { signer: string; agent: AgentKey }): Promise<StagedOrder | Refusal> {
+    const now = Date.parse(this.e.host.now());
+    const print = orderPrint(who.signer, a);
+    const prior = this.staged.get(print);
+    if (prior !== undefined) {
+      const held = this.board().card(prior);
+      const placed = this.released.get(prior);
+      // already signed and placed: the tool has not collected it yet, so do not raise a second card
+      if (placed && held?.status === "approved") {
+        const order = this.stagedOrder.get(prior);
+        return { ok: true, wouldBe: "at once", createdAt: this.e.host.now(), ...(order ? { order } : {}) };
+      }
+      if (held?.status === "pending" && !(held.expiresAt && now >= Date.parse(held.expiresAt))) {
+        const order = this.stagedOrder.get(held.id);
+        return order ? { ok: true, wouldBe: "card", id: held.id, hash: held.actionHash ?? "", expiresAt: held.expiresAt, createdAt: this.e.host.now(), order } : { ok: true, wouldBe: "card", id: held.id, hash: held.actionHash ?? "", expiresAt: held.expiresAt, createdAt: this.e.host.now() };
+      }
+      this.staged.delete(print);
+      this.released.delete(prior);
+    }
+    const spend = await this.limit(who.signer, text(a.venue));
+    if (isRefusal(spend)) return spend;
+    const p = await this.plan(fieldsOf(a));
+    if (isRefusal(p)) return p;
+    const rule = await this.placeRule(p.v, p.side, p.reduceOnly, p.m.symbol);
+    if (rule) return rule;
+    const createdAt = this.e.host.now();
+    const order = orderFacts(p);
+    const superagent = this.superagent(who.signer, p.v);
+    const free = this.freeClose(spend, p);
+    if (this.e.host.policy().mode === "open" || superagent !== undefined) {
+      const c = covers(spend, p.v.id, micro(p.maxUsd.toFixed(6)), now, { close: free });
+      if (c) return c;
+      return { ok: true, wouldBe: "at once", createdAt, order };
+    }
+    const worth = cents(p.maxUsd);
+    const c = covers(spend, p.v.id, micro(worth.toFixed(2)), now, { close: free });
+    if (c) return c;
+    const offer = { payee: p.v.name, payTo: p.m.symbol, amount: `${p.side} ${qtyText(p.qty)} ${p.m.base}`, protocol: `${p.v.paper ? "paper order (no real money)" : "real order"} · ${p.type}${p.limitPrice !== undefined ? ` at ${plain(p.limitPrice)}` : ` near ${plain(p.price)}`}`, network: `${p.side === "buy" ? "costs at most" : "worth about"} ${usd(worth)}` };
+    const actionId = keccak256(stringToHex(canonical(a)));
+    const actionHash = keccak256(stringToHex(canonical({ action: actionId, offer, symbol: p.m.symbol, qty: plain(p.qty), price: plain(p.price), worth: worth.toFixed(2) })));
+    const flight = this.e.host.openFlight({ id: slug(who.agent.name), name: who.agent.name, code: who.agent.code }, `${this.words(p)} · ${p.v.paper ? "paper" : "real money"}`);
+    const intent: Intent = { kind: "trade", symbol: p.m.symbol, side: p.side, qty: p.qty };
+    const card = this.e.host.raiseCard(flight.no, { account: p.v.id, intent, usd: worth, reason: `${who.agent.name} asks to ${this.words(p)}`, why: "live", action: a, actionHash, signer: who.signer, expiresAt: new Date(now + CARD_TTL_MS).toISOString(), offer, ...(free ? {} : { approval: spend.id }) });
+    this.shown.set(card.id, { symbol: p.m.symbol, qty: p.qty, price: p.price, notional: p.notional, maxUsd: worth });
+    this.staged.set(print, card.id);
+    this.stagedOrder.set(card.id, order);
+    if (!free) this.e.patchSpend(spend.id, (x) => ({ ...x, reservedMicro: x.reservedMicro + micro(String(worth)) }));
+    this.e.host.log({ kind: "action", venue: p.v.id, tool: a.type, signer: who.signer, outcome: "card", notionalUsd: worth, reason: `${card.id} · staged before its approval · ${this.words(p)}`, flight: flight.no, intentId: card.id });
+    return { ok: true, wouldBe: "card", id: card.id, hash: actionHash, expiresAt: card.expiresAt, createdAt, order };
+  }
+
+  /** Close a card this door staged and that is still pending. A card the tool raised itself is not here, and is not closed. */
+  dropStaged(id: string): boolean {
+    const card = this.board().card(id);
+    if (!card || card.status !== "pending" || ![...this.staged.values()].includes(id)) return false;
+    if (card.action !== undefined && card.approval) this.e.patchSpend(card.approval, (x) => ({ ...x, reservedMicro: Math.max(0, x.reservedMicro - micro(String(card.usd))) }));
+    this.shown.delete(id);
+    this.stagedOrder.delete(id);
+    this.board().closeCard(id, "rejected", "Declined before it was signed; nothing moved");
+    for (const [print, cardId] of this.staged) if (cardId === id) this.staged.delete(print);
+    return true;
+  }
+
   /** An agent's order. Its trading limit and the dial first; then Guard: a card the owner signs; Beast: placed at once — and, in Guard, the
    * desk's own seat at its paper account under the autonomy the owner signed (AutonomyHook): placed at once as Beast places it, inside the
-   * same limit, the ledger's row saying so */
+   * same limit, the ledger's row saying so. A card already staged for this same order is that card: still pending, it is returned again;
+   * already released, its outcome is returned and nothing is placed twice. */
   async agent(a: AgentLiveOrderAction, who: { signer: string; envelope: Envelope; hash: Hex; agent: AgentKey }): Promise<Outcome> {
     const now = Date.parse(this.e.host.now());
     const spend = await this.limit(who.signer, text(a.venue));
@@ -630,6 +736,19 @@ export class LiveOrders {
     // an order the venue's place rule refuses from here raises no card and holds nothing of the limit
     const line = await this.placeRule(p.v, p.side, p.reduceOnly, p.m.symbol);
     if (line) return line;
+    const stagedId = this.staged.get(orderPrint(who.signer, a));
+    if (stagedId !== undefined) {
+      const held = this.board().card(stagedId);
+      const placed = this.released.get(stagedId);
+      if (placed) {
+        this.staged.delete(orderPrint(who.signer, a));
+        return placed;
+      }
+      if (held?.status === "pending" && !(held.expiresAt && now >= Date.parse(held.expiresAt))) {
+        return { ok: true, kind: "card", pending: true, card: held, flight: held.flight };
+      }
+      this.staged.delete(orderPrint(who.signer, a));
+    }
     const flight = this.e.host.openFlight({ id: slug(who.agent.name), name: who.agent.name, code: who.agent.code }, `${this.words(p)} · ${p.v.paper ? "paper" : "real money"}`);
     const superagent = this.superagent(who.signer, p.v);
     const free = this.freeClose(spend, p);
@@ -674,7 +793,9 @@ export class LiveOrders {
     const free = this.freeClose(spend, p);
     const c = covers(spend, p.v.id, micro(p.maxUsd.toFixed(6)), Date.parse(this.e.host.now()), { close: free });
     if (c) return c;
-    return this.charged(spend.id, p, { signer: who.signer, authority: "agent", agent: who.agent.address, card: card.id, action: card.actionHash, approval: spend.id }, { count: !free });
+    const out = await this.charged(spend.id, p, { signer: who.signer, authority: "agent", agent: who.agent.address, card: card.id, action: card.actionHash, approval: spend.id }, { count: !free });
+    if (!isRefusal(out)) this.released.set(card.id, out);
+    return out;
   }
 
   /** Counted against the limit first, so an order that fills at once settles its count when it is placed — and the venue's turn in the
@@ -1798,6 +1919,36 @@ export interface OrderQuote {
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+/** the same order asked twice: the seat, the market and the fields the seat named, not the price the plan then saw */
+function orderPrint(signer: string, a: AgentLiveOrderAction): string {
+  return canonical({
+    signer, venue: text(a.venue), symbol: text(a.symbol), side: text(a.side), orderType: text(a.orderType) || "market",
+    qty: text(a.qty), usd: text(a.usd), limitPrice: text(a.limitPrice), stopPrice: text(a.stopPrice),
+  });
+}
+
+/** DESIGN.md §9.1 from a plan. `lotSize` only when a CNY market states a size step. No sellable quantity, settlement or FX: this read has none. */
+function orderFacts(p: Plan): OrderFacts {
+  const cny = p.m.quote === "CNY";
+  const facts: OrderFacts = {
+    symbol: p.m.base || p.m.symbol,
+    name: p.m.name,
+    market: cny ? "cn" : "us",
+    side: p.side,
+    type: p.type,
+    tif: p.tif ?? "day",
+    quantity: p.qty,
+    limitPrice: p.limitPrice ?? null,
+    currency: cny ? "CNY" : "USD",
+    estCost: Number(p.notional.toFixed(2)),
+    estCostBasis: p.limitPrice !== undefined ? "limit" : "last",
+    paper: p.v.paper === true,
+    ...(p.stopPrice !== undefined ? { stopPrice: p.stopPrice } : {}),
+    ...(cny && typeof p.m.qtyStep === "number" && p.m.qtyStep > 0 ? { lotSize: p.m.qtyStep } : {}),
+  };
+  return facts;
+}
 
 /** an agent's order is held to its limit's per-order line as it stands after any change: a change cannot grow one order past what one order may be */
 function perOrder(spend: SpendApproval, maxUsd: number): Refusal | null {

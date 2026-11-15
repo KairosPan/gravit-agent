@@ -63,6 +63,18 @@ const seatGate = { type: 'waterfall', event: 'approval/request', eventId: 'ev-10
 const seatResult = (text, isError, callId = 'c10') => ({ type: 'session/event', sessionId: 's1', event: { type: 'tool/result', seq: 61, time: 1756512301000, surfaceOp: 'append', data: { turn: 5, step: 1, message: { id: 'm-61', role: 'tool', source: { kind: 'tool', callId }, toolCallId: callId, content: [{ type: 'text', text }], isError } } } });
 const seatCallAs = (callId, name, args) => ({ ...seatCall, event: { ...seatCall.event, data: { ...seatCall.event.data, callId, name, arguments: JSON.stringify(args) } } });
 
+test("a staged order's fence is the card id and hash, and the line a person reads has none of it", () => {
+  const staged = { wouldBe: 'card', id: 'card-0004', hash: '0xabc', expiresAt: '2026-11-15T16:00:00.000Z', createdAt: '2026-11-15T15:30:00.000Z', order: { symbol: 'AAPL', quantity: 10, estCost: 1795, estCostBasis: 'last', paper: true } };
+  const reason = `${seatGate.request.reason}\n<<<staged ${JSON.stringify(staged)}>>>`;
+  const [card] = toMessages(mapFrame({ ...seatGate, request: { ...seatGate.request, reason, displayReason: { en: seatGate.request.reason } } }), new Map(), NOW);
+  assert.equal(card.text, 'Your call: buy $100 of AAPL · market · paper-1');
+  assert.equal(card.data.id, 'card-0004');
+  assert.equal(card.data.hash, '0xabc');
+  assert.equal(card.data.order.symbol, 'AAPL');
+  assert.equal(card.data.line, seatGate.request.reason);
+  assert.deepEqual(card.data.args, { venue: 'paper-1', symbol: 'AAPL', side: 'buy', usd: 100, orderType: 'market' });
+});
+
 test("a seat order approval is the orange card with the seat line and the venue from the host's own reason line, with or without its call", () => {
   const c = new Map();
   const [card] = toMessages(mapFrame(seatGate), c, NOW);

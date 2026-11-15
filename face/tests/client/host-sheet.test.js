@@ -208,7 +208,7 @@ test('a submit under thirty seconds prepares again before signing', async () => 
   assert.equal(c.s().status, 'ready');
 });
 
-test('at zero the sheet prepares again', async () => {
+test('at zero the sheet waits, and Sign again prepares', async () => {
   const r = rig({ deadlineMs: 5_000 });
   r.sheet.open('topUp', SEED);
   await settle();
@@ -217,10 +217,13 @@ test('at zero the sheet prepares again', async () => {
   assert.equal(r.types.filter(t => t === 'sheetTick').length, 4, 'a re-render every second');
   assert.equal(r.owner.drafts.length, 1);
   await r.timers.advance(1_000);
-  assert.equal(r.owner.drafts.length, 2, 'at zero, prepared again');
+  assert.equal(r.owner.drafts.length, 1, 'at zero, not prepared again on its own');
+  assert.equal(r.s().status, 'lapsed');
+  assert.equal(r.owner.envelopes.length, 0, 'nothing signed');
+  await r.sheet.again();
+  assert.equal(r.owner.drafts.length, 2, 'Sign again prepares');
   assert.equal(r.s().status, 'ready');
   assert.equal(r.s().deadline, START + 5_000 + 5_000, "the new preparation's deadline");
-  assert.equal(r.owner.envelopes.length, 0, 'nothing signed');
 });
 
 test('a quiet ask keeps the shown preparation until the new one lands', async () => {

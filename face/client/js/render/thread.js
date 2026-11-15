@@ -44,10 +44,18 @@ const ENDED = {
 const stateChip = m => (m.answer ? chip(...(Object.hasOwn(ENDED, m.answer) ? ENDED[m.answer]() : [m.answer, 'grey'])) : '');
 
 // ✗ then ✓, answering rejected / allowed-once — the approval vocabulary api.js sends (nothing else reaches the host)
-function gateKeys(m, conv) {
+function gateKeys(m, conv, state) {
   if (!needsAnswer(m)) return '';
   const d = { 'data-action': 'answer', 'data-conv': conv.id, 'data-msg': m.id };
-  return `<div class="keys right">${key('no', t('thread.gate.decline'), { ...d, 'data-value': 'rejected' })}${key('yes', t('thread.gate.approve'), { ...d, 'data-value': 'allowed-once' })}</div>`;
+  const card = typeof m.data?.id === 'string' ? m.data.id : '';
+  const hash = typeof m.data?.hash === 'string' ? m.data.hash : '';
+  // no staged card: the old ✗ / ✓, answering rejected / allowed-once and nothing else
+  if (!card) return `<div class="keys right">${key('no', t('thread.gate.decline'), { ...d, 'data-value': 'rejected' })}${key('yes', t('thread.gate.approve'), { ...d, 'data-value': 'allowed-once' })}</div>`;
+  const decline = key('no', t('thread.gate.decline'), { ...d, 'data-value': 'rejected', 'data-card': card });
+  const expired = typeof m.data?.expiresAt === 'string' && Date.parse(m.data.expiresAt) <= Date.now();
+  if (expired) return `<div class="keys right">${decline}<button type="button" class="btn-primary small" data-action="restageCard" data-card="${esc(card)}" data-msg="${esc(m.id)}">${th('sheet.signAgain')}</button></div>`;
+  const sign = hash && state?.owner?.role === 'signs' ? { 'data-card': card, 'data-hash': hash, 'data-sign': '1' } : {};
+  return `<div class="keys right">${decline}${key('yes', t('thread.gate.approve'), { ...d, 'data-value': 'allowed-once', ...sign })}</div>`;
 }
 
 // every input is named and id'd by the gate and the question (q-<eventId>-<questionId>), so two pending cards asking
@@ -79,11 +87,11 @@ function body(m, conv, state) {
       return composedHtml(m, state?.lunhui?.views?.[viewOf(m).key], state?.lunhui?.ui?.[composedId(m, conv)], conv, state?.channels, { asks: state?.route?.screen !== 'history' });
     case 'card':
       return `<div class="card orange"><div class="card-head"><div class="card-title">${esc(d.title ?? m.text)}</div>${stateChip(m)}</div>` +
-        `<div class="dim">${esc([d.venue, d.line].filter(Boolean).join(' · '))}</div>${gateKeys(m, conv)}</div>`;
+        `<div class="dim">${esc([d.venue, d.line].filter(Boolean).join(' · '))}</div>${gateKeys(m, conv, state)}</div>`;
     case 'approval': {
       const shown = d.displayReason ?? d.reason ?? m.text ?? '';
       const audit = d.reason && d.displayReason && d.reason !== d.displayReason ? `<div class="dim">${esc(d.reason)}</div>` : '';
-      return `<div class="card orange"><div class="card-head"><div class="card-title">${esc(d.toolName ?? t('thread.gate.approval'))}</div>${stateChip(m)}</div><div>${esc(shown)}</div>${audit}${gateKeys(m, conv)}</div>`;
+      return `<div class="card orange"><div class="card-head"><div class="card-title">${esc(d.toolName ?? t('thread.gate.approval'))}</div>${stateChip(m)}</div><div>${esc(shown)}</div>${audit}${gateKeys(m, conv, state)}</div>`;
     }
     case 'question':
       return question(m, conv);

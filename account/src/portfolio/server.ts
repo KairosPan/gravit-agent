@@ -808,6 +808,31 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     res.status(isRefusal(r) ? 409 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : r);
   }));
 
+  // a live order's card, raised before Gate 2 is answered. Beast (no card) and a refusal place nothing. The face calls this; the seat's tool then finds the same card.
+  app.post("/api/account/stage-order", wrap(async (req, res) => {
+    if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
+    const body = req.body as { seat?: unknown; order?: unknown };
+    if (!body.order || typeof body.order !== "object" || Array.isArray(body.order)) return void bad(res, "need {order}");
+    const r = await svc.account.serially(() => svc.stageSeatOrder(typeof body.seat === "string" && body.seat.trim() !== "" ? body.seat : "Gravit", body.order as never));
+    res.status(isRefusal(r) ? 409 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : r);
+  }));
+
+  app.post("/api/account/staged/drop", wrap(async (req, res) => {
+    if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
+    const id = (req.body as { id?: unknown }).id;
+    if (typeof id !== "string" || id === "") return void bad(res, "need {id}");
+    const dropped = await svc.account.serially(async () => svc.dropStagedOrder(id));
+    res.status(dropped ? 200 : 404).json({ ok: dropped });
+  }));
+
+  app.post("/api/account/staged/restage", wrap(async (req, res) => {
+    if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
+    const id = (req.body as { id?: unknown }).id;
+    if (typeof id !== "string" || id === "") return void bad(res, "need {id}");
+    const r = await svc.account.serially(() => svc.restageSeatOrder(id));
+    res.status(isRefusal(r) ? 409 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : r);
+  }));
+
   app.post("/api/account/prepare", wrap(async (req, res) => {
     if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
     const draft = (req.body as { draft?: unknown }).draft;
