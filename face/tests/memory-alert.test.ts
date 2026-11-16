@@ -33,7 +33,11 @@ test("alertConsidering: what might be done on a hit", () => {
   assert.deepEqual(alertConsidering(hitOf({ holding: HELD }, { chgPct: -4 })), ["add", "sell", "hold"]);
   assert.deepEqual(alertConsidering(hitOf({ holding: HELD }, { chgPct: 0 })), ["add", "trim", "hold"]);
   assert.deepEqual(alertConsidering(hitOf({ holding: { qty: 10, avgCost: 140 } }, { chgPct: null })), ["add", "trim", "hold"]);
-  assert.deepEqual(alertConsidering(hitOf({ holding: { qty: 10, avgCost: 200 } }, { chgPct: null })), ["add", "sell", "hold"]);
+  assert.deepEqual(alertConsidering(hitOf({ holding: { qty: 10, avgCost: 200 } }, { chgPct: null })), ["add", "trim", "hold"], "up on the day, whatever the cost");
+  assert.deepEqual(alertConsidering(hitOf({ holding: HELD }, { chgPct: null, prevClose: 200 })), ["add", "sell", "hold"]);
+  assert.deepEqual(alertConsidering(hitOf({ holding: { qty: 10, avgCost: 140 } }, { chgPct: null, prevClose: null })), ["add", "trim", "hold"]);
+  assert.deepEqual(alertConsidering(hitOf({ holding: { qty: 10, avgCost: 200 } }, { chgPct: null, prevClose: null })), ["add", "sell", "hold"]);
+  assert.deepEqual(alertConsidering(hitOf({ holding: { qty: 10, avgCost: 200 } }, { chgPct: null, prevClose: 0 })), ["add", "sell", "hold"], "a previous close of zero is none");
   assert.deepEqual(alertConsidering(hitOf({ trigger: { type: "level", kind: "stop", price: 170, when: "cross_down" } as AlertHit["trigger"] })), ["buy"]);
   assert.deepEqual(alertConsidering(hitOf({ trigger: { type: "gap", rule: "gap", pct: 3 }, holding: HELD }, { chgPct: -4 })), ["add", "sell", "hold"]);
 });
@@ -233,6 +237,14 @@ test("createAlertLessons: a held US hit that fell asks once as gravit-face with 
   assert.deepEqual(answer, { phone: alertBlock("NVDA", asked), note: alertNote("NVDA", asked), key: "NVDA:2026-03-02:no-add-before-earnings|" });
   assert.equal(s.t.live(), 0, "no timer is left");
   assert.deepEqual(s.logs, []);
+});
+
+test("createAlertLessons: with no chgPct the direction and change_1d_pct agree, both from the previous close", async () => {
+  const s = depsOf();
+  await createAlertLessons(s.deps)(hitOf({ holding: { qty: 10, avgCost: 200 } }, { chgPct: null, prevClose: 160 }));
+  const input = s.calls[0].input as { considering: string[]; facts: Record<string, unknown> };
+  assert.deepEqual(input.considering, ["add", "trim", "hold"]);
+  assert.equal(input.facts.change_1d_pct, 10);
 });
 
 test("createAlertLessons: the key sorts the lessons' and the untold ids; untold only has no phone", async () => {

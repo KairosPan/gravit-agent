@@ -4,8 +4,8 @@
  *
  * - What might be done on a hit ({@link alertConsidering}): `buy` when it is not held; when it is, `add`, `hold` and
  *   `trim` when it is up or flat, `sell` in place of `trim` when it is down - up and down on the day's change of the
- *   hit's own quote, else on the price against the book's average cost. Nothing for a filing, a hit with no quote,
- *   or a symbol off its market's shape.
+ *   hit's own quote, its previous close standing in for a change it lacks, else on the price against the book's
+ *   average cost. Nothing for a filing, a hit with no quote, or a symbol off its market's shape.
  * - Its facts ({@link hitFacts}): `price`, `change_1d_pct`, `held` and `unrealized_pct` from the hit's own quote and
  *   holding, then the three bar-based changes of src/memory-facts.ts, read within {@link ALERT_FACTS_MS}.
  * - The ask ({@link createAlertLessons}): the shape-checked symbol, its market and the facts computed here, nothing
@@ -77,8 +77,9 @@ export function alertConsidering(hit: AlertHit): Action[] | undefined {
   const quote = hit.quote;
   if (quote === null || quote === undefined || !positive(quote.price)) return undefined;
   if (hit.holding === null || hit.holding === undefined) return ["buy"];
-  const day = quote.chgPct;
-  const up = typeof day === "number" && Number.isFinite(day) ? day >= 0 : !(quote.price < hit.holding.avgCost);
+  const chg = quote.chgPct;
+  const day = typeof chg === "number" && Number.isFinite(chg) ? chg : positive(quote.prevClose) ? quote.price / quote.prevClose - 1 : undefined;
+  const up = day !== undefined ? day >= 0 : quote.price >= hit.holding.avgCost;
   return up ? ["add", "trim", "hold"] : ["add", "sell", "hold"];
 }
 
