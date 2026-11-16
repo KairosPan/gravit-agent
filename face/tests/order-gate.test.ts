@@ -48,6 +48,7 @@ import { join } from "node:path";
 import { Context, Service } from "@deepseek-ai/cordis";
 import { setupFaceProfile } from "../src/setup.ts";
 import { armOrderGate, bootFace, type OrderRecallParts } from "../src/boot.ts";
+import type { GateNote } from "../src/memory-gate.ts";
 import { DESK_PRESET } from "../src/desk-preset.ts";
 import {
   orderGuardReasonForSession, unreadableSessionLogReason, type PreToolDecision,
@@ -355,6 +356,34 @@ test("a check that rejects or throws, a recall unbound or throwing: the same ask
     } finally {
       await g.done();
     }
+  }
+});
+
+test("a note whose field throws as it is read: the same ask at once, no note, one line - nothing rejects unhandled", async () => {
+  const exec = carded();
+  const want = await baseline(exec);
+  const timers: Array<{ run: () => void; cleared: boolean }> = [];
+  const tampered = Object.defineProperty({ redLine: false }, "lessons", { get() { throw new Error("tampered"); }, enumerable: true });
+  const g = await armed({
+    recall: () => recallOf({ check: async () => tampered as unknown as GateNote }),
+    timers: {
+      setTimer: (run) => { const t = { run, cleared: false }; timers.push(t); return t; },
+      clearTimer: (t) => { (t as { cleared: boolean }).cleared = true; },
+    },
+  });
+  try {
+    let settled: PreToolDecision | undefined;
+    const fired = firePreExecute(g.root, exec).then((d) => { settled = d; return d; });
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    const early = settled;
+    for (const t of timers) if (!t.cleared) t.run();
+    await fired;
+    assert.deepEqual(early, want, "asked without waiting on the gate's own bound");
+    assert.equal(g.asked[0]![2], undefined, "no note");
+    assert.equal(g.lines.length, 1, g.lines.join(" | "));
+    assert.deepEqual(timers.map((t) => t.cleared), [true], "the timer is cleared");
+  } finally {
+    await g.done();
   }
 });
 

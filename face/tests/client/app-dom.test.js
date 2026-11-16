@@ -296,6 +296,36 @@ test("a red-lined card's override key with no reason answers nothing and asks fo
   store.timers.clear();
 });
 
+test("a second press while the approval the override led to is still on its way posts nothing more", async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  h.inventory['/data/memory/gate?callId=c9'] = { ok: true, gate: redLined };
+  let release = () => {};
+  const open = h.openMux;
+  h.openMux = o => {
+    const mux = open(o);
+    const answer = mux.answer;
+    mux.answer = (id, value) => new Promise(r => { release = () => r(answer(id, value)); });
+    return mux;
+  };
+  const store = started(f, h);
+  await h.ready();
+  h.opts().onGate(seatGate);
+  await settle();
+  f.withId('mg-ev-9-reason', { tagName: 'INPUT', type: 'text' }).value = 'I sized it small';
+  overridePress(f);
+  await settle();
+  overridePress(f);
+  await settle();
+  release();
+  await settle();
+  overridePress(f);
+  await settle();
+  assert.equal(h.posted.filter(([p]) => p === '/data/memory/gate/override').length, 1, 'one override, while its approval was in flight and after');
+  assert.deepEqual(h.answered, [['ev-9', 'allowed-once']]);
+  store.timers.clear();
+});
+
 test("a refused override answers nothing and the status line says so", async () => {
   const f = fakeWindow({ hash: '' });
   const h = host({ rows: [row('s1')] });

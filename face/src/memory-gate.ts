@@ -14,7 +14,8 @@
  * `check` never rejects and settles within {@link GATE_CHECK_MS}. Each entry records the session it was checked for;
  * a callId checked again is held by a placeholder until the new check settles, then replaced whole. At most
  * {@link GATE_KEPT} calls are kept, the oldest out first, save a red line still waiting (no override on record, not
- * answered) and a placeholder whose check runs, which are never evicted. {@link gateAccount} is the gate's Account
+ * answered) and an entry whose check still runs - a first-time one or a placeholder -, which are never evicted. A call
+ * id outside {@link CALL_ID} is not kept: the card is asked unchecked, with one log line. {@link gateAccount} is the gate's Account
  * over the Account proxy's in-process reads.
  *
  * A kept call is red-lined when a lesson with `strength: "red-line"` and `says: "dont"` applies to one of its lines.
@@ -169,6 +170,9 @@ export function redLineRefusal(words: string): string {
 /** The guard's refusal of a call whose id is kept for another session's card. */
 export const HELD_BY_ANOTHER = "this call id is held by another order card: the order is not run - place it again";
 
+/** The one log line for a call id the gate does not keep; no part of the id is echoed. */
+const UNKEPT_CALL_ID = "a call id the gate does not keep - the card is asked unchecked";
+
 /** The guard's refusal of a call whose id is being checked again. */
 export const CHECK_NOT_FINISHED = "the memory's check of this call is not finished: the order is not run - place it again";
 
@@ -182,6 +186,7 @@ const POSITION_UNREAD = "the position could not be read - tell Gravit what you d
 const SELLS_UNSAID = "the order does not say how much of the position it sells - tell Gravit what you decided";
 const CONDITIONAL = "a conditional order - tell Gravit when it fills";
 const SEAT_REFUSED = "the seat refused the order";
+const RED_NOT_OVERRIDDEN = "the red line was not overridden";
 const SEAT_UNREADABLE = "the seat's answer could not be read";
 const CARD_EXPIRED = "the Account's card expired";
 const CARD_REFUSED = "the Account approved the card but the order did not pass";
@@ -265,10 +270,10 @@ function sizeOf(order: OrderLine): string | undefined {
   return undefined;
 }
 
-/** An entry never evicted: a placeholder whose check runs, or a checked entry that is red-lined, with no override on
- * record and not answered. */
+/** An entry never evicted: a placeholder whose check runs, a first-time entry whose check runs, or a checked entry that
+ * is red-lined, with no override on record and not answered. */
 function unevictable(entry: Entry): boolean {
-  if (entry.checking === true) return true;
+  if (entry.checking === true || entry.state === "pending") return true;
   return entry.state === "checked" && entry.override === undefined && entry.answered !== true && firstRedLine(entry) !== undefined;
 }
 
@@ -370,7 +375,7 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
   }
 
   /** Keeps `entry` as its callId's only entry, the newest; past GATE_KEPT the oldest evictable entry goes first.
-   * `entry` itself, a waiting red line and a placeholder whose check runs are never evicted, so the map may stay over
+   * `entry` itself, a waiting red line and an entry whose check runs are never evicted, so the map may stay over
    * the cap while every other entry is one of them. */
   function keep(entry: Entry): void {
     entries.delete(entry.call.callId);
@@ -509,19 +514,28 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     return input;
   }
 
-  /** Gravit's own decision on `symbol` within GATE_OWN_CALL_MS of now, by id; undefined on anything else. */
+  /** Gravit's own decision on `symbol` within GATE_OWN_CALL_MS of now, by id; undefined on anything else. An item that
+   * is not a decision's view, or that throws as it is read, is skipped. Never throws or rejects. */
   async function ownCall(memory: MemoryStanding & { connected: true }, symbol: string): Promise<string | undefined> {
-    const read = await within(() => memory.memory.decisions({ symbol, limit: OWN_CALL_LOOK }), GATE_CHECK_MS);
-    const items = read.kind === "ok" ? (read.value as { items?: unknown } | null)?.items : undefined;
-    if (!Array.isArray(items)) return undefined;
-    for (const item of items) {
-      const view = (item as { view?: { line?: unknown; void?: unknown } } | null)?.view;
-      const line = view?.line as Record<string, unknown> | undefined;
-      if (line === undefined || view?.void === true) continue;
-      if (line.by !== AGENT_MEMORY_NAME || line.whose !== "agent" || line.symbol !== symbol) continue;
-      const age = now() - (typeof line.t === "string" ? Date.parse(line.t) : Number.NaN);
-      if (!(age >= 0 && age <= GATE_OWN_CALL_MS)) continue;
-      if (typeof line.id === "string" && DECISION_ID.test(line.id)) return line.id;
+    try {
+      const read = await within(() => memory.memory.decisions({ symbol, limit: OWN_CALL_LOOK }), GATE_CHECK_MS);
+      const items = read.kind === "ok" ? (read.value as { items?: unknown } | null)?.items : undefined;
+      if (!Array.isArray(items)) return undefined;
+      for (const item of items) {
+        try {
+          const view = (item as { view?: { line?: unknown; void?: unknown } } | null)?.view;
+          const line = view?.line;
+          if (!isRecord(line) || view?.void === true) continue;
+          if (line.by !== AGENT_MEMORY_NAME || line.whose !== "agent" || line.symbol !== symbol) continue;
+          const age = now() - (typeof line.t === "string" ? Date.parse(line.t) : Number.NaN);
+          if (!(age >= 0 && age <= GATE_OWN_CALL_MS)) continue;
+          if (typeof line.id === "string" && DECISION_ID.test(line.id)) return line.id;
+        } catch {
+          /* an item that throws as it is read is no decision */
+        }
+      }
+    } catch {
+      /* the decisions that cannot be read add nothing */
     }
     return undefined;
   }
@@ -670,7 +684,11 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
   return {
     async check(call) {
       try {
-        if (disposed || typeof call?.callId !== "string" || !CALL_ID.test(call.callId)) return undefined;
+        if (disposed) return undefined;
+        if (typeof call?.callId !== "string" || !CALL_ID.test(call.callId)) {
+          say(UNKEPT_CALL_ID);
+          return undefined;
+        }
         /* A kept callId is checked again: each check is one execution about to raise its own card. The old entry -
          * its lines, its red line, its override, its answered mark - is replaced at once by a placeholder that holds
          * the new call's session and is being checked: no view, no override, and the guard refuses it for any caller
@@ -781,11 +799,13 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
           return reread.read ? reread.value : reread.fallback;
         });
         const outcomes = seatOutcomes(result, entry.lines.length);
+        /* a red-lined card with no override on record is the one the face's guard refuses: its refusal is the guard's */
+        const guardRefused = entry.override === undefined && firstRedLine(entry) !== undefined;
         entry.lines.forEach((line, i) => {
           const outcome = outcomes[i] ?? { kind: "unreadable" };
           if (outcome.kind === "placed") track(() => approved(entry, i));
           else if (outcome.kind === "pending") watch(entry, i, outcome.card, outcome.expiresAt);
-          else notRegistered(entry, line, outcome.kind === "refused" ? SEAT_REFUSED : SEAT_UNREADABLE);
+          else notRegistered(entry, line, outcome.kind === "refused" ? (guardRefused ? RED_NOT_OVERRIDDEN : SEAT_REFUSED) : SEAT_UNREADABLE);
         });
       } catch (error) {
         say(`${String(callId)}: the seat's result could not be taken: ${memoryFaultWords(error)}`);

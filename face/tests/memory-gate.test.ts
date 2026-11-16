@@ -336,6 +336,8 @@ test("a callId off CALL_ID: undefined, and nothing is asked", async () => {
   }
   assert.equal(await clock.run(gate.check({ callId: 7, name: ORDER, args: BUY_NVDA, sessionId: "s" } as unknown as GateCall)), undefined);
   assert.equal(asked.open, 0);
+  const line = "memory gate: a call id the gate does not keep - the card is asked unchecked";
+  assert.deepEqual(asked.logs, [line, line, line, line, line], "one line each, no part of the id echoed");
 });
 
 test("a kept callId is checked again: the memory is asked for the new call and the entry replaced whole", async () => {
@@ -469,6 +471,25 @@ test("a placeholder whose check runs is never evicted", async () => {
   await clock.run(again);
   assert.equal(gate.redLineReason("reused", "s-1"), undefined);
   assert.notEqual(gate.view("reused"), undefined, "its entry took the placeholder's place");
+});
+
+test("a first-time entry whose check is still running is never evicted: its red line stands once the check settles", async () => {
+  let release: (() => void) | undefined;
+  const { gate, clock } = rig({
+    recall: async (_by, input) => {
+      if ((input as { symbol?: string }).symbol !== "NVDA") return CAREFUL;
+      await new Promise<void>((resolve) => { release = resolve; });
+      return answerOf({ applies: [lessonOf("L-0002", "red-line", "dont", "never add")] });
+    },
+  });
+  const first = gate.check(callOf(BUY_NVDA, "first"));
+  await clock.flush();
+  assert.notEqual(release, undefined, "its recall is running");
+  for (let i = 0; i < GATE_KEPT + 5; i++) await clock.run(gate.check(callOf({}, `p${i}`, "mcp__account__portfolio_balance")));
+  release!();
+  await clock.run(first);
+  assert.notEqual(gate.view("first"), undefined, "still kept");
+  assert.equal(gate.redLineReason("first", "s-1"), redLineRefusal("never add"));
 });
 
 test("at most GATE_KEPT entries are kept; the oldest goes first", async () => {

@@ -933,7 +933,15 @@ export function armOrderGate(
           }
           resolve(note);
         };
-        Promise.resolve(checking).then((note) => settle(isGateNote(note) ? note : undefined), (err: unknown) => {
+        Promise.resolve(checking).then((note) => {
+          /* a note whose field throws as it is read is no note: nothing rejects unhandled, and the race ends now */
+          try {
+            settle(isGateNote(note) ? note : undefined);
+          } catch (err) {
+            if (!done) fault("the memory's check of an order card answered a note that could not be read", err);
+            settle(undefined);
+          }
+        }, (err: unknown) => {
           if (!done) fault("the memory's check of an order card failed", err);
           settle(undefined);
         });

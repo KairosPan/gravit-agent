@@ -1726,7 +1726,8 @@ export function boot(win, host = {}) {
       void actions.answer(m.id, batch);
     },
     // a red-lined order card's form: the owner's reason is required; the override is posted first, and the card approved once
-    // the face kept it — a refusal approves nothing and says so. One post per card while one is in flight
+    // the face kept it — a refusal approves nothing and says so. One post per card while it or the approval it leads to is
+    // in flight
     overrideGate: el => {
       const { conv: convId, msg, call: callId } = el.dataset;
       const m = store.get().conversations.find(c => c.id === convId)?.messages.find(x => x.id === msg);
@@ -1736,8 +1737,9 @@ export function boot(win, host = {}) {
       const wrongIf = String(doc.getElementById(`mg-${msg}-wrongIf`)?.value ?? '');
       overriding.add(msg);
       void memoryGate.override(callId, reason, wrongIf).then(kept => {
-        if (kept) void actions.answer(msg, 'allowed-once');
-        else store.dispatch('hostStatus', { line: said('thread.memory.overrideRefused'), bad: true });
+        if (kept) return actions.answer(msg, 'allowed-once');
+        store.dispatch('hostStatus', { line: said('thread.memory.overrideRefused'), bad: true });
+        return undefined;
       }).finally(() => overriding.delete(msg));
     },
     // a line of the rail of tasks: opened or folded by the page (its summary toggled first), held by its task id; Stop and

@@ -287,6 +287,24 @@ test("Gravit's own call: an older one, the owner's, another symbol's, a void one
   }
 });
 
+test("Gravit's own call: an item whose line is null, or that throws as it is read, is skipped; the line is still written", async () => {
+  const throwing = Object.defineProperty({}, "view", { get() { throw new Error("tampered"); }, enumerable: true });
+  const items = [{ view: { line: null, void: false } }, throwing, null, decisionItem(GRAVITS)];
+  const r = rig({ decisions: async () => ({ items, more: false }) });
+  await r.check();
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  r.gate.settled("c-1", PLACED, "s-1");
+  await r.idle();
+  assert.equal(r.asked.records.length, 1);
+  assert.deepEqual(r.registered(), ["registered: buy"]);
+  const nulls = rig({ decisions: async () => ({ items: [{ view: { line: null } }], more: false }) });
+  await nulls.check();
+  nulls.gate.answered("c-1", "allowed-once", "s-1");
+  nulls.gate.settled("c-1", PLACED, "s-1");
+  await nulls.idle();
+  assert.deepEqual(nulls.asked.records[0]?.input.evidence, EVIDENCE);
+});
+
 /** A position read that answers when the test says. */
 function deferred() {
   let answer: (p: Position | null | undefined) => void = () => {};
@@ -485,6 +503,23 @@ test("refused by the seat, as ok false or as an error result: nothing written, t
     assert.deepEqual(r.registered(), ["not registered: the seat refused the order"]);
     assert.equal(r.asked.logs.length, 1);
   }
+});
+
+test("a red-lined card approved with no override: the face's guard refused it - nothing written, the card says the red line was not overridden", async () => {
+  const r = rig({ recall: async () => answerOf({ applies: [RED] }) });
+  await r.check();
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  r.gate.settled("c-1", { isError: true, text: "a red line applies to this order" }, "s-1");
+  await r.idle();
+  assert.equal(r.asked.records.length, 0);
+  assert.deepEqual(r.registered(), ["not registered: the red line was not overridden"]);
+  const over = rig({ recall: async () => answerOf({ applies: [RED] }) });
+  await over.check();
+  over.gate.override("c-1", { reason: "my call" });
+  over.gate.answered("c-1", "allowed-once", "s-1");
+  over.gate.settled("c-1", REFUSED, "s-1");
+  await over.idle();
+  assert.deepEqual(over.registered(), ["not registered: the seat refused the order"], "overridden, a refusal is the seat's");
 });
 
 test("a seat answer that cannot be read: nothing written, the card says so", async () => {
