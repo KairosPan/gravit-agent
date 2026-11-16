@@ -794,7 +794,7 @@ see them; the desk (`DESK_ALLOW`, fifteen names), every bot, every role and ever
 none. Every line a model writes from inside the face says `by: gravit`; the face's own code writes
 as `gravit-face`. `dsh/profile/memory.md` — what only this host knows: how the Market spells a
 symbol, registering Gravit's own call before an order and the owner's decisions said in
-conversation, leaving the owner's answer to an order card to the face, the facts the face computes,
+conversation, leaving the owner's answer to an order card to the face unless asked, the facts the face computes,
 the Account's own notes being another store — is the
 section `gravit:memory`, gated on `mcp__memory__memory_recall` being callable, so it reaches the
 conversation and the workers alone; `GRAVIT.md` has one line. Renaming the row's `serverName` in a
@@ -984,13 +984,20 @@ arguments and the calling agent's session id — raced against `ORDER_RECALL_MS`
 `followAnswers`, `registerMemoryGateRoutes`). A call with no call id or no session id is not checked.
 The check reads the arguments into order lines — `portfolio_live_order`, `portfolio_live_close`
 (a sell marked close) or a `portfolio_live_batch` of at most five legs — keeping only fields that
-pass a shape check: a venue id, a symbol, `buy` or `sell`, numbers finite and above zero; one field
-that fails leaves the whole order unread. Then, on one clock, the memory is opened through the same
-opener as the clock and the brief; for every line together the Account is read — the venue (`paper`
-is the Account's one paper venue), the position on it and the instrument's kind — within
-`GATE_ACCOUNT_MS`, 1,000 ms; the price facts within `GATE_FACTS_MS`, 1,500 ms, when a market was
-placed; then the recall, as `gravit-face`, with what is left of `GATE_CHECK_MS`, 3,000 ms for the
-whole check. The market is placed per instrument from the Account's listing of the symbol on the
+pass a shape check: a venue id, a symbol, `buy` or `sell`, an order type of the seat's five
+(`market`, `limit`, `stop`, `stop_limit`, `trailing_stop`), numbers finite and above zero (the
+size, the limit and the stop); one field that fails leaves the whole order unread. The venue and the
+symbol are read first as the seat and the Account read them, and no further: a venue whose trimmed
+lower-case form is `paper` is `paper` (`Paper` and ` paper` among them), any other is checked as
+given, and the symbol is trimmed (`NVDA ` is `NVDA`). Then, on one clock, the memory is opened
+through the same opener as the clock and the brief; for every line together the Account is read —
+the venue (`paper` is the Account's one paper venue), the position on it, asked fresh past the
+positions route's 10-second cache so a fill a moment ago is never read as the position before it,
+and the instrument's kind — within `GATE_ACCOUNT_MS`, 1,000 ms; the price facts within
+`GATE_FACTS_MS`, 1,500 ms, when a market was placed, each of their two reads (the quote and the
+daily bars) bounded at `GATE_FACT_READ_MS`, 1,200 ms, so a late bars read still leaves the quote's
+`price` and `change_1d_pct`, and `unrealized_pct` with them; then the recall, as `gravit-face`, with
+what is left of `GATE_CHECK_MS`, 3,000 ms for the whole check. The market is placed per instrument from the Account's listing of the symbol on the
 venue: `kind: "stock"` is `US`; any other kind, or a listing that did not answer, is no market, and
 the recall then carries no symbol. It asks what might be done (`considering`, from the line and the
 position: a buy from flat is `buy`, against a long `add`, against a short `cover`; a sell from flat
@@ -1007,7 +1014,11 @@ text, and a fact the model supplied anywhere is not carried over. The seven fact
 | `unrealized_pct` | a long's price over its entry price, in %; none for a short | `the Market's quote over the Account's entry price on <venue>` |
 
 The answer is kept by call id, with the session it was checked for: at most `GATE_KEPT`, 200, the
-oldest out first, but an entry that is red-lined, not overridden and not answered is never evicted.
+oldest out first, but an entry that is red-lined, not overridden and not answered is never evicted,
+nor is an entry whose check still runs (a first-time one, or the placeholder of an id checked
+again). A call id that is not one the gate keeps (`CALL_ID`) is not checked: the card is asked
+unchecked, with one log line, `memory gate: a call id the gate does not keep - the card is asked
+unchecked`, and no part of the id.
 An entry belongs to one execution: a call id already kept is checked again and its entry replaced
 whole, override and answer dropped; while that check runs the guard refuses the id for everyone
 (`the memory's check of this call is not finished: the order is not run - place it again`), and an
@@ -1017,15 +1028,28 @@ by another order card: the order is not run - place it again`). A first-time id 
 `not checked` or `not connected`, with why), each line's order words, whether its position was read,
 the lessons that apply (id, strength, says, words, and the owner's record: fired, followed,
 overridden), how many more apply than are shown, the lessons that could not be told and what each
-needs (`market`, or a fact's name), a fault, and what was registered.
+needs (`market`, or a fact's name), a fault, what was registered, and `watching: true` while the
+line's Account card is watched (Guard mode, below). The order words name a type the prices do not
+already say, in the card notice's manner: `buy 10 NVDA · limit 183 · paper-1` for a limit order,
+nothing more for a market order, `sell 10 NVDA · stop 150 · paper-1` for a stop,
+`sell 10 NVDA · stop-limit · stop 150 · limit 149 · paper-1` for a stop-limit, and
+`trailing-stop` for a trailing stop.
 
 **What the card draws** (`client/js/host/memory-gate.js`, `client/js/render/thread.js`). The page
-asks each order card's gate once, answered cards too, and reads an answered card's gate again at
-most three more times, 2,000 ms apart, after a render, until a line says what was registered; a
-failed read is retried on the same schedule, and a 404 stays none. Under the order: `Your lesson` or
-`Your red line`, the lesson's words in quotes, `fired · followed · overridden`; `and N more lessons`;
-`Could not be checked: needs …`; `The position was not read`; a fault; what was registered; and,
-once kept, `You overrode this red line in your own words`. A card with no lesson keeps ✗ and ✓. On
+asks each order card's gate once, answered cards too. It reads an answered card's gate again after
+a render — each event of the session brings one, the Account's stream among them, and the page sets
+no timer of its own: while a line says `watching`, no sooner than 5,000 ms after the previous read,
+uncounted, for as long as it says so; otherwise at most three more times, 2,000 ms apart, until a
+line says what was registered. A failed read is retried on the three-reads schedule, a 404 stays
+none, and an answered gate with no lines (`not connected`, `not checked`) is not read again. Under
+the order: `Your lesson` or `Your red line`, the lesson's words in quotes, the owner's record as
+`fired 3 · followed 2 · overridden 1`; `and N more lessons`; `Could not be checked: needs …`; `The
+position was not read`; a fault; what was registered; and, once kept, `You overrode this red line
+in your own words`. Words that came from the memory or the face are made visible before they are
+drawn (`client/js/visible.js`), as the memory package's own command line does: every format
+character (Unicode's `Cf` - bidi marks and overrides, zero-width characters, the byte-order mark, tag
+characters), the line and paragraph separators, the C0 and C1 controls and DEL, a tab left alone,
+each written as its escape, `\uXXXX`, or `\u{XXXXX}` in lower-case hex above U+FFFF. A card with no lesson keeps ✗ and ✓. On
 the rail, a card a lesson applies to has `A lesson applies - open the task` and ✗, no one-click
 approve. On the task's page a red-lined card asks `A red line applies. To approve, override it in
 your own words.`: `Why you override it` (required, at most 500 characters) and `You are wrong if
@@ -1044,8 +1068,9 @@ the tool's body never runs, and the model reads, behind dsh's `Error: `, the fir
 a red line applies to this order - "<the lesson's words>" - and no override is on record: the owner opens the card and overrides it in their own words
 ```
 
-A call the gate holds no entry for passes as before. The override is kept only for a red-lined card
-not yet answered (404 for a card the gate does not hold, 409 for one with no red line or answered).
+A call the gate holds no entry for passes the guard on Gate 2's grant alone. The override is kept
+only for a red-lined card not yet answered (404 for a card the gate does not hold, 409 for one with
+no red line or answered).
 
 **What is registered, and when.** The face writes the owner's answer itself, as `gravit-face`,
 `whose: owner`, through its own handle: the trigger is the session's own `approval/decided` for the
@@ -1059,21 +1084,24 @@ carries the action, the thesis, the symbol and `market: "US"` when a market was 
 | The owner's answer | What is written for each line |
 |---|---|
 | Declined at Gate 2 | at once: `pass` for a buy, `hold` for a sell or a close; thesis `Declined Gravit's order card: <order words>.` |
-| Approved, and the seat says placed | the one action the position settles (`buy`, `add`, `cover`, `short`, `trim`, `sell`); thesis `Approved Gravit's order card: <order words>.`; with a limit, `price` and `price_source: "the order card's limit price"`; `size`; the override's `words` and `wrong_if`; `decision <id>` in the evidence when Gravit's own call on the symbol was registered in the last ten minutes |
-| Approved, and the seat answers with the Account's card (Guard mode) | watched through the Account's overview every 5,000 ms until it is answered or 60,000 ms past its expiry: approved there, as above; declined before its expiry, `pass` or `hold` with thesis `Declined the Account's card for Gravit's order: <order words>.`; closed at or after its expiry, or with no expiry given, nothing (`the Account's card expired`); at the watch's end, still pending, nothing (`the Account's card expired`), not read, nothing (`the Account's card could not be read`) |
-| Approved, and the seat refuses or its answer cannot be read | nothing (`the seat refused the order`, `the seat's answer could not be read`) |
+| Approved, and the seat says placed | the one action the position settles (`buy`, `add`, `cover`, `short`, `trim`, `sell`); thesis `Approved Gravit's order card: <order words>.`; with a limit, `price` and `price_source: "the order card's limit price"`; `size`; the override's `words` and `wrong_if`; `decision <id>` in the evidence when Gravit's own call on the symbol was registered in the last ten minutes. A conditional order - neither a market nor a limit order: a stop, a stop-limit, a trailing stop - writes nothing on approval, a resting stop being no sale yet (`a conditional order - tell Gravit when it fills`); its decline is written as any other |
+| Approved, and the seat answers with the Account's card (Guard mode) | watched until it is answered or 60,000 ms past its expiry (past the seat's result when it gave none), the line saying `watching` meanwhile: one poller serves every watched card, each 5,000 ms reading the Account's pending cards through the account read's 15-second cache, and only when a watched card has left them - or they could not be read - the Account's overview, once for every card that left; a card still pending costs no overview read. Approved there, as above; approved with its release refused by the Account (its card's `outcome` a refusal), nothing (`the Account approved the card but the order did not pass`); declined before its expiry, `pass` or `hold` with thesis `Declined the Account's card for Gravit's order: <order words>.`; closed at or after its expiry, nothing (`the Account's card expired`); closed with no expiry given, nothing (`the Account's card was declined or expired`); at the watch's end, still pending, nothing (`the Account's card expired`), not read, nothing (`the Account's card could not be read`) |
+| Approved, and the seat refuses or its answer cannot be read | nothing (`the seat refused the order`, `the seat's answer could not be read`); a red-lined card with no override on record is refused by the face's guard, not the seat (`the red line was not overridden`) |
 
-The position an approval is written from is read again when Gate 2's approval arrives, within
-5,000 ms, and counts only if it settled before the seat's result; else the position the check read
-stands in; with neither, nothing is written (`the position could not be read - tell Gravit what you
-decided`), and a sell the position does not settle writes nothing either (`the order does not say
+The position an approval is written from is read again, fresh, when Gate 2's approval arrives,
+within 5,000 ms, and counts only if it settled before the seat's result - a read that settled after
+it is never used; else the position the check read stands in, when that read answered at most
+`GATE_POSITION_FRESH_MS`, 60,000 ms, before the approval arrived; with neither, nothing is written
+(`the position could not be read - tell Gravit what you decided`), and a sell the position does not
+settle writes nothing either (`the order does not say
 how much of the position it sells - tell Gravit what you decided`). A line not registered says
 `not registered: <why>` on the card and in one log line. Each call is registered once; nothing is
 kept across a restart.
 
 **What is not checked.** A batch of six to ten lines (`more than five lines`), `portfolio_order`
 and every other seat write (`not checked for this tool`), and an order whose fields fail their check
-(`the order could not be read`): the card is asked as before, says why, and nothing is registered.
+(`the order could not be read`): the card is asked as Gate 2 alone would ask it, with its one-click
+✗ and ✓, says why, and nothing is registered.
 
 **Nothing waits on the memory.** The check never rejects and settles within 3,000 ms; Gate 2 asks
 the card when it settles or at 4,000 ms, whichever is first. With no home, a disabled row, a fault or
@@ -1105,8 +1133,8 @@ the card's own answer is, so a session's shell can record an override for its ow
 answer the card. The face writes through its own handle, not through a tool, so the owner-name fence
 is not involved. A red-line lesson the memory package leaves among the lessons it does not show
 (`applies_more`: past the ones it ranks first, or trimmed to fit) does not red-line the card. An
-owner's decline of the Account's card within a poll of its expiry reads as an expiry, so nothing is
-written. Until a card's gate is read the card shows today's keys; a red line approved in that window
+owner's decline of the Account's card within a poll and the account read's cache of its expiry
+(5,000 ms and 15,000 ms) reads as an expiry, so nothing is written. Until a card's gate is read the card shows today's keys; a red line approved in that window
 is refused by the guard, not by the page. Where the build departs from its design, each a call for
 the operator to strike:
 
@@ -1117,9 +1145,9 @@ the operator to strike:
    and sign, and the card's form draws the same in the rail.
 4. Where the design tells the conversation that nothing could be registered, the card says so, and
    the log does; no new text enters any model's context.
-5. The Account's card is watched through its overview's `approvals`, read in process with no face
-   route, and its expiry is told by the time the seat gave (`expiresAt`), since an expired card is
-   closed there as `rejected`.
+5. The Account's card is watched through the account read's pending cards and, once a card has left
+   them, its overview's `approvals`, read in process with no face route; its expiry is told by the
+   time the seat gave (`expiresAt`), since an expired card is closed there as `rejected`.
 6. A position is the venue account's, not a seat's: the Account attributes none.
 7. `unrealized_pct` is computed for a long only; a short is `held` with no `unrealized_pct`.
 8. Order cards rise in task workers only — the one conversation holds seat reads and no seat write —
@@ -5259,7 +5287,7 @@ FACE_SMOKE=1 npm test     # + the 38 smoke files (51 real boots), isolated; loca
 ```
 
 Offline, `npm test` skips the 38 smoke files (51 real boots) listed below; `FACE_SMOKE=1` runs
-them too (4,918 tests in 316 files on 2026-11-16 with the memory at the order card: 4,844 pass and 74 skipped offline; 4,922 tests under `FACE_SMOKE=1`, 4,921 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1) as before; 4,760 tests in 308 files on 2026-11-15 with the memory's owner-name fence armed inside the boot: 4,687 pass and 73 skipped offline; 4,764 tests under `FACE_SMOKE=1`, 4,763 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1), as it does with the fence not yet in the boot; 4,733 tests in 307 files on 2026-11-14 with the Desk, the routines and the memory together: 4,662 pass and 71 skipped offline; 4,653 tests in 302 files on 2026-11-14 with routines from Messages: 4,588 pass and 65 skipped offline; 4,618 tests in 299 files on 2026-11-14 with the routines' engine: 4,555 pass and 63 skipped offline; 4,544 tests in 292 files on 2026-11-14 with the memory connected and its final review's fixes: 4,476 pass and 68 skipped offline; 4,539 tests at its build, where `FACE_SMOKE=1` ran 4,543 tests, 4,543 pass; 4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+them too (4,951 tests in 316 files on 2026-11-16 with the order card's final review's fixes: 4,877 pass and 74 skipped offline; 4,955 tests under `FACE_SMOKE=1`, 4,954 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 4,918 tests in 316 files on 2026-11-16 with the memory at the order card: 4,844 pass and 74 skipped offline; 4,922 tests under `FACE_SMOKE=1`, 4,921 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1) as before; 4,760 tests in 308 files on 2026-11-15 with the memory's owner-name fence armed inside the boot: 4,687 pass and 73 skipped offline; 4,764 tests under `FACE_SMOKE=1`, 4,763 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1), as it does with the fence not yet in the boot; 4,733 tests in 307 files on 2026-11-14 with the Desk, the routines and the memory together: 4,662 pass and 71 skipped offline; 4,653 tests in 302 files on 2026-11-14 with routines from Messages: 4,588 pass and 65 skipped offline; 4,618 tests in 299 files on 2026-11-14 with the routines' engine: 4,555 pass and 63 skipped offline; 4,544 tests in 292 files on 2026-11-14 with the memory connected and its final review's fixes: 4,476 pass and 68 skipped offline; 4,539 tests at its build, where `FACE_SMOKE=1` ran 4,543 tests, 4,543 pass; 4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -5319,7 +5347,7 @@ and `node --test` gives each file its own:
 | `desk-carry-smoke.test.ts` | a graceful stop and a fresh boot, two real boots on one home, each in a child process of its own (the file runs itself as `one`, then `two`): the first face, the desk as `main.ts` installs it on the stub, posts `LONG` (`telegram:1`), whose model call hangs until its abort, and `QUEUED` (`telegram:2`) behind it, then shuts down as `main.ts` does - `desk.dispose(0)`, then the tree's; the ledger holds one `desk-carry` - `QUEUED`'s key, words and time, and `LONG`'s turn 1 as `cut` - before its `shutdown`; the second face's boot posts `QUEUED` again, its provenance line ending `(carried over a restart)`, the model answers it once and `LONG` not at all, the phone gets the restart line and then `echo QUEUED`, and `desk-carried` says `posted: 1, skipped: 0` (spec §16 H3, R93; the guard across dsh upgrades for `.superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md`) |
 | `analog-events-smoke.test.ts` | the analog rows against a stub market (`fakeMarket` on port 0; `analog-views` over a scratch views directory): `analog_events` registered, no `analog_chart`, and the two rows active in the plugin listing; with the repo's two skill packs on the `skill-filesystem` row as the operator's patch has them, the abilities listing (`src/abilities.ts`) reading both shipped declarations On, every declared tool registered, `source-reader` and `analog-guide` present; `role-source-reader` listed whole; a session created on it sees exactly `web_fetch` and `web_search`, the first in its own layer (`src/source-reader.ts`); a Gravit session, a PDF page reader's and a bot's see no `web_fetch`, the last two no analog tool; the reader's `web_fetch` of a loopback URL refused by dsh's provider until the fortieth page, the next refused by the guard; `analog_events` for Gravit measuring one event and storing the view, its source verified only once the page record holds it, and the present case's anchor citing the same page read back verified too; the view served with the cookie, 403 from another site's page, 404 for an unknown id; the reader refused `analog_events`; the stub asked only `/api/candles` on `cboe` |
 | `memory-smoke.test.ts` | the memory row on four boots over one scratch harness home ("The memory"): over a home the package's `initHome` made under the temporary directory, the conversation (`gravit-router`) and a worker (`gravit`) each hold exactly the seven `mcp__memory__memory_*` tools, on the session and in the first request, and a desk session none; `memory_status` from the conversation answers the home's status, one `memory_record` of filler registers a decision whose `by` is `gravit`; on the same tree the boot's own owner-name fence, bound with whose turn it is set by the test, refuses a worker's and an out-of-turn conversation's `whose: owner` and a worker's void, ref, own-name review and correction of the owner's decision, and the real row registers the worker's own call, its ref and its void, the conversation's owner-name call in the operator's turn, its ref and its close, one stderr line per refusal; then, bound over the real conversation's handle as `main.ts` binds it, real turns on the stub: the operator's prompt has the conversation call `memory_recall` then `memory_record` with `whose: owner`, registered; a worker's brief turn and the conversation's turn on that worker's relayed report each record in the owner's name, both refused; the operator's next turn closes the decision, registered; the conversation and a worker carry `mcp:memory` and `gravit:memory`, a desk session no `gravit:memory`; then over a home nobody made the boot resolves, the seven tools are there and `memory_status` answers `Error: no memory here: run gravit-memory init`; with `FACE_MEMORY_DIR` at an empty directory the boot resolves, the row settles with no memory tool and the face's standing is `gravit-memory is not installed`; and with the row disabled by a line in the operator's patch file, no memory tool in the tree, the conversation (on its session and in its first request) or a Gravit session, no `gravit:memory` in their prompts, and the face's standing `the mcp-memory row is disabled` |
-| `memory-gate-smoke.test.ts` | the order card asks the memory, on one real boot ("The memory" › "At the order card"): a scratch harness home with the seat's row disabled, the stand-in `mcp__drill__portfolio_live_order` (its body records its arguments and answers the seat's placed shape), a home made by the package's `initHome` holding one `red-line` lesson that says `dont` for `buy`, armed through `Memory.owner`, opened through the face's opener over the row the tree composed, and the gate bound as `main.ts` binds it over a stub Account (flat, `kind: "stock"`) and stub price facts; the card answered by an outermost `approval/request` listener that reads `GET /data/memory/gate?callId=` over the wire while the card is pending. A buy: the route shows the red line in the lesson's words; approved with no override, the tool's result is `Error: ` and the guard's refusal word for word, the body did not run, the memory holds no owner's decision, and the seat's refusal reached the gate through the root's tool results (`not registered: the seat refused the order`). A second buy: the override, refused cross-site (403) and kept (200) over the wire, then approved: the body ran once and the memory holds one decision `by: gravit-face`, `whose: owner`, `buy`, with the approval's thesis, the override's words and `wrong_if`, the limit as its price and the gate's recall, and the card says `registered: buy`. A third buy declined: a `pass` naming its recall. A sell of a symbol no lesson covers, from flat: no lesson on the card, the one-click approval runs, `short` is written. An id never raised is a 404, a malformed one a 400 |
+| `memory-gate-smoke.test.ts` | the order card asks the memory, on one real boot ("The memory" › "At the order card"): a scratch harness home with the seat's row disabled, the stand-in `mcp__drill__portfolio_live_order` (its body records its arguments and answers the seat's placed shape), a home made by the package's `initHome` holding one `red-line` lesson that says `dont` for `buy`, armed through `Memory.owner`, opened through the face's opener over the row the tree composed, and the gate bound as `main.ts` binds it over a stub Account (flat, `kind: "stock"`) and stub price facts; the card answered by an outermost `approval/request` listener that reads `GET /data/memory/gate?callId=` over the wire while the card is pending. A buy: the route shows the red line in the lesson's words; approved with no override, the tool's result is `Error: ` and the guard's refusal word for word, the body did not run, the memory holds no owner's decision, and the guard's refusal reached the gate through the root's tool results (`not registered: the red line was not overridden`, its log line among the gate's). A second buy of the symbol: the override, refused cross-site (403) and kept (200) over the wire, then approved: the body ran once and the memory holds one decision `by: gravit-face`, `whose: owner`, `buy`, with the approval's thesis, the override's words and `wrong_if`, the limit as its price and the gate's recall, and the card says `registered: buy`; the armed card's own record (the package's `show`) reads fired 1, followed 0, overridden 1 - the two buys of the symbol within the day one occasion. A buy of another symbol declined: a `pass` naming its recall, and the card's record fired 2, followed 1, overridden 1. A sell of a symbol no lesson covers, from flat: no lesson on the card, the one-click approval runs, `short` is written. An id never raised is a 404, a malformed one a 400 |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
 `observed:` line each (S4, S7), the measurements the bots spec's amendments were

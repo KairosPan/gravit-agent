@@ -17,11 +17,13 @@
  * Account, the Market or the network.
  *
  * THE FIVE STEPS. A buy is raised and `GET /data/memory/gate?callId=` shows the red line in the card's words; answered
- * `allowed-once` with no override, the tool's result is the guard's refusal word for word, the body did not run, and
- * the memory holds no owner's decision. A second buy: the override is posted over the wire, the card is answered
- * `allowed-once`, the body runs once, and the memory holds one decision `by: "gravit-face"`, `whose: "owner"`, `buy`,
- * with the override's words and the gate's recall. A third buy answered `rejected`: a `pass` naming its recall. A sell
- * of a symbol no lesson covers: no lesson on the card, the one-click answer passes, `short` is written.
+ * `allowed-once` with no override, the tool's result is the guard's refusal word for word, the body did not run, the
+ * memory holds no owner's decision, and the card says the red line was not overridden. A second buy of the symbol: the
+ * override is posted over the wire, the card is answered `allowed-once`, the body runs once, and the memory holds one
+ * decision `by: "gravit-face"`, `whose: "owner"`, `buy`, with the override's words and the gate's recall; the armed
+ * card's record shows the two buys within the day as one occasion, overridden once. A buy of another symbol answered
+ * `rejected`: a `pass` naming its recall, the card's record one followed. A sell of a symbol no lesson covers: no
+ * lesson on the card, the one-click answer passes, `short` is written.
  *
  * Gated behind `FACE_SMOKE=1`, in its own file: `bootFace` sets `process.env.DSH_HOME` for the process.
  * @module
@@ -195,6 +197,13 @@ test("the order card asks the memory: a red line refused, an override and a decl
     const ownersDecisions = async (): Promise<DecisionLine[]> =>
       (await owner.decisions({ limit: 20 })).items.map((item) => item.view.line).filter((line) => line.whose === "owner");
     const buy = { venue: VENUE, symbol: "NVDA", qty: 1, side: "buy", limitPrice: 100 };
+    /** The armed card's owner record as the package keeps it (`show`): how often it fired, was followed, was overridden. */
+    const ownerRecord = async (): Promise<{ fired: number; followed: number; overridden: number }> => {
+      const shown = await owner.show(LESSON);
+      assert.ok("record" in shown && shown.record !== null, "the armed card has a record");
+      const { fired, followed, overridden } = shown.record.owner;
+      return { fired, followed, overridden };
+    };
 
     /* 1. A red-lined buy, approved with no override: the guard refuses it in the lesson's words. */
     const refusedResult = await place("mg-red-line", buy);
@@ -214,9 +223,10 @@ test("the order card asks the memory: a red line refused, an override and a decl
     assert.deepEqual(ran, [], "the stand-in body did not run");
     await bound.idle();
     assert.deepEqual(await ownersDecisions(), [], "the memory holds no owner's decision");
-    assert.equal((await readGate("mg-red-line")).gate?.lines[0]?.registered, "not registered: the seat refused the order",
+    assert.equal((await readGate("mg-red-line")).gate?.lines[0]?.registered, "not registered: the red line was not overridden",
       "the refused call's result reached the gate through the root's tool results");
-    assert.deepEqual(lines, ["memory gate: mg-red-line: buy 1 NVDA · limit 100 · paper-1: not registered: the seat refused the order"]);
+    assert.ok(lines.includes("memory gate: mg-red-line: buy 1 NVDA · limit 100 · paper-1: not registered: the red line was not overridden"),
+      lines.join(" | "));
 
     /* 2. A red-lined buy, overridden over the wire, then approved: the body runs, the owner's approval is written. */
     beforeAnswer = async (callId) => {
@@ -245,18 +255,24 @@ test("the order card asks the memory: a red line refused, an override and a decl
     assert.equal(approval?.price, 100);
     assert.equal(approval?.price_source, "the order card's limit price");
     assert.equal((await readGate("mg-overridden")).gate?.lines[0]?.registered, "registered: buy");
+    /* the armed card's own record: the two NVDA buys within the day are one occasion, settled by the owner's override */
+    assert.deepEqual(await ownerRecord(), { fired: 1, followed: 0, overridden: 1 },
+      "one occasion for the second order on the symbol within the day, and one overridden");
 
-    /* 3. A red-lined buy declined: `pass`, naming its recall. */
+    /* 3. A red-lined buy of another symbol declined: `pass`, naming its recall; its own occasion, followed. */
     answer = "rejected";
-    const declinedResult = await place("mg-declined", buy);
+    const amd = { ...buy, symbol: "AMD" };
+    const declinedResult = await place("mg-declined", amd);
     assert.equal(declinedResult.isError, true, "a declined order does not run");
     assert.deepEqual(ran, [buy], "the body did not run again");
+    assert.equal(seen.get("mg-declined")?.redLine, true);
     await waitFor("the owner's decline in the memory", async () => (await ownersDecisions()).length === 2);
     const [decline] = await ownersDecisions();
     assert.equal(decline?.by, FACE_MEMORY_NAME);
     assert.equal(decline?.action, "pass");
-    assert.equal(decline?.thesis, "Declined Gravit's order card: buy 1 NVDA · limit 100 · paper-1.");
+    assert.equal(decline?.thesis, "Declined Gravit's order card: buy 1 AMD · limit 100 · paper-1.");
     assert.equal(decline?.recall, seen.get("mg-declined")?.lines[0]?.recall, "the decline names its recall");
+    assert.deepEqual(await ownerRecord(), { fired: 2, followed: 1, overridden: 1 }, "the decline is one followed");
 
     /* 4. A sell no lesson covers, from flat: no lesson, the one-click answer passes, `short` is written. */
     answer = "allowed-once";
