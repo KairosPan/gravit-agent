@@ -386,7 +386,8 @@ const originHeader = (req: IncomingMessage): Record<string, string> => {
  * callback (`signin/callback`, behind `isTrustedNavigation`) — forty-six in all — on the host webserver, over the
  * proxy core (src/upstream-proxy.ts). The reader returned is the `account` route's own: it and `/data/account` read
  * through one cache, so the seat route `main.ts` hands it to shares that route's upstream read. `positions` and
- * `market` are those routes' reads in process, through the same caches their routes are served from. `overview` is
+ * `market` are those routes' reads in process, through the same caches their routes are served from, each asked past
+ * its TTL when called with `fresh`. `overview` is
  * `GET /api/overview` in process alone - no face route reaches it - asked afresh each time, cut at
  * {@link OVERVIEW_ABORT_MS}, `{ unreachable: "disabled" }` with nothing asked under a disabled row. `dispose`
  * forgets every kept answer and aborts every open stream's upstream. */

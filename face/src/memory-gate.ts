@@ -738,7 +738,8 @@ function okBody(answer: UpstreamAnswer | undefined): Record<string, unknown> | u
 
 const positiveOf = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
 
-/** `GateAccount` over the Account proxy's reads; `approval` reads the overview's `approvals`: an approved card whose
+/** `GateAccount` over the Account proxy's reads: `position` asks fresh every time, past the positions route's TTL, so a
+ * fill a moment ago is never read as the position before it; the listing's kind may ride the cache. `approval` reads the overview's `approvals`: an approved card whose
  * `outcome` - what its release produced - is a refusal (`ok: false`) is `refused`. Shape only: nothing of the outcome
  * is copied. */
 export function gateAccount(reads: {
@@ -760,7 +761,7 @@ export function gateAccount(reads: {
       return typeof id === "string" && VENUE_ID.test(id) ? id : undefined;
     },
     async position(venue, symbol) {
-      const body = okBody(await read(() => reads.positions(new URLSearchParams({ venue }).toString())));
+      const body = okBody(await read(() => reads.positions(new URLSearchParams({ venue }).toString(), true)));
       if (body?.ok !== true || !Array.isArray(body.positions)) return undefined;
       const entry = body.positions.find((p) => (p as { symbol?: unknown } | null)?.symbol === symbol) as Record<string, unknown> | undefined;
       if (entry === undefined) return null;

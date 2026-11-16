@@ -505,14 +505,14 @@ test("dispose forgets every entry and settles a pending check", async () => {
 /* gateAccount over stub reads. */
 
 function readsOf(answers: { account?: UpstreamAnswer; positions?: UpstreamAnswer; market?: UpstreamAnswer }) {
-  const asked = { positions: [] as string[], market: [] as string[] };
+  const asked = { positions: [] as string[], fresh: [] as Array<boolean | undefined>, market: [] as string[], marketFresh: [] as Array<boolean | undefined> };
   const reader: AccountReader = { read: async () => answers.account ?? { unreachable: "ECONNREFUSED" } };
   return {
     asked,
     account: gateAccount({
       reader,
-      positions: async (q) => { asked.positions.push(q); return answers.positions ?? { unreachable: "ECONNREFUSED" }; },
-      market: async (q) => { asked.market.push(q); return answers.market ?? { unreachable: "ECONNREFUSED" }; },
+      positions: async (q, fresh) => { asked.positions.push(q); asked.fresh.push(fresh); return answers.positions ?? { unreachable: "ECONNREFUSED" }; },
+      market: async (q, fresh) => { asked.market.push(q); asked.marketFresh.push(fresh); return answers.market ?? { unreachable: "ECONNREFUSED" }; },
       overview: async () => ({ unreachable: "ECONNREFUSED" }),
     }),
   };
@@ -537,6 +537,7 @@ test("gateAccount.position: the line's symbol's entry, null when none, undefined
   assert.deepEqual(await r.account.position("paper-1", "AMD"), { side: "short", qty: 3 });
   assert.equal(await r.account.position("paper-1", "TSLA"), null);
   assert.deepEqual(r.asked.positions, ["venue=paper-1", "venue=paper-1", "venue=paper-1"]);
+  assert.deepEqual(r.asked.fresh, [true, true, true], "every position read is asked fresh, past the proxy's TTL");
   assert.equal(await readsOf({ positions: ok({ ok: false, positions }) }).account.position("paper-1", "NVDA"), undefined);
   assert.equal(await readsOf({ positions: ok({ ok: true, positions }, 503) }).account.position("paper-1", "NVDA"), undefined);
   assert.equal(await readsOf({}).account.position("paper-1", "NVDA"), undefined);
@@ -546,6 +547,7 @@ test("gateAccount.kind: the listing's kind; undefined on anything else", async (
   const r = readsOf({ market: ok({ ok: true, market: { kind: "stock", name: "NVIDIA" } }) });
   assert.equal(await r.account.kind("paper-1", "NVDA"), "stock");
   assert.deepEqual(r.asked.market, ["venue=paper-1&symbol=NVDA"]);
+  assert.notEqual(r.asked.marketFresh[0], true, "the listing may ride the cache");
   assert.equal(await readsOf({ market: ok({ ok: false }) }).account.kind("paper-1", "NVDA"), undefined);
   assert.equal(await readsOf({}).account.kind("paper-1", "NVDA"), undefined);
 });

@@ -1461,6 +1461,17 @@ test("positions and market in process: the routes' own reads, through the same c
   assert.equal(fetched.length, 2, "each route is served the in-process read's kept answer: one cache");
 });
 
+test("positions in process, asked fresh: two reads inside the TTL both reach the Account, and the route then serves the newer", async () => {
+  let n = 0;
+  const { routes, fetched, proxy } = proxyWith(async () => ok(`{"ok":true,"positions":[],"n":${++n}}`));
+  assert.deepEqual(await proxy.positions("venue=paper-1", true), { status: 200, body: '{"ok":true,"positions":[],"n":1}' });
+  assert.deepEqual(await proxy.positions("venue=paper-1", true), { status: 200, body: '{"ok":true,"positions":[],"n":2}' });
+  assert.equal(fetched.length, 2, "a fresh read skips the TTL");
+  assert.equal((await call(routes, "/data/account/positions?venue=paper-1")).body, '{"ok":true,"positions":[],"n":2}');
+  assert.deepEqual(await proxy.positions("venue=paper-1"), { status: 200, body: '{"ok":true,"positions":[],"n":2}' });
+  assert.equal(fetched.length, 2, "a plain read is served the kept answer");
+});
+
 test("overview in process: GET /api/overview, never kept, `disabled` honoured, and no route of its own", async () => {
   const overview = '{"approvals":[{"id":"ap-1","status":"pending"}]}';
   const { routes, fetched, inits, proxy } = proxyWith(answering(overview));
