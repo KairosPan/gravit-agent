@@ -152,6 +152,19 @@ test("priceFacts: a candles read that never answers resolves after FACT_READ_MS 
   assertPaired(f);
 });
 
+test("priceFacts: a readMs of 1,200 bounds each read - bars that never answer give the quote's two facts at 1,200", async () => {
+  const { reads, timers } = readsOf({ quote: (assets) => Promise.resolve(payloadOf([quoteOf(assets[0].id)])) });
+  const pending = priceFacts(reads, "NVDA", "US", { readMs: 1_200 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(timers.map((t) => t.ms), [1_200, 1_200], "each of the two reads raced against 1,200 ms");
+  const open = timers.filter((t) => !t.cleared);
+  assert.equal(open.length, 1, "the quote answered; the bars are still out");
+  open[0].run();
+  const f = await pending;
+  assert.deepEqual(f.facts, { price: 110, change_1d_pct: 10 });
+  assertPaired(f);
+});
+
 test("priceFacts: a quotes read that never answers gives no fact", async () => {
   const { reads, timers } = readsOf({ candles: () => ok({ ok: true, candles: barsOf(70, Date.parse("2026-02-27T14:30:00Z")) }) });
   const pending = priceFacts(reads, "NVDA", "US");

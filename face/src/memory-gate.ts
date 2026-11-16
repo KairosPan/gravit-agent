@@ -6,7 +6,7 @@
  * not check is kept as `not checked`, with why, and the memory is not opened. Otherwise, on one clock for the whole
  * check: the memory is opened; then, for every line together, the venue (`paper` is the Account's one paper venue),
  * the position and the instrument's kind under {@link GATE_ACCOUNT_MS}; the price facts under {@link GATE_FACTS_MS}
- * when a market was placed (src/memory-facts.ts); then the recall, as {@link FACE_MEMORY_NAME}, with whatever is left
+ * when a market was placed, each of their two reads asked under {@link GATE_FACT_READ_MS} (src/memory-facts.ts); then the recall, as {@link FACE_MEMORY_NAME}, with whatever is left
  * of {@link GATE_CHECK_MS}. The recall is asked only the line's validated fields and the face's own facts: nothing of
  * the model's arguments is passed on as text, and a fact the model supplied is not carried over. A read that loses
  * its race is left to finish and ignored; the kept view never changes once the check settles.
@@ -53,6 +53,10 @@ import type { UpstreamAnswer, UpstreamRouteRead } from "./upstream-proxy.ts";
 
 /** The whole check's bound, the Account reads' and the price facts'; and how many calls are kept. */
 export const GATE_CHECK_MS = 3_000, GATE_ACCOUNT_MS = 1_000, GATE_FACTS_MS = 1_500, GATE_KEPT = 200;
+
+/** Each of the price facts' two reads, the quote and the bars, as the gate asks them: inside GATE_FACTS_MS, so a late
+ * bars read still leaves the quote's facts. */
+export const GATE_FACT_READ_MS = 1_200;
 
 /** The position read again for an approval's action; how often the Account's card is polled and how long past its
  * expiry it is watched; how recent Gravit's own decision on the symbol is to be the approval's evidence. */
@@ -103,7 +107,8 @@ export interface GateAccount {
 
 export interface MemoryGateDeps {
   open: () => Promise<MemoryStanding>;
-  facts: (symbol: string, market: "US") => Promise<Facts>;
+  /** The price facts, each of their reads bounded by `opts.readMs`. */
+  facts: (symbol: string, market: "US", opts: { readMs: number }) => Promise<Facts>;
   account: GateAccount;
   log: (line: string) => void;
   now?: () => number; setTimer?: (run: () => void, ms: number) => unknown; clearTimer?: (timer: unknown) => void;
@@ -381,7 +386,7 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
       market = marketOfKind(valueOf(kind));
     }
     const symbol = memorySymbol(order, market);
-    const price = symbol === undefined ? undefined : valueOf(await within(() => deps.facts(symbol, "US"), Math.min(GATE_FACTS_MS, left())));
+    const price = symbol === undefined ? undefined : valueOf(await within(() => deps.facts(symbol, "US", { readMs: GATE_FACT_READ_MS }), Math.min(GATE_FACTS_MS, left())));
     const last = price?.facts?.price;
     const given = givenFacts(price ?? { facts: {}, sources: {} }, heldFacts(position, typeof last === "number" ? last : undefined, venue ?? order.venue));
     const considering = consideringOf(order, position);

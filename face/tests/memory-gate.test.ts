@@ -11,6 +11,7 @@ import {
   GATE_ACCOUNT_MS,
   GATE_CHECK_MS,
   GATE_FACTS_MS,
+  GATE_FACT_READ_MS,
   GATE_KEPT,
   createMemoryGate,
   gateAccount,
@@ -19,7 +20,8 @@ import {
   type GateCall,
   type MemoryGateDeps,
 } from "../src/memory-gate.ts";
-import type { Facts } from "../src/memory-facts.ts";
+import { priceFacts, type FactReads, type Facts } from "../src/memory-facts.ts";
+import type { MarketQuotePayload } from "../src/market-quotes.ts";
 import type { Position } from "../src/memory-order.ts";
 import { memoryFaultWords, type MemoryStanding } from "../src/memory.ts";
 import type { AccountReader } from "../src/account-proxy.ts";
@@ -285,6 +287,29 @@ test("time: facts that never answer are left out after GATE_FACTS_MS", async () 
   assert.deepEqual(asked.recalls[0].input, {
     considering: ["add"], symbol: "NVDA", market: "US", facts: { held: true }, fact_sources: { held: "the Account's position on paper-1" },
   });
+});
+
+test("time: the gate bounds each price read at GATE_FACT_READ_MS - slow bars still give the quote's facts and unrealized_pct", async () => {
+  assert.equal(GATE_FACT_READ_MS, 1_200);
+  assert.ok(GATE_FACT_READ_MS < GATE_FACTS_MS);
+  const clock = clockOf();
+  const recalls: unknown[] = [];
+  const memory = { recall: async (_by: string, input: unknown) => { recalls.push(input); return CAREFUL; } } as unknown as Memory;
+  const quote = { id: "us:NVDA", market: "us", symbol: "NVDA", price: 110, prev_close: 100, as_of: "2026-03-02T20:59:00.000Z", feed: "cboe delayed" };
+  const factReads: FactReads = {
+    quotes: { snapshot: async () => ({ ok: true, quotes: [quote] }) as unknown as MarketQuotePayload },
+    candles: never,
+    now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer,
+  };
+  const gate = createMemoryGate({
+    open: async () => ({ connected: true, memory, home: "/tmp/m" }),
+    facts: (symbol, market, opts) => priceFacts(factReads, symbol, market, opts),
+    account: { paperVenue: async () => "paper-1", position: async () => ({ side: "long", qty: 5, entryPrice: 100 }), kind: async () => "stock", approval: async () => undefined },
+    log: () => {}, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer,
+  });
+  await clock.run(gate.check(callOf(BUY_NVDA)));
+  assert.deepEqual((recalls[0] as { facts: unknown }).facts, { price: 110, change_1d_pct: 10, held: true, unrealized_pct: 10 });
+  assert.equal(clock.live(), 0);
 });
 
 test("time: a recall that never answers settles the check at GATE_CHECK_MS; its late answer changes nothing", async () => {

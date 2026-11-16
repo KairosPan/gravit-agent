@@ -5,8 +5,8 @@
  *   `change_5d_pct`, `change_20d_pct` and `change_60d_pct` from the Market's daily bars (`/api/candles`, six months,
  *   through the market proxy's in-process read, src/market-proxy.ts). A change is taken against the close N full
  *   sessions before the last full one ({@link changesFrom}); a provisional bar of today is dropped first
- *   ({@link fullBars}). The quote and the bars are read together, each raced against its own
- *   {@link FACT_READ_MS} timer; a read that loses the race is left to finish and ignored.
+ *   ({@link fullBars}). The quote and the bars are read together, each raced against its own timer of
+ *   {@link FACT_READ_MS}, or of the caller's `readMs`; a read that loses the race is left to finish and ignored.
  * - The held facts ({@link heldFacts}): `held` from the Account's position on a venue, and `unrealized_pct` for a long
  *   with an entry price and a last price.
  *
@@ -90,8 +90,8 @@ export function heldFacts(position: { side: "long" | "short"; entryPrice?: numbe
   return out;
 }
 
-/** `read` raced against its own timer: its value, or `undefined` when it throws, rejects or loses the race. */
-function within<T>(read: () => Promise<T>, reads: FactReads): Promise<T | undefined> {
+/** `read` raced against its own timer of `ms`: its value, or `undefined` when it throws, rejects or loses the race. */
+function within<T>(read: () => Promise<T>, reads: FactReads, ms: number): Promise<T | undefined> {
   const setTimer = reads.setTimer ?? ((run: () => void, ms: number): unknown => setTimeout(run, ms));
   const clearTimer = reads.clearTimer ?? ((timer: unknown): void => clearTimeout(timer as ReturnType<typeof setTimeout>));
   let pending: Promise<T>;
@@ -108,7 +108,7 @@ function within<T>(read: () => Promise<T>, reads: FactReads): Promise<T | undefi
       clearTimer(timer);
       resolve(value);
     };
-    const timer = setTimer(() => settle(undefined), FACT_READ_MS);
+    const timer = setTimer(() => settle(undefined), ms);
     Promise.resolve(pending).then(settle, () => settle(undefined));
   });
 }
@@ -136,15 +136,17 @@ function barsOf(answer: UpstreamAnswer | undefined): { bars: DayBar[]; today?: n
 }
 
 /** price, change_1d_pct, change_5d_pct, change_20d_pct, change_60d_pct. Never rejects; what cannot be computed is
- * absent. A symbol off its market's shape asks nothing. */
-export async function priceFacts(reads: FactReads, symbol: string, market: FactMarket): Promise<Facts> {
+ * absent. A symbol off its market's shape asks nothing. `opts.readMs` bounds each of the two reads, FACT_READ_MS by
+ * default. */
+export async function priceFacts(reads: FactReads, symbol: string, market: FactMarket, opts: { readMs?: number } = {}): Promise<Facts> {
+  const ms = opts.readMs ?? FACT_READ_MS;
   const cn = market === "CN";
   if (!(cn ? CN_SYMBOL_RE : SYMBOL_RE).test(symbol)) return empty();
   const id = idOf(cn ? "cn" : "us", symbol);
   const query = cn ? `venue=china&symbol=${symbol}&range=6M` : `venue=cboe&symbol=${symbol}&interval=1d&range=6M`;
   const [payload, answer] = await Promise.all([
-    within(() => reads.quotes.snapshot([{ id, market: cn ? "cn" : "us", symbol }]), reads),
-    within(() => reads.candles(query), reads),
+    within(() => reads.quotes.snapshot([{ id, market: cn ? "cn" : "us", symbol }]), reads, ms),
+    within(() => reads.candles(query), reads, ms),
   ]);
   const quote: MarketQuote | undefined = payload?.quotes?.find((q) => q.id === id);
   if (quote === undefined || !positive(quote.price)) return empty();

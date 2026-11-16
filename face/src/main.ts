@@ -311,7 +311,7 @@ booted.bindMemoryFence({ conversation: () => conversation, open: openMemory });
 const gateFactReads = { quotes: marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes }), candles: marketProxy.candles };
 const gate = createMemoryGate({
   open: openMemory,
-  facts: (symbol, market) => priceFacts(gateFactReads, symbol, market),
+  facts: (symbol, market, opts) => priceFacts(gateFactReads, symbol, market, opts),
   account: gateAccount({ reader: proxy.reader, positions: proxy.positions, market: proxy.market, overview: proxy.overview }),
   log: (line) => { console.error(`${BIN}: ${line}`); },
 });
