@@ -3101,7 +3101,8 @@ before this run of the face began, `late` (`found late`) otherwise —, never ru
 switched off, deleted or edited while its slot waits drops it with no record. The desk paused is
 one `skipped`, `paused` (`the desk was paused`), a routine a pause; the day's cap spent — the
 four token buckets of the day's `desk-turn` events whose source is `routine`, from 00:00 ET —
-is one `skipped`, `cap` (`the daily cap was spent`), a routine a New York day; the face keeps only
+is one `skipped`, `cap` (`the daily cap was spent`), a routine a New York day; a slot skipped
+either way is settled, so a desk resumed inside the slot's grace does not run it late; the face keeps only
 that day's sum, reading again only what was appended to `events.jsonl`. A `started` with no end is
 `interrupted` at the next boot, never run again, and its history shows it so (`Failed`) unless it
 is the run under way. A key already `missed` is never started. A test run (**Test**, keyed
@@ -7519,8 +7520,9 @@ hard-reload the page.
 6. **Asleep.** Let the Mac sleep across a slot (lid closed from before its minute to past its
    5-minute grace). PASS: the history shows `Missed` · `asleep`, and the slot was not run late.
 7. **Paused.** `npm run desk -- pause` before a slot, then `npm run desk -- resume` after it.
-   PASS: one `Skipped` · `the desk was paused` line, the head bar `Paused` meanwhile, and the next
-   slot after the resume runs.
+   PASS: one `Skipped` · `the desk was paused` line, the head bar `Paused` meanwhile, the skipped
+   slot not run after the resume (resume inside its 5-minute grace to try it), and the next slot
+   after the resume runs.
 8. **A change.** Press **Edit in Messages**, then say "make it 09:00". PASS: the composer held
    `Edit your routine: <name>` and nothing was sent until you sent it; the card reads `Change` with
    `Replaces the current version of <name>`; until ✓ the old version runs; after ✓ the chip reads
@@ -7538,7 +7540,10 @@ commit and each step's outcome in `DEVELOPMENT.md` §7.4's manual **Desk** rows.
 runs a day; tokens a run against the 339,218 a desk turn took at the median; the share of slots
 missed and why; cards dismissed against cards confirmed.
 
-**Not yet run.** A real model, the real clock and the browser are the operator's.
+**Run 2026-11-15** at `ad402a14`, on the installed service with a real model, in the app's browser;
+`DEVELOPMENT.md` §7.4 holds each step's outcome. It found the closing prose drawn under the card
+(step 2) and the skipped slot run after a resume inside its grace (step 7), both fixed after it and
+neither drilled again; step 6 is still owed.
 
 ## The phone drill (run after plans B1a and B1b land, and after any change to `../account/src/portfolio/identity/`, src/phone.ts, src/phone-bridge.ts, src/card-notice.ts, scripts/watchdog.ts, client/js/host/identity.js, identity-view.js, sheet-identity.js, client/js/render/identity.js or client/js/reducers/identity.js)
 
