@@ -7,6 +7,8 @@
  *   sessions before the last full one ({@link changesFrom}); a provisional bar of today is dropped first
  *   ({@link fullBars}). The quote and the bars are read together, each raced against its own timer of
  *   {@link FACT_READ_MS}, or of the caller's `readMs`; a read that loses the race is left to finish and ignored.
+ * - The changes alone ({@link changeFacts}): the three bar-based changes against a last price the caller already
+ *   holds, from the same bars read the same way, under the same bound.
  * - The held facts ({@link heldFacts}): `held` from the Account's position on a venue, and `unrealized_pct` for a long
  *   with an entry price and a last price.
  *
@@ -23,7 +25,7 @@ import type { UpstreamAnswer, UpstreamRouteRead } from "./upstream-proxy.ts";
 export type FactMarket = "US" | "CN";
 
 /** Facts by name, and for each the sentence that says where it came from. */
-export interface Facts { facts: Record<string, number | boolean>; sources: Record<string, string> }
+export interface Facts { facts: Record<string, number | boolean | string>; sources: Record<string, string> }
 
 /** How long each of the two reads may take before the facts are given without it. */
 export const FACT_READ_MS = 2_000;
@@ -90,8 +92,11 @@ export function heldFacts(position: { side: "long" | "short"; entryPrice?: numbe
   return out;
 }
 
+/** The clock and the timer a read runs on. */
+type FactTimers = Pick<FactReads, "now" | "setTimer" | "clearTimer">;
+
 /** `read` raced against its own timer of `ms`: its value, or `undefined` when it throws, rejects or loses the race. */
-function within<T>(read: () => Promise<T>, reads: FactReads, ms: number): Promise<T | undefined> {
+function within<T>(read: () => Promise<T>, reads: FactTimers, ms: number): Promise<T | undefined> {
   const setTimer = reads.setTimer ?? ((run: () => void, ms: number): unknown => setTimeout(run, ms));
   const clearTimer = reads.clearTimer ?? ((timer: unknown): void => clearTimeout(timer as ReturnType<typeof setTimeout>));
   let pending: Promise<T>;
@@ -135,18 +140,57 @@ function barsOf(answer: UpstreamAnswer | undefined): { bars: DayBar[]; today?: n
   return typeof today === "number" ? { bars, today } : { bars };
 }
 
+/** Whether `symbol` has its market's shape. */
+const shaped = (symbol: string, market: FactMarket): boolean => (market === "CN" ? CN_SYMBOL_RE : SYMBOL_RE).test(symbol);
+
+/** The six months of daily bars the changes are taken from, raced against `ms`. */
+function readBars(reads: Pick<FactReads, "candles"> & FactTimers, symbol: string, market: FactMarket, ms: number): Promise<UpstreamAnswer | undefined> {
+  const query = market === "CN" ? `venue=china&symbol=${symbol}&range=6M` : `venue=cboe&symbol=${symbol}&interval=1d&range=6M`;
+  return within(() => reads.candles(query), reads, ms);
+}
+
+/** The three changes of `last` over the bars `answer` holds. An A share's provisional bar is decided by `cnPhase`,
+ * a phase not given counting as not closed. Nothing when the answer cannot be read. */
+function changesOf(answer: UpstreamAnswer | undefined, reads: FactTimers, market: FactMarket, last: number, cnPhase: string | undefined): Facts {
+  const read = barsOf(answer);
+  if (read === undefined) return empty();
+  const now = (reads.now ?? Date.now)();
+  const cn = market === "CN";
+  const full = cn
+    ? fullBars(read.bars, { cn: { phase: cnPhase ?? "unknown", today: bjDate(new Date(now)) } })
+    : fullBars(read.bars, read.today === undefined ? {} : { us: read.today });
+  const dateOfBar = cn ? bjDate : etDate;
+  return changesFrom(last, full, (base) => `the Market's daily bars, base close ${dateOfBar(new Date(base.t))}`);
+}
+
+/** change_5d_pct, change_20d_pct, change_60d_pct against `last`, a price already in hand: the bars half of
+ * {@link priceFacts} alone. `cnPhase` decides an A share's provisional bar as the quote's phase does there. A symbol
+ * off its market's shape, or a `last` not finite and above zero, asks nothing. `opts.readMs` bounds the read,
+ * FACT_READ_MS by default. Never rejects. */
+export async function changeFacts(
+  reads: Pick<FactReads, "candles" | "now" | "setTimer" | "clearTimer">, symbol: string, market: FactMarket, last: number,
+  cnPhase?: string, opts: { readMs?: number } = {},
+): Promise<Facts> {
+  try {
+    if (!shaped(symbol, market) || !positive(last)) return empty();
+    const answer = await readBars(reads, symbol, market, opts.readMs ?? FACT_READ_MS);
+    return changesOf(answer, reads, market, last, cnPhase);
+  } catch {
+    return empty();
+  }
+}
+
 /** price, change_1d_pct, change_5d_pct, change_20d_pct, change_60d_pct. Never rejects; what cannot be computed is
  * absent. A symbol off its market's shape asks nothing. `opts.readMs` bounds each of the two reads, FACT_READ_MS by
  * default. */
 export async function priceFacts(reads: FactReads, symbol: string, market: FactMarket, opts: { readMs?: number } = {}): Promise<Facts> {
   const ms = opts.readMs ?? FACT_READ_MS;
   const cn = market === "CN";
-  if (!(cn ? CN_SYMBOL_RE : SYMBOL_RE).test(symbol)) return empty();
+  if (!shaped(symbol, market)) return empty();
   const id = idOf(cn ? "cn" : "us", symbol);
-  const query = cn ? `venue=china&symbol=${symbol}&range=6M` : `venue=cboe&symbol=${symbol}&interval=1d&range=6M`;
   const [payload, answer] = await Promise.all([
     within(() => reads.quotes.snapshot([{ id, market: cn ? "cn" : "us", symbol }]), reads, ms),
-    within(() => reads.candles(query), reads, ms),
+    readBars(reads, symbol, market, ms),
   ]);
   const quote: MarketQuote | undefined = payload?.quotes?.find((q) => q.id === id);
   if (quote === undefined || !positive(quote.price)) return empty();
@@ -159,14 +203,7 @@ export async function priceFacts(reads: FactReads, symbol: string, market: FactM
     out.facts.change_1d_pct = pctOver(price, quote.prev_close);
     out.sources.change_1d_pct = quoteSource;
   }
-  const read = barsOf(answer);
-  if (read === undefined) return out;
-  const now = (reads.now ?? Date.now)();
-  const full = cn
-    ? fullBars(read.bars, { cn: { phase: quote.cn?.phase ?? "unknown", today: bjDate(new Date(now)) } })
-    : fullBars(read.bars, read.today === undefined ? {} : { us: read.today });
-  const dateOfBar = cn ? bjDate : etDate;
-  const changes = changesFrom(price, full, (base) => `the Market's daily bars, base close ${dateOfBar(new Date(base.t))}`);
+  const changes = changesOf(answer, reads, market, price, quote.cn?.phase);
   Object.assign(out.facts, changes.facts);
   Object.assign(out.sources, changes.sources);
   return out;

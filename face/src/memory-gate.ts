@@ -7,7 +7,7 @@
  * check: the memory is opened; then, for every line together, the venue (`paper` is the Account's one paper venue),
  * the position (read fresh) and the instrument's kind under {@link GATE_ACCOUNT_MS}; the price facts under
  * {@link GATE_FACTS_MS} when a market was placed, each of their two reads asked under {@link GATE_FACT_READ_MS}
- * (src/memory-facts.ts); then the recall, as {@link FACE_MEMORY_NAME}, with whatever is left of {@link GATE_CHECK_MS}. The recall is asked only the line's validated fields and the face's own facts: nothing of
+ * (src/memory-facts.ts); then the recall, as {@link FACE_MEMORY_NAME} (src/memory-ask.ts), with whatever is left of {@link GATE_CHECK_MS}. The recall is asked only the line's validated fields and the face's own facts: nothing of
  * the model's arguments is passed on as text, and a fact the model supplied is not carried over. A read that loses
  * its race is left to finish and ignored; the kept view never changes once the check settles.
  *
@@ -46,8 +46,8 @@
  * restart, and after `dispose` nothing more is read or written.
  * @module
  */
-import type { RecallAnswer } from "gravit-memory";
 import type { AccountReader } from "./account-proxy.ts";
+import { ASK_LATE, askMemory, type GateLesson, type GateUntold } from "./memory-ask.ts";
 import { heldFacts, type Facts } from "./memory-facts.ts";
 import {
   approvedAction, conditionalOrder, consideringOf, declinedAction, gateOrdersOf, marketOfKind, memorySymbol, orderWords, VENUE_ID,
@@ -76,14 +76,8 @@ export const CALL_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 /** A seat write about to be carded. */
 export interface GateCall { callId: string; name: string; args: unknown; sessionId: string }
 
-/** A lesson that applies, as the card draws it: the owner's record of it. */
-export interface GateLesson {
-  id: string; strength: "caveat" | "red-line"; says: "dont" | "do" | "careful"; words: string;
-  fired: number; followed: number; overridden: number;
-}
-
-/** A lesson that could not be told, and what it needs: `market`, or a fact's name. */
-export interface GateUntold { id: string; needs: string[] }
+/** A lesson that applies, and a lesson that could not be told: src/memory-ask.ts's. */
+export type { GateLesson, GateUntold };
 
 /** One order line as checked. */
 export interface GateLine {
@@ -155,8 +149,8 @@ export interface MemoryGate {
 export type SeatOutcome =
   | { kind: "placed" } | { kind: "pending"; card: string; expiresAt?: number } | { kind: "refused" } | { kind: "unreadable" };
 
-/** A line's fault when its recall loses the race. */
-const LATE = "the memory did not answer in time";
+/** A fault when the memory loses the race. */
+const LATE = ASK_LATE;
 
 /** How much of a lesson's words the guard's refusal quotes. */
 const REFUSAL_WORDS_MAX = 200;
@@ -290,7 +284,6 @@ type Raced<T> = { kind: "ok"; value: T } | { kind: "late" } | { kind: "fault"; e
 
 const valueOf = <T>(r: Raced<T>): T | undefined => (r.kind === "ok" ? r.value : undefined);
 const isRedLine = (l: GateLesson): boolean => l.strength === "red-line" && l.says === "dont";
-const count = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
 
 /** The facts that may be given: a finite number or a flag, with a source line. */
 function givenFacts(...parts: Facts[]): Facts {
@@ -304,18 +297,6 @@ function givenFacts(...parts: Facts[]): Facts {
     }
   }
   return out;
-}
-
-/** The recall's answer as the card draws it. */
-function answered(view: GateLine, answer: RecallAnswer): void {
-  view.recall = String(answer.recall_id);
-  view.lessons = answer.applies.map((card) => ({
-    id: card.id, strength: card.strength, says: card.says, words: card.words,
-    fired: count(card.record?.owner?.fired), followed: count(card.record?.owner?.followed), overridden: count(card.record?.owner?.overridden),
-  }));
-  view.lessonsMore = count(answer.applies_more);
-  view.untold = answer.untold.map((card) => ({ id: card.id, needs: card.needs.map((need) => (need.what === "fact" ? need.fact : "market")) }));
-  view.untoldMore = count(answer.untold_more);
 }
 
 export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
@@ -393,9 +374,27 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     }
   }
 
+  /** The timer an ask runs on: the gate's own, each held among the running races until it fires or is cleared, so
+   * `dispose` ends it at once as late. */
+  const askTimer = (run: () => void, ms: number): unknown => {
+    const held: { timer?: unknown; end: () => void } = { end: () => {} };
+    held.end = (): void => {
+      running.delete(held.end);
+      run();
+    };
+    held.timer = setTimer(held.end, ms);
+    running.add(held.end);
+    return held;
+  };
+  const askClear = (held: unknown): void => {
+    const { timer, end } = held as { timer?: unknown; end: () => void };
+    running.delete(end);
+    clearTimer(timer);
+  };
+
   /** One line, checked: its account reads, its facts, its recall. */
   async function checkLine(
-    order: OrderLine, memory: { recall: (by: string, input: unknown) => Promise<RecallAnswer> }, paper: Promise<string | undefined>,
+    order: OrderLine, standing: MemoryStanding & { connected: true }, paper: Promise<string | undefined>,
     accountLeft: () => number, left: () => number,
   ): Promise<LineEntry> {
     const venue = order.venue === "paper" ? await paper : order.venue;
@@ -419,26 +418,18 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     const last = price?.facts?.price;
     const given = givenFacts(price ?? { facts: {}, sources: {} }, heldFacts(position, typeof last === "number" ? last : undefined, venue ?? order.venue));
     const considering = consideringOf(order, position);
-    const input: Record<string, unknown> = { considering };
-    if (symbol !== undefined) Object.assign(input, { symbol, market });
-    if (Object.keys(given.facts).length > 0) Object.assign(input, { facts: given.facts, fact_sources: given.sources });
     const view: GateLine = {
       ...(order.leg === undefined ? {} : { leg: order.leg }),
       order: orderWords(order), considering: [...considering], positionRead: position !== undefined,
       ...(symbol === undefined ? {} : { market }),
       lessons: [], lessonsMore: 0, untold: [], untoldMore: 0,
     };
-    const recalled = await within(() => memory.recall(FACE_MEMORY_NAME, input), left());
-    if (recalled.kind === "ok") {
-      try {
-        answered(view, recalled.value);
-      } catch (error) {
-        Object.assign(view, { lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, fault: memoryFaultWords(error) });
-        delete view.recall;
-      }
-    } else {
-      view.fault = recalled.kind === "late" ? LATE : memoryFaultWords(recalled.error);
-    }
+    const told = await askMemory(
+      () => Promise.resolve(standing), { considering, symbol, market, facts: given },
+      { ms: disposed ? 0 : left(), setTimer: askTimer, clearTimer: askClear },
+    );
+    if ("asked" in told) Object.assign(view, told.asked);
+    else view.fault = told.notConnected;
     if (view.fault !== undefined) say(`${view.order}: ${view.fault}`);
     return { order, ...(venue === undefined ? {} : { venue }), position, ...(position === undefined || positionAt === undefined ? {} : { positionAt }), view };
   }
@@ -466,7 +457,7 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
         return typeof id === "string" && VENUE_ID.test(id) ? id : undefined;
       })
       : Promise.resolve(undefined);
-    const lines = await Promise.all(orders.lines.map((order) => checkLine(order, standing.memory, paper, accountLeft, left)));
+    const lines = await Promise.all(orders.lines.map((order) => checkLine(order, standing, paper, accountLeft, left)));
     Object.assign(entry, { state: "checked", lines });
     const views = lines.map((line) => line.view);
     return {

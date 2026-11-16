@@ -2,7 +2,7 @@
  * daily bars, the held facts from a position - with stub reads and an injected timer; nothing leaves the process. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { changesFrom, FACT_READ_MS, fullBars, heldFacts, priceFacts, type Facts, type FactReads } from "../src/memory-facts.ts";
+import { changeFacts, changesFrom, FACT_READ_MS, fullBars, heldFacts, priceFacts, type Facts, type FactReads } from "../src/memory-facts.ts";
 import type { MarketQuote, MarketQuoteIdentity, MarketQuotePayload } from "../src/market-quotes.ts";
 import type { UpstreamAnswer } from "../src/upstream-proxy.ts";
 
@@ -204,5 +204,112 @@ test("priceFacts: a symbol off the market's shape gives no fact and asks nothing
     assert.deepEqual(await priceFacts(reads, symbol, market), { facts: {}, sources: {} }, symbol);
     assert.deepEqual(asked, { quotes: [], candles: [] }, symbol);
     assert.equal(timers.length, 0, symbol);
+  }
+});
+
+test("priceFacts CN: a quote with no cn.phase counts as not closed - today's bar is not a base", async () => {
+  const todayT = Date.parse("2026-03-02T07:00:00Z");   // 15:00 Shanghai, 2026-03-02
+  const { reads } = readsOf({
+    quote: (assets) => Promise.resolve(payloadOf([quoteOf(assets[0].id, { price: 180, prev_close: 160, feed: "tencent" })])),
+    candles: () => ok({ ok: true, candles: barsOf(62, todayT) }),
+    now: Date.parse("2026-03-02T08:00:00Z"),   // 16:00 Shanghai
+  });
+  const f = await priceFacts(reads, "600519", "CN");
+  assert.equal(f.facts.change_5d_pct, 16.13, "today's bar dropped: the base is close 155 (180/155)");
+  assert.equal(f.sources.change_5d_pct, "the Market's daily bars, base close 2026-02-24");
+});
+
+/* changeFacts: the bars half alone, against a last price in hand. */
+
+/** Stub candles alone, recording what was asked; the timer is a manual one. */
+function candlesOf(candles?: (query: string) => Promise<UpstreamAnswer>, now = Date.parse("2026-03-02T21:00:00Z")) {
+  const asked: string[] = [];
+  const timers: Array<{ run: () => void; ms: number; cleared: boolean }> = [];
+  const reads: Pick<FactReads, "candles" | "now" | "setTimer" | "clearTimer"> = {
+    candles: (query) => { asked.push(query); return (candles ?? (() => new Promise(() => {})))(query); },
+    now: () => now,
+    setTimer: (run, ms) => { const t = { run, ms, cleared: false }; timers.push(t); return t; },
+    clearTimer: (t) => { (t as { cleared: boolean }).cleared = true; },
+  };
+  return { reads, asked, timers };
+}
+
+test("changeFacts US: 61 full bars and today's marked one, against 176 in hand", async () => {
+  const lastFull = Date.parse("2026-02-27T14:30:00Z");
+  const todayT = Date.parse("2026-03-02T14:30:00Z");
+  const candles = [...barsOf(61, lastFull), { t: todayT, o: 1, h: 1, l: 1, c: 1 }];   // closes 100..160, then today's
+  const { reads, asked, timers } = candlesOf(() => ok({ ok: true, candles, today: { t: todayT, c: 1 } }));
+  const f = await changeFacts(reads, "NVDA", "US", 176);
+  assert.deepEqual(asked, ["venue=cboe&symbol=NVDA&interval=1d&range=6M"]);
+  assert.deepEqual(f.facts, { change_5d_pct: 13.55, change_20d_pct: 25.71, change_60d_pct: 76 });
+  assert.equal(f.sources.change_5d_pct, "the Market's daily bars, base close 2026-02-22");
+  assert.equal(f.sources.change_60d_pct, "the Market's daily bars, base close 2025-12-29");
+  assertPaired(f);
+  assert.equal(timers.length, 1);
+  assert.ok(timers[0].ms === FACT_READ_MS && timers[0].cleared, "one timer of FACT_READ_MS, cleared once the bars answered");
+});
+
+test("changeFacts CN: the phase in hand decides today's bar; no phase counts as not closed", async () => {
+  const todayT = Date.parse("2026-03-02T07:00:00Z");   // 15:00 Shanghai, 2026-03-02
+  const candles = barsOf(62, todayT);                  // the last bar is today's; closes 100..161
+  const run = async (phase: string | undefined): Promise<{ f: Facts; asked: string[] }> => {
+    const { reads, asked } = candlesOf(() => ok({ ok: true, candles }), Date.parse("2026-03-02T06:00:00Z"));
+    return { f: await changeFacts(reads, "600519", "CN", 180, phase), asked };
+  };
+  const trading = await run("trading");
+  assert.deepEqual(trading.asked, ["venue=china&symbol=600519&range=6M"]);
+  assert.equal(trading.f.facts.change_5d_pct, 16.13, "today's bar dropped: the base is close 155 (180/155)");
+  assert.equal(trading.f.sources.change_5d_pct, "the Market's daily bars, base close 2026-02-24");
+  assertPaired(trading.f);
+  const closed = await run("closed");
+  assert.equal(closed.f.facts.change_5d_pct, 15.38, "today's bar kept: the base is close 156 (180/156)");
+  assert.equal(closed.f.sources.change_5d_pct, "the Market's daily bars, base close 2026-02-25");
+  const unsaid = await run(undefined);
+  assert.equal(unsaid.f.facts.change_5d_pct, 16.13, "no phase: today's bar is not a base");
+});
+
+test("changeFacts: bars that never answer give nothing after FACT_READ_MS", async () => {
+  const { reads, timers } = candlesOf();
+  const pending = changeFacts(reads, "NVDA", "US", 176);
+  let settled = false;
+  void pending.then(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, "waiting on the bars");
+  assert.deepEqual(timers.map((t) => t.ms), [FACT_READ_MS]);
+  timers[0].run();
+  assert.deepEqual(await pending, { facts: {}, sources: {} });
+});
+
+test("changeFacts: a readMs of 1,200 bounds the bars read", async () => {
+  const { reads, timers } = candlesOf();
+  const pending = changeFacts(reads, "NVDA", "US", 176, undefined, { readMs: 1_200 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(timers.map((t) => t.ms), [1_200]);
+  timers[0].run();
+  assert.deepEqual(await pending, { facts: {}, sources: {} });
+});
+
+test("changeFacts: a symbol off its market's shape, or a last price not above zero, asks nothing", async () => {
+  for (const [symbol, market, last] of [
+    ["nvda", "US", 176], ["600519", "US", 176], ["NVDA", "CN", 176], ["sh600519", "CN", 176],
+    ["NVDA", "US", 0], ["NVDA", "US", -1], ["NVDA", "US", Number.NaN], ["NVDA", "US", Number.POSITIVE_INFINITY],
+  ] as const) {
+    const { reads, asked, timers } = candlesOf(() => ok({ ok: true, candles: barsOf(70, Date.parse("2026-02-27T14:30:00Z")) }));
+    assert.deepEqual(await changeFacts(reads, symbol, market, last), { facts: {}, sources: {} }, `${symbol} ${market} ${last}`);
+    assert.deepEqual(asked, [], `${symbol} ${market} ${last}`);
+    assert.equal(timers.length, 0, `${symbol} ${market} ${last}`);
+  }
+});
+
+test("changeFacts: a refused, failed or unreadable bars read never throws", async () => {
+  const answers: Array<(query: string) => Promise<UpstreamAnswer>> = [
+    () => Promise.resolve({ unreachable: "ECONNREFUSED" }),
+    () => Promise.resolve({ status: 200, body: "not json" }),
+    () => Promise.reject(new Error("x")),
+    () => { throw new Error("sync"); },
+  ];
+  for (const candles of answers) {
+    const { reads } = candlesOf(candles);
+    assert.deepEqual(await changeFacts(reads, "NVDA", "US", 176), { facts: {}, sources: {} });
   }
 });
