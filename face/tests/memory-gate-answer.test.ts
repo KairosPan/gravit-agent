@@ -87,7 +87,7 @@ const RED = {
   record: { owner: { fired: 1, followed: 0, overridden: 0, seen: 1, backfilled: 0, no_decision: 0 }, agents: { followed: 0, overridden: 0, seen: 0 } },
 } as unknown as RecallAnswer["applies"][number];
 
-type Status = "pending" | "approved" | "rejected" | undefined;
+type Status = "pending" | "approved" | "refused" | "rejected" | undefined;
 interface Over {
   recall?: () => Promise<RecallAnswer>;
   record?: (input: unknown) => Promise<unknown>;
@@ -446,6 +446,19 @@ test("Guard mode: the Account's card is polled every GATE_WATCH_EVERY_MS; approv
   await r.idle();
   assert.deepEqual(r.asked.records, [{ by: "gravit-face", input: APPROVED_BUY }]);
   assert.deepEqual(r.registered(), ["registered: buy"]);
+  assert.equal(r.clock.live(), 0, "the polling stops");
+});
+
+test("Guard mode: approved at the Account but its release refused: nothing written, the card says the order did not pass", async () => {
+  const r = rig();
+  await r.check();
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  r.gate.settled("c-1", PENDING, "s-1");
+  r.state.approval = async () => "refused";
+  await r.clock.advance(GATE_WATCH_EVERY_MS);
+  await r.idle();
+  assert.equal(r.asked.records.length, 0);
+  assert.deepEqual(r.registered(), ["not registered: the Account approved the card but the order did not pass"]);
   assert.equal(r.clock.live(), 0, "the polling stops");
 });
 
@@ -899,4 +912,18 @@ test("gateAccount.approval: the status of the approvals entry with that id; unde
   assert.equal(await overviewOf(okBody({ approvals: "no" })).approval("ap-1"), undefined);
   assert.equal(await overviewOf({ unreachable: "disabled" }).approval("ap-1"), undefined);
   assert.equal(await overviewOf(async () => { throw new Error("x"); }).approval("ap-1"), undefined);
+});
+
+test("gateAccount.approval: an approved card whose outcome is a refusal is refused; an ok or absent outcome is approved", async () => {
+  const approvals = [
+    { id: "ap-1", status: "approved", outcome: { ok: false, code: "E_MANDATE_BUDGET", message: "the budget is used up" } },
+    { id: "ap-2", status: "approved", outcome: { ok: true, order: { id: "o-1" } } },
+    { id: "ap-3", status: "approved" },
+    { id: "ap-4", status: "rejected", outcome: { ok: false, code: "E_X" } },
+  ];
+  const account = overviewOf(okBody({ approvals }));
+  assert.equal(await account.approval("ap-1"), "refused");
+  assert.equal(await account.approval("ap-2"), "approved");
+  assert.equal(await account.approval("ap-3"), "approved");
+  assert.equal(await account.approval("ap-4"), "rejected");
 });

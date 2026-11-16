@@ -35,7 +35,8 @@
  * placed, as the one action that position settles - or nothing, with why, when there is no position or it settles
  * none. A line the seat
  * answers with the Account's card (Guard mode) is watched through the Account's overview every
- * {@link GATE_WATCH_EVERY_MS} until that card is answered, or {@link GATE_WATCH_GRACE_MS} past its expiry. A line not
+ * {@link GATE_WATCH_EVERY_MS} until that card is answered, or {@link GATE_WATCH_GRACE_MS} past its expiry; approved there with its release refused,
+ * nothing is written. A line not
  * registered says why on the card and in one log line. Each call is registered once; nothing is kept across a
  * restart, and after `dispose` nothing more is read or written.
  * @module
@@ -95,8 +96,9 @@ export interface GateAccount {
   paperVenue(): Promise<string | undefined>;
   position(venue: string, symbol: string): Promise<Position | null | undefined>;
   kind(venue: string, symbol: string): Promise<string | undefined>;
-  /** The Account's card `cardId` as its overview lists it; undefined when it is not there or not read. */
-  approval(cardId: string): Promise<"pending" | "approved" | "rejected" | undefined>;
+  /** The Account's card `cardId` as its overview lists it - `refused` when it was approved but its release did not
+   * pass; undefined when it is not there or not read. */
+  approval(cardId: string): Promise<"pending" | "approved" | "refused" | "rejected" | undefined>;
 }
 
 export interface MemoryGateDeps {
@@ -163,6 +165,7 @@ const SELLS_UNSAID = "the order does not say how much of the position it sells -
 const SEAT_REFUSED = "the seat refused the order";
 const SEAT_UNREADABLE = "the seat's answer could not be read";
 const CARD_EXPIRED = "the Account's card expired";
+const CARD_REFUSED = "the Account approved the card but the order did not pass";
 const CARD_UNREAD = "the Account's card could not be read";
 
 /** A card id the seat's answer may give; a decision id the memory's decisions may hold. */
@@ -558,6 +561,7 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
       if (disposed) return;
       const status = valueOf(read);
       if (status === "approved") return approved(entry, i);
+      if (status === "refused") return notRegistered(entry, line, CARD_REFUSED);
       if (status === "rejected") {
         if (expiresAt !== undefined && now() < expiresAt) return declined(entry, line, ACCOUNT_DECLINED);
         return notRegistered(entry, line, CARD_EXPIRED);
@@ -734,7 +738,9 @@ function okBody(answer: UpstreamAnswer | undefined): Record<string, unknown> | u
 
 const positiveOf = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
 
-/** `GateAccount` over the Account proxy's reads; `approval` reads the overview's `approvals`. */
+/** `GateAccount` over the Account proxy's reads; `approval` reads the overview's `approvals`: an approved card whose
+ * `outcome` - what its release produced - is a refusal (`ok: false`) is `refused`. Shape only: nothing of the outcome
+ * is copied. */
 export function gateAccount(reads: {
   reader: AccountReader; positions: UpstreamRouteRead; market: UpstreamRouteRead; overview: () => Promise<UpstreamAnswer>;
 }): GateAccount {
@@ -772,7 +778,9 @@ export function gateAccount(reads: {
     async approval(cardId) {
       const approvals = okBody(await read(() => reads.overview()))?.approvals;
       if (!Array.isArray(approvals)) return undefined;
-      const status = (approvals.find((a) => (a as { id?: unknown } | null)?.id === cardId) as { status?: unknown } | undefined)?.status;
+      const card = approvals.find((a) => (a as { id?: unknown } | null)?.id === cardId) as { status?: unknown; outcome?: unknown } | undefined;
+      const status = card?.status;
+      if (status === "approved" && isRecord(card?.outcome) && card.outcome.ok === false) return "refused";
       return status === "pending" || status === "approved" || status === "rejected" ? status : undefined;
     },
   };
