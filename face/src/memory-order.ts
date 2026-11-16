@@ -5,8 +5,9 @@
  *
  * Every argument is the model's and is read as hostile: a line keeps only the fields of {@link OrderLine}, each one
  * that passed its shape check - a venue id of {@link VENUE_ID}, a symbol of {@link SHOWN_SYMBOL}, a side of `buy` or
- * `sell`, numbers finite and above zero. One field that fails makes the whole order unreadable; no argument is
- * passed on as text.
+ * `sell`, numbers finite and above zero. The venue and the symbol are first read as the seat and the Account read
+ * them: `paper` in any case and spacing is `paper`, the symbol trimmed. One field that fails makes the whole order
+ * unreadable; no argument is passed on as text.
  *
  * MODULE WEIGHT. Pure: it imports nothing but symbols.ts.
  * @module
@@ -55,6 +56,9 @@ const BATCH_RAW = "portfolio_live_batch";
 
 const UNREADABLE: GateOrders = { kind: "none", why: "the order could not be read" };
 
+/** The venue id the seat takes as the owner's one paper account. */
+const PAPER = "paper";
+
 /** A tool's raw name: what follows its last `__`, or the whole name when it has none. */
 function rawNameOf(name: string): string {
   const at = name.lastIndexOf("__");
@@ -72,11 +76,16 @@ function amountOf(v: unknown): number | undefined | false {
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : false;
 }
 
-/** The venue and symbol both pass their checks. */
+/** The venue and symbol, read as the seat and the Account read them, both pass their checks: a venue whose trimmed
+ * lower-case form is `paper` is `paper` (the seat's `venueOf`), any other is checked as given; the symbol is trimmed
+ * (the Account's order and close). Nothing more is folded. */
 function placeOf(args: Record<string, unknown>): { venue: string; symbol: string } | undefined {
-  const { venue, symbol } = args;
-  if (typeof venue !== "string" || !VENUE_ID.test(venue)) return undefined;
-  if (typeof symbol !== "string" || !SHOWN_SYMBOL.test(symbol)) return undefined;
+  const asked = args.venue;
+  const raw = args.symbol;
+  if (typeof asked !== "string" || typeof raw !== "string") return undefined;
+  const venue = asked.trim().toLowerCase() === PAPER ? PAPER : asked;
+  const symbol = raw.trim();
+  if (!VENUE_ID.test(venue) || !SHOWN_SYMBOL.test(symbol)) return undefined;
   return { venue, symbol };
 }
 

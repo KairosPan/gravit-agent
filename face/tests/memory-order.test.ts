@@ -80,6 +80,39 @@ test("gateOrdersOf: an argument that fails its shape check makes the order unrea
   for (const [what, args] of cases) assert.deepEqual(gateOrdersOf(O, args), UNREAD, what);
 });
 
+test("gateOrdersOf: venue and symbol read as the seat and the Account read them - paper in any case and spacing, the symbol trimmed", () => {
+  const lineOf = (args: Record<string, unknown>) => {
+    const got = gateOrdersOf(O, { ...good, ...args });
+    assert.ok(got.kind === "lines", JSON.stringify(args));
+    return got.lines[0]!;
+  };
+  assert.equal(lineOf({ venue: "paper" }).venue, "paper");
+  assert.equal(lineOf({ venue: "Paper" }).venue, "paper");
+  assert.equal(lineOf({ venue: " paper" }).venue, "paper");
+  assert.equal(lineOf({ venue: "PAPER \t" }).venue, "paper");
+  assert.equal(lineOf({ symbol: "NVDA " }).symbol, "NVDA");
+  assert.equal(lineOf({ symbol: " NVDA" }).symbol, "NVDA");
+  const closed = gateOrdersOf(C, { venue: " Paper", symbol: "NVDA " });
+  assert.deepEqual(closed, { kind: "lines", lines: [{ venue: "paper", symbol: "NVDA", side: "sell", close: true }] });
+  const batch = gateOrdersOf(B, { legs: [{ ...good, venue: "Paper", symbol: " AMD" }] });
+  assert.ok(batch.kind === "lines");
+  assert.deepEqual([batch.lines[0]!.venue, batch.lines[0]!.symbol], ["paper", "AMD"]);
+  assert.deepEqual(gateOrdersOf(O, { ...good, venue: " paper-1" }), UNREAD, "any other venue is the seat's as given: not trimmed");
+  assert.deepEqual(gateOrdersOf(O, { ...good, symbol: "  " }), UNREAD, "a symbol of spaces alone is none");
+});
+
+test("gateOrdersOf: the batch and close rows - empty legs, six legs with a malformed one, legs not an array, a close's bad qty and extra limitPrice", () => {
+  assert.deepEqual(gateOrdersOf(B, { legs: [] }), UNREAD, "empty legs");
+  assert.deepEqual(gateOrdersOf(B, { legs: [good, good, good, good, good, { ...good, qty: -1 }] }), { kind: "none", why: "more than five lines" }, "six legs, one malformed");
+  assert.deepEqual(gateOrdersOf(B, { legs: good }), UNREAD, "legs an object");
+  assert.deepEqual(gateOrdersOf(B, { legs: "NVDA" }), UNREAD, "legs a string");
+  assert.deepEqual(gateOrdersOf(B, {}), UNREAD, "no legs");
+  for (const qty of [0, -2, Infinity, "3", null]) assert.deepEqual(gateOrdersOf(C, { venue: "paper-1", symbol: "NVDA", qty }), UNREAD, `close qty ${String(qty)}`);
+  assert.deepEqual(gateOrdersOf(C, { venue: "paper-1", symbol: "NVDA", qty: 2, limitPrice: 99 }), {
+    kind: "lines", lines: [{ venue: "paper-1", symbol: "NVDA", side: "sell", close: true, qty: 2 }],
+  }, "a close's limitPrice is dropped");
+});
+
 test("gateOrdersOf: a tool it does not check is not checked", () => {
   for (const name of ["mcp__account__portfolio_order", "mcp__account__portfolio_live_amend", "mcp__account__portfolio_pay", "web_fetch"]) {
     assert.deepEqual(gateOrdersOf(name, good), { kind: "none", why: "not checked for this tool" }, name);

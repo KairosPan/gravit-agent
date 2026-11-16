@@ -348,6 +348,23 @@ test("a red-lined callId overridden, then checked again with a red line: no over
   assert.equal(gate.redLineReason("call_1", "s-1"), redLineRefusal("never touch AMD"));
 });
 
+test("a red line is not dodged by spelling: paper, Paper, \" paper\" and a symbol with a trailing space are all red-lined", async () => {
+  const spellings: Array<[string, Record<string, unknown>]> = [
+    ["paper", { venue: "paper" }], ["Paper", { venue: "Paper" }], [" paper", { venue: " paper" }], ["NVDA ", { venue: "paper", symbol: "NVDA " }],
+  ];
+  for (const [what, args] of spellings) {
+    const { gate, asked, clock } = rig({
+      kind: async (venue) => (venue === "paper-1" ? "stock" : undefined),
+      recall: async (_by, input) => ((input as { symbol?: string }).symbol === "NVDA"
+        ? answerOf({ applies: [lessonOf("L-0002", "red-line", "dont", "never touch NVDA")] })
+        : CAREFUL),
+    });
+    assert.deepEqual(await clock.run(gate.check(callOf({ ...BUY_NVDA, ...args }))), { lessons: 1, redLine: true }, what);
+    assert.deepEqual(asked.positions, [["paper-1", "NVDA"]], what);
+    assert.equal(gate.redLineReason("call_1", "s-1"), redLineRefusal("never touch NVDA"), what);
+  }
+});
+
 /** A rig whose first recall answers `first`, and every later one waits for `release()` and answers `later`. */
 function heldRig(first: RecallAnswer, later: RecallAnswer) {
   const held: { release?: () => void; calls: number } = { calls: 0 };
