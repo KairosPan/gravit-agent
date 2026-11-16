@@ -203,3 +203,30 @@ test('a failed read retried that lands its gate is ready; while a read again run
   assert.equal(failed.memoryGate.c1.again, 2);
   assert.equal(failed.memoryGate.c1.busy, undefined);
 });
+
+// a gate read's own dispatch renders, and the render calls ensure() again (app.js): no card is asked twice by that
+test('a render that follows each dispatch and calls ensure() asks each of three cards once, and once each per pass of reads again', async () => {
+  const store = storeOf([card('ev-1', 'c1'), card('ev-2', 'c2'), card('ev-3', 'c3')]);
+  let clock = NOW;
+  const asked = [];
+  const getJson = async path => { asked.push(path); return { ok: true, gate: { ...GATE, callId: path.slice(-2), lines: [{ order: 'buy 1 NVDA', lessons: [] }] } }; };
+  const gate = startMemoryGate({ store, getJson, postJson: async () => ({ ok: true }), now: () => clock });
+  const renders = [];
+  store.subscribe(() => { renders.push(gate.ensure()); });
+  await gate.ensure();
+  await Promise.all(renders);
+  await settle();
+  assert.deepEqual([...asked].sort(), ['/data/memory/gate?callId=c1', '/data/memory/gate?callId=c2', '/data/memory/gate?callId=c3'], 'one GET each on first sight');
+  // all three answered, their gates ready with nothing registered: one pass of reads again, one GET each
+  for (const id of ['ev-1', 'ev-2', 'ev-3']) answer(store, 'w1', id);
+  await Promise.all(renders);
+  await settle();
+  assert.equal(asked.length, 3, 'inside 2,000 ms of the first reads: nothing');
+  clock += 2_000;
+  asked.length = 0;
+  await gate.ensure();
+  await Promise.all(renders);
+  await settle();
+  assert.deepEqual([...asked].sort(), ['/data/memory/gate?callId=c1', '/data/memory/gate?callId=c2', '/data/memory/gate?callId=c3'], 'one GET each in the pass of reads again');
+  assert.deepEqual(['c1', 'c2', 'c3'].map(id => store.get().memoryGate[id].again), [1, 1, 1]);
+});

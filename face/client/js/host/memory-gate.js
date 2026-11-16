@@ -61,6 +61,8 @@ export function startMemoryGate({ store, getJson, postJson, now = Date.now }) {
   // the scan is skipped while neither the conversations nor the slice moved and no read again waits on the clock (renders run
   // many times a second)
   let seen = null;
+  // the call ids whose read this host has started and not finished
+  const inFlight = new Set();
 
   async function read([callId, again]) {
     store.dispatch('memoryGateLoading', { callId, at: now(), again });
@@ -86,7 +88,11 @@ export function startMemoryGate({ store, getJson, postJson, now = Date.now }) {
     if (seen && seen[0] === s.conversations && seen[1] === s.memoryGate) return;
     const { reads, waits } = wanted(s, now());
     seen = waits ? null : [s.conversations, s.memoryGate];
-    await Promise.all(reads.map(read));
+    // every read held in flight before the first dispatch: that dispatch renders, the render calls ensure() again, and the
+    // cards this pass has not reached yet must not be asked twice
+    const mine = reads.filter(([callId]) => !inFlight.has(callId));
+    for (const [callId] of mine) inFlight.add(callId);
+    await Promise.all(mine.map(r => read(r).finally(() => inFlight.delete(r[0]))));
   }
 
   /** The owner's override of a red-lined card: true once the face kept it, false when it refused or nothing was said. */
