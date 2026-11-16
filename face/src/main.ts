@@ -306,8 +306,8 @@ booted.bindMemoryFence({ conversation: () => conversation, open: openMemory });
  * to the order, over the Account proxy's in-process reads and the price facts from the Market's quote and daily bars
  * (src/memory-facts.ts); Gate 2 reads it through the parts bound here (boot.ts divergence 12), and its two routes serve
  * the kept view and take the owner's override. It follows the root's session events and tool results, so the owner's
- * answer to each card it checked is registered in the memory by the face's own code; the Account's overview is the
- * in-process read it watches a Guard-mode card through. */
+ * answer to each card it checked is registered in the memory by the face's own code; it watches a Guard-mode card
+ * through the account reader's pending cards, and reads the Account's overview in process once a card leaves them. */
 const gateFactReads = { quotes: marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes }), candles: marketProxy.candles };
 const gate = createMemoryGate({
   open: openMemory,

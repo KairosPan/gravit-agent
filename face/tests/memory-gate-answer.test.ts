@@ -16,6 +16,7 @@ import {
   followAnswers,
   gateAccount,
   seatOutcomes,
+  type CardStatus,
   type GateAccount,
   type GateView,
   type MemoryGate,
@@ -96,16 +97,21 @@ interface Over {
   open?: () => Promise<MemoryStanding>;
 }
 
-/** The rig: `state.position` is the Account's position now, `state.approval` the Account's card now. */
+/** The rig: `state.position` is the Account's position now, `state.approval` each Account card now (undefined: the
+ * overview does not list it), `state.cards` the cards the Account holds, and `state.pendingRead` whether its pending
+ * list can be read. `asked.pendings` counts the pending list's reads, `asked.overviews` the overview's, and
+ * `asked.approvals` every card id the overview was asked for. */
 function rig(over: Over = {}) {
   const clock = clockOf();
   const asked = {
     records: [] as Array<{ by: string; input: Record<string, unknown> }>, decisions: [] as unknown[], positions: [] as Array<[string, string]>,
-    approvals: [] as string[], logs: [] as string[], opens: 0,
+    approvals: [] as string[], pendings: 0, overviews: 0, logs: [] as string[], opens: 0,
   };
   const state = {
     position: async (_symbol?: string): Promise<Position | null | undefined> => null,
-    approval: async (): Promise<Status> => "pending",
+    approval: async (_card?: string): Promise<Status> => "pending",
+    cards: ["ap-1"],
+    pendingRead: true,
   };
   const memory = {
     recall: () => (over.recall ?? (async () => answerOf()))(),
@@ -116,7 +122,22 @@ function rig(over: Over = {}) {
     paperVenue: async () => "paper-1",
     position: (venue, symbol) => { asked.positions.push([venue, symbol]); return state.position(symbol); },
     kind: async () => over.kind ?? "stock",
-    approval: (card) => { asked.approvals.push(card); return state.approval(); },
+    pendingCards: async () => {
+      asked.pendings += 1;
+      if (!state.pendingRead) return undefined;
+      const statuses = await Promise.all(state.cards.map((card) => state.approval(card)));
+      return new Set(state.cards.filter((_, i) => statuses[i] === "pending"));
+    },
+    approvals: async (ids) => {
+      asked.overviews += 1;
+      asked.approvals.push(...ids);
+      const out = new Map<string, CardStatus>();
+      for (const id of ids) {
+        const status = await state.approval(id);
+        if (status !== undefined) out.set(id, status);
+      }
+      return out;
+    },
   };
   const gate = createMemoryGate({
     open: () => { asked.opens += 1; return (over.open ?? (async (): Promise<MemoryStanding> => ({ connected: true, memory, home: "/tmp/m" })))(); },
@@ -468,27 +489,116 @@ test("cancelled, unavailable, and a settled call never answered allowed-once: no
 
 /* Guard mode: the Account's card. */
 
-test("Guard mode: the Account's card is polled every GATE_WATCH_EVERY_MS; approved there, the approval line", async () => {
+test("Guard mode: the pending list is read every GATE_WATCH_EVERY_MS, the overview only once the card leaves it; approved there, the approval line", async () => {
   assert.equal(GATE_WATCH_EVERY_MS, 5_000);
   const r = rig();
   await r.check();
   r.gate.answered("c-1", "allowed-once", "s-1");
   r.gate.settled("c-1", PENDING, "s-1");
   await r.idle();
-  assert.deepEqual(r.asked.approvals, []);
+  assert.equal(r.asked.pendings, 0);
+  assert.equal(r.gate.view("c-1")?.lines[0].watching, true, "the line says it is watched");
   await r.clock.advance(GATE_WATCH_EVERY_MS);
   await r.idle();
-  assert.deepEqual(r.asked.approvals, ["ap-1"]);
+  assert.equal(r.asked.pendings, 1);
   await r.clock.advance(GATE_WATCH_EVERY_MS);
   await r.idle();
-  assert.deepEqual(r.asked.approvals, ["ap-1", "ap-1"]);
+  assert.equal(r.asked.pendings, 2);
+  assert.equal(r.asked.overviews, 0, "a card still pending costs no overview read");
   assert.equal(r.asked.records.length, 0);
   r.state.approval = async () => "approved";
   await r.clock.advance(GATE_WATCH_EVERY_MS);
   await r.idle();
+  assert.deepEqual(r.asked.approvals, ["ap-1"]);
   assert.deepEqual(r.asked.records, [{ by: "gravit-face", input: APPROVED_BUY }]);
   assert.deepEqual(r.registered(), ["registered: buy"]);
+  assert.equal("watching" in r.gate.view("c-1")!.lines[0], false, "watching is off once the ending settles");
   assert.equal(r.clock.live(), 0, "the polling stops");
+});
+
+/** A five-leg batch, each leg answered by the seat with its own Account card, ap-1 to ap-5. */
+const FIVE = Array.from({ length: 5 }, (_, i) => ({ ...BUY, symbol: ["NVDA", "AMD", "AAPL", "MSFT", "TSLA"][i] }));
+const FIVE_PENDING = json({
+  ok: true,
+  legs: FIVE.map((_, i) => ({ leg: i + 1, ok: true, pending: true, card: { id: `ap-${i + 1}`, expiresAt: new Date(EXPIRES).toISOString() } })),
+});
+
+test("Guard mode: five watched lines share one poller - one pending read a tick, no overview while all wait, one when two leave", async () => {
+  const r = rig();
+  r.state.cards = ["ap-1", "ap-2", "ap-3", "ap-4", "ap-5"];
+  await r.check({ legs: FIVE }, "c-1", BATCH);
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  r.gate.settled("c-1", FIVE_PENDING, "s-1");
+  await r.idle();
+  assert.deepEqual(r.gate.view("c-1")!.lines.map((l) => l.watching), [true, true, true, true, true]);
+  assert.equal(r.clock.live(), 1, "one timer for every watched line");
+  await r.clock.advance(GATE_WATCH_EVERY_MS);
+  await r.idle();
+  await r.clock.advance(GATE_WATCH_EVERY_MS);
+  await r.idle();
+  assert.equal(r.asked.pendings, 2, "one pending read a tick");
+  assert.equal(r.asked.overviews, 0);
+  const decided: Record<string, Status> = { "ap-2": "approved", "ap-4": "rejected" };
+  r.state.approval = async (card) => decided[card ?? ""] ?? "pending";
+  await r.clock.advance(GATE_WATCH_EVERY_MS);
+  await r.idle();
+  assert.equal(r.asked.pendings, 3);
+  assert.equal(r.asked.overviews, 1, "one overview read for the tick two cards left");
+  assert.deepEqual(r.asked.approvals, ["ap-2", "ap-4"]);
+  assert.deepEqual(r.registered(), [undefined, "registered: buy", undefined, "registered: pass", undefined]);
+  assert.deepEqual(r.gate.view("c-1")!.lines.map((l) => l.watching), [true, undefined, true, undefined, true]);
+  assert.equal(r.clock.live(), 1, "still one timer for the three left");
+  r.state.approval = async () => "approved";
+  await r.clock.advance(GATE_WATCH_EVERY_MS);
+  await r.idle();
+  assert.equal(r.asked.overviews, 2);
+  assert.deepEqual(r.registered(), ["registered: buy", "registered: buy", "registered: buy", "registered: pass", "registered: buy"]);
+  assert.deepEqual(r.gate.view("c-1")!.lines.map((l) => l.watching), [undefined, undefined, undefined, undefined, undefined]);
+  assert.equal(r.clock.live(), 0);
+});
+
+test("Guard mode: a pending list that cannot be read reads the overview that tick, once for every watched card", async () => {
+  const r = rig();
+  r.state.pendingRead = false;
+  await r.check();
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  r.gate.settled("c-1", PENDING, "s-1");
+  await r.clock.advance(GATE_WATCH_EVERY_MS);
+  await r.idle();
+  assert.equal(r.asked.overviews, 1);
+  assert.equal(r.asked.records.length, 0, "the overview says pending");
+  r.state.approval = async () => "approved";
+  await r.clock.advance(GATE_WATCH_EVERY_MS);
+  await r.idle();
+  assert.deepEqual(r.registered(), ["registered: buy"]);
+});
+
+test("Guard mode: a card with no expiresAt that reads rejected: declined or expired, nothing written", async () => {
+  const r = rig();
+  await r.check();
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  r.gate.settled("c-1", json({ ok: true, pending: true, card: { id: "ap-1" } }), "s-1");
+  r.state.approval = async () => "rejected";
+  await r.clock.advance(GATE_WATCH_EVERY_MS);
+  await r.idle();
+  assert.equal(r.asked.records.length, 0);
+  assert.deepEqual(r.registered(), ["not registered: the Account's card was declined or expired"]);
+});
+
+test("Guard mode: with no expiresAt the watch's deadline is GATE_WATCH_GRACE_MS from the seat's result", async () => {
+  const r = rig();
+  await r.check();
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  await r.clock.advance(30_000);
+  const at = r.clock.now();
+  r.gate.settled("c-1", json({ ok: true, pending: true, card: { id: "ap-1" } }), "s-1");
+  await r.clock.advance(GATE_WATCH_GRACE_MS - GATE_WATCH_EVERY_MS);
+  await r.idle();
+  assert.deepEqual(r.registered(), [undefined], "still watched inside the grace");
+  await r.clock.advance(at + GATE_WATCH_GRACE_MS - r.clock.now());
+  await r.idle();
+  assert.deepEqual(r.registered(), ["not registered: the Account's card expired"]);
+  assert.equal(r.clock.live(), 0);
 });
 
 test("Guard mode: approved at the Account but its release refused: nothing written, the card says the order did not pass", async () => {
@@ -546,11 +656,11 @@ test("Guard mode: still pending at expiresAt + GATE_WATCH_GRACE_MS: nothing, and
   r.gate.settled("c-1", PENDING, "s-1");
   await r.clock.advance(EXPIRES + GATE_WATCH_GRACE_MS - r.clock.now() + GATE_WATCH_EVERY_MS);
   await r.idle();
-  const polls = r.asked.approvals.length;
+  const polls = r.asked.pendings;
   assert.ok(polls > 0);
   assert.equal(r.clock.live(), 0, "the polling stops");
   await r.clock.advance(GATE_WATCH_EVERY_MS * 4);
-  assert.equal(r.asked.approvals.length, polls);
+  assert.equal(r.asked.pendings, polls);
   assert.equal(r.asked.records.length, 0);
   assert.deepEqual(r.registered(), ["not registered: the Account's card expired"]);
 });
@@ -574,11 +684,13 @@ test("Guard mode: an Account that never answers a poll is cut at GATE_WATCH_EVER
   r.gate.answered("c-1", "allowed-once", "s-1");
   r.gate.settled("c-1", PENDING, "s-1");
   r.state.approval = never;
-  await r.clock.advance(GATE_WATCH_EVERY_MS * 3);
+  /* each tick: the pending list cut at 5 s, then the overview cut at 5 s; the next tick 5 s later */
+  await r.clock.advance(GATE_WATCH_EVERY_MS * 5);
   await r.idle();
-  assert.ok(r.asked.approvals.length >= 2);
+  assert.equal(r.asked.pendings, 2);
+  assert.equal(r.asked.overviews, 2);
   r.state.approval = async () => "approved";
-  await r.clock.advance(GATE_WATCH_EVERY_MS * 2);
+  await r.clock.advance(GATE_WATCH_EVERY_MS * 3);
   await r.idle();
   assert.equal(r.asked.records.length, 1);
   assert.equal(r.clock.live(), 0);
@@ -596,7 +708,7 @@ test("Guard mode: dispose while watching stops the polling and nothing is writte
   assert.equal(r.clock.live(), 0);
   await r.clock.advance(GATE_WATCH_EVERY_MS * 3);
   await r.gate.idle();
-  assert.equal(r.asked.approvals.length, 1);
+  assert.equal(r.asked.pendings, 1);
   assert.equal(r.asked.records.length, 0);
 });
 
@@ -930,42 +1042,50 @@ test("followAnswers: a listener that throws inside is caught; the disposer remov
   assert.equal(ctx.listeners.get("tools/result")?.length, 0);
 });
 
-/* gateAccount.approval. */
+/* gateAccount.approvals and gateAccount.pendingCards. */
 
-function overviewOf(answer: UpstreamAnswer | (() => Promise<UpstreamAnswer>)) {
-  return gateAccount({
-    reader: { read: async () => ({ unreachable: "ECONNREFUSED" }) },
+function overviewOf(answer: UpstreamAnswer | (() => Promise<UpstreamAnswer>), account: UpstreamAnswer | (() => Promise<UpstreamAnswer>) = { unreachable: "ECONNREFUSED" }) {
+  const asked = { overviews: 0, accounts: 0 };
+  const reads = gateAccount({
+    reader: { read: async () => { asked.accounts += 1; return typeof account === "function" ? account() : account; } },
     positions: async () => ({ unreachable: "ECONNREFUSED" }),
     market: async () => ({ unreachable: "ECONNREFUSED" }),
-    overview: typeof answer === "function" ? answer : async () => answer,
+    overview: async () => { asked.overviews += 1; return typeof answer === "function" ? answer() : answer; },
   });
+  return Object.assign(reads, { asked });
 }
 const okBody = (body: unknown, status = 200): UpstreamAnswer => ({ status, body: JSON.stringify(body) });
+const NONE = new Map<string, CardStatus>();
 
-test("gateAccount.approval: the status of the approvals entry with that id; undefined on anything else", async () => {
-  const approvals = [{ id: "ap-1", status: "pending" }, { id: "ap-2", status: "approved" }, { id: "ap-3", status: "rejected" }, { id: "ap-4", status: "odd" }];
+test("gateAccount.approvals: each asked card's status from one overview read; a card not listed or of another status is absent", async () => {
+  const approvals = [{ id: "ap-1", status: "pending" }, { id: "ap-2", status: "approved" }, { id: "ap-3", status: "rejected" }, { id: "ap-4", status: "odd" }, { id: "ap-5", status: "approved" }];
   const account = overviewOf(okBody({ approvals }));
-  assert.equal(await account.approval("ap-1"), "pending");
-  assert.equal(await account.approval("ap-2"), "approved");
-  assert.equal(await account.approval("ap-3"), "rejected");
-  assert.equal(await account.approval("ap-4"), undefined);
-  assert.equal(await account.approval("ap-9"), undefined);
-  assert.equal(await overviewOf(okBody({ approvals }, 503)).approval("ap-1"), undefined);
-  assert.equal(await overviewOf(okBody({ approvals: "no" })).approval("ap-1"), undefined);
-  assert.equal(await overviewOf({ unreachable: "disabled" }).approval("ap-1"), undefined);
-  assert.equal(await overviewOf(async () => { throw new Error("x"); }).approval("ap-1"), undefined);
+  assert.deepEqual(await account.approvals(["ap-1", "ap-2", "ap-3", "ap-4", "ap-9"]), new Map([["ap-1", "pending"], ["ap-2", "approved"], ["ap-3", "rejected"]]));
+  assert.equal(account.asked.overviews, 1, "one read for every card asked");
+  assert.deepEqual(await overviewOf(okBody({ approvals }, 503)).approvals(["ap-1"]), NONE);
+  assert.deepEqual(await overviewOf(okBody({ approvals: "no" })).approvals(["ap-1"]), NONE);
+  assert.deepEqual(await overviewOf({ unreachable: "disabled" }).approvals(["ap-1"]), NONE);
+  assert.deepEqual(await overviewOf(async () => { throw new Error("x"); }).approvals(["ap-1"]), NONE);
 });
 
-test("gateAccount.approval: an approved card whose outcome is a refusal is refused; an ok or absent outcome is approved", async () => {
+test("gateAccount.approvals: an approved card whose outcome is a refusal is refused; an ok or absent outcome is approved", async () => {
   const approvals = [
     { id: "ap-1", status: "approved", outcome: { ok: false, code: "E_MANDATE_BUDGET", message: "the budget is used up" } },
     { id: "ap-2", status: "approved", outcome: { ok: true, order: { id: "o-1" } } },
     { id: "ap-3", status: "approved" },
     { id: "ap-4", status: "rejected", outcome: { ok: false, code: "E_X" } },
   ];
-  const account = overviewOf(okBody({ approvals }));
-  assert.equal(await account.approval("ap-1"), "refused");
-  assert.equal(await account.approval("ap-2"), "approved");
-  assert.equal(await account.approval("ap-3"), "approved");
-  assert.equal(await account.approval("ap-4"), "rejected");
+  const got = await overviewOf(okBody({ approvals })).approvals(["ap-1", "ap-2", "ap-3", "ap-4"]);
+  assert.deepEqual(got, new Map([["ap-1", "refused"], ["ap-2", "approved"], ["ap-3", "approved"], ["ap-4", "rejected"]]));
+});
+
+test("gateAccount.pendingCards: the ids of the account read's cards; undefined when it is not read or lists none", async () => {
+  const listed = overviewOf({ unreachable: "x" }, okBody({ ok: true, cards: [{ id: "ap-1", usd: 1 }, { id: "ap-2" }, { id: 7 }, null] }));
+  assert.deepEqual(await listed.pendingCards(), new Set(["ap-1", "ap-2"]));
+  assert.equal(listed.asked.overviews, 0, "the overview is not read");
+  assert.deepEqual(await overviewOf({ unreachable: "x" }, okBody({ ok: true, cards: [] })).pendingCards(), new Set());
+  assert.equal(await overviewOf({ unreachable: "x" }, okBody({ ok: true })).pendingCards(), undefined);
+  assert.equal(await overviewOf({ unreachable: "x" }, okBody({ ok: true, cards: [] }, 503)).pendingCards(), undefined);
+  assert.equal(await overviewOf({ unreachable: "x" }, { unreachable: "ECONNREFUSED" }).pendingCards(), undefined);
+  assert.equal(await overviewOf({ unreachable: "x" }, async () => { throw new Error("x"); }).pendingCards(), undefined);
 });

@@ -2,8 +2,11 @@
 // holds with a call id is asked once, `GET /data/memory/gate?callId=`, and what the face kept for that call lands in the
 // memoryGate slice (reducers/memory-gate.js) — the gate, none on a 404 (a card raised before the gate, or an entry being
 // checked again), failed on anything else. An answered card is asked too, so what was registered for it can be drawn; an
-// answered card whose gate says nothing registered yet, and a failed read, are read again after a render (each event of the
-// session brings one), up to GATE_READS_AGAIN times, GATE_READ_AGAIN_MS apart — no timer of its own. A none stays none. The
+// answered card whose gate has lines and says nothing registered yet, and a failed read, are read again after a render (each
+// event of the session brings one, the Account's stream among them), up to GATE_READS_AGAIN times, GATE_READ_AGAIN_MS apart —
+// no timer of its own; an answered card one of whose lines says `watching` (its Account card is watched, Guard mode) is read
+// again GATE_WATCH_READ_MS apart for as long as it says so, and those reads are not counted. A none stays none, and an
+// answered gate with no lines is not read again. The
 // owner's override of a red line is posted in their own words, `POST /data/memory/gate/override`, and the card asked once
 // more so it shows the override. Nothing here answers a card: the caller does, once the override is kept.
 
@@ -24,14 +27,22 @@ export function gateOf(state, m) {
 /** How many reads may follow a card's first, and how long after the previous read the next may begin. */
 export const GATE_READS_AGAIN = 3;
 export const GATE_READ_AGAIN_MS = 2_000;
+/** How long after the previous read a card with a watching line may be read again; such reads are not counted. */
+export const GATE_WATCH_READ_MS = 5_000;
 
-const registered = gate => (Array.isArray(gate?.lines) ? gate.lines : []).some(l => typeof l?.registered === 'string' && l.registered !== '');
+const linesOf = gate => (Array.isArray(gate?.lines) ? gate.lines : []);
+const registered = gate => linesOf(gate).some(l => typeof l?.registered === 'string' && l.registered !== '');
+const watching = gate => linesOf(gate).some(l => l?.watching === true);
 
-// whether an entry is read again, by the schedule: a failed read, or an answered card whose gate says nothing registered yet,
-// at most GATE_READS_AGAIN times after the first, each GATE_READ_AGAIN_MS after the one before; `wait` when it will be, later
+// whether an entry is read again, by the schedule: `watch` for an answered card one of whose lines says its Account card is
+// watched - every GATE_WATCH_READ_MS, uncounted, for as long as it says so; `due` for a failed read, or an answered card
+// whose gate has lines and says nothing registered yet - at most GATE_READS_AGAIN times after the first, each
+// GATE_READ_AGAIN_MS after the one before; `no` for anything else, an answered gate with no lines among them
 function againOf(entry, m) {
-  const ready = entry?.status === 'ready' && entry.busy !== true && !!m.answer && !registered(entry.gate);
-  if (!(entry?.status === 'failed' || ready)) return 'no';
+  if (entry?.status === 'failed') return (entry.again ?? 0) >= GATE_READS_AGAIN ? 'no' : 'due';
+  if (!(entry?.status === 'ready' && entry.busy !== true && !!m.answer)) return 'no';
+  if (watching(entry.gate)) return 'watch';
+  if (linesOf(entry.gate).length === 0 || registered(entry.gate)) return 'no';
   return (entry.again ?? 0) >= GATE_READS_AGAIN ? 'no' : 'due';
 }
 
@@ -47,9 +58,11 @@ function wanted(state, now) {
       if (callId === null || out.has(callId)) continue;
       if (!Object.hasOwn(kept, callId)) { out.set(callId, 0); continue; }
       const entry = kept[callId];
-      if (againOf(entry, m) !== 'due') continue;
-      if (typeof entry.at === 'number' && now - entry.at < GATE_READ_AGAIN_MS) { waits = true; continue; }
-      out.set(callId, (entry.again ?? 0) + 1);
+      const again = againOf(entry, m);
+      if (again === 'no') continue;
+      const gap = again === 'watch' ? GATE_WATCH_READ_MS : GATE_READ_AGAIN_MS;
+      if (typeof entry.at === 'number' && now - entry.at < gap) { waits = true; continue; }
+      out.set(callId, (entry.again ?? 0) + (again === 'watch' ? 0 : 1));
     }
   }
   return { reads: [...out], waits };
@@ -87,10 +100,11 @@ export function startMemoryGate({ store, getJson, postJson, now = Date.now }) {
     const s = store.get();
     if (seen && seen[0] === s.conversations && seen[1] === s.memoryGate) return;
     const { reads, waits } = wanted(s, now());
-    seen = waits ? null : [s.conversations, s.memoryGate];
     // every read held in flight before the first dispatch: that dispatch renders, the render calls ensure() again, and the
     // cards this pass has not reached yet must not be asked twice
     const mine = reads.filter(([callId]) => !inFlight.has(callId));
+    // a wanted read left out as in flight is wanted again once that read ends: the scan is not skipped meanwhile
+    seen = waits || mine.length < reads.length ? null : [s.conversations, s.memoryGate];
     for (const [callId] of mine) inFlight.add(callId);
     await Promise.all(mine.map(r => read(r).finally(() => inFlight.delete(r[0]))));
   }

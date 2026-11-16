@@ -5,9 +5,9 @@
  * A check reads the call's arguments into validated lines (src/memory-order.ts `gateOrdersOf`); a call the gate does
  * not check is kept as `not checked`, with why, and the memory is not opened. Otherwise, on one clock for the whole
  * check: the memory is opened; then, for every line together, the venue (`paper` is the Account's one paper venue),
- * the position and the instrument's kind under {@link GATE_ACCOUNT_MS}; the price facts under {@link GATE_FACTS_MS}
- * when a market was placed, each of their two reads asked under {@link GATE_FACT_READ_MS} (src/memory-facts.ts); then the recall, as {@link FACE_MEMORY_NAME}, with whatever is left
- * of {@link GATE_CHECK_MS}. The recall is asked only the line's validated fields and the face's own facts: nothing of
+ * the position (read fresh) and the instrument's kind under {@link GATE_ACCOUNT_MS}; the price facts under
+ * {@link GATE_FACTS_MS} when a market was placed, each of their two reads asked under {@link GATE_FACT_READ_MS}
+ * (src/memory-facts.ts); then the recall, as {@link FACE_MEMORY_NAME}, with whatever is left of {@link GATE_CHECK_MS}. The recall is asked only the line's validated fields and the face's own facts: nothing of
  * the model's arguments is passed on as text, and a fact the model supplied is not carried over. A read that loses
  * its race is left to finish and ignored; the kept view never changes once the check settles.
  *
@@ -33,12 +33,14 @@
  * came - one still running then is dropped, so a read a fill could have reached is never used - and otherwise the
  * position the check read stands in, when it read one. The line is written once the seat's result says it was
  * placed, as the one action that position settles - or nothing, with why, when there is no position or it settles
- * none, or when the order is neither a market nor a limit order (a conditional order's approval is no sale yet). A
- * line the seat
- * answers with the Account's card (Guard mode) is watched through the Account's overview every
- * {@link GATE_WATCH_EVERY_MS} until that card is answered, or {@link GATE_WATCH_GRACE_MS} past its expiry; approved there with its release refused,
- * nothing is written. A line not
- * registered says why on the card and in one log line. Each call is registered once; nothing is kept across a
+ * none, or when the order is neither a market nor a limit order (a conditional order's approval is no sale yet).
+ *
+ * A line the seat answers with the Account's card (Guard mode) says `watching` while one poller watches every such
+ * card: each {@link GATE_WATCH_EVERY_MS} it reads the Account's pending cards through the account read's cache, and only
+ * when a watched card has left them - or they could not be read - the Account's overview, once for every card that
+ * left, for its status and outcome. A card still pending costs no overview read. Each line is watched until its card
+ * is answered, or {@link GATE_WATCH_GRACE_MS} past its expiry; approved there with its release refused, nothing is
+ * written. A line not registered says why on the card and in one log line. Each call is registered once; nothing is kept across a
  * restart, and after `dispose` nothing more is read or written.
  * @module
  */
@@ -84,6 +86,8 @@ export interface GateLine {
   lessons: GateLesson[]; lessonsMore: number; untold: GateUntold[]; untoldMore: number; fault?: string;
   /** What was written for this line, or why nothing was. */
   registered?: string;
+  /** Set while the line's Account card is watched (Guard mode), until its ending settles. */
+  watching?: true;
 }
 
 /** What is kept for a call. */
@@ -101,10 +105,14 @@ export interface GateAccount {
   paperVenue(): Promise<string | undefined>;
   position(venue: string, symbol: string): Promise<Position | null | undefined>;
   kind(venue: string, symbol: string): Promise<string | undefined>;
-  /** The Account's card `cardId` as its overview lists it - `refused` when it was approved but its release did not
-   * pass; undefined when it is not there or not read. */
-  approval(cardId: string): Promise<"pending" | "approved" | "refused" | "rejected" | undefined>;
+  /** The ids of the Account's cards still pending, from its account read (cached); undefined when it was not read. */
+  pendingCards(): Promise<Set<string> | undefined>;
+  /** The Account's cards `ids` as its overview lists them, by id; a card not listed, or not read, is absent. */
+  approvals(ids: readonly string[]): Promise<Map<string, CardStatus>>;
 }
+
+/** An Account card's status: `refused` is a card it approved whose release did not pass. */
+export type CardStatus = "pending" | "approved" | "refused" | "rejected";
 
 export interface MemoryGateDeps {
   open: () => Promise<MemoryStanding>;
@@ -173,6 +181,7 @@ const SEAT_REFUSED = "the seat refused the order";
 const SEAT_UNREADABLE = "the seat's answer could not be read";
 const CARD_EXPIRED = "the Account's card expired";
 const CARD_REFUSED = "the Account approved the card but the order did not pass";
+const CARD_CLOSED = "the Account's card was declined or expired";
 const CARD_UNREAD = "the Account's card could not be read";
 
 /** A card id the seat's answer may give; a decision id the memory's decisions may hold. */
@@ -199,6 +208,9 @@ interface Entry {
 /** A line's position read again as Gate 2's approval lands: `read` once a readable answer came, while it still counts;
  * `closed` once the seat's result was taken, after which an answer is ignored; `end` ends the read's race. */
 interface Reread { read: boolean; value?: Position | null; closed: boolean; end?: () => void }
+
+/** A line waiting on the Account's card: the card, its expiry when the seat gave one, and when the watch gives up. */
+interface Watched { entry: Entry; i: number; card: string; expiresAt?: number; deadline: number }
 
 /** A plain object, not an array and not null. */
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -303,7 +315,7 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
   const entries = new Map<string, Entry>();
   /** Every race still running, by the function that ends it as late. */
   const running = new Set<() => void>();
-  /** Every registration in flight; every watch's next poll, by its timer. */
+  /** Every registration in flight; the poller's next tick, by its timer, while one is set. */
   const flights = new Set<Promise<void>>();
   const watches = new Set<unknown>();
   let disposed = false;
@@ -560,42 +572,89 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     await write(entry, line, input, true);
   }
 
-  /** Watches the Account's card `card` for line `i`, a poll every GATE_WATCH_EVERY_MS until it is answered, or until
-   * GATE_WATCH_GRACE_MS past its expiry (past the first poll's time when it gave none). Approved there, the approval;
-   * rejected before its expiry, the Account's decline; rejected at or after it, an expiry - the Account closes an
-   * expired card as rejected. */
+  /** Every line waiting on the Account's card; the poller's next tick, while one is set; whether a tick's reads run. */
+  const watched = new Set<Watched>();
+  let tick: unknown;
+  let polling = false;
+
+  /** Watches the Account's card `card` for line `i`, through the one poller, until the card is answered or until
+   * GATE_WATCH_GRACE_MS past its expiry - past the seat's result, when it gave none. The line says `watching` until
+   * its ending settles. Approved there, the approval; approved with its release refused, nothing; rejected before its
+   * expiry, the Account's decline; rejected at or after it, an expiry - the Account closes an expired card as
+   * rejected; rejected with no expiry given, declined or expired, which cannot be told apart. */
   function watch(entry: Entry, i: number, card: string, expiresAt: number | undefined): void {
     const line = entry.lines[i];
-    if (line === undefined) return;
+    if (line === undefined || disposed) return;
+    line.view.watching = true;
     const deadline = (expiresAt ?? now()) + GATE_WATCH_GRACE_MS;
-    const poll = async (): Promise<void> => {
-      const read = await within(() => deps.account.approval(card), GATE_WATCH_EVERY_MS);
-      if (disposed) return;
-      const status = valueOf(read);
-      if (status === "approved") return approved(entry, i);
-      if (status === "refused") return notRegistered(entry, line, CARD_REFUSED);
-      if (status === "rejected") {
-        if (expiresAt !== undefined && now() < expiresAt) return declined(entry, line, ACCOUNT_DECLINED);
-        return notRegistered(entry, line, CARD_EXPIRED);
-      }
-      if (now() >= deadline) return notRegistered(entry, line, status === "pending" ? CARD_EXPIRED : CARD_UNREAD);
-      next();
+    watched.add({ entry, i, card, ...(expiresAt === undefined ? {} : { expiresAt }), deadline });
+    schedule();
+  }
+
+  /** Sets the poller's next tick, GATE_WATCH_EVERY_MS from now, while a line is watched and no tick is set or running. */
+  function schedule(): void {
+    if (disposed || tick !== undefined || polling || watched.size === 0) return;
+    const fire = (): void => {
+      watches.delete(tick);
+      tick = undefined;
+      polling = true;
+      track(async () => {
+        try {
+          await poll();
+        } finally {
+          polling = false;
+          schedule();
+        }
+      });
     };
-    const next = (): void => {
-      if (disposed) return;
-      let timer: unknown;
-      const fire = (): void => {
-        watches.delete(timer);
-        track(poll);
-      };
+    try {
+      tick = setTimer(fire, GATE_WATCH_EVERY_MS);
+      watches.add(tick);
+    } catch {
+      tick = undefined;
+      for (const w of [...watched]) ended(w, (line) => notRegistered(w.entry, line, CARD_UNREAD));
+    }
+  }
+
+  /** One tick: the Account's pending cards, from its cached account read; then, only when a watched card is no longer
+   * among them - or the list could not be read - one read of the overview, shared by every card that left. */
+  async function poll(): Promise<void> {
+    const pending = valueOf(await within(() => deps.account.pendingCards(), GATE_WATCH_EVERY_MS));
+    if (disposed) return;
+    const stillPending = (card: string): boolean => pending instanceof Set && pending.has(card);
+    const left = [...new Set([...watched].map((w) => w.card).filter((card) => !stillPending(card)))];
+    const statuses = left.length === 0 ? undefined : valueOf(await within(() => deps.account.approvals(left), GATE_WATCH_EVERY_MS));
+    if (disposed) return;
+    for (const w of [...watched]) {
+      settleWatch(w, stillPending(w.card) ? "pending" : statuses instanceof Map ? statuses.get(w.card) : undefined);
+    }
+  }
+
+  /** `w`'s card read as `status`: an ending, or none yet. */
+  function settleWatch(w: Watched, status: CardStatus | undefined): void {
+    const { entry, i, expiresAt } = w;
+    if (status === "approved") return ended(w, () => approved(entry, i));
+    if (status === "refused") return ended(w, (line) => notRegistered(entry, line, CARD_REFUSED));
+    if (status === "rejected") {
+      if (expiresAt === undefined) return ended(w, (line) => notRegistered(entry, line, CARD_CLOSED));
+      if (now() < expiresAt) return ended(w, (line) => declined(entry, line, ACCOUNT_DECLINED));
+      return ended(w, (line) => notRegistered(entry, line, CARD_EXPIRED));
+    }
+    if (now() >= w.deadline) ended(w, (line) => notRegistered(entry, line, status === "pending" ? CARD_EXPIRED : CARD_UNREAD));
+  }
+
+  /** `w` is watched no more: `then` runs for its line as a registration, and the line says `watching` until it settles. */
+  function ended(w: Watched, then: (line: LineEntry) => Promise<void> | void): void {
+    watched.delete(w);
+    const line = w.entry.lines[w.i];
+    if (line === undefined) return;
+    track(async () => {
       try {
-        timer = setTimer(fire, GATE_WATCH_EVERY_MS);
-        watches.add(timer);
-      } catch {
-        notRegistered(entry, line, CARD_UNREAD);
+        await then(line);
+      } finally {
+        delete line.view.watching;
       }
-    };
-    next();
+    });
   }
 
   return {
@@ -732,6 +791,8 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
         }
       }
       watches.clear();
+      watched.clear();
+      tick = undefined;
       for (const late of [...running]) late();
     },
   };
@@ -751,9 +812,10 @@ function okBody(answer: UpstreamAnswer | undefined): Record<string, unknown> | u
 const positiveOf = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
 
 /** `GateAccount` over the Account proxy's reads: `position` asks fresh every time, past the positions route's TTL, so a
- * fill a moment ago is never read as the position before it; the listing's kind may ride the cache. `approval` reads the overview's `approvals`: an approved card whose
- * `outcome` - what its release produced - is a refusal (`ok: false`) is `refused`. Shape only: nothing of the outcome
- * is copied. */
+ * fill a moment ago is never read as the position before it; the listing's kind may ride the cache. `pendingCards` is
+ * the `cards` the account read lists - the Account lists its pending cards alone there - through the reader's cache.
+ * `approvals` reads the overview's `approvals` once for every id asked: an approved card whose `outcome` - what its
+ * release produced - is a refusal (`ok: false`) is `refused`. Shape only: nothing of the outcome is copied. */
 export function gateAccount(reads: {
   reader: AccountReader; positions: UpstreamRouteRead; market: UpstreamRouteRead; overview: () => Promise<UpstreamAnswer>;
 }): GateAccount {
@@ -788,13 +850,30 @@ export function gateAccount(reads: {
       const kind = body?.ok === true ? (body.market as { kind?: unknown } | null | undefined)?.kind : undefined;
       return typeof kind === "string" ? kind : undefined;
     },
-    async approval(cardId) {
+    async pendingCards() {
+      const cards = okBody(await read(() => reads.reader.read()))?.cards;
+      if (!Array.isArray(cards)) return undefined;
+      const ids = new Set<string>();
+      for (const card of cards) {
+        const id = (card as { id?: unknown } | null)?.id;
+        if (typeof id === "string") ids.add(id);
+      }
+      return ids;
+    },
+    async approvals(ids) {
+      const out = new Map<string, CardStatus>();
       const approvals = okBody(await read(() => reads.overview()))?.approvals;
-      if (!Array.isArray(approvals)) return undefined;
-      const card = approvals.find((a) => (a as { id?: unknown } | null)?.id === cardId) as { status?: unknown; outcome?: unknown } | undefined;
-      const status = card?.status;
-      if (status === "approved" && isRecord(card?.outcome) && card.outcome.ok === false) return "refused";
-      return status === "pending" || status === "approved" || status === "rejected" ? status : undefined;
+      if (!Array.isArray(approvals)) return out;
+      const wanted = new Set(ids);
+      for (const item of approvals) {
+        const card = item as { id?: unknown; status?: unknown; outcome?: unknown } | null;
+        const id = card?.id;
+        if (typeof id !== "string" || !wanted.has(id) || out.has(id)) continue;
+        const status = card?.status;
+        if (status === "approved" && isRecord(card?.outcome) && card.outcome.ok === false) out.set(id, "refused");
+        else if (status === "pending" || status === "approved" || status === "rejected") out.set(id, status);
+      }
+      return out;
     },
   };
 }

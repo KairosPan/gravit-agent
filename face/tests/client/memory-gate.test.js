@@ -2,7 +2,7 @@
 // memoryGate slice; the owner's override of a red line posted in their words.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startMemoryGate, gateOf } from '../../client/js/host/memory-gate.js';
+import { startMemoryGate, gateOf, GATE_WATCH_READ_MS } from '../../client/js/host/memory-gate.js';
 import { createStore } from '../../client/js/store.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -202,6 +202,94 @@ test('a failed read retried that lands its gate is ready; while a read again run
   assert.equal(failed.memoryGate.c1.status, 'ready');
   assert.equal(failed.memoryGate.c1.again, 2);
   assert.equal(failed.memoryGate.c1.busy, undefined);
+});
+
+// ---- a line whose Account card the face watches (Guard mode): read again 5,000 ms apart for as long as it watches,
+// and those reads are not counted against the three
+const watchedGate = (watching, registered) => ({ ...GATE, callId: 'c1', lines: [{ order: 'buy 1 NVDA', lessons: [], ...(watching ? { watching: true } : {}), ...(registered ? { registered } : {}) }] });
+
+test('an answered card with a watching line is read again 5,000 ms apart, uncounted, until the line stops watching', async () => {
+  assert.equal(GATE_WATCH_READ_MS, 5_000);
+  const store = storeOf([card('ev-1', 'c1', { answer: 'approved' })]);
+  let clock = NOW;
+  const asked = [];
+  let answer = () => watchedGate(true);
+  const getJson = async path => { asked.push(path); return { ok: true, gate: answer() }; };
+  const gate = startMemoryGate({ store, getJson, postJson: async () => ({ ok: true }), now: () => clock });
+  await gate.ensure();
+  assert.equal(asked.length, 1);
+  for (const step of [2_000, 2_999]) { clock += step; await gate.ensure(); }
+  assert.equal(asked.length, 1, 'inside 5,000 ms of the last read: nothing');
+  for (let i = 0; i < 5; i++) { clock += 1 + (i === 0 ? 0 : 4_999); await gate.ensure(); }
+  assert.equal(asked.length, 6, 'five reads again while it watches: more than three');
+  assert.equal(store.get().memoryGate.c1.again, 0, 'none of them counted');
+  answer = () => watchedGate(false);
+  clock += 5_000;
+  await gate.ensure();
+  assert.equal(asked.length, 7, 'the read that finds the watch over');
+  for (let i = 0; i < 3; i++) { clock += 2_000; await gate.ensure(); }
+  assert.equal(asked.length, 10, 'nothing registered yet: the three counted reads follow');
+  clock += 60_000;
+  await gate.ensure();
+  assert.equal(asked.length, 10);
+});
+
+test('a watching line that turns registered: one more read, then none', async () => {
+  const store = storeOf([card('ev-1', 'c1', { answer: 'approved' })]);
+  let clock = NOW;
+  const asked = [];
+  const getJson = async path => { asked.push(path); return { ok: true, gate: asked.length === 1 ? watchedGate(true) : watchedGate(false, 'registered: buy') }; };
+  const gate = startMemoryGate({ store, getJson, postJson: async () => ({ ok: true }), now: () => clock });
+  await gate.ensure();
+  clock += 5_000;
+  await gate.ensure();
+  assert.equal(asked.length, 2);
+  clock += 60_000;
+  await gate.ensure();
+  assert.equal(asked.length, 2);
+});
+
+test('an answered gate with no lines (not connected, not checked) is not read again', async () => {
+  const store = storeOf([card('ev-1', 'c1', { answer: 'approved' }), card('ev-2', 'c2', { answer: 'rejected' })]);
+  let clock = NOW;
+  const asked = [];
+  const getJson = async path => {
+    asked.push(path);
+    return { ok: true, gate: path.endsWith('c1') ? { ...GATE, callId: 'c1', state: 'not connected', words: 'no memory here', lines: [] } : { ...GATE, callId: 'c2', state: 'not checked', words: 'not checked for this tool', lines: [] } };
+  };
+  const gate = startMemoryGate({ store, getJson, postJson: async () => ({ ok: true }), now: () => clock });
+  await gate.ensure();
+  for (let i = 0; i < 4; i++) { clock += 2_000; await gate.ensure(); }
+  assert.equal(asked.length, 2, 'each read once');
+});
+
+test('a read again slower than 2,000 ms does not push its next read back to the next state change', async () => {
+  const store = storeOf([card('ev-1', 'c1')]);
+  let clock = NOW;
+  const asked = [];
+  let release = null;
+  const getJson = path => {
+    asked.push(path);
+    if (asked.length === 2) return new Promise((_, reject) => { release = () => reject(failWith(500)); });
+    return Promise.reject(failWith(500));
+  };
+  const gate = startMemoryGate({ store, getJson, postJson: async () => ({ ok: true }), now: () => clock });
+  const renders = [];
+  store.subscribe(() => { renders.push(gate.ensure()); });
+  await gate.ensure();
+  await Promise.all(renders);
+  assert.equal(store.get().memoryGate.c1.status, 'failed');
+  clock += 2_000;
+  const slow = gate.ensure();
+  await settle();
+  assert.equal(asked.length, 2, 'the read again is out');
+  clock += 3_000;
+  release();
+  await slow;
+  await Promise.all(renders);
+  assert.equal(store.get().memoryGate.c1.status, 'failed');
+  await gate.ensure();
+  assert.equal(asked.length, 3, 'the next ensure reads again, 3,000 ms after the slow read began, with no state change between');
 });
 
 // a gate read's own dispatch renders, and the render calls ensure() again (app.js): no card is asked twice by that

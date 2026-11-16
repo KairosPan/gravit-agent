@@ -113,7 +113,8 @@ test("the order card asks the memory: a red line refused, an override and a decl
       paperVenue: async () => VENUE,
       position: async () => null,
       kind: async () => "stock",
-      approval: async () => undefined,
+      pendingCards: async () => undefined,
+      approvals: async () => new Map(),
     };
     gate = createMemoryGate({
       open,
