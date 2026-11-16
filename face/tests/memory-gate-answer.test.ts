@@ -9,6 +9,7 @@ import type { Memory, RecallAnswer } from "gravit-memory";
 import {
   GATE_KEPT,
   GATE_OWN_CALL_MS,
+  GATE_POSITION_FRESH_MS,
   GATE_POSITION_MS,
   GATE_WATCH_EVERY_MS,
   GATE_WATCH_GRACE_MS,
@@ -363,6 +364,33 @@ test("(d) the approval's read never answers: the check's position, once GATE_POS
   assert.equal(comes.clock.live(), 0, "the result ended the read and cleared its timer");
   assert.equal(comes.clock.now(), at, "nothing waited on the read");
   assert.equal(comes.asked.records[0].input.action, "buy");
+});
+
+test("(f) the check's position stands in only when read at most GATE_POSITION_FRESH_MS before the approval arrived", async () => {
+  assert.equal(GATE_POSITION_FRESH_MS, 60_000);
+  for (const [wait, registered] of [[GATE_POSITION_FRESH_MS, "registered: buy"], [GATE_POSITION_FRESH_MS + 1, POSITION_UNREAD]] as const) {
+    const r = rig();
+    await r.check();
+    await r.clock.advance(wait);
+    r.state.position = never;
+    r.gate.answered("c-1", "allowed-once", "s-1");
+    r.gate.settled("c-1", PLACED, "s-1");
+    await r.idle();
+    assert.deepEqual(r.registered(), [registered], `the card waited ${wait} ms`);
+    assert.equal(r.asked.records.length, registered === POSITION_UNREAD ? 0 : 1);
+  }
+});
+
+test("(g) an old check's position is not used, but the approval's own read still is", async () => {
+  const r = rig();
+  await r.check();
+  await r.clock.advance(GATE_POSITION_FRESH_MS * 10);
+  r.state.position = async () => LONG_10;
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  await r.clock.flush();
+  r.gate.settled("c-1", PLACED, "s-1");
+  await r.idle();
+  assert.deepEqual(r.registered(), ["registered: add"]);
 });
 
 test("(e) a batch: each line by the same rule - one read answered before the result, one after", async () => {
