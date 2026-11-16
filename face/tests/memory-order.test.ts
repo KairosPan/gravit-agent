@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  approvedAction, consideringOf, declinedAction, GATE_LINES_MAX, gateOrdersOf, marketOfKind, MEMORY_SYMBOL, memorySymbol,
+  approvedAction, conditionalOrder, consideringOf, declinedAction, GATE_LINES_MAX, gateOrdersOf, marketOfKind, MEMORY_SYMBOL, memorySymbol,
   orderWords, SHOWN_SYMBOL, VENUE_ID, type OrderLine, type Position,
 } from "../src/memory-order.ts";
 
@@ -113,6 +113,28 @@ test("gateOrdersOf: the batch and close rows - empty legs, six legs with a malfo
   }, "a close's limitPrice is dropped");
 });
 
+test("gateOrdersOf: the order's type is one of the seat's five, and a stop price a positive number; anything else is unreadable", () => {
+  for (const orderType of ["market", "limit", "stop", "stop_limit", "trailing_stop"]) {
+    const got = gateOrdersOf(O, { ...good, orderType });
+    assert.ok(got.kind === "lines", orderType);
+    assert.equal(got.lines[0]!.orderType, orderType);
+  }
+  assert.deepEqual(gateOrdersOf(O, { ...good, orderType: "stop", stopPrice: 150 }), {
+    kind: "lines", lines: [{ venue: "paper-1", symbol: "NVDA", side: "buy", close: false, qty: 10, limitPrice: 183, orderType: "stop", stopPrice: 150 }],
+  });
+  const legs = gateOrdersOf(B, { legs: [{ ...good, orderType: "stop_limit", stopPrice: 180 }] });
+  assert.ok(legs.kind === "lines");
+  assert.deepEqual([legs.lines[0]!.orderType, legs.lines[0]!.stopPrice], ["stop_limit", 180]);
+  const cases: Array<[string, unknown]> = [
+    ["orderType Stop", { ...good, orderType: "Stop" }], ["orderType stop-limit", { ...good, orderType: "stop-limit" }],
+    ["orderType oco", { ...good, orderType: "oco" }], ["orderType 7", { ...good, orderType: 7 }], ["orderType null", { ...good, orderType: null }],
+    ["stopPrice 0", { ...good, stopPrice: 0 }], ["stopPrice -1", { ...good, stopPrice: -1 }], ["stopPrice a string", { ...good, stopPrice: "150" }],
+    ["stopPrice NaN", { ...good, stopPrice: Number.NaN }],
+  ];
+  for (const [what, args] of cases) assert.deepEqual(gateOrdersOf(O, args), UNREAD, what);
+  assert.deepEqual(gateOrdersOf(B, { legs: [good, { ...good, orderType: "iceberg" }] }), UNREAD, "a batch leg of no seat type");
+});
+
 test("gateOrdersOf: a tool it does not check is not checked", () => {
   for (const name of ["mcp__account__portfolio_order", "mcp__account__portfolio_live_amend", "mcp__account__portfolio_pay", "web_fetch"]) {
     assert.deepEqual(gateOrdersOf(name, good), { kind: "none", why: "not checked for this tool" }, name);
@@ -173,9 +195,31 @@ test("orderWords: from the line's own fields alone", () => {
   assert.equal(orderWords(line({ leg: 2, qty: 10, limitPrice: 183 })), "buy 10 NVDA · limit 183 · paper-1");
 });
 
+test("orderWords: an order's type and stop, in the card notice's manner - a price that names the type says it once", () => {
+  assert.equal(orderWords(line({ qty: 10, orderType: "market" })), "buy 10 NVDA · paper-1");
+  assert.equal(orderWords(line({ qty: 10, orderType: "limit", limitPrice: 183 })), "buy 10 NVDA · limit 183 · paper-1");
+  assert.equal(orderWords(line({ side: "sell", qty: 10, orderType: "stop", stopPrice: 150 })), "sell 10 NVDA · stop 150 · paper-1");
+  assert.equal(orderWords(line({ side: "sell", qty: 10, orderType: "stop" })), "sell 10 NVDA · stop · paper-1");
+  assert.equal(
+    orderWords(line({ side: "sell", qty: 10, orderType: "stop_limit", stopPrice: 150, limitPrice: 149 })),
+    "sell 10 NVDA · stop-limit · stop 150 · limit 149 · paper-1",
+  );
+  assert.equal(orderWords(line({ side: "sell", qty: 10, orderType: "trailing_stop" })), "sell 10 NVDA · trailing-stop · paper-1");
+  assert.equal(orderWords(line({ usd: 500, orderType: "stop", stopPrice: 190 })), "buy $500 of NVDA · stop 190 · paper-1");
+});
+
+test("conditionalOrder: neither a market nor a limit order", () => {
+  assert.equal(conditionalOrder(line({})), false);
+  assert.equal(conditionalOrder(line({ orderType: "market" })), false);
+  assert.equal(conditionalOrder(line({ orderType: "limit", limitPrice: 1 })), false);
+  for (const orderType of ["stop", "stop_limit", "trailing_stop"] as const) assert.equal(conditionalOrder(line({ orderType })), true, orderType);
+});
+
 test("orderWords: no character outside the order words' set", () => {
   const allowed = /^[A-Za-z0-9 ._:\/^=$·-]*$/;
   const lines: OrderLine[] = [
+    line({ side: "sell", qty: 1, orderType: "stop_limit", stopPrice: 1e21, limitPrice: 1e-7 }),
+    line({ side: "sell", qty: 1, orderType: "trailing_stop" }),
     line({ qty: 10, limitPrice: 183 }),
     line({ symbol: "BTC/USD", venue: "okx:spot", side: "sell", usd: 0.5 }),
     line({ symbol: "^GSPC", qty: 1e21, limitPrice: 1e-7 }),

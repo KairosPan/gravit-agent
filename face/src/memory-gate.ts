@@ -33,7 +33,8 @@
  * came - one still running then is dropped, so a read a fill could have reached is never used - and otherwise the
  * position the check read stands in, when it read one. The line is written once the seat's result says it was
  * placed, as the one action that position settles - or nothing, with why, when there is no position or it settles
- * none. A line the seat
+ * none, or when the order is neither a market nor a limit order (a conditional order's approval is no sale yet). A
+ * line the seat
  * answers with the Account's card (Guard mode) is watched through the Account's overview every
  * {@link GATE_WATCH_EVERY_MS} until that card is answered, or {@link GATE_WATCH_GRACE_MS} past its expiry; approved there with its release refused,
  * nothing is written. A line not
@@ -45,7 +46,7 @@ import type { RecallAnswer } from "gravit-memory";
 import type { AccountReader } from "./account-proxy.ts";
 import { heldFacts, type Facts } from "./memory-facts.ts";
 import {
-  approvedAction, consideringOf, declinedAction, gateOrdersOf, marketOfKind, memorySymbol, orderWords, VENUE_ID,
+  approvedAction, conditionalOrder, consideringOf, declinedAction, gateOrdersOf, marketOfKind, memorySymbol, orderWords, VENUE_ID,
   type Action, type OrderLine, type Position,
 } from "./memory-order.ts";
 import { AGENT_MEMORY_NAME, FACE_MEMORY_NAME, memoryFaultWords, type MemoryStanding } from "./memory.ts";
@@ -167,6 +168,7 @@ const PRICE_SOURCE = "the order card's limit price";
 /** Why nothing was registered for a line, as `not registered: <why>` on the card and in the log. */
 const POSITION_UNREAD = "the position could not be read - tell Gravit what you decided";
 const SELLS_UNSAID = "the order does not say how much of the position it sells - tell Gravit what you decided";
+const CONDITIONAL = "a conditional order - tell Gravit when it fills";
 const SEAT_REFUSED = "the seat refused the order";
 const SEAT_UNREADABLE = "the seat's answer could not be read";
 const CARD_EXPIRED = "the Account's card expired";
@@ -531,12 +533,17 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     return write(entry, line, recordOf(entry, line, declinedAction(line.order), lead), false);
   }
 
-  /** An approval of line `i`, the seat having placed it: its action from the position fixed when the seat's result was
-   * taken, nothing when there is none or it does not settle one; its price, its size, and the owner's override's words. */
+  /** An approval of line `i`, the seat having placed it: nothing for a conditional order (a resting stop is not a
+   * sale); else its action from the position fixed when the seat's result was taken, nothing when there is none or it
+   * does not settle one; its price, its size, and the owner's override's words. */
   async function approved(entry: Entry, i: number): Promise<void> {
     const line = entry.lines[i];
     const position = entry.positions?.[i];
     if (disposed || line === undefined) return;
+    if (conditionalOrder(line.order)) {
+      notRegistered(entry, line, CONDITIONAL);
+      return;
+    }
     const action = approvedAction(line.order, position);
     if (action === undefined) {
       notRegistered(entry, line, position === undefined ? POSITION_UNREAD : SELLS_UNSAID);

@@ -371,6 +371,48 @@ test("Guard mode: the seat's pending result is the moment - a read answering aft
   assert.deepEqual(r.asked.records, [{ by: "gravit-face", input: APPROVED_BUY }]);
 });
 
+/* A conditional order: neither a market nor a limit order. */
+
+const STOP_SELL = { venue: "paper-1", symbol: "NVDA", side: "sell", qty: 5, orderType: "stop", stopPrice: 150 };
+const CONDITIONAL = "not registered: a conditional order - tell Gravit when it fills";
+
+test("a conditional order approved and placed: nothing written, the card says to tell Gravit when it fills", async () => {
+  for (const args of [STOP_SELL, { ...STOP_SELL, orderType: "stop_limit", limitPrice: 149 }, { ...STOP_SELL, orderType: "trailing_stop", stopPrice: undefined }]) {
+    const r = rig();
+    r.state.position = async () => ({ side: "long", qty: 10 });
+    await r.check(args);
+    r.gate.answered("c-1", "allowed-once", "s-1");
+    r.gate.settled("c-1", PLACED, "s-1");
+    await r.idle();
+    assert.equal(r.asked.records.length, 0, String(args.orderType));
+    assert.deepEqual(r.registered(), [CONDITIONAL], String(args.orderType));
+    assert.equal(r.asked.logs.length, 1);
+  }
+});
+
+test("a conditional order approved at the Account's card in Guard mode: nothing written either", async () => {
+  const r = rig();
+  await r.check(STOP_SELL);
+  r.gate.answered("c-1", "allowed-once", "s-1");
+  r.gate.settled("c-1", PENDING, "s-1");
+  r.state.approval = async () => "approved";
+  await r.clock.advance(GATE_WATCH_EVERY_MS);
+  await r.idle();
+  assert.equal(r.asked.records.length, 0);
+  assert.deepEqual(r.registered(), [CONDITIONAL]);
+});
+
+test("a conditional order declined: registered as any decline, its words naming the stop", async () => {
+  const r = rig();
+  await r.check(STOP_SELL);
+  r.gate.answered("c-1", "rejected", "s-1");
+  await r.idle();
+  assert.equal(r.asked.records.length, 1);
+  assert.equal(r.asked.records[0].input.action, "hold");
+  assert.equal(r.asked.records[0].input.thesis, "Declined Gravit's order card: sell 5 NVDA · stop 150 · paper-1.");
+  assert.deepEqual(r.registered(), ["registered: hold"]);
+});
+
 test("a usd sell of a long: no single action, nothing written, the card says why", async () => {
   const r = rig();
   r.state.position = async () => ({ side: "long", qty: 10 });

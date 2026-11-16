@@ -5,7 +5,7 @@
  *
  * Every argument is the model's and is read as hostile: a line keeps only the fields of {@link OrderLine}, each one
  * that passed its shape check - a venue id of {@link VENUE_ID}, a symbol of {@link SHOWN_SYMBOL}, a side of `buy` or
- * `sell`, numbers finite and above zero. The venue and the symbol are first read as the seat and the Account read
+ * `sell`, an order type of the seat's {@link ORDER_TYPES}, numbers finite and above zero. The venue and the symbol are first read as the seat and the Account read
  * them: `paper` in any case and spacing is `paper`, the symbol trimmed. One field that fails makes the whole order
  * unreadable; no argument is passed on as text.
  *
@@ -17,6 +17,10 @@ import { SYMBOL_RE } from "./symbols.ts";
 /** What a decision in the memory says was done. */
 export type Action = "buy" | "add" | "trim" | "sell" | "short" | "cover" | "hold" | "pass";
 
+/** The order types the seat takes (account/src/portfolio/mcp.ts `liveOrderFields`). */
+export const ORDER_TYPES = ["market", "limit", "stop", "stop_limit", "trailing_stop"] as const;
+export type OrderType = (typeof ORDER_TYPES)[number];
+
 /** One order of a seat write, its fields checked. `leg` is a batch's 1-based leg; `close` marks a close (a sell). */
 export interface OrderLine {
   leg?: number;
@@ -27,6 +31,9 @@ export interface OrderLine {
   qty?: number;
   usd?: number;
   limitPrice?: number;
+  /** The seat's type, when the order names one; none is a market order. */
+  orderType?: OrderType;
+  stopPrice?: number;
 }
 
 /** A seat write's lines, or why there are none. */
@@ -99,11 +106,16 @@ function orderLineOf(args: unknown, leg?: number): OrderLine | undefined {
   const qty = amountOf(args.qty);
   const usd = amountOf(args.usd);
   const limitPrice = amountOf(args.limitPrice);
-  if (qty === false || usd === false || limitPrice === false) return undefined;
+  const stopPrice = amountOf(args.stopPrice);
+  if (qty === false || usd === false || limitPrice === false || stopPrice === false) return undefined;
+  const orderType = args.orderType;
+  if (orderType !== undefined && !(ORDER_TYPES as readonly unknown[]).includes(orderType)) return undefined;
   const line: OrderLine = { ...(leg === undefined ? {} : { leg }), ...place, side, close: false };
   if (qty !== undefined) line.qty = qty;
   if (usd !== undefined) line.usd = usd;
   if (limitPrice !== undefined) line.limitPrice = limitPrice;
+  if (orderType !== undefined) line.orderType = orderType as OrderType;
+  if (stopPrice !== undefined) line.stopPrice = stopPrice;
   return line;
 }
 
@@ -180,7 +192,19 @@ function numberWords(n: number): string {
   return String(n).replace("+", "");
 }
 
-/** `buy 10 NVDA · limit 183 · paper-1`, from the line's own fields alone. */
+/** A conditional order: one that is neither a market nor a limit order. Its approval is not a buy or a sale yet. */
+export function conditionalOrder(line: OrderLine): boolean {
+  return line.orderType !== undefined && line.orderType !== "market" && line.orderType !== "limit";
+}
+
+/** The words of a type the order's prices do not already say, in `[a-z-]` alone. */
+const TYPE_WORDS: Readonly<Record<OrderType, string>> = {
+  market: "", limit: "", stop: "stop", stop_limit: "stop-limit", trailing_stop: "trailing-stop",
+};
+
+/** `buy 10 NVDA · limit 183 · paper-1`, `sell 10 NVDA · stop-limit · stop 150 · limit 149 · paper-1`, from the line's
+ * own fields alone. A market or a limit order names no type; a stop's own price says it is one (the card notice's
+ * manner, src/card-notice.ts); the stop is said before the limit. */
 export function orderWords(line: OrderLine): string {
   const parts: string[] = [];
   if (line.close) {
@@ -192,7 +216,12 @@ export function orderWords(line: OrderLine): string {
   } else {
     parts.push(`${line.side} ${line.symbol}`);
   }
-  if (!line.close && line.limitPrice !== undefined) parts.push(`limit ${numberWords(line.limitPrice)}`);
+  if (!line.close) {
+    const type = line.orderType === undefined ? "" : TYPE_WORDS[line.orderType];
+    if (type !== "" && !(line.orderType === "stop" && line.stopPrice !== undefined)) parts.push(type);
+    if (line.stopPrice !== undefined) parts.push(`stop ${numberWords(line.stopPrice)}`);
+    if (line.limitPrice !== undefined) parts.push(`limit ${numberWords(line.limitPrice)}`);
+  }
   parts.push(line.venue);
   return parts.join(" · ");
 }
