@@ -27,10 +27,10 @@ test('the set is the memory package\'s - the format characters (Cf), the line an
 });
 
 test('U+00AD, U+180E, U+206A and U+FFF9 are escaped; a tag character above U+FFFF is written as \\u{...} in lower-case hex', () => {
-  assert.equal(visible('a­b'), 'a\\u00adb');
-  assert.equal(visible('a᠎b'), 'a\\u180eb');
-  assert.equal(visible('a⁪b'), 'a\\u206ab');
-  assert.equal(visible('a￹b'), 'a\\ufff9b');
+  assert.equal(visible('a\u00adb'), 'a\\u00adb');
+  assert.equal(visible('a\u180eb'), 'a\\u180eb');
+  assert.equal(visible('a\u206ab'), 'a\\u206ab');
+  assert.equal(visible('a\ufff9b'), 'a\\ufff9b');
   assert.equal(visible('a\u{e0041}b'), 'a\\u{e0041}b');
   assert.equal(visible('\u{e0001}\u{e007f}'), '\\u{e0001}\\u{e007f}');
   assert.equal(visible('a\u{1f600}b'), 'a\u{1f600}b', 'an emoji is shown as it is');
