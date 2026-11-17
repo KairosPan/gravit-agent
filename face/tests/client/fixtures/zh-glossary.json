@@ -204,7 +204,7 @@
     "Noto Serif SC",
     "JetBrains Mono",
     "~/.dsh",
-    "FACE_DESK=0",
+    "FACE_DESK=0", "face/", "prices.url", "config.json",
     "ALPHA_EDGAR_USER_AGENT",
     "budget.dailyTokens",
     "standing.yml",

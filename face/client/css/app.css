@@ -858,6 +858,7 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .mp-check { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; font-size: calc(13px * var(--fs)); }
 .mp-fact { font: calc(12px * var(--fm)) var(--font-mono); overflow-wrap: anywhere; }
 .mp-def { color: var(--dim); overflow-wrap: anywhere; }
+.mp-def-who { font-weight: 600; }
 .mp-commands { display: flex; flex-direction: column; gap: 6px; }
 /* the Decisions tab: the symbol box, then the decisions under their symbol's head, a void one struck */
 .mp-decisions, .mp-waiting, .mp-health { display: flex; flex-direction: column; gap: 12px; }
@@ -886,6 +887,8 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
   .dk-cols { grid-template-columns: minmax(0, 1fr); }
   .dk-body { padding: 18px 16px 32px; }
   .mp-diff { grid-template-columns: minmax(0, 1fr); }
+  .mp-tabs { padding: 16px 16px 0; }
+  .mp-page { padding: 18px 16px 32px; }
 }
 /* a plugin's and a market's own page: the way back, the head with its keys, then the body */
 .main.plugin-page, .main.mk-page { gap: 18px; }

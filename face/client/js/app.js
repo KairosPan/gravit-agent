@@ -2152,9 +2152,12 @@ export function boot(win, host = {}) {
       store.dispatch('openShortcuts');
     },
     closeShortcuts: () => store.dispatch('closeShortcuts'),
-    // the Memory screen: a lesson's cases opened or closed, a changed lesson's two texts shown or hidden
+    // the Memory screen: a lesson's cases opened or closed, a changed lesson's two texts shown or hidden; the decisions older
+    // than the key's decision read, or the newest read again
     memoryPageToggle: el => store.dispatch('memoryPageToggle', { id: el.dataset.id }),
     memoryPageDiff: el => store.dispatch('memoryPageDiff', { id: el.dataset.id }),
+    memoryPageOlder: el => { store.dispatch('memoryPageBefore', { id: el.dataset.id }); void memoryPage.reread('decisions'); },
+    memoryPageNewest: () => { store.dispatch('memoryPageBefore', {}); void memoryPage.reread('decisions'); },
   };
 
   root.addEventListener('click', ev => {

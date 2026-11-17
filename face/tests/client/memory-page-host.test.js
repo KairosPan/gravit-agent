@@ -13,7 +13,7 @@ import { memoryLessons, memoryDecisions, memoryWaiting, memoryHealth, memoryProp
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
-const READ = { status: 'idle', data: null, at: null, message: null };
+const READ = { status: 'idle', data: null, at: null, message: null, why: null };
 const LESSONS = '/data/memory/lessons';
 const REVIEW = '/data/memory/review';
 
@@ -39,8 +39,8 @@ function rig() {
   return { store, mp, reads, answers, timers, fire, clock, s: () => store.get().memoryPage };
 }
 
-test('the memoryPage slice starts idle: four reads unread, nothing open, no symbol', () => {
-  assert.deepEqual(emptyState().memoryPage, { lessons: READ, decisions: READ, waiting: READ, health: READ, open: {}, diff: {}, symbol: '' });
+test('the memoryPage slice starts idle: four reads unread, nothing open, no symbol, the newest decisions', () => {
+  assert.deepEqual(emptyState().memoryPage, { lessons: READ, decisions: READ, waiting: READ, health: READ, open: {}, diff: {}, symbol: '', before: '' });
   assert.equal(MEMORY_POLL_MS, 20_000);
   assert.deepEqual(PATH_OF_READ, { lessons: '/data/memory/lessons', decisions: '/data/memory/decisions', waiting: '/data/memory/review', health: '/data/memory/status' });
 });
@@ -119,9 +119,15 @@ test('a failed read keeps the data it had, with its words; the next answer repla
   assert.equal(r.s().lessons.status, 'error');
   assert.equal(sayOf(r.s().lessons.message), 'the memory did not answer in time', "the route's own words");
   assert.deepEqual(r.s().lessons.data, kept, 'the data it had');
+  assert.equal(r.s().lessons.why, null, 'a refusal with no why carries none');
+  r.answers[LESSONS] = Object.assign(new Error('/data/memory/lessons: HTTP 502'), { status: 502, body: { ok: false, error: 'the memory could not be read', why: 'config.json is not valid JSON' } });
+  r.fire(); await settle();
+  assert.equal(sayOf(r.s().lessons.message), 'the memory could not be read');
+  assert.equal(r.s().lessons.why, 'config.json is not valid JSON', "the memory's own sentence kept beside the route's words");
   r.answers[LESSONS] = new Error('network down');
   r.fire(); await settle();
   assert.equal(sayOf(r.s().lessons.message), 'network down', 'a throw with no body: its message');
+  assert.equal(r.s().lessons.why, null, 'and no why');
   r.answers[LESSONS] = { ok: false, error: 'GET only' };
   r.fire(); await settle();
   assert.equal(sayOf(r.s().lessons.message), 'GET only', "another body: its error");
@@ -134,6 +140,7 @@ test('a failed read keeps the data it had, with its words; the next answer repla
   r.fire(); await settle();
   assert.equal(r.s().lessons.status, 'ready');
   assert.equal(r.s().lessons.message, null, 'the line goes with the next answer');
+  assert.equal(r.s().lessons.why, null);
   assert.equal(r.s().lessons.data.ownerChainBroken, true);
   r.mp.dispose();
 });
@@ -161,6 +168,28 @@ test('the decisions read carries the symbol the slice holds, and reads again whe
   r.mp.dispose();
 });
 
+test('the decisions read carries the decision it is read before, beside the symbol, each only when set; either changed reads again', async () => {
+  const r = rig();
+  r.mp.show(true, 'decisions');
+  await settle();
+  r.store.dispatch('memoryPageBefore', { id: 'd-20261113-1b2c3d4e' });
+  await r.mp.reread('decisions');
+  assert.equal(r.reads.at(-1), '/data/memory/decisions?before=d-20261113-1b2c3d4e');
+  r.store.dispatch('memoryPageSymbol', { symbol: 'NVDA' });
+  assert.equal(r.s().before, '', 'a symbol typed reads the newest again');
+  r.store.dispatch('memoryPageBefore', { id: 'd-20261112-2c3d4e5f' });
+  r.mp.show(true, 'decisions');
+  assert.equal(r.reads.at(-1), '/data/memory/decisions?symbol=NVDA&before=d-20261112-2c3d4e5f', 'shown again with a new window: read at once, both');
+  await settle();
+  const n = r.reads.length;
+  r.mp.show(true, 'decisions');
+  assert.equal(r.reads.length, n, 'the same window: nothing more');
+  r.store.dispatch('memoryPageBefore', {});
+  r.fire(); await settle();
+  assert.equal(r.reads.filter(p => p.startsWith('/data/memory/decisions')).at(-1), '/data/memory/decisions?symbol=NVDA', 'back to the newest');
+  r.mp.dispose();
+});
+
 test('a reread asked while its read is out is read once more after it answers', async () => {
   const r = rig();
   let release;
@@ -181,9 +210,9 @@ test("the slice's reducers: a read's three states, a row opened, a diff shown, t
   s = R.memoryPageLoading(s, { read: 'health' });
   assert.equal(s.memoryPage.health.status, 'loading');
   s = R.memoryPageLoaded(s, { read: 'health', data: memoryHealth(), at: 5 });
-  assert.deepEqual(s.memoryPage.health, { status: 'ready', data: memoryHealth(), at: 5, message: null });
+  assert.deepEqual(s.memoryPage.health, { status: 'ready', data: memoryHealth(), at: 5, message: null, why: null });
   s = R.memoryPageFailed(s, { read: 'health', at: 6, message: 'the memory could not be read' });
-  assert.deepEqual(s.memoryPage.health, { status: 'error', data: memoryHealth(), at: 6, message: 'the memory could not be read' });
+  assert.deepEqual(s.memoryPage.health, { status: 'error', data: memoryHealth(), at: 6, message: 'the memory could not be read', why: null });
   s = R.memoryPageLoading(s, { read: 'health' });
   assert.equal(s.memoryPage.health.message, 'the memory could not be read', 'a read under way keeps the line until it answers');
   assert.equal(R.memoryPageLoaded(s, { read: 'nowhere', data: {} }), s);
@@ -198,4 +227,11 @@ test("the slice's reducers: a read's three states, a row opened, a diff shown, t
   assert.equal(s.memoryPage.symbol, 'NVDA');
   s = R.memoryPageSymbol(s, { symbol: 7 });
   assert.equal(s.memoryPage.symbol, '');
+  s = R.memoryPageBefore(s, { id: 'd-20261113-1b2c3d4e' });
+  assert.equal(s.memoryPage.before, 'd-20261113-1b2c3d4e');
+  assert.equal(R.memoryPageBefore(s, { id: 'd x' }).memoryPage.before, '', 'an id that is not plain: the newest');
+  assert.equal(R.memoryPageBefore(s, {}).memoryPage.before, '');
+  assert.equal(R.memoryPageSymbol(s, { symbol: 'NVDA' }).memoryPage.before, '', 'a symbol clears the window');
+  s = R.memoryPageToggle(s, { id: 'constructor' });
+  assert.equal(Object.hasOwn(s.memoryPage.open, 'constructor') && s.memoryPage.open.constructor === true, true, 'the first press opens a row named constructor');
 });

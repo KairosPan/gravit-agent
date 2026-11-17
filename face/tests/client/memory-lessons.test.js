@@ -32,16 +32,32 @@ test('an armed card: its id, its state, its line, when it was armed, its words i
   assert.ok(words.includes('“Do not chase a name up eight percent in five sessions”'));
   assert.ok(words.includes('fired 6 · followed 4 · overridden 1'));
   assert.ok(words.includes('no decision 1'));
-  assert.match(html, /At the terminal/);
+  assert.match(html, /At the terminal, in face\//);
   assert.match(html, /<code class="mp-command">npx --no gravit-memory retire no-chasing --reason &quot;…&quot; --home \/srv\/owner\/memory<\/code>/);
 });
 
-test("an armed card's checks: the face checks:, change_5d_pct computed by the face, sector not", () => {
+test("an armed card's checks: each as fact, operator and value, computed or not, the card's own definition and the face's beside it", () => {
   const html = draw(memoryLessons({ lessons: [armedLesson()] }));
   assert.match(html, /the face checks:/);
-  assert.match(html, /<li class="mp-check"><code class="mp-fact">change_5d_pct<\/code><span class="chip ok">computed<\/span>/);
-  assert.match(html, /<li class="mp-check"><code class="mp-fact">sector<\/code><span class="chip grey">not computed<\/span>/);
-  assert.match(html, /The sector the owner files the name under\./);
+  assert.ok(html.includes('<li class="mp-check"><code class="mp-fact">change_5d_pct &gt; 8</code><span class="chip ok">computed</span>' +
+    '<span class="mp-def"><span class="mp-def-who">the card defines it:</span> How far the name ran in five sessions, in percent.</span>' +
+    '<span class="mp-def"><span class="mp-def-who">the face computes it:</span> The last price in the Market&#39;s quote over the close 5 full sessions'), html);
+  assert.match(html, /<li class="mp-check"><code class="mp-fact">sector == semis<\/code><span class="chip grey">not computed<\/span><span class="mp-def"><span class="mp-def-who">the card defines it:<\/span> The sector the owner files the name under\.<\/span><\/li>/);
+  assert.equal(count(html, 'the face computes it:'), 1, 'the face\'s definition for the fact it computes alone');
+});
+
+test("every state with a card draws its checks; a fact the card defines and does not check by its name; a list's values joined", () => {
+  const checks = [
+    { fact: 'session', op: 'in', value: ['open', 'pre'], own: 'The part of the day.', definition: null, face: false },
+    { fact: 'held', op: '==', value: true, own: 'Whether it is held.', definition: 'Whether the venue holds it.', face: true },
+    { fact: 'mood', own: 'The tape.', definition: null, face: false },
+  ];
+  for (const row of [changedLesson({ checks }), unarmedLesson({ checks }), retiredLesson({ checks }), brokenLesson({ checks })]) {
+    const html = draw(memoryLessons({ lessons: [row] }));
+    assert.match(html, /<code class="mp-fact">session in open, pre<\/code>/, row.state);
+    assert.match(html, /<code class="mp-fact">held == true<\/code><span class="chip ok">computed<\/span>/, row.state);
+    assert.match(html, /<code class="mp-fact">mood<\/code><span class="chip grey">not computed<\/span><span class="mp-def"><span class="mp-def-who">the card defines it:<\/span> The tape\.<\/span><\/li>/, row.state);
+  }
 });
 
 test('a changed card: Changed since armed, its key See the change; the diff closed shows no text', () => {
@@ -78,10 +94,55 @@ test("an unarmed card: Not armed, its file's text, its arm command; a retired ca
 test('a refused card and a broken one: the state, and the fault as given', () => {
   const html = draw(memoryLessons({ lessons: [refusedLesson(), brokenLesson()] }));
   assert.match(html, /<span class="chip down">Refused<\/span>/);
-  assert.match(html, /<p class="mp-fault">card size-cap cannot be armed: its words are empty<\/p>/);
-  assert.equal(count(html, 'its words are empty'), 1, 'a file fault the row repeats is drawn once');
+  assert.match(html, /<p class="mp-fault">card size-cap has no front matter: it starts with a line of three dashes, then YAML, then another\.<\/p>/);
+  assert.equal(count(html, 'has no front matter'), 1, 'a file fault the row repeats is drawn once');
   assert.match(html, /<span class="chip down">Broken<\/span>/);
-  assert.match(html, /<p class="mp-fault">card earnings-hold cannot be read: lessons\/earnings-hold\.md is a directory, not a card file\.<\/p>/);
+  assert.match(html, /<p class="mp-fault">Its armed copy is missing\.<\/p>/);
+});
+
+test("a broken card's line and words are its file's, under Now; its arm and retire commands", () => {
+  const html = draw(memoryLessons({ lessons: [brokenLesson()] }));
+  assert.match(html, /<div class="mp-diff-head">Now<\/div><div class="mp-line">caveat · careful hold<\/div><div class="mp-words">“Hold no size through a print”<\/div>/);
+  assert.match(html, /npx --no gravit-memory arm earnings-hold --home/);
+  assert.match(html, /npx --no gravit-memory retire earnings-hold --reason/);
+  assert.doesNotMatch(draw(memoryLessons({ lessons: [armedLesson()] })), /mp-diff-head/, 'an armed card is not headed Now');
+});
+
+test("a card's record: seen and backfilled beside no decision when above zero; none at zero", () => {
+  const seen = draw(memoryLessons({ lessons: [armedLesson({ record: { owner: { fired: 6, followed: 0, overridden: 0, seen: 5, backfilled: 1, no_decision: 0 } } })] }));
+  assert.ok(text(seen).includes('fired 6 · followed 0 · overridden 0 · seen 5 · backfilled 1 · no decision 0'), text(seen));
+  const plain = text(draw(memoryLessons({ lessons: [armedLesson({ record: { owner: { fired: 2, followed: 1, overridden: 1, seen: 0, backfilled: 0, no_decision: 0 } } })] })));
+  assert.ok(plain.includes('fired 2 · followed 1 · overridden 1 · no decision 0'), plain);
+  assert.doesNotMatch(plain, /seen|backfilled/);
+});
+
+test('a horizon of one session reads in the singular, a median and a list of cases alike', () => {
+  const one = { k: 1, change_pct: 2 };
+  const record = { owner: { fired: 1, followed: 1, overridden: 1, seen: 0, backfilled: 0, no_decision: 0 },
+    followed: [{ decision: 'd-1', date: '2026-11-03', symbol: 'NVDA', action: 'pass', figures: [one] }], overridden: [{ decision: 'd-2', date: '2026-11-04', symbol: 'AMD', action: 'buy', figures: [one] }],
+    medians: { followed: { 1: 2 }, overridden: {} } };
+  const html = text(draw(null, R.memoryPageToggle(loaded(memoryLessons({ lessons: [armedLesson({ record })] })), { id: 'no-chasing' })));
+  assert.ok(html.includes('median +2.00% over 1 session '), html);
+  assert.ok(html.includes('over 1 session '));
+  assert.doesNotMatch(html, /1 sessions/);
+});
+
+test('a lesson named constructor: its cases and its change open on the first press, as any other', () => {
+  const row = armedLesson({ id: 'constructor' });
+  const st = R.memoryPageToggle(loaded(memoryLessons({ lessons: [row] })), { id: 'constructor' });
+  assert.equal(Object.hasOwn(st.memoryPage.open, 'constructor') && st.memoryPage.open.constructor, true);
+  assert.match(draw(null, st), /<div class="mp-cases">/);
+  assert.doesNotMatch(draw(null, loaded(memoryLessons({ lessons: [row] }))), /mp-cases/, 'closed until pressed, the prototype read as unset');
+  const changed = changedLesson({ id: 'constructor' });
+  const shown = R.memoryPageDiff(loaded(memoryLessons({ lessons: [changed] })), { id: 'constructor' });
+  assert.match(draw(null, shown), /<div class="mp-diff">/);
+  assert.doesNotMatch(draw(null, R.memoryPageDiff(shown, { id: 'constructor' })), /<div class="mp-diff">/);
+});
+
+test("a card armed in another year carries its year; one with no words draws no empty quotes", () => {
+  assert.ok(text(draw(memoryLessons({ lessons: [armedLesson({ armedAt: '2025-03-04T12:00:00.000Z' })] }))).includes('armed Mar 4, 2025'));
+  const card = lessonCard('no-chasing', { words: '' });
+  assert.doesNotMatch(draw(memoryLessons({ lessons: [armedLesson({ armed: lessonText(card), file: lessonText(card) })] })), /“”/);
 });
 
 test('a card that applies with cases: a key opens them; open, each case and a median by horizon', () => {
@@ -98,11 +159,11 @@ test('a card that applies with cases: a key opens them; open, each case and a me
   assert.ok(words.includes('over 20 sessions'));
 });
 
-test("the owner's chain broken: one line at the top and the reseal command", () => {
+test("the owner's chain broken: one line at the top and the reseal command under At the terminal, in face/", () => {
   const html = draw(memoryLessons({ ownerChainBroken: true, reseal: memoryReseal, lessons: [armedLesson()] }));
   assert.ok(html.indexOf("No lesson is applied until the owner&#39;s chain is resealed") < html.indexOf('no-chasing'));
   assert.equal(count(html, 'resealed'), 1);
-  assert.match(html, /<code class="mp-command">npx --no gravit-memory reseal --home \/srv\/owner\/memory<\/code>/);
+  assert.match(html, /<div class="mp-dim">At the terminal, in face\/<\/div><code class="mp-command">npx --no gravit-memory reseal --home \/srv\/owner\/memory<\/code>/);
   assert.doesNotMatch(draw(memoryLessons({ lessons: [armedLesson()] })), /resealed/);
 });
 

@@ -46,13 +46,32 @@ test('a new card and a change: the card as it would be written - its line, its w
   assert.match(fresh, /<li class="mp-check"><code class="mp-fact">session<\/code><span class="mp-def">The part of the trading day the order is placed in\.<\/span><\/li>/);
   assert.ok(text(change).includes('caveat · dont buy · US'));
   assert.match(change, /<code class="mp-fact">change_5d_pct &gt; 10<\/code>/);
-  assert.doesNotMatch(change, /it defines:/, 'no facts defined: none drawn');
+  assert.match(change, /<li class="mp-check"><code class="mp-fact">change_5d_pct<\/code><span class="mp-def">How far the name ran in five sessions, in percent\.<\/span><\/li>/);
   assert.doesNotMatch(retire, /as it would be written/, 'a retire carries no card');
+  const bare = articles(draw(memoryWaiting({ proposals: [{ ...memoryWaitingProposals()[0], card: proposalCard('chase-gap', { check: undefined, facts: undefined }) }] })))[0];
+  assert.doesNotMatch(bare, /it checks:|it defines:/, 'no check and no fact: neither list drawn');
 });
 
-test('the review command under At the terminal, once', () => {
+test("a change's and a retire's lesson id is set apart from the face's words, as a new lesson's is", () => {
+  const [fresh, change, retire] = articles(draw(memoryWaiting({ proposals: memoryWaitingProposals() })));
+  assert.match(fresh, /<span class="mp-what">new lesson <span class="mp-id">chase-gap<\/span><\/span>/);
+  assert.match(change, /<span class="mp-what">change to <span class="mp-id">no-chasing<\/span><\/span>/);
+  assert.match(retire, /<span class="mp-what">retire <span class="mp-id">gap-fade<\/span><\/span>/);
+});
+
+test('a proposal whose time does not parse keeps who proposed it, without a date; one of another year carries its year; no empty quotes', () => {
+  const [first] = memoryWaitingProposals();
+  const html = draw(memoryWaiting({ proposals: [{ ...first, t: 'not a time' }, { ...first, t: '2025-03-04T12:00:00.000Z' }, { ...first, t: 'x', by: '', reason: '' }] }));
+  const [undated, older, bare] = articles(html);
+  assert.match(undated, /<div class="mp-when">proposed by gravit<\/div>/);
+  assert.match(older, /<div class="mp-when">proposed by gravit on Mar 4, 2025<\/div>/);
+  assert.doesNotMatch(bare, /mp-when/, 'no time and no one: no line');
+  assert.doesNotMatch(bare, /“”/);
+});
+
+test('the review command under At the terminal, in face/, once', () => {
   const html = draw(memoryWaiting({ proposals: memoryWaitingProposals() }));
-  assert.match(html, /<div class="mp-dim">At the terminal<\/div><code class="mp-command">npx --no gravit-memory review --home \/srv\/owner\/memory<\/code>/);
+  assert.match(html, /<div class="mp-dim">At the terminal, in face\/<\/div><code class="mp-command">npx --no gravit-memory review --home \/srv\/owner\/memory<\/code>/);
   assert.equal(html.split('<code class="mp-command">').length - 1, 1);
 });
 
@@ -84,7 +103,7 @@ test("a proposal's reason, words, lesson and evidence with a mark and markup are
   const odd = { v: 1, kind: 'proposal', id: 'p-x', seq: 1, prev: null, t: '2026-11-15T12:00:00.000Z', by: 'agent<b>\u200b', sum: 'f', what: 'change', lesson: 'a<b>\u202e', card,
     reason: 'because <script>\u202e', evidence: ['d-1<i>\u202e'] };
   const html = draw(memoryWaiting({ proposals: [odd, { ...odd, what: 'merge" class="x', card: undefined }], pastHorizon: ['d-<b>\u202e'] }));
-  assert.ok(html.includes('change to a&lt;b&gt;\\u202e'), html);
+  assert.ok(html.includes('change to <span class="mp-id">a&lt;b&gt;\\u202e</span>'), html);
   assert.ok(html.includes('proposed by agent&lt;b&gt;\\u200b on Nov 15'));
   assert.ok(html.includes('“because &lt;script&gt;\\u202e”'));
   assert.ok(html.includes('evidence: d-1&lt;i&gt;\\u202e'));
@@ -106,6 +125,6 @@ test('the frame draws the Waiting tab for a connected waiting read', () => {
 
 test('the Waiting tab under ZH', () => {
   const html = withTable(ZH, () => draw(memoryWaiting({ proposals: memoryWaitingProposals(), pastHorizon: PAST, withoutWrongIf: 2 })));
-  for (const word of ['新教训', '修改 no-chasing', '退役 gap-fade', '在终端运行']) assert.ok(html.includes(word), word);
+  for (const word of ['新教训', '修改 <span class="mp-id">no-chasing</span>', '退役 <span class="mp-id">gap-fade</span>', '在终端的 face/ 目录下运行']) assert.ok(html.includes(word), word);
   assert.ok(withTable(ZH, () => draw(memoryWaiting())).includes('没有等你处理的事'));
 });

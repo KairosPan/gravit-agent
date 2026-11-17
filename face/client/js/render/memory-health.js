@@ -1,13 +1,14 @@
 // face/client/js/render/memory-health.js — the Memory screen's Health tab (memory screen plan Task 4), for a connected health
 // read: the home; each ledger with its line count, its chain sound or broken at a line, and a partial last line named; the
-// price source - its address as text, when it last ran, whether it answered and how many it refused - or No price source is
-// named; the face's seven facts with its definitions; and the commands, each in a code under At the terminal. Every text from
-// the memory is made visible (visible.js) and then escaped; nothing is a link, and a class comes from the face's own tables
-// alone.
+// price source - its address as text and its last run in the package's own three cases (gravit-memory's status text): never
+// asked; a last run that asked it nothing; else when it was last asked and whether it answered or how many it refused, of how
+// many - or No price source is named, with where one is named; the face's seven facts with its definitions; and the commands,
+// each in a code under At the terminal, in face/. Every text from the memory is made visible (visible.js) and then escaped;
+// nothing is a link, a count that is not one is left out, and a class comes from the face's own tables alone.
 import { esc } from '../html.js';
 import { t, tn } from '../i18n/words.js';
-import { fmtDate, fmtClock } from '../time.js';
-import { shown, dim, command } from './memory-lessons.js';
+import { fmtClock } from '../time.js';
+import { shown, dim, command, dayOf } from './memory-lessons.js';
 
 const str = v => (typeof v === 'string' ? v : '');
 const count = v => (Number.isInteger(v) && v >= 0 ? v : null);
@@ -35,23 +36,27 @@ function ledgersHtml(read) {
   return section(t('memory.health.ledgers'), `<div class="mp-ledgers">${rows.join('')}</div>`);
 }
 
-function pricesHtml(prices) {
+// the last run of the price source, in the package's three cases: none, never asked; one that asked nothing (asked 0), when it
+// ran; else when it was last asked and answered - a source set that refused nothing - or refused k, of n when asked is a count
+// (a last run with no asked was written before asked was, and is read as a run that asked)
+function lastRunOf(last, now) {
+  if (!last) return t('memory.health.neverAsked');
+  const at = Date.parse(str(last.t));
+  const when = Number.isNaN(at) ? null : `${dayOf(at, now)} ${fmtClock(at)}`;
+  const asked = count(last.asked);
+  if (asked === 0) return [...(when ? [t('memory.health.lastRan', { when })] : []), t('memory.health.askedNothing')].join(' · '); // words-order: the run's facts under the visual separator
+  const refused = count(last.refused);
+  const outcome = last.ok === true ? t('memory.health.answered')
+    : refused === null ? t('memory.health.refusedSome')
+      : asked !== null ? t('memory.health.refusedOf', { n: refused, asked }) : t('memory.health.refused', { n: refused });
+  return [...(when ? [t('memory.health.lastAsked', { when })] : []), outcome].join(' · '); // words-order: the run's facts under the visual separator
+}
+
+function pricesHtml(prices, now) {
   const url = str(prices?.url);
   if (url === '') return section(t('memory.health.prices'), dim(t('memory.health.noSource')));
   const last = prices.last && typeof prices.last === 'object' ? prices.last : null;
-  let run = t('memory.health.notYet');
-  if (last) {
-    const at = Date.parse(str(last.t));
-    const refused = count(last.refused) ?? 0;
-    const asked = count(last.asked);
-    const parts = [
-      ...(Number.isNaN(at) ? [] : [t('memory.health.lastRan', { when: `${fmtDate(at)} ${fmtClock(at)}` })]),
-      last.ok === true ? t('memory.health.answered') : t('memory.health.notAnswered'),
-      asked !== null ? t('memory.health.refusedOf', { n: refused, asked }) : t('memory.health.refused', { n: refused }),
-    ];
-    run = parts.join(' · ');
-  }
-  return section(t('memory.health.prices'), `<code class="mp-fact">${shown(url)}</code><div class="mp-when">${esc(run)}</div>`);
+  return section(t('memory.health.prices'), `<code class="mp-fact">${shown(url)}</code><div class="mp-when">${esc(lastRunOf(last, now))}</div>`);
 }
 
 function factsHtml(facts) {
@@ -66,9 +71,9 @@ function commandsHtml(commands) {
 }
 
 /** The Health tab's body for a connected health read: `read` its body, `page` the screen's slice, `now` the clock's time,
- *  which a last run's time does not need. */
+ *  against which a last run's day carries its year when it is another. */
 export function healthHtml(read, page, now) {
   const r = read && typeof read === 'object' ? read : {};
   return `<div class="mp-body mp-health">${section(t('memory.health.home'), `<code class="mp-fact">${shown(str(r.home))}</code>`)}` +
-    `${ledgersHtml(r)}${pricesHtml(r.prices)}${factsHtml(r.facts)}${commandsHtml(r.commands)}</div>`;
+    `${ledgersHtml(r)}${pricesHtml(r.prices, now)}${factsHtml(r.facts)}${commandsHtml(r.commands)}</div>`;
 }

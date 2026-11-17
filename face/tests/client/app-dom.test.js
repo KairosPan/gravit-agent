@@ -931,6 +931,43 @@ test("the Memory screen's symbol box puts the symbol in the slice and reads the 
   store.timers.clear();
 });
 
+// the Decisions tab's window (the final review's fix wave): Show older reads the decisions before the key's decision, beside
+// the symbol typed, and Back to the newest reads the newest again
+test("the Memory screen's Show older reads the window before the last decision, and Back to the newest the newest", async () => {
+  const f = fakeWindow({ hash: '#/memory/decisions', storage: memoryStorage() });
+  const h = host({ rows: [row('s1')] });
+  const rows = memoryDecisionRows();
+  h.inventory['/data/memory/decisions'] = memoryDecisions({ items: rows.slice(0, 2), more: true });
+  h.inventory['/data/memory/decisions?before=d-20261113-1b2c3d4e'] = memoryDecisions({ items: rows.slice(2), more: false });
+  h.inventory['/data/memory/decisions?symbol=NVDA'] = memoryDecisions({ items: rows.slice(0, 1), more: true });
+  h.inventory['/data/memory/decisions?symbol=NVDA&before=d-20261114-0a1b2c3d'] = memoryDecisions({ items: rows.slice(2, 3), more: false });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers: new HeldTimers(() => true), now: () => 1_000_000 });
+  await h.ready();
+  await settle();
+  const decisionReads = () => h.reads.filter(p => p.startsWith('/data/memory/decisions'));
+  assert.match(f.html(), /data-action="memoryPageOlder" data-id="d-20261113-1b2c3d4e">Show older<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryPageOlder', id: 'd-20261113-1b2c3d4e' } });
+  await settle();
+  assert.equal(store.get().memoryPage.before, 'd-20261113-1b2c3d4e');
+  assert.equal(decisionReads().at(-1), '/data/memory/decisions?before=d-20261113-1b2c3d4e');
+  assert.match(f.html(), />Back to the newest<\/button>/);
+  assert.doesNotMatch(f.html(), /Show older/, 'the oldest window: no key further');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryPageNewest' } });
+  await settle();
+  assert.equal(store.get().memoryPage.before, '');
+  assert.equal(decisionReads().at(-1), '/data/memory/decisions', 'the newest read again');
+  assert.doesNotMatch(f.html(), /Back to the newest/);
+  store.dispatch('memoryPageSymbol', { symbol: 'NVDA' });
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryPageOlder', id: 'd-20261114-0a1b2c3d' } });
+  await settle();
+  assert.equal(decisionReads().at(-1), '/data/memory/decisions?symbol=NVDA&before=d-20261114-0a1b2c3d', 'the window beside the symbol');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryPageOlder', id: 'd x' } });
+  await settle();
+  assert.equal(store.get().memoryPage.before, '', 'an id that is not plain reads the newest');
+  store.timers.clear();
+});
+
 // the Lessons tab's keys clicked (memory screen plan Task 4): a changed card's See the change and an armed card's Cases each
 // flip their row in the slice and redraw the screen
 test("the Memory screen's keys: See the change shows and hides the change, Cases opens and closes a card's record", async () => {

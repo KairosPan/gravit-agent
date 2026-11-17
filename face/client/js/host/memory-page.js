@@ -1,9 +1,10 @@
 // face/client/js/host/memory-page.js — the Memory screen's reads (memory screen plan Task 2): the open tab's read and the
 // waiting read, whose proposals the third tab counts, into the store's memoryPage slice, at once and every MEMORY_POLL_MS
 // while the screen is on screen in a visible tab; on Waiting the tab's read is the count's, read once a tick. A tab's name is
-// its read's name. One read of a path in flight at a time; a failed read keeps the data it had. The decisions read carries
-// the symbol the slice holds, and is read again when it changes. Nothing here touches the DOM, and nothing is read before
-// the screen shows.
+// its read's name. One read of a path in flight at a time; a failed read keeps the data it had, with the route's words and its
+// why when it gave one. The decisions read carries the symbol and the decision before which it reads that the slice holds,
+// each only when set, and is read again when either changes. Nothing here touches the DOM, and nothing is read before the
+// screen shows.
 import { said } from '../i18n/words.js';
 import { MEMORY_TABS } from '../router.js';
 
@@ -16,6 +17,8 @@ const messageOf = err => {
   if (typeof words === 'string' && words !== '') return words;
   return err instanceof Error ? err.said ?? err.message : said('memory.page.notRead');
 };
+// the memory's own sentence a refusal carries (`{ ok: false, error, why }`), or null
+const whyOf = body => (typeof body?.why === 'string' && body.why !== '' ? body.why : null);
 // a call made now, at once, its throw a rejection
 const attempt = fn => { try { return Promise.resolve(fn()); } catch (err) { return Promise.reject(err); } };
 // the reads a tab polls: its own and the waiting read, one read on Waiting
@@ -28,24 +31,29 @@ export function startMemoryPage({ store, getJson, schedule, cancelTimer, now = D
   let timer = null;
   const flights = new Map();   // a read's name -> its answer in flight
   const again = new Set();     // the reads asked again while in flight, read once more when they answer
-  let symbolAsked = null;      // the symbol the last decisions read carried
+  let decisionsAsked = null;   // the path the last decisions read asked
 
-  const symbolOf = () => { const v = store.get().memoryPage?.symbol; return typeof v === 'string' ? v : ''; };
-  const pathOf = name => (name === 'decisions' && symbolOf() !== '' ? `${PATH_OF_READ.decisions}?symbol=${encodeURIComponent(symbolOf())}` : PATH_OF_READ[name]);
+  const slot = key => { const v = store.get().memoryPage?.[key]; return typeof v === 'string' ? v : ''; };
+  // the decisions' path: the symbol and the decision before which they are read, each only when set
+  function decisionsPath() {
+    const query = [['symbol', slot('symbol')], ['before', slot('before')]].filter(([, v]) => v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
+    return query.length ? `${PATH_OF_READ.decisions}?${query.join('&')}` : PATH_OF_READ.decisions;
+  }
+  const pathOf = name => (name === 'decisions' ? decisionsPath() : PATH_OF_READ[name]);
 
   function read(name) {
     if (closed || !Object.hasOwn(PATH_OF_READ, name)) return Promise.resolve();
     const out = flights.get(name);
     if (out) return out;
-    if (name === 'decisions') symbolAsked = symbolOf();
     const path = pathOf(name);
+    if (name === 'decisions') decisionsAsked = path;
     store.dispatch('memoryPageLoading', { read: name });
     const current = attempt(() => getJson(path))
       .then(data => {
         if (closed) return;
         if (data && data.ok === true) store.dispatch('memoryPageLoaded', { read: name, data, at: now() });
-        else store.dispatch('memoryPageFailed', { read: name, at: now(), message: typeof data?.error === 'string' && data.error !== '' ? data.error : said('memory.page.notRead') });
-      }, err => { if (!closed) store.dispatch('memoryPageFailed', { read: name, at: now(), message: messageOf(err) }); })
+        else store.dispatch('memoryPageFailed', { read: name, at: now(), message: typeof data?.error === 'string' && data.error !== '' ? data.error : said('memory.page.notRead'), why: whyOf(data) });
+      }, err => { if (!closed) store.dispatch('memoryPageFailed', { read: name, at: now(), message: messageOf(err), why: whyOf(err?.body) }); })
       .finally(() => {
         if (flights.get(name) === current) flights.delete(name);
         if (again.delete(name) && shown && !closed) void read(name);
@@ -73,7 +81,7 @@ export function startMemoryPage({ store, getJson, schedule, cancelTimer, now = D
 
   return {
     /** The screen on screen in a visible tab on `next`, or not: the tab's reads at once on showing it, then every
-     *  MEMORY_POLL_MS until it hides or another tab shows; the decisions read again when the symbol changed. */
+     *  MEMORY_POLL_MS until it hides or another tab shows; the decisions read again when their symbol or window changed. */
     show(on, next) {
       if (closed) return;
       if (!on) {
@@ -83,7 +91,7 @@ export function startMemoryPage({ store, getJson, schedule, cancelTimer, now = D
       }
       const want = MEMORY_TABS.includes(next) ? next : MEMORY_TABS[0];
       if (shown && want === tab) {
-        if (tab === 'decisions' && symbolOf() !== symbolAsked) void reread('decisions');
+        if (tab === 'decisions' && decisionsPath() !== decisionsAsked) void reread('decisions');
         return;
       }
       shown = true;

@@ -18,16 +18,18 @@ const RETIRE = id => cmd(`retire ${id} --reason "…"`);
 export const lessonCard = (id, over = {}) => ({
   id, says: 'dont', actions: ['buy', 'add'], strength: 'caveat', scope: { market: ['US'] },
   check: [{ fact: 'change_5d_pct', op: '>', value: 8 }, { fact: 'sector', op: '==', value: 'semis' }],
-  facts: { sector: 'The sector the owner files the name under.' },
+  facts: { change_5d_pct: 'How far the name ran in five sessions, in percent.', sector: 'The sector the owner files the name under.' },
   words: 'Do not chase a name up eight percent in five sessions', ...over,
 });
 
 const fileOf = card => `---\nid: ${card.id}\nsays: ${card.says}\nstrength: ${card.strength}\n---\n${card.words}\n`;
 export const lessonText = (card, over = {}) => ({ sha256: 'a'.repeat(64), text: fileOf(card), card, ...over });
 
+// what the face serves of lessonCard's checks (src/memory-screen.ts CheckRow): each check with its operator and value, the
+// card's own definition, and the face's when the face computes the fact
 export const LESSON_CHECKS = [
-  { fact: 'change_5d_pct', definition: "The last price over the close 5 full sessions before the last full one, in percent, from the Market's daily bars.", face: true },
-  { fact: 'sector', definition: 'The sector the owner files the name under.', face: false },
+  { fact: 'change_5d_pct', op: '>', value: 8, own: 'How far the name ran in five sessions, in percent.', definition: "The last price in the Market's quote over the close 5 full sessions before the last full one in the Market's daily bars, in percent.", face: true },
+  { fact: 'sector', op: '==', value: 'semis', own: 'The sector the owner files the name under.', definition: null, face: false },
 ];
 
 const figure = (k, change) => ({ k, change_pct: change, vs_benchmark_pct: null });
@@ -49,7 +51,7 @@ export const lessonRecord = (over = {}) => ({
 export const armedLesson = (over = {}) => {
   const card = lessonCard('no-chasing');
   return {
-    id: 'no-chasing', state: 'armed', armedAt: '2026-11-14T15:00:00.000Z', armed: lessonText(card), file: lessonText(card),
+    id: 'no-chasing', state: 'armed', armedAt: '2026-11-14T12:00:00.000Z', armed: lessonText(card), file: lessonText(card),
     record: lessonRecord(), checks: LESSON_CHECKS, commands: { retire: RETIRE('no-chasing') }, ...over,
   };
 };
@@ -58,7 +60,7 @@ export const changedLesson = (over = {}) => {
   const was = lessonCard('trim-into-strength', { says: 'do', actions: ['trim'], strength: 'caveat', words: 'Trim a third into a gap up', check: [], facts: undefined });
   const now = { ...was, words: 'Trim a half into a gap up' };
   return {
-    id: 'trim-into-strength', state: 'changed', armedAt: '2026-11-10T15:00:00.000Z',
+    id: 'trim-into-strength', state: 'changed', armedAt: '2026-11-10T12:00:00.000Z',
     armed: lessonText(was), file: lessonText(now, { sha256: 'b'.repeat(64) }), record: lessonRecord({ followed: [], overridden: [], medians: { followed: {}, overridden: {} } }),
     checks: [], commands: { arm: cmd('arm trim-into-strength'), retire: RETIRE('trim-into-strength'), review: cmd('review') }, ...over,
   };
@@ -74,17 +76,21 @@ export const retiredLesson = (over = {}) => {
   return { id: 'gap-fade', state: 'retired', file: lessonText(card), record: null, checks: [], commands: { arm: cmd('arm gap-fade') }, ...over };
 };
 
+// a card file with no front matter, as the package refuses it: the row's fault and the file's, in its words
+const NO_FRONT_MATTER = 'card size-cap has no front matter: it starts with a line of three dashes, then YAML, then another.';
 export const refusedLesson = (over = {}) => ({
-  id: 'size-cap', state: 'refused', fault: 'card size-cap cannot be armed: its words are empty',
-  file: { sha256: 'c'.repeat(64), text: '---\nid: size-cap\n---\n', fault: 'card size-cap cannot be armed: its words are empty' },
+  id: 'size-cap', state: 'refused', fault: NO_FRONT_MATTER,
+  file: { sha256: 'c'.repeat(64), text: 'no front matter here\n', fault: NO_FRONT_MATTER },
   record: null, checks: [], commands: {}, ...over,
 });
 
+// an armed card whose armed copy is gone, as the package serves it: its file and no armed copy, and the face's arm command
+// beside its retire, since the file parses
 export const brokenLesson = (over = {}) => {
   const card = lessonCard('earnings-hold', { says: 'careful', actions: ['hold'], scope: undefined, words: 'Hold no size through a print', check: [], facts: undefined });
   return {
-    id: 'earnings-hold', state: 'broken', fault: 'card earnings-hold cannot be read: lessons/earnings-hold.md is a directory, not a card file.',
-    armedAt: '2026-11-02T15:00:00.000Z', armed: lessonText(card), record: null, checks: [], commands: { retire: RETIRE('earnings-hold') }, ...over,
+    id: 'earnings-hold', state: 'broken', fault: 'Its armed copy is missing.',
+    armedAt: '2026-11-02T12:00:00.000Z', file: lessonText(card), record: null, checks: [], commands: { arm: cmd('arm earnings-hold'), retire: RETIRE('earnings-hold') }, ...over,
   };
 };
 
@@ -92,7 +98,7 @@ export const memoryReseal = cmd('reseal');
 
 export const memoryDecisions = (over = {}) => ({ ok: true, connected: true, items: [], more: false, ...over });
 
-const proposal = (id, lesson, reason) => ({ id, t: '2026-11-15T14:00:00.000Z', by: 'gravit', kind: 'proposal', what: 'new', lesson, reason });
+const proposal = (id, lesson, reason) => ({ id, t: '2026-11-15T12:00:00.000Z', by: 'gravit', kind: 'proposal', what: 'new', lesson, reason });
 
 export const memoryProposals = () => [
   proposal('p-20261115-0a1b2c3d', 'chase-gap', 'Two gap-up buys on the open gave back their gain by noon'),
@@ -132,7 +138,7 @@ export const memoryDecisionRows = () => [
 export const proposalCard = (id, over = {}) => ({
   id, says: 'dont', actions: ['buy'], strength: 'red-line', scope: { market: ['US'] },
   check: [{ fact: 'change_1d_pct', op: '>=', value: 6 }, { fact: 'session', op: 'in', value: ['open', 'pre'] }],
-  facts: { session: 'The part of the trading day the order is placed in.' },
+  facts: { change_1d_pct: 'How far the name moved since the last close, in percent.', session: 'The part of the trading day the order is placed in.' },
   words: 'Do not buy a gap up of six percent on the open', ...over,
 });
 
@@ -141,7 +147,7 @@ export const memoryWaitingProposals = () => [
   proposalLine('p-20261115-0a1b2c3d', 1, { what: 'new', lesson: 'chase-gap', card: proposalCard('chase-gap'),
     reason: 'Two gap-up buys on the open gave back their gain by noon', evidence: ['d-20261103-0a1b2c3d', 'd-20261105-1b2c3d4e'] }),
   proposalLine('p-20261115-1b2c3d4e', 2, { what: 'change', lesson: 'no-chasing',
-    card: proposalCard('no-chasing', { strength: 'caveat', check: [{ fact: 'change_5d_pct', op: '>', value: 10 }], facts: undefined, words: 'Do not chase a name up ten percent in five sessions' }),
+    card: proposalCard('no-chasing', { strength: 'caveat', check: [{ fact: 'change_5d_pct', op: '>', value: 10 }], facts: { change_5d_pct: 'How far the name ran in five sessions, in percent.' }, words: 'Do not chase a name up ten percent in five sessions' }),
     reason: 'Eight percent fired on names that kept going', evidence: ['d-20261107-2c3d4e5f'] }),
   proposalLine('p-20261115-2c3d4e5f', 3, { what: 'retire', lesson: 'gap-fade', reason: 'It has not fired in a year' }),
 ];
@@ -150,9 +156,9 @@ export const memoryWaitingProposals = () => [
 export const FACE_FACT_ROWS = [
   { fact: 'price', definition: "The last price, to two decimals, from the Market's quote." },
   { fact: 'change_1d_pct', definition: "The last price over the previous close, in percent, both from the Market's quote." },
-  { fact: 'change_5d_pct', definition: "The last price over the close 5 full sessions before the last full one, in percent, from the Market's daily bars." },
-  { fact: 'change_20d_pct', definition: "The last price over the close 20 full sessions before the last full one, in percent, from the Market's daily bars." },
-  { fact: 'change_60d_pct', definition: "The last price over the close 60 full sessions before the last full one, in percent, from the Market's daily bars." },
+  { fact: 'change_5d_pct', definition: "The last price in the Market's quote over the close 5 full sessions before the last full one in the Market's daily bars, in percent." },
+  { fact: 'change_20d_pct', definition: "The last price in the Market's quote over the close 20 full sessions before the last full one in the Market's daily bars, in percent." },
+  { fact: 'change_60d_pct', definition: "The last price in the Market's quote over the close 60 full sessions before the last full one in the Market's daily bars, in percent." },
   { fact: 'held', definition: "Whether the venue's account holds the symbol, from the Account's position on that venue." },
   { fact: 'unrealized_pct', definition: "A long's last price over its entry price, in percent, from the Market's quote and the Account's entry price; none for a short." },
 ];
@@ -163,6 +169,6 @@ export const memoryHealthFull = (over = {}) => memoryHealth({
   lines: { 'decisions.jsonl': 12, 'recalls.jsonl': 40, 'outcomes.jsonl': 31, 'proposals.jsonl': 3, 'owner.jsonl': 5 },
   partial: ['recalls.jsonl'],
   chains: [{ file: 'decisions.jsonl', ok: true }, { file: 'recalls.jsonl', ok: true }, { file: 'outcomes.jsonl', ok: true }, { file: 'proposals.jsonl', ok: true }, { file: 'owner.jsonl', ok: false, line: 4 }],
-  prices: { url: 'http://127.0.0.1:4821', last: { t: '2026-11-16T12:00:00.000Z', ok: true, refused: 1, asked: 6 } },
+  prices: { url: 'http://127.0.0.1:4821', last: { t: '2026-11-16T12:00:00.000Z', ok: false, refused: 1, asked: 6 } },
   facts: FACE_FACT_ROWS, commands: HEALTH_COMMANDS, ...over,
 });

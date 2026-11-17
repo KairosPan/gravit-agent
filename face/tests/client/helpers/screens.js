@@ -487,6 +487,8 @@ function memoryPageStates() {
   const on = R.nav(emptyState(), { screen: 'memory', tab: 'lessons' });
   const loaded = (st, read, data) => R.memoryPageLoaded(st, { read, data, at: NOW });
   const kept = loaded(loaded(on, 'lessons', memoryLessons()), 'waiting', memoryWaiting({ proposals: memoryProposals() }));
+  const decisionsOn = R.nav(on, { screen: 'memory', tab: 'decisions' });
+  const { command: _none, ...noInstall } = memoryNotConnected({ why: 'no install', say: 'the memory is not connected: gravit-memory is not installed; run npm ci in face/' });
   return [
     ['memory-page', on],
     ['memory-page-not-connected', loaded(loaded(on, 'lessons', memoryNotConnected()), 'waiting', memoryNotConnected())],
@@ -506,6 +508,12 @@ function memoryPageStates() {
     ['memory-page-waiting-empty', loaded(R.nav(on, { screen: 'memory', tab: 'waiting' }), 'waiting', memoryWaiting())],
     ['memory-page-health', loaded(R.nav(on, { screen: 'memory', tab: 'health' }), 'health', memoryHealthFull())],
     ['memory-page-health-no-source', loaded(R.nav(on, { screen: 'memory', tab: 'health' }), 'health', memoryHealthFull({ prices: { url: '' } }))],
+    // the final review's fix wave: an older window of decisions, with Back to the newest and Show older; a symbol typed that
+    // finds none; a read that failed with the memory's own why under the face's line; a standing with no command
+    ['memory-page-decisions-older', loaded(R.memoryPageBefore(decisionsOn, { id: 'd-20261115-4e5f6a7b' }), 'decisions', memoryDecisions({ items: memoryDecisionRows(), more: true }))],
+    ['memory-page-decisions-none-for', loaded(R.memoryPageSymbol(decisionsOn, { symbol: 'nvda' }), 'decisions', memoryDecisions())],
+    ['memory-page-why', R.memoryPageFailed(kept, { read: 'lessons', at: NOW, message: 'the memory could not be read', why: 'config.json is not valid JSON' })],
+    ['memory-page-not-connected-no-install', loaded(on, 'lessons', noInstall)],
   ];
 }
 
@@ -1204,8 +1212,9 @@ const CONTENT_FIELDS = new Set([
 // (gravit's call and the face's when line) and a proposal's the read holds; the gate the face kept for an order card's call
 // (the face's order words and sentences, the memory's lessons), and of a Lunhui run's leaders the memory's words: a lesson's
 // words, what an untold lesson needs, a leader's fault; and of a Memory screen's read not connected the face's words and the
-// command that makes the home; of its lessons read the memory's texts - each card's id, fault, texts and their faults, a card's
-// words and codes and scope, what it checks and how each fact is defined, the face's commands and the reseal command, and
+// command that makes the home, and of a failed read the memory's own why; of its lessons read the memory's texts - each card's
+// id, fault, texts and their faults, a card's words and codes and scope, what it checks (each fact, operator and value) and how
+// each fact is defined, by the card and by the face, the face's commands and the reseal command, and
 // each case's date, symbol and action; the symbol the owner typed; of its decisions read each decision's line and its void
 // command; of its waiting read each proposal whole and the ids past their horizon; of its health read the home, each ledger's
 // name, the price source's address and when it last ran, the face's facts and its commands; `*` is any one key
@@ -1215,11 +1224,12 @@ const CONTENT = [['memoryGate', '*', 'gate'], ['memoryLunhui', '*', 'lessons', '
   ['deskPage', 'routines', 'data', 'routines', 'when'], ['deskPage', 'routines', 'data', 'routines', 'instruction'],
   ['conversations', 'messages', 'data', 'when'], ['conversations', 'messages', 'data', 'instruction'],
   ['deskPage', 'routines', 'data', 'proposals', 'when'], ['deskPage', 'routines', 'data', 'proposals', 'instruction'], ['deskPage', 'routines', 'data', 'proposals', 'replacesName'],
-  ['memoryPage', '*', 'data', 'say'], ['memoryPage', '*', 'data', 'command'], ['memoryPage', 'lessons', 'data', 'reseal'],
+  ['memoryPage', '*', 'data', 'say'], ['memoryPage', '*', 'data', 'command'], ['memoryPage', '*', 'why'], ['memoryPage', 'lessons', 'data', 'reseal'],
   ['memoryPage', 'lessons', 'data', 'lessons', 'id'], ['memoryPage', 'lessons', 'data', 'lessons', 'fault'], ['memoryPage', 'lessons', 'data', 'lessons', '*', 'text'], ['memoryPage', 'lessons', 'data', 'lessons', '*', 'fault'],
   ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'words'], ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'says'], ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'strength'], ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'actions'],
   ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'scope', 'market'], ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'scope', 'symbols'],
   ['memoryPage', 'lessons', 'data', 'lessons', 'checks', 'fact'], ['memoryPage', 'lessons', 'data', 'lessons', 'checks', 'definition'], ['memoryPage', 'lessons', 'data', 'lessons', 'commands', '*'],
+  ['memoryPage', 'lessons', 'data', 'lessons', 'checks', 'own'], ['memoryPage', 'lessons', 'data', 'lessons', 'checks', 'op'], ['memoryPage', 'lessons', 'data', 'lessons', 'checks', 'value'],
   ['memoryPage', 'lessons', 'data', 'lessons', 'record', '*', 'date'], ['memoryPage', 'lessons', 'data', 'lessons', 'record', '*', 'symbol'], ['memoryPage', 'lessons', 'data', 'lessons', 'record', '*', 'action'],
   ['memoryPage', 'symbol'], ['memoryPage', 'decisions', 'data', 'items', 'view', 'line', '*'], ['memoryPage', 'decisions', 'data', 'items', 'command'],
   ['memoryPage', 'waiting', 'data', 'proposals', '*'], ['memoryPage', 'waiting', 'data', 'pastHorizon'],

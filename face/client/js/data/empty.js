@@ -4,7 +4,7 @@ import { TRADE_KIND_IDS } from '../host/trade-view.js';
 import { said } from '../i18n/words.js';
 
 // one of the Memory screen's reads before it is read
-const MEMORY_READ = Object.freeze({ status: 'idle', data: null, at: null, message: null });
+const MEMORY_READ = Object.freeze({ status: 'idle', data: null, at: null, message: null, why: null });
 
 export function emptyState() {
   return {
@@ -125,7 +125,7 @@ export function emptyState() {
       routines: { status: 'idle', data: null, at: null, message: null }, rOpen: '', rAsk: '', rBusy: {}, rSaid: {}, pSaid: {}, pBusy: {} },
     // the Memory screen (host/memory-page.js): each of its four reads as last answered, read while the screen shows, with
     // the words of its last failure; the rows opened and the differences shown by id, the symbol the decisions are read for
-    memoryPage: { lessons: { ...MEMORY_READ }, decisions: { ...MEMORY_READ }, waiting: { ...MEMORY_READ }, health: { ...MEMORY_READ }, open: {}, diff: {}, symbol: '' },
+    memoryPage: { lessons: { ...MEMORY_READ }, decisions: { ...MEMORY_READ }, waiting: { ...MEMORY_READ }, health: { ...MEMORY_READ }, open: {}, diff: {}, symbol: '', before: '' },
     // the list's search (host/search.js): the box, the content read's phase, its items
     search: { query: '', contentPhase: 'idle', content: [], hasMore: false },
     // the open conversation's background jobs (host/jobs.js): the one watched, its rows, the job open in Details, the finished

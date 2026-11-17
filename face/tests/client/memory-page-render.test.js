@@ -47,9 +47,32 @@ test("not connected: its words as given, made visible and escaped, the command i
   const say = 'no <b>memory</b> here\u202e: run init';
   const html = draw(loaded(on(), 'lessons', memoryNotConnected({ say, command: 'npx --no gravit-memory init --home "/a b"' })));
   assert.match(html, /<p class="mp-say">no &lt;b&gt;memory&lt;\/b&gt; here\\u202e: run init<\/p>/);
-  assert.match(html, /<code class="mp-command">npx --no gravit-memory init --home &quot;\/a b&quot;<\/code>/);
+  assert.match(html, /<div class="mp-commands"><div class="mp-dim">At the terminal, in face\/<\/div><code class="mp-command">npx --no gravit-memory init --home &quot;\/a b&quot;<\/code><\/div>/);
   assert.doesNotMatch(html, /mp-body/);
   assert.doesNotMatch(html, /\u202e/, 'the mark drawn as its escape');
+});
+
+test('not connected with no command - a disabled row, no install, no home named: its words alone, no terminal', () => {
+  const say = 'the memory is not connected: gravit-memory is not installed; run npm ci in face/';
+  const { command, ...body } = memoryNotConnected({ why: 'no install', say });
+  const html = draw(loaded(on(), 'lessons', body));
+  assert.match(html, /<div class="mp-page"><p class="mp-say">the memory is not connected: gravit-memory is not installed; run npm ci in face\/<\/p><\/div>/);
+  assert.doesNotMatch(html, /mp-command|At the terminal/);
+  assert.doesNotMatch(draw(loaded(on(), 'lessons', { ...body, command: '' })), /mp-command/, 'an empty command is none');
+});
+
+test("a failed read with the memory's why: the fixed line, the why under it in the dim class, made visible and escaped; the next answer clears both", () => {
+  const why = 'this memory is version "2" <b>x</b>\u202e: use a gravit-memory that reads it';
+  const failed = R.memoryPageFailed(loaded(on(), 'lessons', memoryLessons()), { read: 'lessons', at: NOW, message: 'the memory could not be read', why });
+  const html = draw(failed);
+  assert.match(html, /<div class="mp-page"><p class="mp-dim">the memory could not be read<\/p><p class="mp-dim">this memory is version &quot;2&quot; &lt;b&gt;x&lt;\/b&gt;\\u202e: use a gravit-memory that reads it<\/p><div class="mp-body mp-lessons">/);
+  assert.doesNotMatch(html, /\u202e|<b>/);
+  const none = draw(R.memoryPageFailed(on(), { read: 'lessons', at: NOW, message: 'the memory could not be read', why }));
+  assert.match(none, /<p class="mp-dim">the memory could not be read<\/p><p class="mp-dim">this memory is version[^<]*<\/p><p class="mp-dim">Unavailable<\/p>/);
+  const cleared = R.memoryPageLoaded(failed, { read: 'lessons', data: memoryLessons(), at: NOW });
+  assert.equal(cleared.memoryPage.lessons.why, null);
+  assert.doesNotMatch(draw(cleared), /version/);
+  assert.equal(R.memoryPageFailed(on(), { read: 'lessons', at: NOW, message: 'x', why: 7 }).memoryPage.lessons.why, null, 'a why that is not words is none');
 });
 
 test('a failed read with data kept: one dim line with its words above the body as it was; with nothing kept: Unavailable', () => {
