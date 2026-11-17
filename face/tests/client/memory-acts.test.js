@@ -220,6 +220,34 @@ test("a refusal of the face's prepare ends refused with the body's error; of the
   assert.equal(sayOf(u.a().message), 'Refused');
 });
 
+test("a refused signature has the page learn its standing again; another refusal does not", async () => {
+  const BAD = { status: 401, body: { ok: false, error: 'the signature does not match the instruction', refusal: { code: 'E_ACCOUNT_BAD_SIGNATURE', message: 'the signature does not match the instruction' } } };
+  const r = rig();
+  r.store.dispatch('ownerStanding', { role: 'signs', kid: 'k1' });
+  let readies = 0;
+  r.owner.ready = async () => { readies += 1; };
+  r.queue(ACT, BAD);
+  r.acts.open('arm', 'no-chasing');
+  await settle();
+  r.acts.go();
+  await settle();
+  assert.equal(readies, 1, 'the standing read again once');
+  assert.equal(r.a().status, 'refused');
+  assert.equal(r.a().message, 'the signature does not match the instruction');
+
+  const s = rig();
+  s.store.dispatch('ownerStanding', { role: 'signs', kid: 'k1' });
+  let others = 0;
+  s.owner.ready = async () => { others += 1; };
+  s.queue(ACT, { status: 409, body: { ok: false, error: 'it was signed too long ago: prepare it again' } });
+  s.acts.open('arm', 'no-chasing');
+  await settle();
+  s.acts.go();
+  await settle();
+  assert.equal(s.a().status, 'refused');
+  assert.equal(others, 0, 'a refusal not about the standing reads nothing');
+});
+
 test('a refusal that says it changed while it was shown asks the reads again', async () => {
   const r = rig();
   r.queue(ACT, { status: 409, body: { ok: false, error: 'it changed while it was shown: nothing was done' } });

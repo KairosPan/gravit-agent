@@ -8822,3 +8822,40 @@ test("the Memory screen's key opens the act's drawer; words typed and the key pr
   assert.equal(store.get().memoryPage.act, null);
   store.timers.clear();
 });
+
+// a signature the Account no longer takes (the device dropped): the act is refused in the Account's words, the page learns its
+// standing again, and with it the keys go and the terminal commands and the line that says it does not sign come back
+test("the Memory screen's act refused for its signature: the page pairs again, the keys go, the commands come back", async () => {
+  const f = fakeWindow({ hash: '#/memory/waiting', storage: memoryStorage() });
+  const door = ownerDoor();
+  const [proposal] = memoryWaitingProposals();
+  const post = async (path, body) => {
+    if (path === '/data/memory/prepare') return { status: 200, body: { ok: true, show: { kind: 'proposal', proposal }, draft: { type: 'attest', service: 'gravit-memory', act: body.act, subject: body.subject, digest: 'e'.repeat(64) } } };
+    if (path === '/data/memory/act') {
+      door.role = 'pending';
+      return { status: 401, body: { ok: false, error: 'the signature does not match the instruction', refusal: { code: 'E_ACCOUNT_BAD_SIGNATURE', message: 'the signature does not match the instruction' } } };
+    }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: {
+    '/data/account': () => door.page(), '/data/memory/review': memoryWaiting({ proposals: memoryWaitingProposals() }),
+    '/data/memory/lessons': memoryLessons(), '/data/memory/decisions': memoryDecisions(),
+  } });
+  const store = bootOwner(f, h, door, fakeMarkets(), { ownerPost: post, timers: new HeldTimers(ms => ms >= 5_000), now: () => 1_000_000 });
+  await h.ready();
+  await until(signs(store), 'the page to sign at #/memory');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryActOpen', act: 'accept', subject: proposal.id } });
+  await until(() => store.get().memoryPage.act?.status === 'ready', 'the act to be prepared');
+  const pairs = door.sent('/data/account/pair').length;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryActGo' } });
+  await until(() => store.get().owner.role === 'pending', 'the standing learnt again');
+  await settle();
+  assert.equal(door.sent('/data/account/pair').length, pairs + 1, 'paired once again');
+  assert.equal(store.get().memoryPage.act.status, 'refused');
+  assert.equal(store.get().memoryPage.act.message, 'the signature does not match the instruction');
+  assert.doesNotMatch(f.html(), /class="btn-sm" data-action="memoryActOpen"/, "the rows' keys are gone");
+  assert.match(f.html(), /<code class="mp-command">npx --no gravit-memory review/, 'the command is back');
+  assert.match(f.html(), /This browser does not sign for the account<\/a>/);
+  store.timers.clear();
+});

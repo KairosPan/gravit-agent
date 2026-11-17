@@ -153,8 +153,12 @@ export function startMemoryActs({ store, owner, post, schedule, cancelTimer, aft
           afterDone(a.act);
           return;
         }
-        refuse(m, refusalOf(r).message);
+        const why = refusalOf(r);
+        refuse(m, why.message);
         if (r?.body?.error === CHANGED) afterDone(a.act);
+        // the door did not take the signature (the device may be dropped): the page learns its standing again, as the owner
+        // device's submit does, after the refusal is drawn and outside the drawer's flow
+        if (why.standing && store.get().owner?.role === 'signs') void Promise.resolve(owner.ready?.()).catch(() => {});
       } finally {
         if (current(m)) going = false;
       }
