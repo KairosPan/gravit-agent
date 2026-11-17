@@ -31,6 +31,7 @@ import { registerMarketProxy } from "./market-proxy.ts";
 import { composedMarketRow } from "./market-row.ts";
 import { composedMemoryRow } from "./memory-row.ts";
 import { memoryOpener } from "./memory.ts";
+import { createAlertLessons } from "./memory-alert.ts";
 import { readBriefMemory } from "./memory-brief.ts";
 import { installMemoryClock, memoryClockEnabled, type MemoryClock } from "./memory-clock.ts";
 import { createMemoryGate, followAnswers, gateAccount, type GateNote, type MemoryGate } from "./memory-gate.ts";
@@ -541,6 +542,9 @@ const deskRoute = deskEnabled
  * desk's own symbols and the XNYS clock whether the desk is on or off, so a task's `read_through` works either way. */
 const quotes = marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes });
 wireReadThrough(booted.ctx, { quotes, root: process.cwd() });
+/* The owner's lessons on a price alert (src/memory-alert.ts), asked by the watch as `gravit-face` once the alert is
+ * sent, over the memory and the Market's bars; handed to the desk whether it is on or off. */
+const lessons = createAlertLessons({ open: openMemory, candles: marketProxy.candles, log: (line) => { console.error(`${BIN}: ${line}`); } });
 desk = installDesk(booted.ctx.webServer, {
   home: dshHome,
   enabled: deskEnabled,
@@ -558,6 +562,7 @@ desk = installDesk(booted.ctx.webServer, {
   /* the watch (src/watch.ts) on the production defaults: the wall clock, the face's calendars, and SEC's filings
    * only once ALPHA_EDGAR_USER_AGENT names a contact */
   watchRow: {},
+  lessons,
 });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
 /* The memory's reconcile clock (src/memory-clock.ts), beside the desk: two minutes from now and every eight hours, as
