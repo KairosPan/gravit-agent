@@ -2,8 +2,8 @@
 // a caret; expanded, its strategy, steps, result or gate, usage and the keys its state allows.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderTaskRail, scheduledLineHtml } from '../../client/js/render/tasks.js';
-import { scheduledOf } from '../../client/js/host/rail-view.js';
+import { renderTaskRail, scheduledLineHtml, waitingLineHtml } from '../../client/js/render/tasks.js';
+import { scheduledOf, railOf } from '../../client/js/host/rail-view.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { withTable } from '../../client/js/i18n/words.js';
@@ -205,4 +205,17 @@ test("a bot task's rail line shows the bot before its title; a gravit task's non
   assert.match(summary, /<span class="task-dot running"><\/span><span class="task-bot">drill-bull<\/span><span class="task-title">Argue the bull case<\/span>/);
   assert.doesNotMatch(lineOf(h, 'g1'), /task-bot/);
   assert.match(renderTaskRail(state([task('x', { bot: '<b>' })]), NOW), /task-bot">&lt;b&gt;</, 'the bot id is escaped');
+});
+
+test('the gravit box draws a waiting card as the rail does: a lesson applying sends the owner to the task, no one-click approve', () => {
+  const w = task('t1', { state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c', tool: 'x' } });
+  const s = R.hostGate(state([w], [conv('t1')]), { convId: 't1', message: { id: 'ev-1', seq: 1.5, at: NOW, from: 'gravit', kind: 'card', text: 'Buy 1 NVDA', data: { eventId: 'ev-1', sessionId: 't1', callId: 'c1', title: 'Buy 1 NVDA', venue: 'paper' } } });
+  const lesson = { id: 'L-1', strength: 'caveat', says: 'careful', words: 'Do not chase', fired: 1, followed: 0, overridden: 0 };
+  const gate = { callId: 'c1', state: 'checked', lines: [{ order: 'buy 1 NVDA', considering: ['open'], positionRead: true, lessons: [lesson], lessonsMore: 0, untold: [], untoldMore: 0 }], redLine: false, overridden: false };
+  const kept = R.memoryGateLoaded(s, { callId: 'c1', gate });
+  const [line] = railOf(kept, NOW).you;
+  const h = waitingLineHtml(line, kept);
+  assert.doesNotMatch(h, /allowed-once/);
+  assert.match(h, /<a href="#\/task\/t1">A lesson applies - open the task<\/a>/);
+  assert.match(waitingLineHtml(railOf(s, NOW).you[0], s), /data-value="allowed-once"/, 'no lesson kept: the one-click keys');
 });

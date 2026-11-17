@@ -6,8 +6,9 @@ import { DESK_ROUTINES_POLL_MS } from '../../client/js/host/desk-routines.js';
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { boot as bootApp, Timers, DROP_QUIET_MS } from '../../client/js/app.js';
+import { boot as bootApp, Timers, DROP_QUIET_MS, PREFS_KEY } from '../../client/js/app.js';
 import { rowsOf, pairsOf } from '../../client/js/host/market-view.js';
+import { boxAttached } from '../../client/js/host/box-view.js';
 import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
 import { startComposerReads } from '../../client/js/host/composer.js';
@@ -83,7 +84,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
   };
   return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, reads, inventory, overviews, statuses, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
 }
-const started = (f, h) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
+const started = (f, h, more = {}) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
 const send = f => f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'send' } }) } });
 // a session opened as a link the browser followed (one-entry plan 2: no row action opens one): its old address, which lands on
 // Messages, its task's page or history
@@ -930,9 +931,9 @@ test("the Desk's filter, Details and rules keys narrow the news, open a reason a
 });
 
 // the Routines column (desk-page plan 2 Task 7): a row opened, its switch posting and the routines read again, Test posting and
-// reading Running…, Delete asking once more with only Delete routine posting, Edit in Messages putting its words in gravit's
-// composer and sending nothing
-test("the Desk's routines: open a row, flip its switch, Test it, Delete it once asked, Edit it in Messages", async () => {
+// reading Running…, Delete asking once more with only Delete routine posting, Edit with gravit putting its words in the gravit
+// box's composer, the Desk unmoved, and sending nothing
+test("the Desk's routines: open a row, flip its switch, Test it, Delete it once asked, Edit it with gravit", async () => {
   const f = fakeWindow({ hash: '#/desk', storage: memoryStorage() });
   const say = f.withId('say', { tagName: 'TEXTAREA' });
   const h = host({ rows: [row('s1')], conversation: 's1' });
@@ -972,8 +973,8 @@ test("the Desk's routines: open a row, flip its switch, Test it, Delete it once 
   assert.equal(store.get().deskPage.rAsk, '');
   f.click({ tagName: 'BUTTON', dataset: { action: 'dkEdit', text: 'Edit your routine: Idea screening' } });
   await settle();
-  assert.equal(f.win.location.hash, '#/messages');
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(f.win.location.hash, '#/desk', 'the Desk stays');
+  assert.equal(store.get().boxOpen, true, 'the box opens');
   assert.equal(say.value, 'Edit your routine: Idea screening');
   assert.deepEqual(h.calls.filter(c => c[0] === 'session/prompt' || c[0] === 'commands/execute' || c[0] === 'session/create'), [], 'nothing sent');
   store.timers.clear();
@@ -1055,7 +1056,7 @@ test('a market page reads no /data/bars, whatever its id; Markets on screen read
   store.timers.clear();
 });
 
-test('Hand to gravit opens the conversation with the words in the composer', async () => {
+test('Hand to gravit opens the gravit box with the words in its composer, the market\'s page unmoved', async () => {
   const storage = memoryStorage();
   storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'us:AAPL', market: 'us', symbol: 'AAPL', name: 'Apple', exchange: 'NASDAQ', currency: 'USD' }] }));
   const f = fakeWindow({ hash: '#/markets/us:AAPL', storage });
@@ -1065,7 +1066,8 @@ test('Hand to gravit opens the conversation with the words in the composer', asy
   await h.ready();
   f.click({ tagName: 'BUTTON', dataset: { action: 'handToGravit', id: 'us:AAPL' } });
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(store.get().route.screen, 'markets');
+  assert.equal(store.get().boxOpen, true);
   assert.equal(say.value, 'Look at AAPL (Apple)');
   assert.equal(f.doc.activeElement, say);
   store.timers.clear();
@@ -1093,8 +1095,8 @@ test('Hand to gravit while /data/tasks still loads: the words move to the conver
   store.timers.clear();
 });
 
-// an ability's ask key (spec 2026-11-13 §4.4): its words in gravit's composer on Messages, after what it holds; nothing sent
-test("an ability's ask key opens the conversation with its words in the composer, and sends nothing", async () => {
+// an ability's ask key (spec 2026-11-13 §4.4): its words in the gravit box's composer, after what it holds; nothing sent
+test("an ability's ask key opens the gravit box with its words in the composer, and sends nothing", async () => {
   const f = fakeWindow({ hash: '#/plugin/ability%3Aevent-analogs' });
   const say = f.withId('say', { tagName: 'TEXTAREA' });
   const h = host({ rows: [row('s1')], conversation: 's1' });
@@ -1106,14 +1108,15 @@ test("an ability's ask key opens the conversation with its words in the composer
   const ask = 'Line one\nIs "A&B" <up>?';
   f.click({ tagName: 'BUTTON', dataset: { action: 'askAbility', text: ask } });
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(store.get().route.screen, 'plugin', 'the page stays');
+  assert.equal(store.get().boxOpen, true);
   assert.equal(say.value, ask, 'exactly its words');
   assert.equal(f.doc.activeElement, say);
   f.win.location.hash = '#/discover';
   await settle();
   f.click({ tagName: 'BUTTON', dataset: { action: 'askAbility', text: 'And another' } });
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(store.get().route.screen, 'discover');
   assert.equal(say.value, `${ask}\nAnd another`, 'a second ask after the first, on a new line');
   assert.deepEqual(h.calls.filter(c => c[0] === 'session/prompt' || c[0] === 'commands/execute' || c[0] === 'session/create'), [], 'nothing sent');
   store.timers.clear();
@@ -7576,8 +7579,8 @@ test('⌥⌘N focuses the composer on Messages', async () => {
   assert.ok(prevented, "the browser's own key is not run");
   assert.equal(f.doc.activeElement, say, 'the composer has focus');
   assert.deepEqual(store.get().route, { screen: 'messages', id: null });
-  // from another screen: Messages, then the composer once it is drawn
-  const g = fakeWindow({ hash: '#/discover' });
+  // from a screen with no box (History): Messages, then the composer once it is drawn
+  const g = fakeWindow({ hash: '#/history' });
   g.win.navigator = { platform: 'MacIntel' };
   const gsay = g.withId('say', { tagName: 'TEXTAREA', presentIf: /id="say"/ });
   const h2 = host({ rows: [row('s1')] });
@@ -8271,4 +8274,404 @@ test('Stop on a line posts /data/tasks/stop; a line opened stays open across a r
   await settle();
   assert.deepEqual(h.posted.filter(p => p[0].startsWith('/data/tasks/')), [['/data/tasks/stop', { task: 't1' }]]);
   store.timers.clear();
+});
+
+// ---- the gravit box (plan 1 of the box, Task 3): it reads and writes the one conversation, nothing else
+const boxFollows = (h, id) => h.streams.filter(st => st.name === 'session/follow' && st.args.request.address.sessionId === id && !st.cancelled).length;
+const boxPrompts = h => h.calls.filter(c => c[0] === 'session/prompt').map(c => c[1].request);
+const boxRig = (hash, over = {}) => {
+  const f = fakeWindow({ hash, ...(over.storage ? { storage: over.storage } : {}) });
+  if (over.mac) f.win.navigator = { platform: 'MacIntel' };
+  const h = host({ rows: [row('conv', { updatedAt: 30, agentAvailable: true }), ...(over.rows ?? [])], conversation: 'conv', tasks: over.tasks ?? [], channels: over.channels ?? [] });
+  const store = started(f, h, over.now ? { now: over.now } : {});
+  return { f, h, store };
+};
+const openBox = f => f.click({ tagName: 'BUTTON', dataset: { action: 'boxOpen' } });
+const closeBox = f => f.click({ tagName: 'BUTTON', dataset: { action: 'boxClose' } });
+const typeSay = (f, text) => { const say = f.withId('say', { tagName: 'INPUT' }); say.value = text; f.fire('root', 'input', { target: say }); return say; };
+
+test('the box: the half ball on the Desk, and a click opens the conversation in it', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  assert.match(f.html(), /id="gbox-ball"/);
+  assert.equal(boxFollows(h, 'conv'), 0, 'the closed box reads nothing');
+  openBox(f); await settle();
+  assert.match(f.html(), /class="gbox-panel"/);
+  assert.match(f.html(), /id="say"/);
+  assert.equal(boxFollows(h, 'conv'), 1);
+  assert.equal(f.win.location.hash, '#/desk', 'the page behind never moves');
+  assert.equal(store.get().boxOpen, true);
+});
+
+test('the box sends to the conversation', async () => {
+  const { f, h } = boxRig('#/markets');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  typeSay(f, 'why is it down'); send(f); await settle();
+  assert.deepEqual(boxPrompts(h).map(r => [r.sessionId, r.content[0].text]), [['conv', '[on screen · Markets]\nwhy is it down']]);
+});
+
+test('a draft typed in the box is there on Messages', async () => {
+  const { f, h } = boxRig('#/messages');
+  await h.ready(); await settle();
+  await goTo(f, '#/desk');
+  openBox(f); await settle();
+  const say = typeSay(f, 'half a thought'); await settle();
+  await goTo(f, '#/messages');
+  assert.equal(say.value, 'half a thought');
+  assert.deepEqual(boxPrompts(h), [], 'nothing sent');
+});
+
+test('after Messages, opening starts no second read and marks the conversation seen', async () => {
+  const { f, h, store } = boxRig('#/messages');
+  await h.ready(); await settle();
+  assert.equal(boxFollows(h, 'conv'), 1);
+  await goTo(f, '#/desk');
+  h.rows[0].updatedAt = 44;
+  await store.live.refresh(); await settle();
+  assert.equal(store.get().conversations.find(c => c.id === 'conv').updatedAt, 44);
+  openBox(f); await settle();
+  assert.equal(boxFollows(h, 'conv'), 1);
+  const c = store.get().conversations.find(x => x.id === 'conv');
+  assert.equal(c.lastSeen, c.updatedAt);
+});
+
+test('closing leaves the read where it is', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  closeBox(f); await settle();
+  assert.equal(boxFollows(h, 'conv'), 1);
+  assert.equal(store.get().boxOpen, false);
+  assert.match(f.html(), /id="gbox-ball"/);
+});
+
+test("a task's page reads the worker; coming back reads the conversation again", async () => {
+  const { f, h } = boxRig('#/markets', { rows: [row('w1', { agentAvailable: true })], tasks: [taskRow('w1')] });
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  await goTo(f, '#/task/w1');
+  await goTo(f, '#/markets');
+  assert.equal(h.streams.filter(s => s.name === 'session/follow').map(s => s.args.request.address.sessionId).join(','), 'conv,w1,conv');
+});
+
+test('the open box survives a reload', async () => {
+  const storage = memoryStorage();
+  storage.setItem(PREFS_KEY, JSON.stringify({ boxOpen: true }));
+  const { f, h } = boxRig('#/desk', { storage });
+  await h.ready(); await settle();
+  assert.match(f.html(), /class="gbox-panel"/);
+  assert.equal(boxFollows(h, 'conv'), 1);
+});
+
+test('the routines are read while the box is open off the Desk', async () => {
+  const { f, h } = boxRig('#/markets');
+  await h.ready(); await settle();
+  assert.equal(h.reads.includes('/data/desk/routines'), false, 'not with the box closed');
+  openBox(f); await settle();
+  assert.ok(h.reads.includes('/data/desk/routines'));
+});
+
+test('the box follows a new conversation', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  h.rows.push(row('conv2', { updatedAt: 50, agentAvailable: true }));
+  h.inventory['/data/tasks'] = () => ({ ok: true, conversation: 'conv2', tasks: [] });
+  await store.live.refresh(); await store.tasks.refresh(); await settle();
+  assert.equal(boxFollows(h, 'conv2'), 1);
+  typeSay(f, 'and now'); send(f); await settle();
+  assert.deepEqual(boxPrompts(h).map(r => r.sessionId), ['conv2']);
+});
+
+test('a send right after opening reaches the conversation', async () => {
+  const { f, h } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f);
+  typeSay(f, 'quick'); send(f); await settle();
+  assert.deepEqual(boxPrompts(h).map(r => [r.sessionId, r.content[0].text]), [['conv', '[on screen · Desk]\nquick']]);
+});
+
+test('open, close, open reads once', async () => {
+  const { f, h } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); closeBox(f); openBox(f); await settle();
+  assert.equal(h.streams.filter(s => s.name === 'session/follow' && s.args.request.address.sessionId === 'conv').length, 1);
+});
+
+test('a card answered in the box is settled everywhere', async () => {
+  const { f, h, store } = boxRig('#/desk', { rows: [row('w1', { agentAvailable: true })], tasks: [taskRow('w1', { title: 'Size the order', state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c9', tool: 'x' } })] });
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  h.opts().onGate({ type: 'waterfall', event: 'approval/request', eventId: 'ev-9', agentId: 'w1', request: { toolName: 'mcp__account__portfolio_place_order', callId: 'c9', reason: 'paper' } });
+  await settle();
+  assert.match(f.html(), /<div class="gbox-line" data-task="w1">[\s\S]*data-action="answer" data-conv="w1" data-msg="ev-9" data-value="allowed-once"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'answer', conv: 'w1', msg: 'ev-9', value: 'allowed-once' } }); await settle();
+  assert.deepEqual(h.answered, [['ev-9', 'allowed-once']]);
+  assert.doesNotMatch(f.html(), /class="gbox-line"/, 'answered: no longer waiting in the box');
+  const gate = store.get().conversations.find(c => c.id === 'w1').messages.find(x => x.id === 'ev-9');
+  assert.equal(gate.answer, 'approved', 'the worker\'s record holds the answer the rail and the task page read');
+  store.timers.clear();
+});
+
+// the live drill (2026-11-17): on a market's page, whose quotes redraw the page, render() writes a new panel each time and the
+// panel's grow played again on every one — the panel faded and every key slid under the operator's click, which landed beside
+// the key (a Decline that did nothing). The grow is drawn only inside BOX_GROW_MS of the box's opening
+const quote = (store, price) => store.dispatch('accountQuotesLoaded', { quotes: [{ venue: 'broker', symbol: 'NVDA', market: { price, quoteAt: '2026-11-17T15:00:00.000Z' } }] });
+const PANEL_STILL = '<section class="gbox-panel" role="dialog" aria-modal="false" aria-label="gravit">';
+test('the panel grows once as the box opens: a redraw inside the grow carries it on, one after it draws the panel still', async () => {
+  const clock = { t: 1_000_000 };
+  const { f, h, store } = boxRig('#/markets', { now: () => clock.t });
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  assert.match(f.html(), /<section class="gbox-panel" role="dialog" aria-modal="false" aria-label="gravit" data-grow>/, 'opened: the grow from its start');
+  clock.t += 50;
+  quote(store, 182.4); await settle();
+  assert.match(f.html(), /<section class="gbox-panel" [^>]*data-grow style="animation-delay:-50ms">/, 'a quote 50 ms in: the new panel carries the grow on from 50 ms');
+  clock.t += 500;
+  const writes = f.writes;
+  quote(store, 182.5); await settle();
+  assert.ok(f.writes > writes, 'the quote redrew the page');
+  assert.ok(f.html().includes(PANEL_STILL), 'a redraw after the grow draws the panel still: its keys stand where the operator sees them');
+  assert.doesNotMatch(f.html(), /data-grow|animation-delay/);
+  clock.t += 2_000;
+  quote(store, 182.6); await settle();
+  assert.ok(f.html().includes(PANEL_STILL), 'and on every redraw after it');
+  closeBox(f); await settle();
+  openBox(f); await settle();
+  assert.match(f.html(), /aria-label="gravit" data-grow>/, 'opened again: it grows again, once');
+  store.timers.clear();
+});
+
+test('a panel that was open at the load draws still: the grow is the opening\'s, not a render\'s', async () => {
+  const storage = memoryStorage();
+  storage.setItem(PREFS_KEY, JSON.stringify({ boxOpen: true }));
+  const { f, h, store } = boxRig('#/markets', { storage });
+  await h.ready(); await settle();
+  assert.ok(f.html().includes(PANEL_STILL));
+  quote(store, 182.4); await settle();
+  assert.ok(f.html().includes(PANEL_STILL));
+  store.timers.clear();
+});
+
+test("the waiting strip keeps where the operator scrolled it across a quote's redraw", async () => {
+  const { f, h, store } = boxRig('#/markets', { rows: [row('w1', { agentAvailable: true })], tasks: [taskRow('w1', { title: 'Pick a venue', state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c9', tool: 'x' } })] });
+  const strip = f.withSelector('.gbox-waiting', { presentIf: /class="gbox-waiting"/ });
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  strip.scrollTop = 140;   // scrolled down to a question's Answer key
+  quote(store, 182.4); await settle();
+  assert.equal(strip.scrollTop, 140, 'the redraw put the strip back where it stood, not at its top');
+  store.timers.clear();
+});
+
+// ---- the box's keys and the hand-offs (plan 1 of the box, Task 5)
+const keyN = f => f.fire('doc', 'keydown', { code: 'KeyN', key: 'n', altKey: true, metaKey: true, ctrlKey: false, shiftKey: false, preventDefault() {} });
+const macBox = (hash, over = {}) => boxRig(hash, { ...over, mac: true });
+const escIn = (f, inBox) => f.fire('doc', 'keydown', { key: 'Escape', target: { closest: sel => (inBox && sel === '.gbox-panel' ? {} : null) }, preventDefault() {} });
+
+test('⌥⌘N on the Desk opens the box and stays on the Desk', async () => {
+  const { f, h, store } = macBox('#/desk');
+  await h.ready(); await settle();
+  keyN(f); await settle();
+  assert.match(f.html(), /class="gbox-panel"/);
+  assert.equal(f.win.location.hash, '#/desk');
+  assert.equal(store.get().boxOpen, true);
+  // already open: the composer takes focus, nothing else moves
+  const say = f.withId('say', { tagName: 'INPUT' });
+  keyN(f); await settle();
+  assert.equal(f.doc.activeElement, say);
+  assert.equal(f.win.location.hash, '#/desk');
+});
+
+test('⌥⌘N under the identity sheet does nothing', async () => {
+  const { f, h, store } = macBox('#/account/identity');
+  await h.ready(); await settle();
+  store.dispatch('identityConnectOpen', 'telegram'); await settle();
+  keyN(f); await settle();
+  assert.equal(store.get().boxOpen, false);
+  assert.equal(f.win.location.hash, '#/account/identity');
+});
+
+test("⌥⌘N on a task's page still goes to Messages", async () => {
+  const { f, h, store } = macBox('#/task/w1', { rows: [row('w1', { agentAvailable: true })], tasks: [taskRow('w1')] });
+  await h.ready(); await settle();
+  keyN(f); await settle();
+  assert.equal(store.get().route.screen, 'messages');
+  assert.equal(store.get().boxOpen, false);
+});
+
+test("Esc inside the box minimizes it and leaves Trade's ticket open", async () => {
+  const { f, h, store } = boxRig('#/trade/stock:NVDA');
+  await h.ready(); await settle();
+  store.dispatch('ticketOpen', { id: 'stock:NVDA', side: 'buy' });
+  openBox(f); await settle();
+  escIn(f, true); await settle();
+  assert.equal(store.get().boxOpen, false);
+  assert.notEqual(store.get().trade.ticket, null);
+});
+
+test("Esc inside the box leaves the page's confirm and minimizes the box", async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  store.dispatch('askConfirm', { action: 'routineDelete', id: 'r1' });
+  escIn(f, true); await settle();
+  assert.equal(store.get().boxOpen, false);
+  assert.deepEqual(store.get().confirm, { action: 'routineDelete', id: 'r1' });
+});
+
+test("Esc inside the box cancels a confirm drawn in the box", async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  store.dispatch('askConfirm', { action: 'stopGravit', id: 'conv' });
+  f.fire('doc', 'keydown', { key: 'Escape', target: { closest: sel => (sel === '.gbox-panel' ? { querySelector: q => (q === '.confirm' ? {} : null) } : null) }, preventDefault() {} });
+  await settle();
+  assert.equal(store.get().confirm, null);
+  assert.equal(store.get().boxOpen, true);
+});
+
+test("Esc inside the box leaves the bot editor's edit and minimizes the box", async () => {
+  const { f, h, store } = boxRig('#/plugin/bot:news-scout');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  store.dispatch('startEdit', { kind: 'bot', id: 'news-scout' });
+  escIn(f, true); await settle();
+  assert.equal(store.get().boxOpen, false);
+  assert.deepEqual(store.get().edit, { kind: 'bot', id: 'news-scout' });
+});
+
+test("Esc outside the box keeps today's ladder", async () => {
+  const { f, h, store } = boxRig('#/trade/stock:NVDA');
+  await h.ready(); await settle();
+  store.dispatch('ticketOpen', { id: 'stock:NVDA', side: 'buy' });
+  openBox(f); await settle();
+  escIn(f, false); await settle();
+  assert.equal(store.get().trade.ticket, null);
+  assert.equal(store.get().boxOpen, true);
+});
+
+test("a page control that goes under the open box leaves the box's composer unfocused; one of the box's own lands there", async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  const say = f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  openBox(f); await settle();
+  const pageKey = f.withId('dk-gone', { tagName: 'BUTTON', presentIf: /never-drawn/ });
+  pageKey.focus();
+  store.dispatch('boxDetach'); await settle();
+  assert.notEqual(f.doc.activeElement, say, 'the page lost its control: the box does not take focus');
+  const boxKey = f.withId('gbox-gone', { tagName: 'BUTTON', presentIf: /never-drawn/, closestMap: { '.gbox-panel': {} } });
+  boxKey.focus();
+  store.dispatch('boxAttach'); await settle();
+  assert.equal(f.doc.activeElement, say, "the box's control went: its composer takes focus");
+});
+
+test('files dragged over the open box while a sheet covers it are refused; with the sheet gone they are taken', async () => {
+  const { f, h, store } = boxRig('#/account/identity');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  store.dispatch('identityConnectOpen', 'telegram'); await settle();
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
+  assert.equal(store.get().dropping, false, 'the hidden box takes no file');
+  store.dispatch('identityConnectClose'); await settle();
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
+  assert.equal(store.get().dropping, true);
+  store.timers.clear();
+});
+
+test('the hand-offs fill the box and stay on the page', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  const say = f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkEdit', text: 'Edit your routine: Idea screening' } }); await settle();
+  assert.equal(f.win.location.hash, '#/desk');
+  assert.equal(store.get().boxOpen, true);
+  assert.equal(say.value, 'Edit your routine: Idea screening');
+  assert.deepEqual(boxPrompts(h), [], 'nothing sent');
+  const g = boxRig('#/plugin/ability:event-analogs');
+  await g.h.ready(); await settle();
+  const gsay = g.f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  g.f.click({ tagName: 'BUTTON', dataset: { action: 'askAbility', text: 'Measure the past events like NVDA today' } }); await settle();
+  assert.equal(g.f.win.location.hash, '#/plugin/ability:event-analogs');
+  assert.equal(g.store.get().boxOpen, true);
+  assert.equal(gsay.value, 'Measure the past events like NVDA today');
+});
+
+test("a hand-off on a task's page still goes to Messages", async () => {
+  const { f, h, store } = boxRig('#/task/w1', { rows: [row('w1', { agentAvailable: true })], tasks: [taskRow('w1')] });
+  await h.ready(); await settle();
+  const say = f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkEdit', text: 'Edit your routine: Idea screening' } }); await settle();
+  assert.equal(store.get().route.screen, 'messages');
+  assert.equal(store.get().boxOpen, false);
+});
+
+test('a hand-off under a sheet fills the draft for later', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  const say = f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  store.dispatch('identityConnectOpen', 'telegram'); await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkEdit', text: 'Edit your routine: Idea screening' } }); await settle();
+  assert.equal(store.get().boxOpen, true);
+  assert.doesNotMatch(f.html(), /class="gbox-panel"/);
+  store.dispatch('identityConnectClose'); await settle();
+  assert.match(f.html(), /class="gbox-panel"/);
+  assert.equal(say.value, 'Edit your routine: Idea screening');
+});
+
+// ---- the page tag (plan 2 of the box, Task 2): what the box sends opens with the page, unless × took it off
+test('a message from the box carries the page', async () => {
+  const { f, h } = boxRig('#/desk', { channels: [{ workspaceId: 'wb', name: 'beta', title: 'Beta', isRoot: false, sessionIds: [] }] });
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  typeSay(f, 'why'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, '[on screen · Desk]\nwhy');
+  await goTo(f, '#/strategy/beta');
+  typeSay(f, 'how is it doing'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, '[on screen · Strategy · beta]\nhow is it doing');
+});
+
+test('× leaves it off the next message, and the next page brings it back', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'boxDetach' } }); await settle();
+  assert.match(f.html(), /class="gbox-attach"/);
+  typeSay(f, 'plain'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, 'plain');
+  await goTo(f, '#/markets');
+  assert.equal(boxAttached(store.get()), true);
+  assert.match(f.html(), /class="gbox-chip"/);
+  typeSay(f, 'and here'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, '[on screen · Markets]\nand here');
+});
+
+test('Attach this page puts the tag back', async () => {
+  const { f, h } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'boxDetach' } }); await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'boxAttach' } }); await settle();
+  assert.match(f.html(), /class="gbox-chip"/);
+  typeSay(f, 'back on'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, '[on screen · Desk]\nback on');
+});
+
+test('a / line goes out untagged', async () => {
+  const { f, h } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  typeSay(f, '/compact'); send(f); await settle();
+  assert.ok(h.calls.length > 0);
+  assert.ok(h.calls.every(([, a]) => !JSON.stringify(a ?? {}).includes('[on screen')));
+});
+
+test('Messages never tags', async () => {
+  const { f, h } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  await goTo(f, '#/messages');
+  typeSay(f, 'hello'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, 'hello');
 });

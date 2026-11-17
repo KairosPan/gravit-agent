@@ -113,7 +113,9 @@ test('the known words hold no code word and no face word', () => {
   const ACCOUNT_PROSE = new Set(['via', 'watchOnly', 'what', 'label']);
   for (const w of ['live', 'Live', 'Markets']) {
     const from = [...(contributors.get(w) ?? [])];
-    assert.deepEqual(from.filter(k => !ACCOUNT_PROSE.has(k)), [], `${w} is known only from the Account's prose (known from ${from.join(', ')})`);
+    // the page tag's kept page names (host/page-tag.js) hold Markets as a code the router reads, never drawn as a word
+    const kept = w === 'Markets' ? ['en-kept'] : [];
+    assert.deepEqual(from.filter(k => !ACCOUNT_PROSE.has(k) && !kept.includes(k)), [], `${w} is known only from the Account's prose (known from ${from.join(', ')})`);
   }
 });
 

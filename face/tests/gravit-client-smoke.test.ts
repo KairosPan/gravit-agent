@@ -40,6 +40,8 @@ import { installDesk } from "../src/desk.ts";
 import { parseHash } from "../client/js/router.js";
 import { renderNav } from "../client/js/render/rail.js";
 import { renderDeskScreen } from "../client/js/render/desk-page.js";
+import { renderBox } from "../client/js/render/box.js";
+import { pageTagOf } from "../client/js/host/page-tag.js";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
@@ -164,8 +166,15 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
       assert.match(nav, />Desk</);
       const screen = renderDeskScreen(deskStore.get(), Date.now());
       for (const column of ["News", "Routines"]) assert.match(screen, new RegExp(`<section class="dk-col" aria-label="${column}">`), column);
-      // the page module and its two host modules are served to the browser too
-      for (const path of ["/client/js/render/desk-page.js", "/client/js/host/desk-page-view.js", "/client/js/host/desk-news.js"]) {
+      // the gravit box on the Desk: opened on the same store, it draws its panel and composer, and the page tag names the Desk
+      deskStore.dispatch("tasksLoaded", { conversation: "conv", tasks: [], at: Date.now() });
+      deskStore.dispatch("boxOpen");
+      const boxHtml = renderBox(deskStore.get(), Date.now());
+      assert.match(boxHtml, /class="gbox-panel"/);
+      assert.match(boxHtml, /id="say"/);
+      assert.equal(pageTagOf(deskStore.get()), "[on screen · Desk]");
+      // the page module, the box's modules and its two host modules are served to the browser too
+      for (const path of ["/client/js/render/desk-page.js", "/client/js/host/desk-page-view.js", "/client/js/host/desk-news.js", "/client/js/render/box.js", "/client/js/host/box-view.js", "/client/js/host/page-tag.js"]) {
         const res = await realFetch(base + path);
         assert.equal(res.status, 200, path);
       }

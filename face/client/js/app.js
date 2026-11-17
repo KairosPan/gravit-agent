@@ -79,7 +79,10 @@ import { startTrade } from './host/trade.js';
 import { startSearch } from './host/search.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
-import { onScreenId } from './host/sessions.js';
+import { onScreenId, boxOpenHere, boxShown } from './host/sessions.js';
+import { boxCovered, boxAside, boxAttached } from './host/box-view.js';
+import { pageTagOf } from './host/page-tag.js';
+import { renderBox, BOX_GROW_MS } from './render/box.js';
 import { createAccountStream } from './wire/account-stream.js';
 import { createMarketStream } from './wire/market-stream.js';
 import { discoverWallets, proveWallet } from './wire/wallet.js';
@@ -147,7 +150,7 @@ export class Timers {
   }
 }
 
-// per-viewer conveniences only: the theme, the sizes and fonts, the rail's fold, the last conversation, what was seen (the watchlist keeps
+// per-viewer conveniences only: the theme, the sizes and fonts, the rail's fold, the gravit box open, the last conversation, what was seen (the watchlist keeps
 // its own key, host/markets.js)
 export function readPrefs(storage) {
   try {
@@ -158,7 +161,7 @@ export function readPrefs(storage) {
     return {};
   }
 }
-export const prefsOf = s => ({ theme: s.theme, lang: s.lang, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, lastSeen: s.lastSeen });
+export const prefsOf = s => ({ theme: s.theme, lang: s.lang, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, boxOpen: s.boxOpen, lastSeen: s.lastSeen });
 export function initialState(storage, now = Date.now()) {
   const p = readPrefs(storage);
   const s = emptyState(now);
@@ -171,6 +174,7 @@ export function initialState(storage, now = Date.now()) {
     textFont: cleanFont(p.textFont),
     codeFont: cleanFont(p.codeFont),
     railCollapsed: p.railCollapsed === true,
+    boxOpen: p.boxOpen === true,
     lastSeen: p.lastSeen && typeof p.lastSeen === 'object' && !Array.isArray(p.lastSeen) ? p.lastSeen : {},
   };
 }
@@ -231,9 +235,10 @@ const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
 // a history image's thumb as landed (a blob: URL, null for one the host could not give), undefined while it reads — by the
 // store's own key alone, so an id like `constructor` reads nothing of Object.prototype
 const thumbOf = (s, id) => (typeof id === 'string' && s.thumbs && Object.hasOwn(s.thumbs, id) ? s.thumbs[id] : undefined);
-// the lightbox over the page: open on Messages on a thumb that is an image's URL (isImageSrc; the host's thumbs are blob: URLs)
+// the lightbox over the page: open on Messages, or over the open gravit box, on a thumb that is an image's URL (isImageSrc; the
+// host's thumbs are blob: URLs)
 const lightboxOf = s => {
-  if (!s.lightbox || s.route.screen !== 'messages') return null;
+  if (!s.lightbox || (s.route.screen !== 'messages' && !boxOpenHere(s))) return null;
   const src = thumbOf(s, s.lightbox.attachmentId);
   return isImageSrc(src) ? { src, name: s.lightbox.name } : null;
 };
@@ -510,13 +515,14 @@ export function boot(win, host = {}) {
   // a room member's trace, read without activating the member's session
   const traces = startTraces({ store, call, loadMemberTrace, now });
   // the quotes run only while Markets is on screen in a visible tab, the desk's status while Markets or the Desk is, the Desk's
-  // news while the Desk is, the routines while the Desk or Messages (its routine cards) is; Trade's picks only while Trade is
+  // news while the Desk is, the routines while the Desk, Messages or the open gravit box (their routine cards) is; Trade's picks
+  // only while Trade is
   const showMarkets = () => {
     const screen = store.get().route.screen;
     markets.show(screen === 'markets' && !doc.hidden);
     desk.show((screen === 'markets' || screen === 'desk') && !doc.hidden);
     deskNews.show(screen === 'desk' && !doc.hidden);
-    deskRoutines.show((screen === 'desk' || screen === 'messages') && !doc.hidden);
+    deskRoutines.show((screen === 'desk' || screen === 'messages' || boxOpenHere(store.get())) && !doc.hidden);
   };
   // Embedded browsers may report hidden before their first visibility event. Opening Markets or choosing a source still
   // needs one answer; only the recurring polls depend on visibility.
@@ -527,15 +533,16 @@ export function boot(win, host = {}) {
 
   // the session the one composer writes to (one-entry plan 2): gravit's conversation as /data/tasks last named it (a failed
   // re-read keeps it), on Messages with no old link waiting to land — listed or not yet (a fresh one); none while the tasks
-  // load, or once it is off or unknown
-  const writeTo = s => (s.route.screen === 'messages' && !s.route.id && !s.route.channel ? s.tasks?.conversation ?? null : null);
+  // load, or once it is off or unknown; the same conversation from the open gravit box, so the box and Messages share its draft
+  const writeTo = s => ((s.route.screen === 'messages' && !s.route.id && !s.route.channel) || boxOpenHere(s) ? s.tasks?.conversation ?? null : null);
   // the composer's drafts (D8), in memory: the conversation's by its id, `empty` with none to write to (words put there by Hand
   // to gravit while the conversation is unknown); each its runs and its files (composer/files.js), the entry gone only when
   // both are empty
   const drafts = new Map();
   const draftKey = s => writeTo(s) ?? 'empty';
-  // Messages is the one screen with a composer, drawn while there is a conversation to write to
-  const composerOn = s => writeTo(s) !== null;
+  // Messages is the one screen with a composer, drawn while there is a conversation to write to — and the open box's, while
+  // the box is drawn: a box under a sheet, or set aside by a drawer on a narrow window, takes no dropped file
+  const composerOn = s => writeTo(s) !== null && !(boxOpenHere(s) && boxHidden(s));
   // the session the screen draws a transcript of: the conversation on Messages, a task's or a history session's on theirs
   const shownConv = s => { const id = onScreenId(s); return id ? s.conversations.find(c => c.id === id) ?? null : null; };
   // a conversation's draft, whose files upload to it as they are added; the `empty` one's wait (D10)
@@ -632,6 +639,7 @@ export function boot(win, host = {}) {
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
   let sayFocus = false;     // ⌥⌘N from another screen: the composer takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
+  let boxGrowAt = null;     // when the gravit box last opened, while its panel's grow runs: a render then draws the grow on from there
 
   function applyTheme(theme) {
     if (theme === 'cream' || theme === 'black') doc.documentElement.dataset.theme = theme; else delete doc.documentElement.dataset.theme;
@@ -649,6 +657,8 @@ export function boot(win, host = {}) {
     // what the person had: focus and caret, typed text, picked radios, and where each scrolling box stood
     const active = doc.activeElement;
     const activeKey = focusKey(active);
+    // focus inside the open box: a control of the box's that goes leaves it on the box's composer, never one of the page's
+    const activeInBox = Boolean(active?.closest?.('.gbox-panel'));
     const caret = active && active.id !== 'say' && typeof active.selectionStart === 'number' && (active.id || active.name) ? [active.selectionStart, active.selectionEnd] : null;
     // the editor's selection while it has focus, and whose draft it showed: it comes back on that same draft; another
     // draft put on screen under the focus has its caret at the end
@@ -663,7 +673,7 @@ export function boot(win, host = {}) {
     // the scroll keep's anchor: the message drawn first at the anchor seq last time, where it stood, and the document's
     // scroll (a narrow window scrolls the page, not the thread)
     const docAt = doc.scrollingElement?.scrollTop ?? null;
-    const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, results: root.querySelector('.conv-results')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
+    const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, results: root.querySelector('.conv-results')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop, waiting: root.querySelector('.gbox-waiting')?.scrollTop };
     if (scrolls.rows != null) rowsAt = scrolls.rows;
     // a disclosure the person opened (its Raw, a trace; tool calls are stored but not drawn) is the page's, not the store's: open again by its id
     // (a job's disclosure is the store's: open while it is the job open, never kept open by the page)
@@ -702,7 +712,12 @@ export function boot(win, host = {}) {
     // an operator image at full size, over everything (D34: Esc closes it after a menu)
     const lit = lightboxOf(s);
     const lightHtml = lit ? lightboxHtml(lit) : '';
-    root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen) + scHtml + overlayHtml + lightHtml;
+    // the gravit box over the screen (it draws nothing where it does not stand), under the shortcut sheet; its panel grows only
+    // inside BOX_GROW_MS of its opening (this write replaces the panel, and a grow on every redraw would move its keys away from
+    // the operator's click on a page that redraws on each quote)
+    if (boxGrowAt !== null && now() - boxGrowAt >= BOX_GROW_MS) boxGrowAt = null;
+    const boxHtml = renderBox(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail, mac, grow: boxGrowAt === null ? null : now() - boxGrowAt });
+    root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen) + boxHtml + scHtml + overlayHtml + lightHtml;
     const note1 = doc.getElementById('composer-note');
     if (note0 && note1 && note0 !== note1 && typeof note1.replaceWith === 'function') note1.replaceWith(note0);
     // the open job's output in place before any scroll keep: drawn empty it is hidden, and the drawer's keep would be
@@ -757,6 +772,10 @@ export function boot(win, host = {}) {
     if (main && sameScreen && scrolls.main != null) main.scrollTop = scrolls.main;
     const drawerBody = root.querySelector('.drawer-body');
     if (drawerBody && last.drawer && last.drawer === drawerOf(s) && scrolls.drawer != null) drawerBody.scrollTop = scrolls.drawer;
+    // what waits on you in the open gravit box: a strip that scrolls (a question's options and its Answer key under them), kept
+    // where the operator scrolled it, or every quote's redraw would put it back at the top
+    const strip = root.querySelector('.gbox-waiting');
+    if (strip && scrolls.waiting != null) strip.scrollTop = scrolls.waiting;
     // a section asked for (a pill's Usage): scrolled to after the drawer's own keep, once
     if (detailsAt !== null) {
       doc.getElementById(detailsAt)?.scrollIntoView?.({ block: 'start' });
@@ -825,8 +844,9 @@ export function boot(win, host = {}) {
     } else if (!s.confirm && last.confirm && find(confirmFrom)) {
       target = find(confirmFrom); // No: back on the key that asked
     } else if (!target && activeKey) {
-      // the pressed control went away (an answered card's keys): stay inside the drawer if one is up, else the composer
-      target = overlay ? root.querySelector(closeKeyOf(overlay)) : say;
+      // the pressed control went away (an answered card's keys): stay inside the drawer if one is up, else the composer — on
+      // Messages, or the box's when it was in the box; a page control's going under the open box leaves focus where it falls
+      target = overlay ? root.querySelector(closeKeyOf(overlay)) : (s.route.screen === 'messages' || activeInBox ? say : null);
     }
     if (searchFocus && doc.getElementById('cq')) { target = doc.getElementById('cq'); searchFocus = false; }
     // ⌥⌘N's composer, its caret after what it holds
@@ -1074,8 +1094,14 @@ export function boot(win, host = {}) {
     if (r.screen === 'module' && !(was?.screen === 'module' && was.id === r.id)) void modules.latestArtifact(r.id);
     if (r.screen === 'discover' && r.id === 'create' && !(was?.screen === 'discover' && was.id === 'create')) void discover.modelChoices();
     was = r;
-    // the session on screen: Messages opens the conversation, a task's page the worker's — each its jobs watched for Details —,
-    // a history page its session cold — paged, never followed; one the list does not carry yet waits for it
+    readShown();
+  }
+
+  // the session on screen: Messages opens the conversation, a task's page the worker's — each its jobs watched for Details —,
+  // the open gravit box the conversation, a history page its session cold — paged, never followed; one the list does not carry
+  // yet waits for it. A session is left only when it went from the list: closing the box keeps the read where it is
+  function readShown() {
+    const r = store.get().route;
     const conv = shownConv(store.get());
     jobs.watch((r.screen === 'messages' || r.screen === 'task') && conv ? conv.id : null);
     if (opens(store.get())) {
@@ -1338,13 +1364,18 @@ export function boot(win, host = {}) {
     if (held) { refuse(held === 'uploading' ? said('status.uploading') : said('status.notUploaded')); if (waiting.length) render(); return; }
     if (isConvKey(key) && refusesImages.has(key) && hasImage(files)) { notes.set(key, modelLineFor(key)); render(); return; }
     const workspaceId = currentConversation(s)?.channel?.workspaceId ?? null;
-    const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
+    let text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
     // a / line with files: a command the kept rows know takes them only when its input says so (D12); a name the rows do
     // not know is the host's to judge
     if (files.length && text.startsWith('/')) {
       const name = text.slice(1).split(/\s/)[0];
       const row = (composerReads.keptCommands(currentConversation(s)) ?? []).find(r => r.name === name);
       if (row && row.input?.attachments !== true) { refuse(said('status.takesNoFiles', { name })); return; }
+    }
+    // from the box with its chip on, the first line names the page (spec §6.7); a / line and a send of files alone go as they are
+    if (boxOpenHere(s) && boxAttached(s) && text !== '' && !text.startsWith('/')) {
+      const tag = pageTagOf(s);
+      if (tag !== null) text = `${tag}\n${text}`;
     }
     // words and files added under the key while the send was on its way are kept, after the sent ones (A7)
     const back = () => {
@@ -1651,6 +1682,11 @@ export function boot(win, host = {}) {
   }
 
   const act = {
+    // the gravit box: the half ball opens it, Minimize folds it back
+    boxOpen: () => openBox(),
+    boxClose: () => closeBox(),
+    boxDetach: () => { store.dispatch('boxDetach'); render(); },
+    boxAttach: () => { store.dispatch('boxAttach'); render(); },
     // a channel's page: Retry reads it again
     channelRetry: el => { void channels.overview(el.dataset.id); },
     // Discover: a shelf read again, the CLI agents' three writes
@@ -1947,7 +1983,7 @@ export function boot(win, host = {}) {
     dkFilter: el => store.dispatch('deskFilter', { value: el.dataset.value }),
     dkToggle: el => store.dispatch('deskToggle', { id: el.dataset.id }),
     dkRules: () => store.dispatch('deskRules'),
-    // the Routines column: a row opened or folded, its switch, its Test, Delete asked once more and answered; Edit in Messages
+    // the Routines column: a row opened or folded, its switch, its Test, Delete asked once more and answered; Edit with gravit
     // puts its words in gravit's composer as an ability's ask key does, and sends nothing
     dkRoutine: el => store.dispatch('deskRoutineOpen', { id: el.dataset.id }),
     dkSwitch: el => { void deskRoutines.switchOne(el.dataset.id, el.dataset.value === 'true'); },
@@ -1955,8 +1991,7 @@ export function boot(win, host = {}) {
     dkEdit: el => {
       const words = el.dataset.text;
       if (!words) return;
-      go({ screen: 'messages', id: null });
-      putWords(words);
+      handOff(words);
     },
     dkDelete: el => store.dispatch('deskRoutineAsk', { id: el.dataset.id }),
     dkDeleteYes: el => { void deskRoutines.remove(el.dataset.id); },
@@ -1988,15 +2023,13 @@ export function boot(win, host = {}) {
       const s = store.get();
       const asset = handWordsOf(s.markets, s.account, el.dataset.id, now());
       if (!asset) return;
-      go({ screen: 'messages', id: null });
-      putWords(asset.name && asset.name !== asset.symbol ? t('markets.lookAt.named', { symbol: asset.symbol, name: asset.name }) : t('markets.lookAt.symbol', { symbol: asset.symbol }));
+      handOff(asset.name && asset.name !== asset.symbol ? t('markets.lookAt.named', { symbol: asset.symbol, name: asset.name }) : t('markets.lookAt.symbol', { symbol: asset.symbol }));
     },
     // an ability's ask key (spec 2026-11-13 §4.4): its words in gravit's composer, as Hand to gravit puts them; nothing is sent
     askAbility: el => {
       const words = el.dataset.text;
       if (!words) return;
-      go({ screen: 'messages', id: null });
-      putWords(words);
+      handOff(words);
     },
     // the owner device: Get a code, the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out, Let
     // it sign and Remove
@@ -2320,11 +2353,51 @@ export function boot(win, host = {}) {
     store.dispatch('setListOpen', true);
     doc.getElementById('cq')?.focus();
   }
-  // ⌥⌘N: the conversation's composer takes focus, its caret after what it holds; from another screen once Messages draws it
+  // the gravit box opened: its panel grows (once: render() draws the grow while it runs), the conversation read in it (the
+  // store's subscription), marked seen, its composer focused with the caret after the draft
+  function openBox() {
+    boxGrowAt = now();
+    store.dispatch('boxOpen');
+    const s = store.get();
+    const c = s.conversations.find(x => x.id === s.tasks?.conversation);
+    if (c) store.dispatch('markSeen', { convId: c.id, seq: c.updatedAt });
+    sayFocus = true;
+    render();
+  }
+  // Minimize: the panel folds back into the half ball, which takes the focus; the read stays
+  function closeBox() {
+    store.dispatch('boxClose');
+    render();
+    doc.getElementById('gbox-ball')?.focus();
+  }
+  // the box stands here but is not drawn: an owner sheet or the identity sheet over it, or a drawer it steps aside for at a
+  // width where the drawer takes the box's place (app.css hides the panel there)
+  function boxHidden(s) {
+    return boxCovered(s) || (boxAside(s) === 'drawer' && win.matchMedia?.('(max-width: 907px)')?.matches === true);
+  }
+  // words handed to gravit (Edit with gravit, Hand to gravit, an ability's ask key): into the box where it stands — opened, the
+  // page behind unmoved, the draft filled even while a sheet covers it — else into Messages' composer as before; nothing is sent
+  function handOff(words) {
+    if (boxShown(store.get())) {
+      if (store.get().boxOpen !== true) openBox();
+      putWords(words);
+      return;
+    }
+    go({ screen: 'messages', id: null });
+    putWords(words);
+  }
+  // ⌥⌘N: the conversation's composer takes focus, its caret after what it holds; where the box stands it opens (or, open,
+  // its composer takes focus), and does nothing while the box is hidden; from any other screen once Messages draws it
   function focusComposer() {
     const s = store.get();
     const say = doc.getElementById('say');
     if (s.route.screen === 'messages' && say) { say.focus(); editor.place(say, lengthOf(currentRuns())); return; }
+    if (boxShown(s)) {
+      if (boxHidden(s)) return;
+      if (s.boxOpen !== true) { openBox(); return; }
+      if (say) { say.focus(); editor.place(say, lengthOf(currentRuns())); }
+      return;
+    }
     sayFocus = true;
     go({ screen: 'messages', id: null });
   }
@@ -2398,6 +2471,14 @@ export function boot(win, host = {}) {
       if (s.lightbox) { store.dispatch('closeLightbox'); return; }
       // the shortcut sheet after the lightbox, before the search box (D34)
       if (s.shortcuts) { store.dispatch('closeShortcuts'); return; }
+      // inside the open box: a confirm drawn in the box first, else the box minimizes — the page's own edit (the bot editor) and
+      // confirm (a routine's Delete) stand, and no drawer and no Trade ticket closes from there
+      const inBox = boxOpenHere(s) ? ev.target?.closest?.('.gbox-panel') : null;
+      if (inBox) {
+        if (s.confirm && inBox.querySelector?.('.confirm')) store.dispatch('cancelConfirm');
+        else closeBox();
+        return;
+      }
       // the search box while it has focus, before today's chain (spec D34): the first Esc clears the query, the next leaves the box
       const box = doc.activeElement;
       if (box && box.id === 'cq') {
@@ -2459,6 +2540,9 @@ export function boot(win, host = {}) {
       store.dispatch('closeJob');
     } else requestRender();
     if (type === 'sheetOpen' || type === 'sheetClose') stopConnectCheck();
+    // the gravit box opened or closed: the routines read for its cards, and the conversation read once it opens (closing it
+    // leaves the read where it is)
+    if (type === 'boxOpen' || type === 'boxClose') { showMarkets(); readShown(); }
     if (type === 'sheetOpen') sheetOpens += 1;
     // the order sheet's fields as they stand, kept while another sheet takes its place; a ticket opened or closed forgets them
     if (s.sheet?.kind === 'order') orderFields = s.sheet.fields;

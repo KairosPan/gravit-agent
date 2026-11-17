@@ -4,6 +4,7 @@
 import { roundEndLine } from '../wire/room.js';
 import { t, tn } from '../i18n/words.js';
 import { tableLineViews } from './analog.js';
+import { parseTag } from './page-tag.js';
 
 // the Account seat's twelve write tools (spec 2026-10-20 §6.1): what the host's Gate 2 cards under any server name
 export const SEAT_TOOLS = Object.freeze(['portfolio_live_order', 'portfolio_live_batch', 'portfolio_live_amend', 'portfolio_live_cancel',
@@ -257,8 +258,13 @@ function bubble(view, speaker) {
   // only the operator's own words are You; every other user-role record (a compaction checkpoint, a plugin notice,
   // runtime context, a member's delta) is a system line, never the operator's blue bubble
   // their attachments ride on the row as the mapper read them (plan 4 Task 3)
+  // a message sent from the gravit box opens with its page tag (host/page-tag.js): the words alone are drawn, the tag kept as
+  // onScreen for the thread's Asked from caption - read from the text alone, so it holds with an empty store
   if (view.source === 'user' || view.source === undefined) {
-    return { ...b, from: 'you', kind: 'text', text: view.text ?? '', data: { mention: view.mention, ...(Array.isArray(view.attachments) ? { attachments: view.attachments } : {}) } };
+    const data = { mention: view.mention, ...(Array.isArray(view.attachments) ? { attachments: view.attachments } : {}) };
+    const tagged = parseTag(view.text);
+    if (tagged) return { ...b, from: 'you', kind: 'text', text: tagged.rest, data: { ...data, onScreen: tagged.tag } };
+    return { ...b, from: 'you', kind: 'text', text: view.text ?? '', data };
   }
   if (view.source === 'telegram') return phoneMessage(b, view);
   if (view.source === 'task' && TASK_FORMS.has(view.form)) return taskMessage(b, view);

@@ -21,6 +21,7 @@ import { renderDiscover, renderPlugin } from '../../../client/js/render/discover
 import { renderDeskScreen } from '../../../client/js/render/desk-page.js';
 import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
+import { renderBox } from '../../../client/js/render/box.js';
 import { newSheet } from '../../../client/js/host/run-sheet-view.js';
 import { MODULES } from '../../../client/js/host/modules-view.js';
 import { t, said } from '../../../client/js/i18n/words.js';
@@ -457,6 +458,18 @@ export function namedStates() {
     // the owner's lessons on a Lunhui run's leaders (memory alert and Lunhui Task 5): under the ladder, a leader's caveat and
     // another's untold lesson; a run not checked; a memory not connected; and the drawer of a leader with a lesson
     ...memoryLunhuiStates(),
+    // the gravit box (plan 1 of the box, Task 2): the ball on the Desk with two waiting and working; on Markets with a new
+    // reply; the panel open on Markets with three messages and earlier ones; open on Account beside the Statement; open on Trade
+    // beside a ticket; open on Discover with the conversation not listed yet
+    ...boxStates(),
+    // the gravit box (plan 1 of the box, Task 4): the panel open on the Desk with four tasks waiting on you (three lines and the
+    // count) and, in the compact thread, a composed answer and an event table each one line to Messages
+    ['box-panel-waiting', boxWaitingState()],
+    // the page chip (plan 2 of the box, Task 2): the panel open on Markets with × taken, the ghost key that puts the page back
+    ['box-panel-detached', R.boxDetach(R.boxOpen(R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('bx')], channels: [], bots: [] }), { conversation: 'bx', tasks: [], at: NOW }), { screen: 'markets', id: null })))],
+    // the caption (plan 2 of the box, Task 3): Messages with a message sent from the box on a stock's page, its words under
+    // Asked from Markets · NVDA, the tag line not drawn
+    ['thread-asked-from', onConv(R.hostList(emptyState(), { conversations: [conv('af', { loaded: true, messages: [m('af1', { from: 'you', text: 'why is it down', data: { onScreen: { page: 'Markets', id: 'stock:NVDA', at: null } } })] })], channels: [], bots: [] }), 'af')],
   ];
 }
 
@@ -502,6 +515,39 @@ function memoryGateStates() {
     ['task-memory-fault', page([card('m1', 'm1'), card('m2', 'm2', { seq: 3 })], [gate('m1', { state: 'not connected', words: 'no memory here', lines: [] }), gate('m2', { lines: [line({ fault: 'the memory did not answer in time' })] })])],
     ['task-memory-registered', page([card('m1', 'm1', { answer: 'approved' })], [gate('m1', { redLine: true, overridden: true, lines: [line({ lessons: [red], registered: 'registered: add' })] })])],
     ['messages-memory-rail', rail],
+  ];
+}
+
+function boxWaitingState() {
+  const gated = ['bq1', 'bq2', 'bq3', 'bq4'];
+  const asks = gated.map(id => ({ id, title: 'Check ' + id, origin: 'web', state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c', tool: 'x' }, steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 }));
+  const said = [m('bq0', { from: 'you', text: 'How was the A-share market?' }),
+    m('bqc', { seq: 2, kind: 'composed', text: 'A weak day.', data: { callId: '2', strategy: 'cn-market', run: '20261027T201627Z-6937d208', summary: 'A weak day.', blocks: [{ kind: 'ladder' }], choices: [], modules: ['environment'] } }),
+    m('bqr', { seq: 3, from: 'system', kind: 'task', text: '[task · CEO analogs · ready]', data: { form: 'report', task: 'bq1', status: 'ready', title: 'CEO analogs', body: `Read ${EVENT_VIEW_ID}`, views: [EVENT_VIEW_ID] } })];
+  let s = R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('bx', { messages: said, loaded: true }), ...gated.map(id => conv(id))], channels: [], bots: [] }), { conversation: 'bx', tasks: asks, at: NOW }), { screen: 'desk', id: null });
+  for (const id of gated) s = R.hostGate(s, { convId: id, message: m('g' + id, { kind: 'card', text: 'Buy 1 NVDA', seq: 1.5, data: { eventId: 'g' + id, sessionId: id, title: 'Buy 1 NVDA', venue: 'paper' } }) });
+  return R.boxOpen(s);
+}
+
+// the gravit box's states (plan 1 of the box, Task 2): gravit's one conversation 'bx' named by the tasks, a screen it stands on
+function boxStates() {
+  const gated = ['bw1', 'bw2'];
+  const asks = gated.map(id => ({ id, title: 'Check ' + id, origin: 'web', state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c', tool: 'x' }, steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 }));
+  const base = (screen, over = {}, tasks = []) => R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('bx', over), ...tasks.map(t => conv(t.id))], channels: [], bots: [] }), { conversation: 'bx', tasks, at: NOW }), { screen, id: null });
+  let waiting = base('desk', { running: true }, asks);
+  for (const id of gated) waiting = R.hostGate(waiting, { convId: id, message: m('g' + id, { kind: 'card', text: 'Buy 1 NVDA', seq: 1.5, data: { eventId: 'g' + id, sessionId: id, title: 'Buy 1 NVDA', venue: 'paper' } }) });
+  const said = [m('bx1', { from: 'you', text: 'Why is NVDA down?' }), m('bx2', { seq: 2, text: 'Its supplier cut guidance this morning.' }), m('bx3', { seq: 3, from: 'you', text: 'Watch it for me.' })];
+  const open = R.boxOpen(base('markets', { messages: said, loaded: true, window: { start: 3, through: 3, hasMore: true, replaced: [] } }));
+  const account = R.boxOpen(base('account', { messages: said, loaded: true }));
+  const trade = R.boxOpen(base('trade', { messages: said, loaded: true }));
+  return [
+    ['box-ball-desk', waiting],
+    ['box-ball-fresh', base('markets', { updatedAt: NOW, lastSeen: NOW - MIN })],
+    ['box-panel-markets', open],
+    ['box-panel-drawer', { ...account, account: { ...account.account, statementOpen: true } }],
+    ['box-panel-ticket', { ...trade, trade: { ...trade.trade, ticket: { id: 'stock:NVDA', side: 'buy', venue: null, outcome: 0 } } }],
+    // the conversation named but not listed yet: one plain line in place of the thread
+    ['box-panel-new', R.boxOpen(R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [], channels: [], bots: [] }), { conversation: 'bx', tasks: [], at: NOW }), { screen: 'discover', id: null }))],
   ];
 }
 
@@ -987,7 +1033,7 @@ export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMark
 
 // a state's page as css.test.js draws it: the rail, the screen, then every drawer and sheet that may stand over it
 export function pageHtml(st, { mac = true } = {}) {
-  return renderRail(st, NOW, { mac }) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st, { mac }) : '') + stockDrawerHtml(st) + renderSellMany(st) +
+  return renderRail(st, NOW, { mac }) + screenOf(st, NOW) + renderBox(st, NOW, {}, { mac }) + (st.settingsOpen ? renderSettings(st, { mac }) : '') + stockDrawerHtml(st) + renderSellMany(st) +
     renderSheet(st, NOW) + renderConnectDrawer(st) + renderRunSheet(st, NOW) + renderShortcuts(st, { mac });
 }
 

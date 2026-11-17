@@ -178,6 +178,27 @@ test('the question card and the thinking row have their rules', () => {
   }
 });
 
+// the live drill (2026-11-17): render() writes a new panel on every redraw (a market's quotes redraw the page), so an
+// animation on the plain panel played again on each, fading it and sliding its keys out from under a click
+test("the box's panel grows only where render/box.js draws data-grow, as long as BOX_GROW_MS, and not with reduced motion", async () => {
+  const { BOX_GROW_MS } = await import('../../client/js/render/box.js');
+  const plain = css.match(/^\.gbox-panel \{([^}]*)\}/m)?.[1] ?? '';
+  assert.ok(plain.includes('position: fixed'), 'the panel\'s own rule');
+  assert.doesNotMatch(plain, /animation/, 'no animation on the plain panel');
+  const grow = css.match(/^\.gbox-panel\[data-grow\] \{([^}]*)\}/m)?.[1] ?? '';
+  const [, secs] = grow.match(/animation: gbox-grow ([\d.]+)s/) ?? [];
+  assert.equal(Number(secs) * 1000, BOX_GROW_MS, 'the grow lasts BOX_GROW_MS');
+  assert.match(css, /prefers-reduced-motion: reduce\) \{[^@]*\.gbox-panel\[data-grow\][^{]*\{ animation: none; \}/);
+});
+
+// the live drill (2026-11-17): a question card in the box's 400 px strip took the run sheet's .opt grid, its description in the
+// radio's column, its label squeezed to a letter a line; its free answer and the override's fields were 80 px tall
+test("a question's options lay their description under the label; the small fields in a column keep their own height", () => {
+  assert.match(css, /^\.question \.opt > \.dim \{ grid-column: 2; \}/m);
+  assert.match(css, /^\.question \.q > \.input\.small, \.mg-field > \.input\.small \{ flex: none; \}/m);
+  assert.match(css, /^\.gbox-waiting \{[^}]*max-height: 45%; overflow-y: auto;/m, 'the strip scrolls');
+});
+
 test('every token app.css reads is declared: a var(--x) nobody defines falls back to inherit and the rule silently does nothing', async () => {
   const tokens = await readFile(new URL('../../client/css/tokens.css', import.meta.url), 'utf8');
   const declared = new Set((tokens + css).match(/--[\w-]+(?=\s*:)/g));

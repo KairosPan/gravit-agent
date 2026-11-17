@@ -11,16 +11,17 @@ import { renderThread, railHtml } from './thread.js';
 import { renderTaskRail } from './tasks.js';
 import { HOST_NAME } from '../wire/speaker.js';
 import { kv, confirmPair } from './controls.js';
-import { onScreenId } from '../host/sessions.js';
+import { onScreenId, boxOpenHere } from '../host/sessions.js';
 import { childrenOf } from '../host/children-view.js';
 import { renderMenu, menuAria, filesRail } from '../composer/view.js';
 import { statsView, pillsText, durationText, clockText } from '../host/turns-view.js';
 import { jobsView, metaLine, isLive } from '../host/jobs-view.js';
 
 // the conversation Messages writes to (plan 2 of one entry): the one /data/tasks names, once the list carries it; none while
-// it is unknown (the tasks loading, off or failed) or on any other screen, so no composer is ever bound to another session
+// it is unknown (the tasks loading, off or failed) or on any other screen but under the open gravit box, so no composer is
+// ever bound to another session
 export function currentConversation(state) {
-  const id = state.route.screen === 'messages' ? onScreenId(state) : null;
+  const id = state.route.screen === 'messages' || boxOpenHere(state) ? onScreenId(state) : null;
   return id ? state.conversations.find(c => c.id === id) ?? null : null;
 }
 
