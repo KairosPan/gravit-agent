@@ -2,7 +2,7 @@
  * project: `GRAVIT.md` and its machine-local twin `GRAVIT.local.md`, in each
  * directory from the project root down to the session's cwd - no other file
  * name is a candidate. The repo's `AGENTS.md` and `CLAUDE.md` are the coding
- * agents' files, not Gravit's (spec §4.1 L3, §4.3).
+ * agents' files, not gravit's (spec §4.1 L3, §4.3).
  *
  * The seam is dsh-base's own row. The installed `@deepseek-ai/dsh-base`
  * `cordis.patch.yml` mounts `agent-instructions`
@@ -11,7 +11,7 @@
  * 'CLAUDE.md']` for the base files and `['AGENTS.local.md', 'CLAUDE.local.md']`
  * for the local overlay (`Config` in the package's `lib/index.js`). The row is
  * host-plane (spec §4.1 L3), so one patch serves every agent in the tree, not
- * Gravit alone; tests/room-smoke.test.ts pins the chain on each bot session of
+ * gravit alone; tests/room-smoke.test.ts pins the chain on each bot session of
  * a room.
  *
  * {@link instructionsPatch} is pushed by `composeFace` (boot.ts) after the

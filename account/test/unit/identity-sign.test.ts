@@ -171,7 +171,7 @@ describe("connect, disconnect, routing and block, signed at the door", () => {
     const p = await heardPending();
     const r = await own(connectOf(p));
     expect(isRefusal(r)).toBe(false);
-    expect(r).toMatchObject({ ok: true, kind: "account", summary: `Telegram connected: Gravit speaks as @gravit_desk_bot and talks only with @pan · token ${keyHash.slice(0, 8)}` });
+    expect(r).toMatchObject({ ok: true, kind: "account", summary: `Telegram connected: gravit speaks as @gravit_desk_bot and talks only with @pan · token ${keyHash.slice(0, 8)}` });
     expect(readNetworkSecret(home, "telegram")).toEqual({ token: TOKEN, botId: "777", username: "gravit_desk_bot", operatorId: "555000123", operatorHandle: "@pan" });
     const v = svc.identity!.view();
     expect(v.networks).toHaveLength(1);
@@ -245,7 +245,7 @@ describe("connect, disconnect, routing and block, signed at the door", () => {
     expect(ledger).not.toContain(keyHash);
     expect(ledger).not.toContain(salt);
     expect(ledger).not.toContain(TOKEN);
-    expect(ledger).toContain(`Telegram connected: Gravit speaks as @gravit_desk_bot and talks only with @pan · token ${keyHash.slice(0, 8)}`);
+    expect(ledger).toContain(`Telegram connected: gravit speaks as @gravit_desk_bot and talks only with @pan · token ${keyHash.slice(0, 8)}`);
     expect(said.join("\n")).not.toContain(TOKEN);
     // the state file holds the binding with its fingerprint
     expect(loadIdentity(home).bindings).toMatchObject([{ network: "telegram", botId: "777", operatorId: "555000123", fingerprint: keyHash.slice(0, 8) }]);
@@ -284,7 +284,7 @@ describe("connect, disconnect, routing and block, signed at the door", () => {
     clockAt = Date.parse("2026-11-04T21:40:00Z");
     const r = await own({ type: "disconnectNetwork", network: "telegram" });
     expect(isRefusal(r)).toBe(false);
-    expect(bot.sent.map((x) => x.text)).toEqual(["Gravit's Telegram was disconnected from the account at 16:40 ET. Not you? Connect it again under Account › Identity."]);
+    expect(bot.sent.map((x) => x.text)).toEqual(["gravit's Telegram was disconnected from the account at 16:40 ET. Not you? Connect it again under Account › Identity."]);
     expect(bot.sent[0]!.chat_id).toBe(555000123);
     expect(fileThen).toEqual([true]);
     expect(existsSync(tokenFile)).toBe(false);
@@ -440,7 +440,7 @@ describe("connect Slack, signed at the door", () => {
     }
     const r = await own(connectOf(p));
     expect(isRefusal(r)).toBe(false);
-    expect(r).toMatchObject({ ok: true, kind: "account", summary: `Slack connected: Gravit speaks as @gravit and talks only with @pan · tokens ${keyHash.slice(0, 8)}` });
+    expect(r).toMatchObject({ ok: true, kind: "account", summary: `Slack connected: gravit speaks as @gravit and talks only with @pan · tokens ${keyHash.slice(0, 8)}` });
     expect(readNetworkSecret(home, "slack")).toEqual({ appToken: slack.tokens.app, botToken: slack.tokens.bot, appId: "A0FAKE001", channel: "D0FAKEDM1", botId: "T0FAKE001:U0BOT0001", username: "gravit", operatorId: "T0FAKE001:U0PAN07QK", operatorHandle: "@pan" });
     const v = svc.identity!.view();
     expect(v.networks).toHaveLength(1);
@@ -459,7 +459,7 @@ describe("connect Slack, signed at the door", () => {
     const holding = walk(home).filter((f) => tokens().some((t) => f.text.includes(t))).map((f) => f.path);
     expect(holding).toEqual([join("credentials", "networks", "slack.json")]);
     const ledger = ledgerText(home);
-    expect(ledger).toContain(`Slack connected: Gravit speaks as @gravit and talks only with @pan · tokens ${keyHash.slice(0, 8)}`);
+    expect(ledger).toContain(`Slack connected: gravit speaks as @gravit and talks only with @pan · tokens ${keyHash.slice(0, 8)}`);
     expect(ledger).not.toContain(keyHash);
     expect(ledger).not.toContain(salt);
     for (const t of tokens()) expect(ledger).not.toContain(t);

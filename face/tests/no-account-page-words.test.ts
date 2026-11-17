@@ -47,7 +47,7 @@ test("no face sentence points at the Account's own page", () => {
   assert.deepEqual(found, [], `sentences that send the operator to the Account's page:\n${found.join("\n")}`);
 });
 
-test("the seat says the owner answers on the owner's Gravit face, on every line", () => {
+test("the seat says the owner answers on the owner's gravit face, on every line", () => {
   const found = [SEAT, SEAT_STATE].flatMap((file) => pointersIn(relative(join(FACE, ".."), file), readFileSync(file, "utf8"), FACE_WORDS));
   assert.deepEqual(found, [], `the seat's sentences that name the Account's page:\n${found.join("\n")}`);
 });

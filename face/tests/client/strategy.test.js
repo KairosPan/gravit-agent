@@ -1,7 +1,7 @@
 // A strategy's page (one-entry plan 2; the channel page before it, spec 2026-10-19 §7 Stage 3 "Channels"): the status
 // headline, the thesis, the latest backtest, the backtests, the journal, the files and the rosters from
 // /data/channels/overview, then the strategy's tasks and the paper positions of the venue its status.yaml names; every
-// Gravit-written string is text.
+// gravit-written string is text.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderStrategyScreen } from '../../client/js/render/strategy.js';

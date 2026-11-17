@@ -40,7 +40,7 @@ export interface OwnerNode { owner: OwnerCalls; store: ClientStore; standing: ()
 
 /** The owner device paired through the face at `faceOrigin` (`http://127.0.0.1:<port>`), labelled `label`. Every
  * `signature.es256` value it posts is kept, in this process only, for a smoke to look for in the face's output. */
-export function startOwnerNode(faceOrigin: string, label = "Gravit face smoke"): OwnerNode {
+export function startOwnerNode(faceOrigin: string, label = "gravit face smoke"): OwnerNode {
   const store = createStore({ initial: emptyState(), reducers });
   let signedOut = false;
   const flag = { get: (): boolean => signedOut, set: (on: boolean): void => { signedOut = Boolean(on); } };

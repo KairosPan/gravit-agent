@@ -59,7 +59,7 @@ const SAID = `${BIN}: source reader:`;
 export const SOURCE_READER_ROLE = "source-reader";
 /** The preset each of the role's children runs on (src/roles.ts `rolePresetDefinition`). */
 export const SOURCE_READER_PRESET = "role-source-reader";
-/** The tool Gravit and a task's worker call to brief a reader (plugins/role.mjs). */
+/** The tool gravit and a task's worker call to brief a reader (plugins/role.mjs). */
 export const SOURCE_READER_TOOL = "role_source_reader";
 /** The most pages one reader opens: one `role_source_reader` call, one child. */
 export const SOURCE_READER_PAGES = 40;

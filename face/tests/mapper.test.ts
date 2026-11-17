@@ -650,7 +650,7 @@ test("a firing of the desk's clock or watch is a desk line with its fields, as a
     kind: "desk-line", line: "routine", seq: 48, sessionId: "desk", surfaceOp: "append", text: routineText,
     routine: "r-1", key: "r-1:2026-11-13:08:30", date: "2026-11-13", time: 1,
   });
-  assert.equal(alert.role, undefined, "the face's words: neither the operator's lane nor Gravit's");
+  assert.equal(alert.role, undefined, "the face's words: neither the operator's lane nor gravit's");
 
   const bare = deskMessage(42, "[schedule · ? · ?]", { kind: "schedule", order: 7, date: null });
   assert.equal(bare.kind, "desk-line");
@@ -708,7 +708,7 @@ test("a block with no attachmentId is dropped, not thrown", () => {
   assert.equal(userMessage(55, [{ type: "image", attachment: {} }]).kind, "ignore", "nothing left to draw");
 });
 
-test("Gravit's message never carries attachments", () => {
+test("gravit's message never carries attachments", () => {
   const v = mapFrame({ type: "session/event", sessionId: "s1", event: { type: "assistant/message", seq: 56, time: 1, data: { message: { role: "assistant", content: [{ type: "text", text: "Seen" }, { type: "image", attachment: PNG }] } } } });
   assert.equal(v.kind, "bubble");
   assert.equal(v.role, "gravit");

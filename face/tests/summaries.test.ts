@@ -84,7 +84,7 @@ test("normalized rows restore the member fold and the speaker label the raw 0.2 
   assert.deepEqual([...fold.members].sort(), ["m1", "m2"]);
   const bots = [{ id: "buffett", name: "Buffett Type" }];
   assert.equal(speakerFor(summaryOf(raw[1], hints), bots), "Buffett Type");
-  assert.equal(speakerFor(raw[1] as { agentPreset?: unknown }, bots), "Gravit", "the raw row is exactly the silent mislabel this closes");
+  assert.equal(speakerFor(raw[1] as { agentPreset?: unknown }, bots), "gravit", "the raw row is exactly the silent mislabel this closes");
 });
 
 // rc.5: `SessionSummary.formatStatus?: 'current' | 'migration-required'` and the kinded `SessionProjectionsValue` union

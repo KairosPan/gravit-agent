@@ -13,7 +13,7 @@
  * outside its generated catalog, so there are no `room/*` events. Membership
  * is the member's own header (`parentSession` + `agentPreset`); the dispatch is
  * the tool's own `tool/call`/`tool/result`; an answer is a `user/message` in
- * Gravit's session with `source.kind === 'room'`; the member's cursor is the
+ * gravit's session with `source.kind === 'room'`; the member's cursor is the
  * delta message in ITS log.
  *
  * `kind: 'room'` is a native v4 message source (dsh 0.2 admits any non-empty
@@ -37,7 +37,7 @@
  * next request's history - but ONLY while the room log is quiet (no open turn),
  * because a user message dropped between an assistant tool-call message and
  * its tool result breaks the running request. Otherwise it waits in the room's
- * outbox for the next `turn/end`. Gravit is woken only by the round-end
+ * outbox for the next `turn/end`. gravit is woken only by the round-end
  * `followup`, issued in the same synchronous block as the last flush.
  *
  * WHAT THIS IS NOT. Dispatch grants nothing: a member's tools are its mask,
@@ -121,7 +121,7 @@ export interface PersistedSnapshotLike { readonly header: PersistedHeaderLike }
 /** The session domain's resolve result (NEW packages/api/session-controller/src/agent.ts:61-66):
  * the live agent, or a `RemoteError` with a slash-namespaced `code`. */
 export type ResolveAgentResultLike = { readonly agent: AgentLike } | { readonly error: { readonly code?: string; readonly message: string } };
-/** dsh-tools' `ToolRunContext`, narrowed: the calling agent and Gravit's TURN signal (which the round must not run on). */
+/** dsh-tools' `ToolRunContext`, narrowed: the calling agent and gravit's TURN signal (which the round must not run on). */
 export interface RoomToolExec { agent?: AgentLike; signal: AbortSignal }
 /** dsh-tools' `ToolDefinition`, stated the way agents.ts states it. */
 export interface RoomToolDefinition {
@@ -395,11 +395,11 @@ export class RoomEngine {
       const message = event.data as MessageLike | undefined;
       if (message?.source?.kind !== "user") return;
       /* `say` posts the operator's `@` and resets the caps in the same breath,
-       * but when Gravit is mid-turn that message waits in the outbox and lands
-       * on the log a turn LATER - after a round Gravit dispatched in between.
+       * but when gravit is mid-turn that message waits in the outbox and lands
+       * on the log a turn LATER - after a round gravit dispatched in between.
        * Log order is not wall order here, so an engine-posted message is never
        * read back as a fresh send: it would supersede a round that in fact came
-       * after it and hand Gravit a second set of caps. */
+       * after it and hand gravit a second set of caps. */
       if (typeof message.id === "string" && room.posted.delete(message.id)) return;
       queueMicrotask(() => this.guard(room, "record the operator's send", () => this.onOperatorSend(room)));
     }
@@ -563,7 +563,7 @@ export class RoomEngine {
         } catch (err) {
           /* Never fall back to a fresh member here: that would fork the voice's
            * memory silently. The turn fails with the reason (the round-end text
-           * carries it to Gravit) and the log line tells the operator what to do. */
+           * carries it to gravit) and the log line tells the operator what to do. */
           const reason = memberResumeFailure(bot.id, existing, err);
           this.log(`${reason} (room in ${room.place.name})`);
           throw new Error(reason);
@@ -710,7 +710,7 @@ export class RoomEngine {
   }
 
   /**
-   * Start a round for Gravit and return at once (the tool result tells the model
+   * Start a round for gravit and return at once (the tool result tells the model
    * to end its turn). Refuses on the round cap and while a round is unsettled.
    */
   async dispatch(agentId: string, place: RoomPlace, args: DispatchArgs, roster: readonly RosterBot[]): Promise<{ round: number; remainingRounds: number; notCalled: string[]; notes: string[] }> {
@@ -773,7 +773,7 @@ export class RoomEngine {
     const drive = async (member: Member, trig: TurnTrigger): Promise<void> => {
       /* A member turn that THROWS (an unreadable log, say) is that member's
        * failed turn with its reason - never a rejected round, which would skip
-       * `finishRound` and leave Gravit asleep with no round-end at all. */
+       * `finishRound` and leave gravit asleep with no round-end at all. */
       const result = await this.enqueue(member, () => this.runMemberTurn(room, member, roster, trig, brief))
         .catch((err: unknown): MemberTurnResult => ({ record: { bot: member.bot, name: member.name, sessionId: member.agent.id, state: "failed", reason: errText(err) }, text: "" }));
       round.turns.push(result.record);
@@ -859,7 +859,7 @@ export class RoomEngine {
    * `sessionController.resolveAgent` resumes it with the model selection and
    * preset join the session domain gives every session and changes nothing
    * else (NEW packages/api/session-controller/src/index.ts:215-221; agent.ts:147-230),
-   * so the face never composes Gravit's session itself. Its failures are
+   * so the face never composes gravit's session itself. Its failures are
    * results, not throws; each becomes the route's status with dsh's reason. */
   private async ensureLive(sessionId: string): Promise<AgentLike> {
     const live = this.deps.ctx.agents.get(sessionId);
@@ -877,7 +877,7 @@ export class RoomEngine {
 
   /**
    * The operator's `@`: resolved against the roster deterministically, appended
-   * to the room as the operator's own message (never a prompt - Gravit sees it
+   * to the room as the operator's own message (never a prompt - gravit sees it
    * on its next wake), and each named member turns on the standard delta. A
    * member mid-turn takes it after that turn. Resets the caps like every send.
    */
@@ -1016,7 +1016,7 @@ export function dispatchToolDefinition(engine: RoomEngine, deps: Pick<RoomDeps, 
       /* The 0.1.1 check read the header only. Both records are checked now and
        * EITHER naming a bot refuses - strictly narrower, never wider. The mask
        * already keeps `dispatch` out of a voice's roster; this is the second lock. */
-      if (presetsOf(agent.session, deps.ctx?.sessionProjections).some((preset) => !isHostPreset(preset))) throw new Error("dispatch is Gravit's tool; a voice does not dispatch");
+      if (presetsOf(agent.session, deps.ctx?.sessionProjections).some((preset) => !isHostPreset(preset))) throw new Error("dispatch is gravit's tool; a voice does not dispatch");
       /* Any folder: the members are created in the caller's own. A session
        * whose header carries no cwd has nowhere to put them. */
       const place = deps.placeFor(agent.session.header.cwd);
@@ -1050,7 +1050,7 @@ export const MEMBER_HELD_TOOLS: ReadonlySet<string> = new Set(["ask_user_questio
 /** What a member is told when one of {@link MEMBER_HELD_TOOLS} is refused. */
 export const MEMBER_HELD_REASON =
   "you are a voice in a debate: nothing shows the operator a question or a goal from you, and the round would wait on it. " +
-  "Say what you would ask the operator in your answer, in prose; Gravit reads it and asks.";
+  "Say what you would ask the operator in your answer, in prose; gravit reads it and asks.";
 
 /** dsh-tools' `PreToolDecision`, stated structurally: the guard makes only the deny and hands on any other. */
 export type MemberPreDecision =

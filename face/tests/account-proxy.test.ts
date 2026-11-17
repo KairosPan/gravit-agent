@@ -593,7 +593,7 @@ test("createAccountReader: read() is the account route's cache; read(true) asks 
 test("the seat route and /data/account share one upstream read within the TTL", async () => {
   const page = JSON.stringify({
     ok: true,
-    keys: [{ address: "0xab12", name: "Gravit", status: "ok" }],
+    keys: [{ address: "0xab12", name: "gravit", status: "ok" }],
     spend: [{ agent: "0xab12", scope: "trade", allow: ["paper-1"], perPaymentUsd: 25, budgetUsd: 100, spentUsd: 0, reservedUsd: 0 }],
     venues: [{ id: "paper-1", name: "Paper account · paper", paper: true, usd: 10_000 }],
     cards: [],
@@ -607,7 +607,7 @@ test("the seat route and /data/account share one upstream read within the TTL", 
   const routes: WebRoute[] = [];
   const register = (route: WebRoute): void => { routes.push(route); };
   const proxy = registerAccountProxy({ register }, { url: URL_, fetch: counting as unknown as typeof fetch, now: () => NOW });
-  registerSeatRoute({ register }, { url: URL_, seatName: "Gravit", reader: proxy.reader, fetch: counting as unknown as typeof fetch, now: () => NOW });
+  registerSeatRoute({ register }, { url: URL_, seatName: "gravit", reader: proxy.reader, fetch: counting as unknown as typeof fetch, now: () => NOW });
 
   const proxied = await call(routes, "/data/account");
   assert.equal(proxied.status, 200); assert.equal(proxied.body, page);
@@ -1130,7 +1130,7 @@ test("nothing of a new write's body is logged", async (t) => {
 });
 
 test("the callback forwards a venue's navigation and answers the Account's page", async () => {
-  const page = "<!doctype html><title>Robinhood sign-in</title><p>Go back to Gravit</p>";
+  const page = "<!doctype html><title>Robinhood sign-in</title><p>Go back to gravit</p>";
   const { routes, fetched, inits } = proxyWith(answering(page));
   const a = await call(routes, `${CALLBACK}?state=s1&code=c1&iss=https%3A%2F%2Fexample`, NAVIGATION);
   assert.equal(a.status, 200);
@@ -1195,7 +1195,7 @@ test("the callback: a fetch, a form, an Origin, a rebound Host are 403; a bad qu
 });
 
 test("the callback: an Account that does not answer, and a disabled row, are 503 with the fixed page", async () => {
-  const fixed = "The Account did not answer. Go back to Gravit and start the sign-in again.";
+  const fixed = "The Account did not answer. Go back to gravit and start the sign-in again.";
   const html = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" };
   const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed: secret text"), { cause: { code: "ECONNREFUSED" } }); });
   const a = await call(refused.routes, `${CALLBACK}?state=s1`, NAVIGATION);
@@ -1224,7 +1224,7 @@ test("the callback's abort is thirty seconds", async (t) => {
   t.mock.timers.tick(1);
   assert.equal(hanging.inits[0].signal.aborted, true, "cut at 30 s");
   await one.done;
-  assert.equal(one.out.status, 503); assert.equal(one.out.body, "The Account did not answer. Go back to Gravit and start the sign-in again.");
+  assert.equal(one.out.status, 503); assert.equal(one.out.body, "The Account did not answer. Go back to gravit and start the sign-in again.");
 });
 
 test("funding is read with no venue, as the Account's own page reads it: every venue that lists it", async () => {

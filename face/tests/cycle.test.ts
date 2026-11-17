@@ -31,7 +31,7 @@ test("the mounted cycle names no role and runs on a forward paper trade", () => 
 });
 
 /* cycle.md names the roles it delegates to by tool name, and nothing else ties the two: a role
- * renamed or removed under roles/ would leave Gravit told to call a tool that does not exist.
+ * renamed or removed under roles/ would leave gravit told to call a tool that does not exist.
  * The text names none today, so the check holds vacuously; it fails the day cycle.md names a
  * role that roles/ does not ship. */
 test("every role_* tool cycle.md names is a role the shipped library has", () => {
@@ -125,7 +125,7 @@ test("the shipped desk.md reads, fits 3,200 bytes and states the desk rules", ()
     assert.ok(text.includes(phrase), phrase);
   assert.ok(!text.includes("{{"));
   assert.ok(text.includes("You are on the desk: the market clock's standing orders and the watch's alerts reach you here."), "the desk is the firings' contract");
-  assert.ok(text.split("\n").includes("- [telegram · operator · 14:03 ET] or [slack · operator · 14:03 ET] is the operator on their phone; it reaches you only while Gravit's one conversation is off."),
+  assert.ok(text.split("\n").includes("- [telegram · operator · 14:03 ET] or [slack · operator · 14:03 ET] is the operator on their phone; it reaches you only while gravit's one conversation is off."),
     "the phone's forms only as the router-off case");
   assert.equal(text.includes("the operator's phone and the market clock reach you here"), false, "the old opening is gone");
   assert.ok(text.includes("While the conversation is off, a message with no bracketed line is the operator at the browser, where your answer stays."),
@@ -213,7 +213,7 @@ test("router.md names bot tasks and debates", () => {
   assert.ok(text.includes("`bot`"), "task_start's bot field");
   assert.ok(text.includes("dispatch"), "the worker hosts a debate with dispatch");
   assert.ok(/debate/i.test(text), "a debate is named");
-  assert.ok(text.includes("A debate's task names no `bot`"), "a debate's task takes no bot: its worker is Gravit, who hosts the bots");
+  assert.ok(text.includes("A debate's task names no `bot`"), "a debate's task takes no bot: its worker is gravit, who hosts the bots");
 });
 
 /** Since one entry's plan 4 there are no channels and no rooms: no prompt any agent reads names them. */

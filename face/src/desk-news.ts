@@ -1,6 +1,6 @@
 /** `GET /data/desk/news`: the Desk screen's News, one New York day of the watch's alerts read back from the desk's
  * ledgers. Each alert of `alerts.jsonl` is a row - sent, queued, undelivered, still pending, or held back by the gate
- * with its word - grouped by symbol, and the reason Gravit wrote for its pass (the `annotated` line) is joined to it:
+ * with its word - grouped by symbol, and the reason gravit wrote for its pass (the `annotated` line) is joined to it:
  * its headline the line of the reply that starts with the row's own ticker, the pages its session opened counted from
  * the `desk-fetch` events of `events.jsonl`. The watch's rules come with the day's count each, and the three sources
  * the watch reads with their state. Under them, the routines' reports of the last seven days (the `report` lines of
@@ -28,7 +28,7 @@ import type { RuleStatus, WatchStatus } from "./watch.ts";
 /** Why the gate held an alert back, as its `suppressed` says. */
 export type NewsHeld = "cooldown" | "cap" | "muted" | "off" | "window";
 
-/** The reason Gravit wrote for an alert's pass: `headline` the reply's line for this row's symbol (else its first
+/** The reason gravit wrote for an alert's pass: `headline` the reply's line for this row's symbol (else its first
  * line), `label` the short line under it or `null`, `text` the whole reply as written, `pages` the pages its session
  * opened, `sessionId` and `outcome` its turn's. */
 export interface NewsReason { headline: string; label: string | null; text: string; pages: number; sessionId: string; outcome: string }

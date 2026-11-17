@@ -1,6 +1,6 @@
 /* Card notices (src/card-notice.ts): the words a Gate 2 card raised sends to the phone, through the
  * account, kind `card` - text only, no button, no link (D18, charter §8): a card is answered in
- * Gravit, never from the phone. */
+ * gravit, never from the phone. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,21 +12,21 @@ import type { PhoneKind, PhoneSendResult } from "../src/phone.ts";
 
 test("an order card's notice: side, size, symbol, limit, venue, no button, no link", () => {
   assert.equal(cardNoticeText("mcp__account__portfolio_live_order", { venue: "alpaca-paper", symbol: "NVDA", side: "buy", qty: 10, orderType: "limit", limitPrice: 183 }),
-    "Your call · Buy 10 NVDA · limit 183 · alpaca-paper — waiting in Gravit");
+    "Your call · Buy 10 NVDA · limit 183 · alpaca-paper — waiting in gravit");
   const args = { venue: "alpaca-paper", order: "ord-0007" };
-  assert.equal(cardNoticeText("mcp__account__portfolio_live_cancel", args), `Your call · ${describeOrder("portfolio_live_cancel", args)} — waiting in Gravit`);
+  assert.equal(cardNoticeText("mcp__account__portfolio_live_cancel", args), `Your call · ${describeOrder("portfolio_live_cancel", args)} — waiting in gravit`);
   assert.doesNotMatch(cardNoticeText("mcp__account__portfolio_pay", { url: "https://x.example/pay", maxAmount: 5 }), /127\.0\.0\.1|localhost/);
 });
 
 test("an order's other shapes: a market sell in dollars, a stop, snake_case keys, a server of the operator's own name", () => {
   assert.equal(cardNoticeText("mcp__account__portfolio_live_order", { venue: "alpaca-paper", symbol: "AAPL", side: "sell", usd: 500, orderType: "market" }),
-    "Your call · Sell $500 AAPL · market · alpaca-paper — waiting in Gravit");
+    "Your call · Sell $500 AAPL · market · alpaca-paper — waiting in gravit");
   assert.equal(cardNoticeText("mcp__seat__portfolio_live_order", { venue: "v", symbol: "TSLA", side: "buy", qty: 2, order_type: "stop_limit", limit_price: 250, stopPrice: 248 }),
-    "Your call · Buy 2 TSLA · stop_limit · limit 250 · stop 248 · v — waiting in Gravit");
+    "Your call · Buy 2 TSLA · stop_limit · limit 250 · stop 248 · v — waiting in gravit");
   /* missing a side or a symbol, or a field that is not a word: the card's own line, not a guess */
   const odd = { venue: "v", symbol: { x: 1 }, side: "buy", qty: 1 };
-  assert.equal(cardNoticeText("mcp__account__portfolio_live_order", odd), `Your call · ${describeOrder("portfolio_live_order", odd)} — waiting in Gravit`);
-  assert.equal(cardNoticeText("mcp__account__portfolio_live_order", undefined), "Your call · portfolio_live_order — waiting in Gravit");
+  assert.equal(cardNoticeText("mcp__account__portfolio_live_order", odd), `Your call · ${describeOrder("portfolio_live_order", odd)} — waiting in gravit`);
+  assert.equal(cardNoticeText("mcp__account__portfolio_live_order", undefined), "Your call · portfolio_live_order — waiting in gravit");
 });
 
 test("a notice carries no link of any kind and no line break, and stays one bounded line", () => {
@@ -38,18 +38,18 @@ test("a notice carries no link of any kind and no line break, and stays one boun
   assert.doesNotMatch(crafted, /\n|https?:|127\.0\.0\.1|token=abc/);
   const long = cardNoticeText("mcp__account__portfolio_transfer", { body: "y".repeat(5_000) });
   assert.ok(long.length <= 600, `bounded: ${long.length}`);
-  assert.match(long, /— waiting in Gravit$/);
+  assert.match(long, /— waiting in gravit$/);
 });
 
 test("a note from the memory's check: how many lessons apply, or that a red line does, before the suffix", () => {
   const name = "mcp__account__portfolio_live_order";
   const order = { venue: "alpaca-paper", symbol: "NVDA", side: "buy", qty: 10, orderType: "limit", limitPrice: 183 };
-  const today = "Your call · Buy 10 NVDA · limit 183 · alpaca-paper — waiting in Gravit";
+  const today = "Your call · Buy 10 NVDA · limit 183 · alpaca-paper — waiting in gravit";
   assert.equal(cardNoticeText(name, order, { lessons: 1, redLine: false }),
-    "Your call · Buy 10 NVDA · limit 183 · alpaca-paper · 1 lesson applies — waiting in Gravit");
-  assert.match(cardNoticeText(name, order, { lessons: 1, redLine: false }), /· 1 lesson applies — waiting in Gravit$/);
-  assert.match(cardNoticeText(name, order, { lessons: 3, redLine: false }), /· 3 lessons apply — waiting in Gravit$/);
-  assert.match(cardNoticeText(name, order, { lessons: 2, redLine: true }), /· a red line applies — waiting in Gravit$/);
+    "Your call · Buy 10 NVDA · limit 183 · alpaca-paper · 1 lesson applies — waiting in gravit");
+  assert.match(cardNoticeText(name, order, { lessons: 1, redLine: false }), /· 1 lesson applies — waiting in gravit$/);
+  assert.match(cardNoticeText(name, order, { lessons: 3, redLine: false }), /· 3 lessons apply — waiting in gravit$/);
+  assert.match(cardNoticeText(name, order, { lessons: 2, redLine: true }), /· a red line applies — waiting in gravit$/);
   assert.equal(cardNoticeText(name, order, { lessons: 0, redLine: false }), today);
   assert.equal(cardNoticeText(name, order), today);
   assert.equal(cardNoticeText(name, order, undefined), today);
@@ -59,10 +59,10 @@ test("a note from the memory's check: how many lessons apply, or that a red line
   assert.ok(cardNoticeText("mcp__account__portfolio_transfer", many).includes("…"), "a line the notice itself cuts");
   const long = cardNoticeText("mcp__account__portfolio_transfer", many, { lessons: 2, redLine: true });
   assert.equal(long.length, CARD_NOTICE_MAX);
-  assert.match(long, /… · a red line applies — waiting in Gravit$/);
+  assert.match(long, /… · a red line applies — waiting in gravit$/);
   const longer = cardNoticeText("mcp__account__portfolio_transfer", many, { lessons: 12, redLine: false });
   assert.equal(longer.length, CARD_NOTICE_MAX);
-  assert.match(longer, /… · 12 lessons apply — waiting in Gravit$/);
+  assert.match(longer, /… · 12 lessons apply — waiting in gravit$/);
 });
 
 test("announceCard passes the note into the words it sends", async () => {
@@ -70,7 +70,7 @@ test("announceCard passes the note into the words it sends", async () => {
   announceCard({ send: async (_kind: PhoneKind, text: string) => { sends.push(text); return { sent: ["telegram:9"] }; } },
     "mcp__account__portfolio_live_order", { venue: "v", symbol: "NVDA", side: "buy", qty: 1 }, { lessons: 1, redLine: false }, () => {});
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(sends, ["Your call · Buy 1 NVDA · v · 1 lesson applies — waiting in Gravit"]);
+  assert.deepEqual(sends, ["Your call · Buy 1 NVDA · v · 1 lesson applies — waiting in gravit"]);
 });
 
 test("announceCard sends kind card and never throws; held, refused and no phone are one line each", async () => {
@@ -85,7 +85,7 @@ test("announceCard sends kind card and never throws; held, refused and no phone 
 
   announceCard(phone(async () => ({ sent: ["telegram:9"] })), "mcp__account__portfolio_live_order", order, undefined, log);
   await settle();
-  assert.deepEqual(sends, [["card", "Your call · Buy 10 NVDA · limit 183 · alpaca-paper — waiting in Gravit"]]);
+  assert.deepEqual(sends, [["card", "Your call · Buy 10 NVDA · limit 183 · alpaca-paper — waiting in gravit"]]);
   assert.deepEqual(lines, []);
 
   announceCard(phone(async () => ({ queued: true })), "mcp__account__portfolio_live_order", order, undefined, log);
@@ -152,11 +152,11 @@ test("a text is defanged: no link and no host survives; prices, numbers and the 
   }
   for (const text of UNCHANGED) assert.equal(scrubLinks(text), text, text);
   const bare = { venue: "evil.example/approve", symbol: "NVDA", side: "buy", qty: 1 };
-  assert.equal(cardNoticeText("mcp__account__portfolio_live_order", bare), "Your call · Buy 1 NVDA · evil·example/approve — waiting in Gravit");
+  assert.equal(cardNoticeText("mcp__account__portfolio_live_order", bare), "Your call · Buy 1 NVDA · evil·example/approve — waiting in gravit");
   assert.equal(cardNoticeText("mcp__account__portfolio_transfer", { to: "evil.com", amount: "183.00" }),
-    "Your call · portfolio_transfer: amount=183.00 to=evil·com — waiting in Gravit");
+    "Your call · portfolio_transfer: amount=183.00 to=evil·com — waiting in gravit");
   assert.equal(cardNoticeText("mcp__account__portfolio_live_order", { venue: "alpaca-paper", symbol: "NVDA", side: "buy", qty: 10, orderType: "limit", limitPrice: 183.5 }),
-    "Your call · Buy 10 NVDA · limit 183.5 · alpaca-paper — waiting in Gravit");
+    "Your call · Buy 10 NVDA · limit 183.5 · alpaca-paper — waiting in gravit");
 });
 
 test("a cut line is scrubbed again: wherever the cut lands near a link, none is left", () => {
@@ -165,7 +165,7 @@ test("a cut line is scrubbed again: wherever the cut lands near a link, none is 
       a: "evil.museum/x", b: "https://evil.example/x", c: "1.2.3.4",
       ...Object.fromEntries(Array.from({ length: Math.ceil(pad / 40) }, (_, i) => [`k${i}`, "w".repeat(38)])), zz: "sub.evil.io/x" });
     assert.ok(text.length <= 600, `bounded: ${text.length}`);
-    const inner = text.slice("Your call · ".length, -" — waiting in Gravit".length).replace(/…$/, "");
+    const inner = text.slice("Your call · ".length, -" — waiting in gravit".length).replace(/…$/, "");
     assert.ok(linkless(inner), `pad ${pad}`);
     assert.equal(scrubLinks(inner), inner, "the cut line is already clean");
   }

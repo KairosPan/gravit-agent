@@ -110,7 +110,7 @@ test('a seat tool without a venue, or one the face never classified, is a card a
 test("a seat write's result lifts a card-raised line, a placed or canceled order, the Account's refusal, or a batch count; a seat read lifts nothing", () => {
   const c = new Map();
   rememberCall(c, seatCall);
-  const raised = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, pending: true, card: { id: 'card-0007', usd: 100 }, next: "the owner answers this card on the owner's Gravit face (Account › Cards)" }), false)), c, NOW);
+  const raised = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, pending: true, card: { id: 'card-0007', usd: 100 }, next: "the owner answers this card on the owner's gravit face (Account › Cards)" }), false)), c, NOW);
   assert.equal(raised.length, 2); assert.equal(raised[0].kind, 'tool');
   assert.equal(raised[1].kind, 'receipt'); assert.equal(raised[1].id, 'rc10'); assert.equal(raised[1].from, 'gravit'); assert.equal(raised[1].seq, 61);
   assert.equal(raised[1].text, 'Card raised · card-0007 · answer it under Account › Cards');
@@ -138,7 +138,7 @@ test("a seat write's result lifts a card-raised line, a placed or canceled order
   assert.equal(none[1].kind, 'refusal'); assert.equal(none[1].text, 'Batch · 2 of 2 legs refused · E_MANDATE_RECIPIENT · okx is not in your limit');
   const r = new Map();
   rememberCall(r, seatCallAs('c14', 'mcp__account__portfolio_account', {}));
-  assert.equal(toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, seat: { name: 'Gravit' } }), false, 'c14')), r, NOW).length, 1, 'a read lifts nothing');
+  assert.equal(toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, seat: { name: 'gravit' } }), false, 'c14')), r, NOW).length, 1, 'a read lifts nothing');
   const cancel = new Map();
   rememberCall(cancel, seatCallAs('c15', 'mcp__account__portfolio_live_cancel', { venue: 'paper-1', order: 'ord-0001' }));
   const canceled = toMessages(mapFrame(seatResult(JSON.stringify({ ok: true, order: { id: 'ord-0001', status: 'canceled', paper: true } }), false, 'c15')), cancel, NOW);
@@ -161,18 +161,18 @@ test("the operator's words are a blue text message from you, dated by the event"
   assert.equal(m.replace, undefined);
 });
 
-test("Gravit's words are a text message flagged for markdown, the bot's words carry the bot's name", () => {
+test("gravit's words are a text message flagged for markdown, the bot's words carry the bot's name", () => {
   const g = one(1);
   assert.equal(g.from, 'gravit'); assert.equal(g.kind, 'text'); assert.equal(g.text, 'Both pivots are technically valid.');
   assert.equal(g.data.markdown, true);
   const b = one(21);
   assert.equal(b.from, 'buffett'); assert.equal(b.kind, 'text'); assert.equal(b.data.name, '巴菲特型'); assert.equal(b.text, '买。理由：便宜。');
-  // a member writes the same markdown Gravit does (news-scout's sources are [name](url) links): drawn as markdown
+  // a member writes the same markdown gravit does (news-scout's sources are [name](url) links): drawn as markdown
   // in a room as in its home session, as the old client drew it
   assert.equal(b.data.markdown, true);
 });
 
-test("in a bot's home session Gravit's role speaks as the bot", () => {
+test("in a bot's home session gravit's role speaks as the bot", () => {
   const [m] = toMessages(mapFrame(frames[1]), new Map(), NOW, 'buffett');
   assert.equal(m.from, 'buffett');
 });
@@ -331,7 +331,7 @@ test("round trip: reasonArgs(describeOrder(…)) gives back the title-relevant f
   }
 });
 
-// plan 2 of the Lunhui run view, task 4: an ok lunhui_present result lifts Gravit's composed answer; a refusal, or any
+// plan 2 of the Lunhui run view, task 4: an ok lunhui_present result lifts gravit's composed answer; a refusal, or any
 // other tool, lifts nothing (its tool row stays hidden like every tool row)
 const presentArgs = { strategy: 'cn-market', run: '2026-10-27-a', summary: '弱势日，跌多涨少。', blocks: [{ kind: 'breadth', title: '涨跌分布' }, { kind: 'ladder', title: '连板梯队', focus: { rung: 3 } }, { kind: 'sources' }], choices: [{ label: '看看连板' }] };
 test("an ok lunhui_present result lifts a composed message p<callId> carrying the summary, the blocks in the result's order and the view's modules", () => {
@@ -439,7 +439,7 @@ test('a relay head whose title holds \' · \' keeps the whole title: it ends at 
 });
 
 test('a brief keeps its form and drops the footer', () => {
-  const text = 'Scan filings\n\nRead the 10-Q.\n---\nnot the footer\n\n---\nThis is a task from Gravit\'s conversation with the operator…';
+  const text = 'Scan filings\n\nRead the 10-Q.\n---\nnot the footer\n\n---\nThis is a task from gravit\'s conversation with the operator…';
   const [m] = toMessages(mapFrame(taskFrame({ kind: 'task', form: 'brief', conversation: 'c', origin: 'web' }, text)), new Map(), NOW);
   assert.equal(m.kind, 'task'); assert.equal(m.data.form, 'brief');
   assert.equal(m.text, 'Scan filings\n\nRead the 10-Q.\n---\nnot the footer', 'cut at the last line that is exactly ---');

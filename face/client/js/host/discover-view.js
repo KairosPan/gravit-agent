@@ -1,7 +1,7 @@
 // face/client/js/host/discover-view.js — Discover's items from the face's listings (spec 2026-10-19 §7 Stage 3
-// "Discover = My plugins"): what Gravit runs, as cards. Pure. The abilities sit on Abilities, first (what Gravit can do,
+// "Discover = My plugins"): what gravit runs, as cards. Pure. The abilities sit on Abilities, first (what gravit can do,
 // spec 2026-11-13 §4.4), MCP servers on Data, the six Lunhui modules on Research (module cards spec §5.1), the bots on
-// Bots (never the default composition, which is Gravit), Gravit and the local CLI agents on Agents, the skills on Skills.
+// Bots (never the default composition, which is gravit), gravit and the local CLI agents on Agents, the skills on Skills.
 import { researchItems } from './modules-view.js';
 import { ICONS } from '../icons.js';
 import { t, tn } from '../i18n/words.js';
@@ -83,7 +83,7 @@ function botItems(bots, roster) {
   });
 }
 
-// Gravit first (the main agent is always there), then the connected agents - each available or not to Gravit - then the
+// gravit first (the main agent is always there), then the connected agents - each available or not to gravit - then the
 // ones found but not connected
 function agentItems(agents, roster) {
   const main = agents?.main && typeof agents.main === 'object' ? agents.main : {};

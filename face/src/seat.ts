@@ -99,7 +99,7 @@ export interface SeatView {
 export interface SeatDeps {
   /** The Account service; default `FACE_ACCOUNT_URL` or `http://127.0.0.1:4820`. */
   url?: string;
-  /** The seat's name at the Account (the face's Account › Agents); default `Gravit`. */
+  /** The seat's name at the Account (the face's Account › Agents); default `gravit`. */
   seatName?: string;
   /** The Account's `GET /api/account` through the proxy's cache: `main.ts` hands the one
    * `registerAccountProxy` returns. None: the route makes its own from `url`, `fetch`, `now` and `timeoutMs`. */

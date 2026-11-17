@@ -3,7 +3,7 @@
 // rows, each with its figures by kind (an event in cents, Kalshi's volume in contracts, a pre-IPO perpetual's implied valuation),
 // the price it shows, where that price is from in the Account's own words with its age, its lines across venues with the best
 // marked — beside the face's own A-share (cn:) rows; a market's page with its words, its history's state, what is held, working
-// and stated for it, and the read each of those stands on; one compact word for a volume; what Hand to Gravit says of a market.
+// and stated for it, and the read each of those stands on; one compact word for a volume; what Hand to gravit says of a market.
 // No image URL the Account names (`icon`) is in anything returned here: the face's page never loads a third party's image. And
 // the face's own ids and words for the A shares (spec 2026-10-19 §7 Stage 2), every word in English from the wire's enums. The
 // wire's own text (a quote's message, a provider's message, a search note, a source name) is Chinese and never reaches a word
@@ -766,7 +766,7 @@ const saidBy = read => (read?.status === 'error' ? str(read.message) || null : n
  *  - Its words: its name; the one its tile is lettered from; its sub's parts (`sub`: what it is and the symbol at the line it
  *    follows, or an event's category) and an event's close (`closesAt`, the Account's time); its outcomes (`outcomes`: each
  *    label as a person says it, its price in cents); whether it is a pre-IPO perpetual (`preipo`) and whether it is starred
- *    (`watched`, rowsOf's rule); what Gravit's conversations on it are found by (`about`, for mentionsOf: its base, or — an
+ *    (`watched`, rowsOf's rule); what gravit's conversations on it are found by (`about`, for mentionsOf: its base, or — an
  *    event, which has none — its name).
  *  - Its history: the candles for the range kept (1D until one is chosen) once a read answered, and that read's state
  *    (`history`: its status, the Account's sentence when it refused, and whether the candles kept are the range's own).
@@ -884,7 +884,7 @@ export function cnPageOf(markets, id) {
   };
 }
 
-/** What Hand to Gravit names a market by, `{ symbol, name }`: an Account key by its page's item — its base, else its name, and its
+/** What Hand to gravit names a market by, `{ symbol, name }`: an Account key by its page's item — its base, else its name, and its
  *  name — a face id by its asset's symbol and name; null for a key no read lists, or an id that is neither. */
 export function handWordsOf(markets, account, id, now = Date.now()) {
   if (!isCnKey(id) && isAccountKey(id)) {

@@ -1,16 +1,16 @@
 /** Role delegation on a real tree: `role_auditor` and `role_worker` (the face's
  * role tool, plugins/role.mjs, D20) start a one-shot child on the role's own
- * preset, `role-<id>`, whose persona is the role's (shadowing Gravit's), whose
+ * preset, `role-<id>`, whose persona is the role's (shadowing gravit's), whose
  * tools are exactly the role's allow list (`role_*` tools absent, `gravit:roles`
  * and `gravit:cycle` blank), and whose report returns through the tool; the
  * auditor's child reads the root `GRAVIT.md` in its `agent-instructions`
  * baseline; a `subagent_fork` child - seeded and unrestricted - is assembled
- * Gravit's system text byte for byte (the roles list and the cycle contract
- * included) and Gravit's tools, the premise of its inherited prefix's cache
+ * gravit's system text byte for byte (the roles list and the cycle contract
+ * included) and gravit's tools, the premise of its inherited prefix's cache
  * reuse; a plain `subagent` child - unseeded and as unrestricted - reads neither
  * section although it can call `create_goal` and every role tool; dsh's two
  * native tools return `started subagent <id>` and report through the parent's
- * `subagent-settled` notice; cancelling Gravit's turn while a role child is
+ * `subagent-settled` notice; cancelling gravit's turn while a role child is
  * mid-turn ends the call `aborted` and tears the child down; a role naming a
  * tool the tree lacks fails loudly at delegation, no child created. The two roles are fixtures made from the real `roles/_template`
  * under the test's own roles root, handed to the boot as `rolesRoot`; the MCP
@@ -147,10 +147,10 @@ test("roles smoke: persona, exact tools, the report, the baseline, a fork's iden
      * `{{`, as bots-smoke does (the text after it is a substituted variable); it is read from the file. */
     const rolesIntro = "Roles. One-shot delegates";
     const gravitPersona = readPersona(PERSONA_PATH).split("{{")[0];
-    assert.ok(gravitPrompt.includes("- role_auditor — "), "Gravit reads the roles section");
-    assert.ok(gravitPrompt.includes(rolesIntro), "Gravit reads the roles intro");
-    assert.ok(gravitPrompt.includes(CYCLE_HEADING), "Gravit reads the cycle contract");
-    assert.ok(gravitPrompt.includes(gravitPersona), "Gravit is told who it is");
+    assert.ok(gravitPrompt.includes("- role_auditor — "), "gravit reads the roles section");
+    assert.ok(gravitPrompt.includes(rolesIntro), "gravit reads the roles intro");
+    assert.ok(gravitPrompt.includes(CYCLE_HEADING), "gravit reads the cycle contract");
+    assert.ok(gravitPrompt.includes(gravitPersona), "gravit is told who it is");
     /* dsh's native delegation tools report through the parent: a `user/message` whose source is `subagent-settled`. */
     const settledWith = (marker: string) => gravit.session.snapshotEvents().some((e) => e.type === "user/message"
       && sourceKind((e.data ?? {}) as { source?: unknown }) === "subagent-settled" && JSON.stringify(e.data).includes(marker));
@@ -175,7 +175,7 @@ test("roles smoke: persona, exact tools, the report, the baseline, a fork's iden
     const system = auditor.request.messages[0];
     assert.equal(system.role, "system");
     assert.ok(textOf(system).includes("You are the auditor"), "the role persona is the child's");
-    assert.equal(textOf(system).includes(gravitPersona), false, "and it shadows Gravit's");
+    assert.equal(textOf(system).includes(gravitPersona), false, "and it shadows gravit's");
     assert.equal(textOf(system).includes(rolesIntro), false, "the roles section is blank for a role child: its allow list removed every role tool");
     assert.equal(textOf(system).includes(CYCLE_HEADING), false, "and so is the cycle section: its allow list removed create_goal, the visibility `gravit:cycle` is gated on");
     assert.match(textOf(system), /Today is \d{4}-\d{2}-\d{2}/, "the date reaches the child");
@@ -186,12 +186,12 @@ test("roles smoke: persona, exact tools, the report, the baseline, a fork's iden
     assert.notEqual(auditorResult.isError, true, "the role call succeeded");
     assert.equal(textOfResult(auditorResult), "AUDIT_DONE", "the child's report is the tool result (D20)");
     /* The workspace map reaches a role child: dsh's agent-instructions row publishes a baseline on every
-     * agent's first request, a spawn child's included. Gravit's own first request is the positive pair. */
+     * agent's first request, a spawn child's included. gravit's own first request is the positive pair. */
     const baselineHasMark = (r: GenerateOptions) => r.messages.some((m) => sourceKind(m) === "agent-instructions" && textOf(m).includes(GRAVIT_MARK));
-    assert.ok(baselineHasMark(requested.get(sessionId)![0]), "Gravit's baseline carries the root GRAVIT.md");
+    assert.ok(baselineHasMark(requested.get(sessionId)![0]), "gravit's baseline carries the root GRAVIT.md");
     assert.ok(baselineHasMark(auditor.request), "so does the auditor child's first request");
-    /* fork: `subagent_fork` seeds its child with Gravit's completed turns and restricts nothing, so the
-     * child's first request must open with Gravit's system text byte for byte and offer Gravit's tools,
+    /* fork: `subagent_fork` seeds its child with gravit's completed turns and restricts nothing, so the
+     * child's first request must open with gravit's system text byte for byte and offer gravit's tools,
      * or the inherited prefix loses its cache reuse. `gravit:roles` and `gravit:cycle` are gated on what the
      * assembling scope can call (plugins/gravit.js `canCall`: a role tool, `create_goal`) and on the header
      * (`isRootOrFork`: a root, or a seeded child), which is why both reach the fork unchanged. */
@@ -204,16 +204,16 @@ test("roles smoke: persona, exact tools, the report, the baseline, a fork's iden
     assert.equal(fork.request.messages[0].role, "system");
     const gravitSystem = textOf(atFork.messages[0]);
     const forkSystem = textOf(fork.request.messages[0]);
-    assert.ok(gravitSystem.includes(rolesIntro), "Gravit's request at the fork carries the roles section");
-    assert.ok(gravitSystem.includes(CYCLE_HEADING), "Gravit's request at the fork carries the cycle contract");
+    assert.ok(gravitSystem.includes(rolesIntro), "gravit's request at the fork carries the roles section");
+    assert.ok(gravitSystem.includes(CYCLE_HEADING), "gravit's request at the fork carries the cycle contract");
     assert.ok(forkSystem.includes(CYCLE_HEADING), "and the fork child's does too: `gravit:cycle` reads create_goal's visibility and the header, and a seeded, unrestricted child passes both");
-    assert.equal(forkSystem, gravitSystem, `the fork child's system text is Gravit's, whole (${forkSystem.length} vs ${gravitSystem.length} characters, first difference at ${firstDifference(forkSystem, gravitSystem)})`);
-    assert.deepEqual(fork.request.tools!.map((t) => t.name), atFork.tools!.map((t) => t.name), "and its tools are Gravit's, in order");
+    assert.equal(forkSystem, gravitSystem, `the fork child's system text is gravit's, whole (${forkSystem.length} vs ${gravitSystem.length} characters, first difference at ${firstDifference(forkSystem, gravitSystem)})`);
+    assert.deepEqual(fork.request.tools!.map((t) => t.name), atFork.tools!.map((t) => t.name), "and its tools are gravit's, in order");
     assert.ok(toolResultsOf().some((r) => /^started subagent \S+$/.test(textOfResult(r.message))), "subagent_fork returns the child's id at once");
     assert.equal(toolResultsOf().some((r) => textOfResult(r.message).includes("FORK_DONE")), false, "not its text");
-    assert.ok(settledWith("FORK_DONE"), "the fork's text reaches Gravit through the settlement notice");
+    assert.ok(settledWith("FORK_DONE"), "the fork's text reaches gravit through the settlement notice");
     /* spawn: a plain `subagent` child is delegated, unseeded and restricted by nothing, so its scope
-     * resolves `create_goal` and every role tool as Gravit's does - the visibility half of the gate
+     * resolves `create_goal` and every role tool as gravit's does - the visibility half of the gate
      * admits it. It reads neither section all the same: both are gated on the header too
      * (plugins/gravit.js `isRootOrFork`), and only a fork inherits a prefix worth keeping identical;
      * the fork above is this step's positive pair. */
@@ -231,7 +231,7 @@ test("roles smoke: persona, exact tools, the report, the baseline, a fork's iden
     assert.equal(spawnSystem.includes(rolesIntro), false, "and no roles section");
     assert.match(spawnSystem, /Today is \d{4}-\d{2}-\d{2}/, "the date still reaches it");
     assert.equal(toolResultsOf().some((r) => textOfResult(r.message).includes("SPAWN_DONE")), false, "subagent returns an id, not the child's text");
-    assert.ok(settledWith("SPAWN_DONE"), "the spawn's text reaches Gravit through the settlement notice");
+    assert.ok(settledWith("SPAWN_DONE"), "the spawn's text reaches gravit through the settlement notice");
     /* worker */
     await prompt("RUN_WORKER");
     const worker = await childRequestAfter("WORK_FIXTURE");
@@ -241,7 +241,7 @@ test("roles smoke: persona, exact tools, the report, the baseline, a fork's iden
     assert.equal(workerTools.includes("edit"), false);
     assert.deepEqual([...workerTools].sort(), [...role("worker").allow].sort(), "the worker's tools are exactly its allow list");
     assert.equal(textOfResult(toolResultsOf().at(-1)!.message), "WORK_DONE", "the worker's report is the tool result");
-    /* abort (Review Focus 1): Gravit's turn cancelled while the role child is mid-turn - its lookup held - ends
+    /* abort (Review Focus 1): gravit's turn cancelled while the role child is mid-turn - its lookup held - ends
      * the role call `aborted` (plugins/role.mjs disposes the activation on exec.signal) and tears the child down. */
     hold = true;
     await prompt("RUN_WORKER_ABORT");
@@ -304,10 +304,10 @@ const toolTexts = (request: GenerateOptions) => request.messages.filter((m) => s
  * nothing is written under the repository's strategies/. The market run is opened through the booted `lunhuiRuns`
  * service and frozen with nothing, so every context expects NOT_EVALUABLE and the child submits the context's own
  * NOT_EVALUABLE example. What is pinned: the child's tools are exactly its allow list; its persona is its own; its
- * submit passes NOT_A_ROLE and lands in the run; the same submit from Gravit's root is NOT_A_ROLE; a freeze is out
+ * submit passes NOT_A_ROLE and lands in the run; the same submit from gravit's root is NOT_A_ROLE; a freeze is out
  * of the role child's reach (UNKNOWN_TOOL), and a delegated child that can reach one - a plain `subagent` child,
  * unrestricted - is NOT_GRAVIT. */
-test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own submit is NOT_A_ROLE, a delegated freeze is NOT_GRAVIT", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+test("roles smoke: cn-market-analyst reads and submits as a role, gravit's own submit is NOT_A_ROLE, a delegated freeze is NOT_GRAVIT", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
   const bots = await makeBotsRoot();
   const fixtureRoles = await mkdtemp(join(tmpdir(), "face-roles-fixture-"));
   const strategies = await realpath(await mkdtemp(join(tmpdir(), "face-roles-strategies-")));
@@ -386,15 +386,15 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
       return found()![1];
     };
 
-    /* The run protocol: Gravit's prompt carries it (lunhui_read_run is registered), the role child's and the
+    /* The run protocol: gravit's prompt carries it (lunhui_read_run is registered), the role child's and the
      * spawn child's below do not. */
-    assert.ok(renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(gravit))).includes(RUN_HEADING), "Gravit reads the run protocol");
+    assert.ok(renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(gravit))).includes(RUN_HEADING), "gravit reads the run protocol");
 
-    /* Gravit's root: the submit is refused before the run is touched. */
+    /* gravit's root: the submit is refused before the run is touched. */
     await prompt("RUN_ROOT_SUBMIT");
     await gravit.whenIdle();
     const refused = lastResult();
-    assert.equal(refused.isError, true, "Gravit's own submit fails");
+    assert.equal(refused.isError, true, "gravit's own submit fails");
     assert.match(resultText(refused), /^Error: NOT_A_ROLE: /, "as NOT_A_ROLE");
 
     /* The role child. */
@@ -404,7 +404,7 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
     assert.deepEqual(child[0].tools!.map((t) => t.name).sort(), [...analyst.allow].sort(), "the analyst's tools are exactly its allow list");
     const system = textOf(child[0].messages[0]);
     assert.ok(system.includes("市场与题材分析员"), "the role persona is the child's");
-    assert.equal(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), false, "and it shadows Gravit's");
+    assert.equal(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), false, "and it shadows gravit's");
     assert.equal(system.includes(RUN_HEADING), false, "no run protocol for a role child: its allow list carries no lunhui_read_run, and it is no fork");
     const childResults = toolTexts(child.at(-1)!);
     assert.equal(childResults.length, 3, "the freeze, the read and the submit came back");
@@ -416,8 +416,8 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
     assert.deepEqual([artifact.module, artifact.status, artifact.run], ["environment", "NOT_EVALUABLE", run]);
     assert.equal(resultText(lastResult()), "MARKET_DONE", "the child's report returns through the tool");
 
-    /* A delegated child that can reach a freeze: NOT_GRAVIT; and, joined to Gravit's preset, no role: NOT_A_ROLE
-     * (Review Focus 5, R44). It runs on dsh's managed `subagent`, which reports through Gravit's settlement notice. */
+    /* A delegated child that can reach a freeze: NOT_GRAVIT; and, joined to gravit's preset, no role: NOT_A_ROLE
+     * (Review Focus 5, R44). It runs on dsh's managed `subagent`, which reports through gravit's settlement notice. */
     await prompt("RUN_SPAWN_FREEZE");
     await waitFor("the spawn's settlement notice", () => gravit.session.snapshotEvents().some((e) => e.type === "user/message"
       && sourceKind((e.data ?? {}) as { source?: unknown }) === "subagent-settled" && JSON.stringify(e.data).includes("SPAWN_DONE")));
@@ -426,7 +426,7 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
     assert.ok(spawn[0].tools!.some((t) => t.name === "lunhui_read_run"), "and the run protocol's probe");
     assert.equal(textOf(spawn[0].messages[0]).includes(RUN_HEADING), false, "yet no run protocol: it is a delegated child that is not a fork");
     assert.match(toolTexts(spawn.at(-1)!)[0], /NOT_GRAVIT/, "and its call is NOT_GRAVIT");
-    assert.equal(headers.get([...requested.entries()].find(([, rs]) => rs === spawn)![0])?.agentPreset, "gravit", "the plain subagent child joins Gravit's preset");
+    assert.equal(headers.get([...requested.entries()].find(([, rs]) => rs === spawn)![0])?.agentPreset, "gravit", "the plain subagent child joins gravit's preset");
     assert.match(toolTexts(spawn.at(-1)!)[1], /^Error: NOT_A_ROLE: /, "so its module submit is NOT_A_ROLE");
     assert.deepEqual((await service.readRun("cn-market", run)).manifest.artifacts, ["environment"], "and nothing more landed in the run");
   } finally {
@@ -444,8 +444,8 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
  * the strategy, the run, the market run and the artifact, reads the leader context citing that market run and submits
  * the context's own example. What is pinned: the child's tools are exactly its allow list; its persona is its own;
  * the context cites the market run and expects OK; its leader submit passes NOT_A_ROLE and lands in the strategy run;
- * the same submit from Gravit's root is NOT_A_ROLE. */
-test("roles smoke: cn-stock-analyst reads the leader context citing a sealed market run and submits as a role, Gravit's own submit is NOT_A_ROLE", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+ * the same submit from gravit's root is NOT_A_ROLE. */
+test("roles smoke: cn-stock-analyst reads the leader context citing a sealed market run and submits as a role, gravit's own submit is NOT_A_ROLE", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
   const bots = await makeBotsRoot();
   const fixtureRoles = await mkdtemp(join(tmpdir(), "face-roles-fixture-"));
   const strategies = await realpath(await mkdtemp(join(tmpdir(), "face-roles-strategies-")));
@@ -531,11 +531,11 @@ test("roles smoke: cn-stock-analyst reads the leader context citing a sealed mar
     const lastResult = () => (gravit.session.snapshotEvents().filter((e) => e.type === "tool/result").at(-1)!.data as { message: { isError?: boolean; content: ReadonlyArray<{ text?: string }> } }).message;
     const resultText = (message: { content: ReadonlyArray<{ text?: string }> }) => message.content.map((b) => b.text ?? "").join("\n");
 
-    /* Gravit's root: the submit is refused before the run is touched. */
+    /* gravit's root: the submit is refused before the run is touched. */
     await prompt("RUN_ROOT_LEADER");
     await gravit.whenIdle();
     const refused = lastResult();
-    assert.equal(refused.isError, true, "Gravit's own leader submit fails");
+    assert.equal(refused.isError, true, "gravit's own leader submit fails");
     assert.match(resultText(refused), /^Error: NOT_A_ROLE: /, "as NOT_A_ROLE");
 
     /* The role child. */
@@ -548,7 +548,7 @@ test("roles smoke: cn-stock-analyst reads the leader context citing a sealed mar
     assert.deepEqual(child[0].tools!.map((t) => t.name).sort(), [...analyst.allow].sort(), "the stock analyst's tools are exactly its allow list");
     const system = textOf(child[0].messages[0]);
     assert.ok(system.includes("个股与预期分析员"), "the role persona is the child's");
-    assert.equal(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), false, "and it shadows Gravit's");
+    assert.equal(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), false, "and it shadows gravit's");
     const childResults = toolTexts(child.at(-1)!);
     assert.equal(childResults.length, 2, "the read and the submit came back");
     const context = JSON.parse(childResults[0]);
@@ -573,8 +573,8 @@ test("roles smoke: cn-stock-analyst reads the leader context citing a sealed mar
  * tools are exactly its allow list, sharing only `skill` with each analyst; its persona is its own; the context reads
  * the market run's three artifacts and, with no evidence row to cite, expects NOT_EVALUABLE naming the run's three
  * sources; its submit passes NOT_A_ROLE and lands in the market run; the same
- * submit from Gravit's root is NOT_A_ROLE. */
-test("roles smoke: cn-reviewer reads the counterevidence context of a sealed cn-market run and submits as a role, Gravit's own submit is NOT_A_ROLE", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+ * submit from gravit's root is NOT_A_ROLE. */
+test("roles smoke: cn-reviewer reads the counterevidence context of a sealed cn-market run and submits as a role, gravit's own submit is NOT_A_ROLE", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
   const bots = await makeBotsRoot();
   const fixtureRoles = await mkdtemp(join(tmpdir(), "face-roles-fixture-"));
   const strategies = await realpath(await mkdtemp(join(tmpdir(), "face-roles-strategies-")));
@@ -659,11 +659,11 @@ test("roles smoke: cn-reviewer reads the counterevidence context of a sealed cn-
     const lastResult = () => (gravit.session.snapshotEvents().filter((e) => e.type === "tool/result").at(-1)!.data as { message: { isError?: boolean; content: ReadonlyArray<{ text?: string }> } }).message;
     const resultText = (message: { content: ReadonlyArray<{ text?: string }> }) => message.content.map((b) => b.text ?? "").join("\n");
 
-    /* Gravit's root: the submit is refused before the run is touched. */
+    /* gravit's root: the submit is refused before the run is touched. */
     await prompt("RUN_ROOT_REVIEW");
     await gravit.whenIdle();
     const refused = lastResult();
-    assert.equal(refused.isError, true, "Gravit's own counterevidence submit fails");
+    assert.equal(refused.isError, true, "gravit's own counterevidence submit fails");
     assert.match(resultText(refused), /^Error: NOT_A_ROLE: /, "as NOT_A_ROLE");
 
     /* The role child. */
@@ -676,7 +676,7 @@ test("roles smoke: cn-reviewer reads the counterevidence context of a sealed cn-
     assert.deepEqual(child[0].tools!.map((t) => t.name).sort(), [...reviewer.allow].sort(), "the reviewer's tools are exactly its allow list");
     const system = textOf(child[0].messages[0]);
     assert.ok(system.includes("反证审查员"), "the role persona is the child's");
-    assert.equal(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), false, "and it shadows Gravit's");
+    assert.equal(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), false, "and it shadows gravit's");
     const childResults = toolTexts(child.at(-1)!);
     assert.equal(childResults.length, 2, "the read and the submit came back");
     const context = JSON.parse(childResults[0]);

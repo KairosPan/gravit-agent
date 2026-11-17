@@ -1,9 +1,9 @@
 // face/plugins/gravit.js
 /**
- * `gravit` - the face-owned plugin Gravit's own preset mounts, and the first
+ * `gravit` - the face-owned plugin gravit's own preset mounts, and the first
  * row of the composition the face renders for that preset (src/roles.ts
  * `gravitRows`; `bots/gravit/agent.cordis.yml` is the render's generated
- * mirror). It holds what only Gravit is told: the date (`deployment:today`),
+ * mirror). It holds what only gravit is told: the date (`deployment:today`),
  * the list of its roles (`gravit:roles`, from the `roles` config key, which
  * `gravitRows` fills from `roles/`), the research-cycle contract
  * (`gravit:cycle`, from the `cycle` config key, which `composeFace` fills from
@@ -15,7 +15,7 @@
  * CONVERSATION, below).
  *
  * WHY A DATE. The 2026-10-10 prompt trace found no date anywhere in the
- * assembled prompt, so Gravit could not tell a fresh bar from a stale one or
+ * assembled prompt, so gravit could not tell a fresh bar from a stale one or
  * resolve "yesterday" and "this week". `deployment:today` closes that.
  *
  * The text is a FUNCTION, not a string. dsh resolves a section's text at every
@@ -35,7 +35,7 @@
  * rebases to that same URL), and a file URL is all the loader needs.
  *
  * THE ROLE LIST. The `role_<id>` tools are registered by the sibling
- * `plugins/role.mjs` rows, one per role (D20): this section is where Gravit reads
+ * `plugins/role.mjs` rows, one per role (D20): this section is where gravit reads
  * what each role is for - a sentence on what a role is, that the call returns
  * the role's report, why that report is a claim to check and that a role child
  * is never messaged, then one line per entry of the `roles` config,
@@ -47,7 +47,7 @@
  * GATED ON WHAT THE ASSEMBLING SCOPE CAN CALL, AND ON WHO IS ASSEMBLING. A role
  * child composes its own `role-<id>` preset, whose `gravit` row carries no roles,
  * no cycle and no desk (src/roles.ts `rolePresetDefinition`); a fork or a plain
- * `subagent` child still JOINS Gravit's preset, so a scoped section reaches it
+ * `subagent` child still JOINS gravit's preset, so a scoped section reaches it
  * too, and an allow list removes tools but cannot remove a sentence. The three
  * sections this plugin gates - the role list, the cycle contract and the desk contract -
  * are therefore functions of the assembly context, and each resolves to `""` for
@@ -58,7 +58,7 @@
  * their own sections with; {@link isRootOrFork} reads the header
  * (`context.agent.session.header`: no `origin`, or `origin: "subagent"` with
  * `isSeeded`). A `subagent_fork` child - seeded and unrestricted - passes both,
- * so it gets Gravit's text unchanged and the system prompt its inherited history
+ * so it gets gravit's text unchanged and the system prompt its inherited history
  * was cached under stays byte-identical. A plain `subagent` spawn, a workflow or
  * a ralph worker is unrestricted too and passes the visibility half, but it
  * inherits no prefix and cannot open a goal (`create_goal` needs a direct human
@@ -83,7 +83,7 @@
  * `interpolate: false`, so a brace in it is literal.
  *
  * THE DESK. `gravit:desk` carries `dsh/profile/desk.md` (src/cycle.ts
- * `readDesk`) - how Gravit behaves on the desk: it informs and never orders -
+ * `readDesk`) - how gravit behaves on the desk: it informs and never orders -
  * in the cycle's slot, `DEPLOYMENT_PERSONA_SUFFIX - 50`; a preset carries one
  * contract or the other, never both, and {@link validateGravitConfig} refuses a
  * row that carries the two. It has NO tool gate, unlike the role list
@@ -93,7 +93,7 @@
  * cycle's.
  *
  * THE CONVERSATION. `gravit:router` carries `dsh/profile/router.md` (src/cycle.ts
- * `readRouter`) - how Gravit answers or starts a task in the operator's one
+ * `readRouter`) - how gravit answers or starts a task in the operator's one
  * conversation - in the same slot, gated as the desk's is, by the header alone.
  * Its config is `{ text, root }`: every `<REPO>` in the text becomes `root`, the
  * repository's absolute path, at mount. It carries no cycle and no desk, and
@@ -107,9 +107,9 @@
  * reaches every session joined to the preset that mounted the row, and nobody
  * else: the `gravit` preset (and its `kairos` alias, which declares the same
  * rows), or the `gravit-desk` preset (src/desk-preset.ts), whose row carries
- * the desk's contract alone - so Gravit's sessions never read `gravit:desk`,
+ * the desk's contract alone - so gravit's sessions never read `gravit:desk`,
  * and a desk session never reads the role list or the cycle. A bot is its own
- * preset and sees none of them. tests/bots-smoke.test.ts pins Gravit's half
+ * preset and sees none of them. tests/bots-smoke.test.ts pins gravit's half
  * and a bot's on a real boot.
  *
  * It masks nothing. `inject` names `tools` only to READ the registry's view of
@@ -182,7 +182,7 @@ const ROLE_TOOL = /^role_[a-z0-9_]+$/;
 
 /** What would fail at mount or render, as a reason; `undefined` when the config
  *  is valid. `{}` is valid (no roles, no cycle, no protocols, no desk); the row in
- *  Gravit's own preset carries `roles`, `cycle` and `protocols`, the desk's row
+ *  gravit's own preset carries `roles`, `cycle` and `protocols`, the desk's row
  *  (src/desk-preset.ts) `desk` alone. Each is an optional key, checked here when
  *  present so a malformed value refuses the mount, loudly, instead of loading a
  *  silently dead config - and `cycle` and `desk` exclude each other: a preset
@@ -239,7 +239,7 @@ export function todayText(now, timeZone) {
  *  `"Etc/Unknown"`, which `new Intl.DateTimeFormat(locale, { timeZone })` refuses
  *  with a RangeError, and `TZ=Foo/Bar` or `TZ=:/etc/localtime` resolve to
  *  `undefined`. `apply` never calls the text function, so the mount would
- *  succeed and every Gravit prompt would then fail at assembly; the fallback
+ *  succeed and every gravit prompt would then fail at assembly; the fallback
  *  keeps the date sentence total. */
 export function resolveZone() {
   try {
@@ -263,7 +263,7 @@ export function canCall(ctx, context, name) {
   return ctx.tools.get(name, context?.scope) !== undefined;
 }
 
-/** Whether the session whose prompt is being assembled is one Gravit's own sections are written
+/** Whether the session whose prompt is being assembled is one gravit's own sections are written
  *  for: a root session, or a `subagent_fork` child. Read from the assembly context's
  *  `agent.session.header` (`assembleContextFor` sets `agent` beside `scope`): a delegated child
  *  (`origin: "subagent"`) that is not seeded - a plain `subagent` spawn, a workflow or ralph
@@ -301,7 +301,7 @@ export function apply(ctx, config) {
     }));
   }
   /* Just before the persona suffix, after every dsh-ordered section. `create_goal` is the
-   * probe: visible to Gravit and to a fork child (the same text, the same cached prefix),
+   * probe: visible to gravit and to a fork child (the same text, the same cached prefix),
    * removed from a role child; a spawn, workflow or ralph child sees it but is no fork
    * (nothing). */
   if (config.cycle !== undefined) {
@@ -336,7 +336,7 @@ export function apply(ctx, config) {
   }
   /* Ten before the cycle, in their listed order (the run protocol, then the module protocol, one
    * step after, then the memory's), each on its own probe: each reads only where its tools mounted,
-   * for Gravit and a fork child (the same text, the same cached prefix). */
+   * for gravit and a fork child (the same text, the same cached prefix). */
   for (const [index, protocol] of (config.protocols ?? []).entries()) {
     ctx.effect(() => ctx.systemPrompt.section({
       name: protocol.name,

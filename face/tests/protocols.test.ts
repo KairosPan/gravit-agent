@@ -206,7 +206,7 @@ test("the memory's section: its file, its cap, its probe", () => {
   assert.equal(p.text.includes("{{"), false);
 });
 
-test("three protocols for Gravit, in order", () => assert.deepEqual(readProtocols().map((p) => p.name), ["lunhui:run", "lunhui:module", "gravit:memory"]));
+test("three protocols for gravit, in order", () => assert.deepEqual(readProtocols().map((p) => p.name), ["lunhui:run", "lunhui:module", "gravit:memory"]));
 
 test("a memory.md over 1,000 bytes is refused, path first", async () => {
   const dir = await mkdtemp(join(tmpdir(), "face-memory-protocol-"));

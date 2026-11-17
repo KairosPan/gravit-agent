@@ -1,5 +1,5 @@
 // face/client/js/render/identity.js — Account › Identity (plan B1b Task 1), the seventh tab: three cardboxes over the account's
-// identity read (host/identity-view.js) — Gravit (the networks Gravit speaks on: Telegram, iMessage and Slack, each connected or
+// identity read (host/identity-view.js) — gravit (the networks gravit speaks on: Telegram, iMessage and Slack, each connected or
 // not, with Details and Connect… (Telegram's and iMessage's), Install app… (Slack's, plan B2 Task 7) or Disconnect…, which asks once
 // in its place; a connected iMessage says it runs via Photon), What reaches you where (the five routing rows by network, the face
 // always on; Save while the ticks differ from the account's; quiet hours on New York's clock, with Change… opening their two clocks,
@@ -37,7 +37,7 @@ const OFF = { disabled: true, 'aria-disabled': 'true' };
 const NETWORK_NAME = Object.fromEntries(NETWORKS);
 const quietWords = () => t('identity.quiet.words');
 
-// ── Gravit: the networks ──
+// ── gravit: the networks ──
 
 // a network's row: not connected (Connect… for Telegram and iMessage, Install app… for Slack), or connected with its lines (iMessage's
 // via Photon, its fingerprint the project secret's), Details and Disconnect… — asked once, what goes said in its place

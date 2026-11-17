@@ -1,6 +1,6 @@
 /** THE IDENTITY STATE AND THE STRANGERS — what the account keeps about the networks it speaks on, besides their tokens.
  *
- * `<home>/identity/state.json` holds the bindings (which bot speaks as Gravit, and the one person it talks to), the routing, quiet hours
+ * `<home>/identity/state.json` holds the bindings (which bot speaks as gravit, and the one person it talks to), the routing, quiet hours
  * and the senders the owner blocked. `<home>/identity/strangers.json` holds whoever wrote to the bot and is not the operator: a reference
  * (the first 12 hex of sha256("<network>:<id>")), the id masked to its last three characters, how many times and when last — never a name, a
  * handle, the id itself or a text. At most 50 strangers are kept; the one heard from longest ago leaves first.

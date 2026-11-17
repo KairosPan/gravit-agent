@@ -1,6 +1,6 @@
 /** The market's five tools left the seat (plan A2 Task 4): portfolio_explore,
  * portfolio_candles, portfolio_book and portfolio_akshare are gone from the
- * Account seat, and nothing Gravit reads, no allow-list and no code names one.
+ * Account seat, and nothing gravit reads, no allow-list and no code names one.
  * The one line allowed is the role rule that still refuses an older seat's
  * AKShare passthrough by its raw name (src/roles.ts NEVER). */
 import test from "node:test";

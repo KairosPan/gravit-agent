@@ -124,7 +124,7 @@ describe("the face's origin", () => {
     } finally { await srv.close(); }
   });
 
-  it("the callback's pages say Go back to Gravit, never the account page", async () => {
+  it("the callback's pages say Go back to gravit, never the account page", async () => {
     const { srv } = await boot();
     try {
       const started = await post(srv.url, "/api/account/signin/start", { connector: "robinhood" }, { [H]: FACE });
@@ -132,12 +132,12 @@ describe("the face's origin", () => {
       const done = await fetch(`${srv.url}/api/account/signin/callback?state=${state}&code=code-made-up&iss=${encodeURIComponent(ISSUER)}`);
       expect(done.status).toBe(200);
       const page = await done.text();
-      expect(page).toContain("Go back to Gravit: it carries on from here. This tab can be closed.");
+      expect(page).toContain("Go back to gravit: it carries on from here. This tab can be closed.");
       expect(page).not.toContain("account page");
       const unknown = await fetch(`${srv.url}/api/account/signin/callback?state=made-up`);
       expect(unknown.status).toBe(400);
       const refused = await unknown.text();
-      expect(refused).toContain("this sign-in is not one this server started, or it ran out: start it again from Gravit, under Account › Venues");
+      expect(refused).toContain("this sign-in is not one this server started, or it ran out: start it again from gravit, under Account › Venues");
       expect(refused).not.toContain("account page");
     } finally { await srv.close(); }
   });

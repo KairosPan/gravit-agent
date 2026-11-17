@@ -1,6 +1,6 @@
 // A task's full process (one-entry plan 2 Task 8): #/task/<id> is the worker's transcript, read-only — its head (back to
 // Messages, the title, the state, the strategy, Stop or Continue by state, Details), the thread with its gates answerable,
-// and in place of a composer one line that sends the operator to Gravit.
+// and in place of a composer one line that sends the operator to gravit.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderTaskScreen } from '../../client/js/render/task.js';
@@ -13,7 +13,7 @@ const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members
 const task = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 3 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
 const on = (convs, tasks, id) => R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: convs, channels: [], bots: [] }), { conversation: 'c', tasks, at: NOW }), { screen: 'task', id });
 
-test('the page has no composer and says to tell Gravit', () => {
+test('the page has no composer and says to tell gravit', () => {
   const messages = [
     { id: 'b1', from: 'system', kind: 'task', text: 'Read the tape\n\nPrice it', seq: 1, at: NOW - 3 * MIN, data: { form: 'brief' } },
     { id: 'm2', from: 'gravit', kind: 'text', text: 'held <b>', seq: 2, at: NOW - 2 * MIN, data: {} },
@@ -29,18 +29,18 @@ test('the page has no composer and says to tell Gravit', () => {
   assert.match(h, /data-action="answer"/, 'a gate answerable as on its line');
   assert.match(h, /data-action="toggleDetails"/, 'Details, for its jobs');
   assert.doesNotMatch(h, /class="composer"|id="say"|contenteditable/, 'no composer');
-  assert.match(h, /<a class="task-tell" href="#\/messages">To change course, tell Gravit<\/a>/);
-  // Details is the worker's: its jobs, and no Stop Gravit (the head's Stop stops the task)
+  assert.match(h, /<a class="task-tell" href="#\/messages">To change course, tell gravit<\/a>/);
+  // Details is the worker's: its jobs, and no Stop gravit (the head's Stop stops the task)
   const d = renderTaskScreen(R.toggleDetails(s), NOW);
   assert.match(d, /class="drawer details"/);
   assert.doesNotMatch(d, /data-action="stopGravit"/);
 });
 
-test('a worker no task lists (aged out of the window) still gets the worker\'s Details: no Stop Gravit, titled from its session', () => {
+test('a worker no task lists (aged out of the window) still gets the worker\'s Details: no Stop gravit, titled from its session', () => {
   const s = R.toggleDetails(on([conv('c'), conv('w', { title: 'Old <run>', running: true, loaded: true })], [], 'w'));
   const d = renderTaskScreen(s, NOW);
   assert.match(d, /class="drawer details"/);
-  assert.doesNotMatch(d, /data-action="stopGravit"/, 'never Stop Gravit on a worker');
+  assert.doesNotMatch(d, /data-action="stopGravit"/, 'never Stop gravit on a worker');
   assert.match(d, /<div class="dsec-title">Old &lt;run&gt;<\/div>/, "titled from the session's record");
 });
 

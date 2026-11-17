@@ -2,8 +2,8 @@
  * the search index holds (`search-index.ts`).
  *
  * Only what the face draws as words counts: the operator's messages (and the
- * phone's and a compaction's), Gravit's and a room member's answers, and an
- * ok `lunhui_present` call's summary, which the client shows as Gravit's
+ * phone's and a compaction's), gravit's and a room member's answers, and an
+ * ok `lunhui_present` call's summary, which the client shows as gravit's
  * composed answer. Reasoning, a room's deltas, runtime snapshots, plugin
  * notices, a desk firing's `schedule` or `alert` prompt, plain tool calls and
  * results yield nothing. The shapes mirror `client/js/wire/mapper.js`

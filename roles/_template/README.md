@@ -1,6 +1,6 @@
 # A role
 
-One directory = one role = one `role_<id>` tool on Gravit's sessions (the face's
+One directory = one role = one `role_<id>` tool on gravit's sessions (the face's
 `face/plugins/role.mjs`), which runs a one-shot child on the role's own agent preset, `role-<id>` —
 its persona and an exact tool allow-list as the preset's mask — and returns the child's report as
 the tool result.
@@ -8,11 +8,11 @@ the tool result.
 | File | Owner | What |
 |---|---|---|
 | `ROLE.md` | the operator | the child's persona; no `{{` (the prompt is a strict template); ≤ 2,000 bytes |
-| `role.yml` | the operator | `name`, `description` (the summary Gravit reads, ≤ 300 chars), `allow` (exact tool names), optional `model` |
+| `role.yml` | the operator | `name`, `description` (the summary gravit reads, ≤ 300 chars), `allow` (exact tool names), optional `model` |
 
-The face reads this directory at boot (`face/src/roles.ts`), renders Gravit's composition from it
+The face reads this directory at boot (`face/src/roles.ts`), renders gravit's composition from it
 and declares the role's preset after boot (a role none of whose tools exists refuses the boot); `bots/gravit/agent.cordis.yml` is the generated mirror (`npm run render:roles` in `face/`),
-and a test fails when it drifts. Gravit proposes a role in conversation and never writes here.
+and a test fails when it drifts. gravit proposes a role in conversation and never writes here.
 A tool a role names must exist in the tree when the role is called, or that call fails naming
 the tool. A role never carries `ask_user_question` (a child has no human to ask), delegation,
 goals, `run_code`, the account and order tools under any server name, the AKShare passthrough (`market_akshare`, and an older seat's), or the web tools, with one exception: the source reader (`source-reader`, `WEB_ROLE_IDS` in `face/src/roles.ts`) carries `web_search` and nothing beside it, and no role names `web_fetch` — the face gives the source reader's children `web_fetch` itself. The

@@ -1,4 +1,4 @@
-/** ACCOUNT › IDENTITY — the service the rest of the account talks to about the networks Gravit speaks on.
+/** ACCOUNT › IDENTITY — the service the rest of the account talks to about the networks gravit speaks on.
  *
  * It holds the pending connection of Connect's sheets 1 to 3 (pending.ts), the strangers (store.ts Strangers), the identity state
  * (store.ts: bindings, routing, quiet hours, blocked), each connected network's connector (`Connector`: telegram.ts TelegramConnector,
@@ -764,7 +764,7 @@ export class Identity {
     await this.outbound(async () => this.dropQueued(network));
     this.startConnector(binding, { ...taken.secret, operatorHandle: a.talksOnlyWith }, taken.resume);
     // Slack's fingerprint is of its two tokens together
-    return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} connected: Gravit speaks as ${a.speaksAs} and talks only with ${a.talksOnlyWith} · ${network === "slack" ? "tokens" : network === "imessage" ? "project secret" : "token"} ${fingerprint}` };
+    return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} connected: gravit speaks as ${a.speaksAs} and talks only with ${a.talksOnlyWith} · ${network === "slack" ? "tokens" : network === "imessage" ? "project secret" : "token"} ${fingerprint}` };
   }
 
   private async disconnect(a: Extract<IdentityAction, { type: "disconnectNetwork" }>): Promise<Outcome> {

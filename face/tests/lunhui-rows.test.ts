@@ -328,10 +328,10 @@ test("errors: STALE_MARKET_RUN names both sessions and the rule; MISSING_EVIDENC
   for (const message of [stale, missing, differs]) assert.doesNotMatch(message, /\/|\\/);
 });
 
-/* R44: a role child composes its own role-<id> preset (D20/B1); a plain `subagent` child joins Gravit's. */
+/* R44: a role child composes its own role-<id> preset (D20/B1); a plain `subagent` child joins gravit's. */
 test("errors: callerIsRole is callerIsChild on a role- preset alone", () => {
   assert.equal(callerIsRole(fakeExec({ origin: "subagent", agentPreset: "role-cn-reviewer" })), true);
-  assert.equal(callerIsRole(fakeExec({ origin: "subagent", agentPreset: "gravit" })), false, "a plain subagent child of Gravit is no role");
+  assert.equal(callerIsRole(fakeExec({ origin: "subagent", agentPreset: "gravit" })), false, "a plain subagent child of gravit is no role");
   assert.equal(callerIsRole(fakeExec({ origin: "subagent" })), false, "nor a child with no preset recorded");
   assert.equal(callerIsRole(fakeExec({ origin: "subagent", isSeeded: true, agentPreset: "role-cn-reviewer" })), false, "nor a seeded fork");
   assert.equal(callerIsRole(fakeExec({ agentPreset: "role-cn-reviewer" })), false, "nor a root session");

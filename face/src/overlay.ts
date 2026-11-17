@@ -5,10 +5,10 @@
  * registry), minus every frontend/client-ui row — the face serves its own UI
  * (spec section 3.2) — and MINUS web-app's agent-plane disable set (:447-556).
  * That set exists because every web-app session mounts a full preset that
- * re-declares the tools; Gravit's `gravit` preset masks no tool (composeFace
+ * re-declares the tools; gravit's `gravit` preset masks no tool (composeFace
  * renders it from `roles/`: the gravit plugin, whose date section and role
  * summaries it carries, and one `plugins/role.mjs` row per role), so the face
- * keeps dsh-base's flat host roster and Gravit keeps its tools and gains the
+ * keeps dsh-base's flat host roster and gravit keeps its tools and gains the
  * `role_*` ones (MAP overlay-rows §5).
  * Static config replaces the webStartup/webRuntime `!!js` expressions: no
  * dsh-web-app row is mounted, so neither service exists here.
@@ -64,7 +64,7 @@ export const BOTS_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..
 /** The preset every session that names none joins (spec S3). `composeFace`
  * renders it from `roles/` in memory (src/boot.ts; src/roles.ts `gravitRows`):
  * the face's gravit plugin row, then one `plugins/role.mjs` row per role. None
- * masks a tool, so Gravit's roster is the host's flat roster plus the `role_*`
+ * masks a tool, so gravit's roster is the host's flat roster plus the `role_*`
  * tools. */
 export const DEFAULT_PRESET = "gravit";
 /** The plugin row the generated mirror `bots/gravit/agent.cordis.yml` ships,
@@ -87,7 +87,7 @@ export const ROLE_PLUGIN_RELATIVE = "../../face/plugins/role.mjs";
  * declares it as a hidden alias of the default (rename spec 2026-10-18 §5.1). */
 export const LEGACY_PRESET = "kairos";
 /** The alias row's description; its name and composition are the default's. */
-export const LEGACY_PRESET_DESCRIPTION = "Gravit under its id before 2026-10-08, kept so sessions created before the rename still open";
+export const LEGACY_PRESET_DESCRIPTION = "gravit under its id before 2026-10-08, kept so sessions created before the rename still open";
 /** Whether a preset id is the host's: the default, or its pre-rename alias. */
 export const isHostPreset = (id: unknown): boolean => id === DEFAULT_PRESET || id === LEGACY_PRESET;
 /** The preset registry's row id. Load-bearing beyond addressing: the row id is
@@ -230,7 +230,7 @@ export function faceOverlay(port: number, defaultPreset: AgentPresetConfig, host
        * and so inherits that one hole. The two halves fail INDEPENDENTLY, and
        * that is what made the hole invisible at 0.1.1: the tree came up
        * healthy, `bootFace`'s Gate-2 service check passed, the model was
-       * offered its full toolset, and Gravit simply never asked anything.
+       * offered its full toolset, and gravit simply never asked anything.
        * Measured 2026-09-02 on a real session: 35 tools offered, none of them
        * this one. Face-owned rather than left to the operator's patch layer for
        * the same reason `webserver` is: this overlay composes LAST, so a patch
@@ -274,7 +274,7 @@ export function faceOverlay(port: number, defaultPreset: AgentPresetConfig, host
       { id: presetRowId(defaultPreset.id), name: "@deepseek-ai/dsh-agent-preset",
         config: { ...defaultPreset } satisfies AgentPresetConfig },
       /* The pre-rename alias: the same definition under the id archived
-       * sessions persist, so they resume as Gravit instead of failing
+       * sessions persist, so they resume as gravit instead of failing
        * `agent-preset/not-found`. No `bots/` directory backs it. */
       { id: presetRowId(LEGACY_PRESET), name: "@deepseek-ai/dsh-agent-preset",
         config: { ...defaultPreset, id: LEGACY_PRESET, description: LEGACY_PRESET_DESCRIPTION } satisfies AgentPresetConfig },

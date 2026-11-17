@@ -142,7 +142,7 @@ test("runAgentRecipe: gates, fixed argv, prompt on stdin, scrubbed env, session 
 /* connected ⇒ callable: the agent tools                                   */
 /* ====================================================================== */
 
-test("agentToolDefinition: the tool Gravit gets — schema, read card, session cwd, cancellation, error propagation", async () => {
+test("agentToolDefinition: the tool gravit gets — schema, read card, session cwd, cancellation, error propagation", async () => {
   const home = await freshHome();
   await seedRoster(home, { agents: ["claude"] });
   await mkdir(join(home, "strategies", "alpha"), { recursive: true });
@@ -180,7 +180,7 @@ test("agentToolDefinition: the tool Gravit gets — schema, read card, session c
   assert.equal(calls[1]!.opts.cwd, await realpath(home));
   assert.deepEqual(calls[1]!.argv.slice(5, 7), ["--resume", "11111111-2222-4333-8444-555555555555"]);
 
-  /* a failed run throws, so the registry hands Gravit an error result with the cause */
+  /* a failed run throws, so the registry hands gravit an error result with the cause */
   await assert.rejects(tool.execute({ prompt: "fail" }, exec), /model refused/);
   await assert.rejects(tool.execute({}, exec), /prompt required/);
   await assert.rejects(tool.execute({ prompt: "x", resume: "nope" }, exec), /invalid session id/);

@@ -1,4 +1,4 @@
-/** Gravit's run protocols - prose files under `dsh/profile/` that tell Gravit how to drive a set of
+/** gravit's run protocols - prose files under `dsh/profile/` that tell gravit how to drive a set of
  * tools, each mounted as a section of its own (modules spec A9, §5.10). Three ship. Two are gated on
  * `lunhui_read_run`, so they are in the prompt only when the Lunhui rows mounted:
  * `lunhui-run.md`, the order of an A-share research run, mounted as `lunhui:run`, and
@@ -6,11 +6,11 @@
  * mounted as `lunhui:module` one order step after it and held to its own
  * {@link LUNHUI_MODULE_MAX_BYTES}. The third, `memory.md`, mounted as `gravit:memory`, says what only
  * this host knows about the memory's tools; it is gated on {@link MEMORY_PROBE}, the recall tool, and
- * held to {@link MEMORY_MAX_BYTES} by its reader. {@link readProtocols} reads all three where `composeFace` renders Gravit's default preset
+ * held to {@link MEMORY_MAX_BYTES} by its reader. {@link readProtocols} reads all three where `composeFace` renders gravit's default preset
  * (src/boot.ts), beside the cycle, and hands them to `gravitRows` (src/roles.ts) as the `gravit`
  * row's `protocols` key; `bootFace` hands the memory's alone ({@link readMemoryProtocol}) to the
  * conversation's preset (src/router-preset.ts). `plugins/gravit.js` registers each as a section a ROOT or FORK session
- * that can call the probe reads - Gravit's, and a `subagent_fork` child's. A role child, a bot or
+ * that can call the probe reads - gravit's, and a `subagent_fork` child's. A role child, a bot or
  * any other delegated child is told nothing.
  *
  * Read as `readCycle` reads `cycle.md` (src/cycle.ts): trimmed, capped at
@@ -88,7 +88,7 @@ export function readProtocol(path: string, maxBytes: number = PROTOCOL_MAX_BYTES
 }
 
 /** The memory's protocol, read from `dir` (default {@link PROTOCOLS_DIR}) and refused as
- * {@link readProtocol} refuses, path-first, with {@link MEMORY_MAX_BYTES} as its cap. Gravit's
+ * {@link readProtocol} refuses, path-first, with {@link MEMORY_MAX_BYTES} as its cap. gravit's
  * default preset carries it as the last of {@link readProtocols}; the conversation's preset carries
  * it alone (src/router-preset.ts). */
 export function readMemoryProtocol(dir: string = PROTOCOLS_DIR): Protocol {

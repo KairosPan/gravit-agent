@@ -3,7 +3,7 @@
 // it). Impure; nothing here draws. The listing is Discover's modules listing (host/discover.js), the run picked by
 // modules-view's latestOf; the overview's latestRun holds the json only when it is that same run. One read per page
 // entered, and only the latest-started read of a module lands.
-// The Runs this page sent (spec §5.7, G10; one-entry plan 2): trackRuns drops a record when the task it asked Gravit for
+// The Runs this page sent (spec §5.7, G10; one-entry plan 2): trackRuns drops a record when the task it asked gravit for
 // is done — re-reading the listing at once and once more 5 s later, a backstop for the file write — when no such task
 // showed within FRESH_MS of it, or when it is an hour old, and mirrors the records to this browser's storage as a
 // convenience, read back at boot; the page is right without it.

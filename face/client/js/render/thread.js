@@ -1,5 +1,5 @@
 // face/client/js/render/thread.js — the conversation body on host-shaped messages (spec 2026-10-19 §6):
-// bubbles, the three gate cards, receipts and refusals, Gravit's composed answers with their working notes folded,
+// bubbles, the three gate cards, receipts and refusals, gravit's composed answers with their working notes folded,
 // icon-only keys, centred dividers; no tool call is drawn.
 import { esc, attrs, cls } from '../html.js';
 import { setMarkdown, markdownHtml } from './markdown.js';
@@ -37,7 +37,7 @@ export const ticker = sym => `<a class="ticker" href="#/markets/${esc(sym)}">${e
 
 export const withTickers = text => esc(text).replace(/\{\{([A-Z]+)\}\}/g, (_, sym) => ticker(sym));
 
-// Gravit's words carry markdown (render/markdown.js); only a message flagged `markdown` goes through it. setMarkdown and
+// gravit's words carry markdown (render/markdown.js); only a message flagged `markdown` goes through it. setMarkdown and
 // markdownHtml are re-exported for the callers that named them here.
 export { setMarkdown, markdownHtml };
 const prose = m => (m.data?.markdown ? markdownHtml(m.text ?? '') : esc(m.text ?? ''));
@@ -177,7 +177,7 @@ function routineCard(m, state) {
 function body(m, conv, state, { rail = false } = {}) {
   const d = m.data ?? {};
   switch (m.kind) {
-    // Gravit's composed answer, drawn from its run's view as the lunhui slice holds it
+    // gravit's composed answer, drawn from its run's view as the lunhui slice holds it
     case 'composed': {
       // (a history page reads its answers and sends nothing: their follow-ups are not drawn); the owner's lessons on the run's
       // leaders, once the face answered them (host/memory-lunhui.js)
@@ -321,7 +321,7 @@ export function thumbsNeeded(conv, thumbs) {
 }
 
 // a task's message (host/kinds.js): a report relayed into the conversation is one centred line linking its task's page, its
-// body folded under it (open across a render by its id); a worker's brief and a steer Gravit relayed are Gravit's bubbles
+// body folded under it (open across a render by its id); a worker's brief and a steer gravit relayed are gravit's bubbles
 // under their labels; a recovery note and a stop are centred lines in the face's words. A report's title is its head's, else
 // the task's own, else Task; its status in the table's words, one it does not name as it came. Masked as every worker's words
 const REPORT_STATUS = {

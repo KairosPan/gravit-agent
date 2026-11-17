@@ -1,5 +1,5 @@
 // A module card's Run sheet from the host (module cards spec §4 G6, §5.4–§5.5): open from the listing, every field
-// recomputed against the listing as it stands, Run as one message to Gravit's one conversation (one-entry plan 2) asking for
+// recomputed against the listing as it stands, Run as one message to gravit's one conversation (one-entry plan 2) asking for
 // a task under the Run's title, and nothing sent while the sheet cannot run or the conversation is not known.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,7 +17,7 @@ import { EN } from '../../client/js/i18n/en.js';
 const NOW = new Date(2026, 9, 28, 14, 0).getTime();
 const NEWER = '20261029T020000Z-aaaaaaaa';
 const THEME_NEW = '请只跑 Lunhui 的 theme 模块：频道 cn-market，开新运行——先按 lunhui:run 第 1 步冻结整套（index、limit-up、boards），再只写 theme。';
-const FAILED = "Couldn't send to Gravit's conversation";
+const FAILED = "Couldn't send to gravit's conversation";
 const CONV = 'c-gravit';
 const ask = (title, text) => `请为此开一个任务，标题恰为「${title}」：\n${text}`;
 const channelOf = (listing, name) => listing.channels.find(c => c.channel === name);
@@ -102,7 +102,7 @@ test('Run with the conversation unknown is refused with a line', async () => {
     await r.runSheet.open('theme');
     await r.runSheet.run();
     assert.deepEqual(r.sent, [], 'nothing sent');
-    assert.equal(spoken(r.sheet().said), "Gravit's conversation is not known yet — open Messages");
+    assert.equal(spoken(r.sheet().said), "gravit's conversation is not known yet — open Messages");
     assert.equal(r.sheet().module, 'theme', 'the sheet stays');
     assert.deepEqual(r.store.get().moduleRuns, {});
     assert.deepEqual(r.went, []);

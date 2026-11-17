@@ -36,7 +36,7 @@ test("GRAVIT.md names nothing of the removed layer and states that no read is gu
   assert.match(text, /no lookahead guard/);
 });
 
-test("GRAVIT.md tells Gravit to answer a Lunhui market run with lunhui_present", () => {
+test("GRAVIT.md tells gravit to answer a Lunhui market run with lunhui_present", () => {
   assert.ok(readFileSync(GRAVIT_MD, "utf8").includes("lunhui_present"));
 });
 
@@ -49,7 +49,7 @@ test("GRAVIT.md reaches AKShare through the market row, not the seat", () => {
   assert.equal(text.includes("mcp__akshare__"), false);
 });
 
-/* dsh UI port spec §5.6, O8: Gravit's shell reads a PDF's text with pdftotext, renders a page whose layout
+/* dsh UI port spec §5.6, O8: gravit's shell reads a PDF's text with pdftotext, renders a page whose layout
  * matters with pdftoppm into the temp directory (never the tree), and hands the PNG to a shipped role. */
 test("GRAVIT.md reads a PDF with Poppler and hands a layout page to a shipped role", () => {
   const text = readFileSync(GRAVIT_MD, "utf8");
@@ -69,18 +69,18 @@ test("GRAVIT.md states debates, not rooms", () => {
   assert.equal(text.includes("@<bot>"), false, "the operator's @ in a room has no surface left");
 });
 
-/* Analog event table, task 3: a return Gravit writes carries its sign, a % and what it measures. */
+/* Analog event table, task 3: a return gravit writes carries its sign, a % and what it measures. */
 test("GRAVIT.md says a return is never a bare run of numbers", () => {
   const text = readFileSync(GRAVIT_MD, "utf8");
   assert.ok(text.includes("never as a bare run of numbers"));
   assert.ok(Buffer.byteLength(text, "utf8") <= BUDGET_BYTES);
 });
 
-/* Memory in Gravit, plan 1: one line names the memory's tools and who arms a lesson, right after the seat's paragraph. */
+/* Memory in gravit, plan 1: one line names the memory's tools and who arms a lesson, right after the seat's paragraph. */
 test("GRAVIT.md names the memory in one line", () => {
   const text = readFileSync(GRAVIT_MD, "utf8");
   const line = "`mcp__memory__*`: the owner's record of decisions and lessons; you record and propose, the owner arms.";
   assert.ok(text.split("\n").includes(line), "the line, exactly, on a line of its own");
-  assert.ok(text.indexOf(line) > text.indexOf("`mcp__account__*`: Gravit's seat") && text.indexOf(line) < text.indexOf("## The desk"), "after the seat's paragraph");
+  assert.ok(text.indexOf(line) > text.indexOf("`mcp__account__*`: gravit's seat") && text.indexOf(line) < text.indexOf("## The desk"), "after the seat's paragraph");
   assert.ok(Buffer.byteLength(text, "utf8") <= BUDGET_BYTES);
 });

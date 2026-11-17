@@ -1,4 +1,4 @@
-/** The room's rules that are not Gravit's (spec §4.2, §4.3, §4.4, §4.6) —
+/** The room's rules that are not gravit's (spec §4.2, §4.3, §4.4, §4.6) —
  * pure functions and the constants block, so every rule is drillable without
  * a harness and the engine (room.ts) is orchestration only.
  *
@@ -6,7 +6,7 @@
  * persistence read path refuses a log carrying any event type outside its
  * generated catalog, so the vocabulary here is a `source` vocabulary on
  * ordinary `user/message` events, never a new event type. The four sources:
- *   `answer`    a member's final text, injected into Gravit's session;
+ *   `answer`    a member's final text, injected into gravit's session;
  *   `round-end` the one waking message per round;
  *   `delta`     the prompt a member turn received, in the MEMBER's own log -
  *               its `messageIds` are the member's durable cursor;
@@ -228,8 +228,8 @@ function lineOfUserMessage(message: MessageLike | undefined, roster: readonly Ro
 }
 
 /**
- * The room as a member reads it: operator prompts, Gravit replies and member
- * answers, in log order, then the messages still pending in Gravit's inbox
+ * The room as a member reads it: operator prompts, gravit replies and member
+ * answers, in log order, then the messages still pending in gravit's inbox
  * (answers and `@`s that have not been claimed yet), deduplicated by id.
  */
 export function roomLinesOf(events: readonly EventLike[], pending: readonly MessageLike[], roster: readonly RosterBot[]): RoomLine[] {
@@ -257,7 +257,7 @@ export function formatDelta(lines: readonly RoomLine[], self: string): string {
   if (lines.length === 0) return "(nothing new)";
   return lines.map((line) => {
     const label = line.speaker.kind === "operator" ? "操作员"
-      : line.speaker.kind === "gravit" ? "Gravit"
+      : line.speaker.kind === "gravit" ? "gravit"
       : line.speaker.bot === self ? `${line.speaker.name} (you)` : line.speaker.name;
     return `${label}: ${line.text.replace(/\n/g, "\n  ")}`;
   }).join("\n");
@@ -274,13 +274,13 @@ export const MEMBER_RULES: readonly string[] = [
 export function memberPrompt(opts: { roomName: string; roster: readonly RosterBot[]; self: string; delta: string; trigger: TurnTrigger; brief?: RoomBrief }): string {
   const others = opts.roster.filter((b) => b.id !== opts.self).map((b) => `${b.name} (@${b.id})`);
   const parts = [
-    `You are in the room "${opts.roomName}" with the operator, Gravit (the organizer)${others.length === 0 ? "" : ` and the other voices on the roster: ${others.join(", ")}`}.`,
+    `You are in the room "${opts.roomName}" with the operator, gravit (the organizer)${others.length === 0 ? "" : ` and the other voices on the roster: ${others.join(", ")}`}.`,
     "",
     "New in the room since you last spoke:",
     opts.delta,
     "",
   ];
-  if (opts.brief !== undefined) parts.push(`Gravit asks this batch: ${formatBrief(opts.brief)}`, "");
+  if (opts.brief !== undefined) parts.push(`gravit asks this batch: ${formatBrief(opts.brief)}`, "");
   if (opts.trigger === "mention") parts.push("The operator addressed you directly.", "");
   if (opts.trigger === "continuation") parts.push("A peer addressed you; this is your one continuation turn this round.", "");
   parts.push("Rules for this turn:", ...MEMBER_RULES.map((rule, i) => `${i + 1}. ${rule}`));

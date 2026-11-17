@@ -6,7 +6,7 @@
  * (`@deepseek-ai/dsh-tool-web` `applyWebFetchTool`; spec 2026-11-07 §5.6, charter A1 and D29): the tree registers
  * none (src/policy.ts D6 keeps `tool-web`'s `fetch` off) but leaves the http fetch provider on, so the desk and the
  * source reader's children (src/source-reader.ts, which equips them through {@link equipAgents}) alone open pages -
- * Gravit's other sessions, the bots and every other role never see the tool.
+ * gravit's other sessions, the bots and every other role never see the tool.
  *
  * WHERE THEY REGISTER: into each desk agent's OWN tool layer, from one root `agent/created` listener and
  * one sweep of the agents already live ({@link installDeskTools}). The desk's preset carries an allow mask
@@ -14,7 +14,7 @@
  * preset's alike - so a tool registered in either would be hidden from the desk by its own mask, and
  * `tools.restrict` refuses to name a tool its scope does not inherit. An agent's own registrations are
  * the one layer no restriction filters (dsh-tools `view`). So `DESK_ALLOW` does not list these two,
- * Gravit's agents never see them, and the global view - `/data/plugins.json` - never lists them, as with
+ * gravit's agents never see them, and the global view - `/data/plugins.json` - never lists them, as with
  * the role tools. They unwind with the agent. `web_fetch` lands in the same layer through a child plugin of the
  * agent's context that injects `web` ({@link webFetchLayer}): the agent's context reaches `tools` and
  * `systemPrompt` through the agent loop's injects, but no fiber above it injects `web`, and cordis refuses a service a
@@ -1007,7 +1007,7 @@ const mayMatchDotName = (segment: string): boolean => dotLed(segment) || "*?[{".
  *   directory - `<the realpath of os.tmpdir()>/dsh-spill-XXXXXX/session-<sha256(sessionId)[:12]>/`, the directory itself
  *   or below it ({@link spillHomeOf}) - goes on, since the spill notice of a result too large to show inline tells the
  *   model to read it so. Never the temp directory, never a spill root itself, never another session's directory - those
- *   hold Gravit's spills, which can hold a key file's text - and only for the session the call comes from, by the
+ *   hold gravit's spills, which can hold a key file's text - and only for the session the call comes from, by the
  *   `sessionId` the guard reads off its header; given none, nothing outside the repository is read;
  * - inside either, when a name the path spells - every name of a relative one; those below its common ancestor with
  *   the root of an absolute one, as the write check counts them - or a name either placement reaches below the root,
@@ -1326,7 +1326,7 @@ function unrecordedLine(exec: DeskGuardExecution, error: unknown): string {
  * ({@link GUARDED_PRESETS}); a desk agent below means either, and a deny's reason, quoted below as the desk's, opens
  * `the conversation …` for the conversation's agent. Its reads are judged against the repository root only, as the
  * desk's are: it cannot read its own folder, and a `grep` or `glob` with no path - its folder - is denied; harmless,
- * since it writes nothing there. Anyone else's call - Gravit's workbench sessions, a
+ * since it writes nothing there. Anyone else's call - gravit's workbench sessions, a
  * task's worker, a bot's - is handed on unjudged.
  *
  * Neither ever throws. A failure to judge - an agent whose session or cwd cannot be read, or a registry that throws

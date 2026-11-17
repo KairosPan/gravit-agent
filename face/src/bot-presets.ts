@@ -72,7 +72,7 @@ const SKILL_FILESYSTEM = "@deepseek-ai/dsh-skill-filesystem";
 const FIBER_ACTIVE = 2;
 
 /** One row of a preset's composition: what {@link definitionFor} hands the registry, and
- * the type `gravitRows` (src/roles.ts) builds Gravit's composition in. */
+ * the type `gravitRows` (src/roles.ts) builds gravit's composition in. */
 export type PresetRow = PresetDefinition["plugins"][number];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

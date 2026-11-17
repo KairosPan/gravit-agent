@@ -1,6 +1,6 @@
 // face/client/js/render/lunhui/intraday.js — an index's day minute by minute (plan 2 of the Lunhui run view, task 6): the
 // chart's geometry over the session's 242-point grid, the intraday SVG (the previous close dashed, the price line and the
-// minute's amount in the minute's colour, the high and the low, Gravit's focus band, the cursor), the row's sparkline, and
+// minute's amount in the minute's colour, the high and the low, gravit's focus band, the cursor), the row's sparkline, and
 // the cursor's patch the slider and the pointer apply in place.
 //
 // Every time drawn comes from the grid (minuteLabel, a copy of the plugin's lib/market.mjs one: the client cannot import the

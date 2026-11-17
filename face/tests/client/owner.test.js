@@ -131,7 +131,7 @@ test('Devices: Remove for every other device, only on a page that signs; how and
   const page = fx('account');
   const FIRST = '2026-11-01T14:05:00.000Z', LET = '2026-11-02T15:30:00.000Z', CODE = '2026-11-09T21:10:00.000Z';
   page.signers.owners = [
-    { id: `device:${KID}`, kind: 'device', label: 'Gravit face', via: 'first', addedAt: FIRST },
+    { id: `device:${KID}`, kind: 'device', label: 'gravit face', via: 'first', addedAt: FIRST },
     { id: 'device:0f0f0f0f0f0f0f0f', kind: 'device', label: 'Laptop', via: 'letIn', by: `device:${KID}`, addedAt: LET },
     { id: 'device:1234123412341234', kind: 'device', label: 'Phone', via: 'code', addedAt: CODE },
     // let in by a device that is gone: its id stands for it
@@ -140,8 +140,8 @@ test('Devices: Remove for every other device, only on a page that signs; how and
   // the date and the time as New York's clock reads them
   const when = at => `${etDate(at)} ${etClock(at)}`;
   const html = renderDevices(standing('signs', KID, page));
-  has(html, `<div class="dsec-line">Gravit face · device:${KID} · this page · first device · ${when(FIRST)}</div>`);
-  has(html, `<div class="venue"><span>Laptop · device:0f0f0f0f0f0f0f0f · let in from Gravit face · ${when(LET)}</span>` +
+  has(html, `<div class="dsec-line">gravit face · device:${KID} · this page · first device · ${when(FIRST)}</div>`);
+  has(html, `<div class="venue"><span>Laptop · device:0f0f0f0f0f0f0f0f · let in from gravit face · ${when(LET)}</span>` +
     '<button type="button" class="btn-sm" data-action="removeDevice" data-id="device:0f0f0f0f0f0f0f0f">Remove</button></div>');
   has(html, `<div class="venue"><span>Phone · device:1234123412341234 · let in with a code · ${when(CODE)}</span>` +
     '<button type="button" class="btn-sm" data-action="removeDevice" data-id="device:1234123412341234">Remove</button></div>');
@@ -158,7 +158,7 @@ test('Devices: Remove for every other device, only on a page that signs; how and
 test("Devices: when a signer came in is New York's date and time, whatever the browser's zone", () => {
   const page = fx('account');
   page.signers.owners = [
-    { id: `device:${KID}`, kind: 'device', label: 'Gravit face', via: 'first', addedAt: '2026-11-01T14:05:00.000Z' },
+    { id: `device:${KID}`, kind: 'device', label: 'gravit face', via: 'first', addedAt: '2026-11-01T14:05:00.000Z' },
     // 21:10 UTC: 16:10 in New York on the 9th, 05:10 on the 10th in a UTC+8 browser
     { id: 'device:1234123412341234', kind: 'device', label: 'Phone', via: 'code', addedAt: '2026-11-09T21:10:00.000Z' },
   ];

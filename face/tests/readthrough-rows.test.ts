@@ -349,7 +349,7 @@ test("read_through: its schema, a task's answer, a desk agent's refusal outside 
   assert.deepEqual(schema.required, ["symbol", "basis", "event", "sources", "logic", "peers", "certainty"]);
   assert.ok(toolRow.READ_THROUGH_DESCRIPTION.startsWith("Which rivals a company's own bad news points to: your inference, not an order."));
   const answer = JSON.parse(await tools[0]!.execute(ARGS, ROOT("s-task")));
-  assert.equal(answer.ok, true); assert.match(answer.id, ID_RE); assert.ok(answer.block.startsWith("推演 · Gravit 的推断，不是下单 · 确定度 中\n· 事件："));
+  assert.equal(answer.ok, true); assert.match(answer.id, ID_RE); assert.ok(answer.block.startsWith("推演 · gravit 的推断，不是下单 · 确定度 中\n· 事件："));
   await assert.rejects(tools[0]!.execute(ARGS, ROOT("s-desk", "gravit-desk")), code("ALERT_ONLY"));
   await assert.rejects(tools[0]!.execute(ARGS, CHILD), code("NOT_GRAVIT"));
   service.open("s-run", RUN);

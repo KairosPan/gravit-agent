@@ -215,7 +215,7 @@ const pageHtml = (who, keys, top, left, right) => {
 // a key opening the Trade ticket on the market, at a side
 const ticketKey = (id, side, word) => `<button type="button" class="btn" data-action="openTicket" data-id="${esc(id)}" data-side="${side}">${word}</button>`;
 // the page's keys: Buy, and Sell where it is held, when `trade` is given (an Account market on a page that signs); Hand to
-// Gravit; Watch — and a perpetual's Leverage… (`leverage`, its seed) where it is given
+// gravit; Watch — and a perpetual's Leverage… (`leverage`, its seed) where it is given
 const keysHtml = (id, watched, trade = null, leverage = null) => `<div class="mk-d-acts">${trade ? ticketKey(id, 'buy', th('trade.buy')) + (trade.held ? ticketKey(id, 'sell', th('trade.sell')) : '') : ''}` +
   `${leverage ? marketKey('leverage', leverage, t('account.key.leverage'), 'btn') : ''}` +
   `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button>` + // words-order: an icon, then its word

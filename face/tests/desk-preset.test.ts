@@ -85,7 +85,7 @@ test("DESK_ALLOW is exactly the plan's 17 names, in order - no shell, no job too
   assert.equal(Object.isFrozen(DESK_ALLOW), true);
 });
 
-/* Who holds the memory's tools (memory-connect plan 1): Gravit's workers, unmasked, and the conversation, by
+/* Who holds the memory's tools (memory-connect plan 1): gravit's workers, unmasked, and the conversation, by
  * name - never the desk, a bot or a role. A debate member is a bot's preset, read-only, so it holds none either. */
 test("the desk holds no memory tool", () => {
   assert.equal(DESK_ALLOW.length, 17);
@@ -123,8 +123,8 @@ test("the desk definition: its display fields, both rows on the real plugin file
   const d = deskPresetDefinition({ desk: "Inform; never order." });
   assert.deepEqual(d, {
     id: DESK_PRESET,
-    name: "Gravit · desk",
-    description: "Gravit on the desk: informs from the phone and the clock, never orders",
+    name: "gravit · desk",
+    description: "gravit on the desk: informs from the phone and the clock, never orders",
     plugins: [
       { id: "gravit", name: GRAVIT_PLUGIN_URL, config: { desk: "Inform; never order." } },
       { id: "desk-mask", name: BOT_PLUGIN_URL, config: { maskOnly: true, allow: [...DESK_ALLOW] } },
@@ -135,7 +135,7 @@ test("the desk definition: its display fields, both rows on the real plugin file
   assert.equal(entryListProblem(d.plugins), undefined, "the registry's own validator accepts the composition");
   assert.equal(validateGravitConfig(d.plugins[0].config), undefined, "the gravit row carries the desk contract alone");
   assert.equal(validateBotConfig(d.plugins[1].config), undefined, "the mask row is a valid mask-only row: no persona");
-  assert.equal("persona" in d.plugins[1].config, false, "no persona row: Gravit's own prefix stays");
+  assert.equal("persona" in d.plugins[1].config, false, "no persona row: gravit's own prefix stays");
 });
 
 test("deskPresetDefinition is pure: every call builds fresh rows, and no caller can reach DESK_ALLOW through one", () => {

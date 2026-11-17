@@ -9,19 +9,19 @@
  * dsh 0.2 has no `host.describe` (the apiproxy that served it is gone,
  * upstream commit 4f00a8b82a), so its host facts - cwd, home, attached
  * sessions - are answered here, in-process. The LOCAL-agent roster — the
- * coding agents connected beside Gravit — lives here too, because only the
+ * coding agents connected beside gravit — lives here too, because only the
  * face process can ask the machine what is on its PATH. The roster is OPERATOR-CURATED, not fixed: it starts empty; auto-
  * discovery probes a known list of coding-agent CLIs and offers what answers;
  * a connect probes one binary and adds it to `$DSH_HOME/face/agents.json`
  * (the same face-metadata home archived.json uses); a disconnect removes it.
  * What a connection is FOR — becoming a callable `agent_<bin>` tool, and the
- * one roster that gates which of those Gravit may call —
+ * one roster that gates which of those gravit may call —
  * is `./agents.ts`, split out because that machinery is its own concern; this
  * module still builds its process seams (`PanelDeps`)
  * and re-exports the pieces its own routes and other consumers still name.
  * The remaining two sections need what only the booted tree holds in-process:
  *
- * - MEMORY is the skill catalog — Gravit's standing knowledge (the mechanics
+ * - MEMORY is the skill catalog — gravit's standing knowledge (the mechanics
  *   and style-gravit packs). `skill.list` over RPC needs an attached session
  *   and drops source/path/body; `ctx.skills` has the full record and the
  *   markdown body, so the routes here read it directly.
@@ -214,7 +214,7 @@ export interface AgentsMeta {
 
 /** One probed local agent: present-with-version, or connected-but-silent,
  * plus its auth reading when the agent has a status command, and the dsh
- * tool name Gravit reaches it by when the face has a recipe for it. */
+ * tool name gravit reaches it by when the face has a recipe for it. */
 export interface LocalAgentRow {
   bin: string;
   label: string;
@@ -399,7 +399,7 @@ async function authSoft(deps: PanelDeps, bin: string): Promise<AgentAuth> {
 /** A detected-but-unconnected agent, as the roster page offers it. */
 export interface Candidate { bin: string; label: string; version: string }
 
-/** The agent roster as the panel shows it: the main agent (Gravit on this
+/** The agent roster as the panel shows it: the main agent (gravit on this
  * dsh runtime), the operator's CONNECTED local agents (probed, in connect
  * order — one that stopped answering stays listed as found:false rather than
  * vanishing), and the detected candidates (known suggestions that answer on
@@ -426,7 +426,7 @@ export async function agentsListing(deps: PanelDeps): Promise<{
       return version === null ? null : { bin, label, version };
     })))
     .filter((row): row is Candidate => row !== null);
-  return { main: { name: "Gravit", runtime: `dsh ${DSH_PIN}` }, local, candidates };
+  return { main: { name: "gravit", runtime: `dsh ${DSH_PIN}` }, local, candidates };
 }
 
 /** The connect handshake, Hermes-shaped: validate the name, then verify the

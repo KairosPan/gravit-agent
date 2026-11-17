@@ -135,7 +135,7 @@ describe("the send route, through the account", () => {
     const r = await send({ kind: "chat", text: "NVDA is 183", network: "telegram", replyTo: "telegram:41" });
     expect(r).toEqual({ ok: true, sent: ["telegram:" + String(1000 + bot.sent.length - 1)] });
     expect(bot.sent.at(-1)).toMatchObject({ chat_id: 555000123, text: "NVDA is 183", reply_parameters: { message_id: 41, allow_sending_without_reply: true } });
-    // a chat with no network goes by the Chat with Gravit row, and not as a reply
+    // a chat with no network goes by the Chat with gravit row, and not as a reply
     const plain = await send({ kind: "chat", text: "and AAPL is 230" });
     expect(plain.sent).toHaveLength(1);
     expect(bot.sent.at(-1)).toEqual({ chat_id: 555000123, text: "and AAPL is 230" });
@@ -164,7 +164,7 @@ describe("the send route, through the account", () => {
     for (const kind of ["chat", "alert", "watchdog"]) expect(await send({ kind, text: "anyone?" })).toEqual({ ok: true, held: "nothing connected" });
     expect(await send({ kind: "chat", text: "anyone?", network: "telegram", replyTo: "telegram:41" })).toEqual({ ok: true, held: "nothing connected" });
     // the brief, and the disconnect's own last line on the network it took away
-    expect(bot.sent.map((s) => s.text)).toEqual(["the brief", "Gravit's Telegram was disconnected from the account at 12:00 ET. Not you? Connect it again under Account › Identity."]);
+    expect(bot.sent.map((s) => s.text)).toEqual(["the brief", "gravit's Telegram was disconnected from the account at 12:00 ET. Not you? Connect it again under Account › Identity."]);
   });
 
   it("quiet hours hold proactive kinds, never a reply, an urgent alert or a watchdog notice", async () => {
@@ -190,7 +190,7 @@ describe("the send route, through the account", () => {
   it("the watchdog goes to every connected network whatever the routing says", async () => {
     await routing("chat=;alerts=;brief=;cards=;fills=");
     for (const kind of ["chat", "alert", "urgent", "brief", "report", "card", "fill"]) expect(await send({ kind, text: "x" })).toEqual({ ok: true, held: "not routed" });
-    // a reply names its network, but the Chat with Gravit row still decides nothing here: a reply goes where its text came from
+    // a reply names its network, but the Chat with gravit row still decides nothing here: a reply goes where its text came from
     expect((await send({ kind: "chat", text: "a reply", network: "telegram", replyTo: "telegram:7" })).sent).toHaveLength(1);
     const w = await send({ kind: "watchdog", text: "the face is down" });
     expect(w.sent).toHaveLength(1);
@@ -370,7 +370,7 @@ describe("the send route, through the account", () => {
     ledger.append({ kind: "card", venue: "*", intentId: "ap-1", outcome: "approved", reason: "Buy 10 NVDA · limit 183.00 · Paper · Alpaca" });
     await until(() => bot.sent.length >= 1);
     await pause(200);
-    expect(bot.sent).toEqual([{ chat_id: OPERATOR.id, text: "Your call · Buy 10 NVDA · limit 183.00 · Paper · Alpaca — waiting in Gravit" }]);
+    expect(bot.sent).toEqual([{ chat_id: OPERATOR.id, text: "Your call · Buy 10 NVDA · limit 183.00 · Paper · Alpaca — waiting in gravit" }]);
     // never throws, whatever it is handed
     expect(() => svc.identity!.onLedgerRow(null as unknown as LedgerRow)).not.toThrow();
     expect(() => svc.identity!.onFill(undefined as never)).not.toThrow();
@@ -415,13 +415,13 @@ describe("the account's own notices", () => {
   });
 
   it("a Guard card raised is a notice with no button and no link", () => {
-    expect(cardNotice({ kind: "card", outcome: "pending", reason: "Buy 10 NVDA · limit 183.00 · Paper · Alpaca" } as LedgerRow)).toBe("Your call · Buy 10 NVDA · limit 183.00 · Paper · Alpaca — waiting in Gravit");
+    expect(cardNotice({ kind: "card", outcome: "pending", reason: "Buy 10 NVDA · limit 183.00 · Paper · Alpaca" } as LedgerRow)).toBe("Your call · Buy 10 NVDA · limit 183.00 · Paper · Alpaca — waiting in gravit");
     expect(cardNotice({ kind: "card", outcome: "approved", reason: "x" } as LedgerRow)).toBeUndefined();
     expect(cardNotice({ kind: "order", outcome: "pending", reason: "x" } as LedgerRow)).toBeUndefined();
     expect(cardNotice({ kind: "card", outcome: "pending" } as LedgerRow)).toBeUndefined();
     const linked = cardNotice({ kind: "card", outcome: "pending", reason: "Pay 5 USDC to https://x.example/pay?id=1 · see http://127.0.0.1:3090/#/cards" } as LedgerRow)!;
     expect(linked).not.toMatch(/https?:\/\//);
-    expect(linked).toBe("Your call · Pay 5 USDC to <link> · see <link> — waiting in Gravit");
+    expect(linked).toBe("Your call · Pay 5 USDC to <link> · see <link> — waiting in gravit");
   });
 
   /* Fix rounds 1-3: the text is defanged rather than searched for hosts - every scheme link, scheme-relative link
@@ -460,7 +460,7 @@ describe("the account's own notices", () => {
   "@gravit /status #nvda $NVDA"]) {
       expect(noLinks(text)).toBe(text);
     }
-    expect(cardNotice({ kind: "card", outcome: "pending", reason: "Pay 5 USDC to evil.museum/approve" } as LedgerRow)).toBe("Your call · Pay 5 USDC to evil·museum/approve — waiting in Gravit");
+    expect(cardNotice({ kind: "card", outcome: "pending", reason: "Pay 5 USDC to evil.museum/approve" } as LedgerRow)).toBe("Your call · Pay 5 USDC to evil·museum/approve — waiting in gravit");
     expect(fillNotice({ side: "buy", qty: 1, symbol: "BTC/USDT", price: "183.00", venueName: "evil.com" })).toBe("Filled · Buy 1 BTC/USDT at 183.00 · evil·com");
     expect(fillNotice({ side: "buy", qty: 10, symbol: "NVDA", price: "183.00", venueName: "Alpaca", paper: true })).toBe("Filled · Buy 10 NVDA at 183.00 · Paper · Alpaca");
   });

@@ -1,4 +1,4 @@
-/** The market row: the project-owned MCP row that gives Gravit the market's
+/** The market row: the project-owned MCP row that gives gravit the market's
  * own reads - the market service in the repo's `market/` (127.0.0.1:4821),
  * through its MCP server `market/src/mcp.ts` (`npm run market:mcp`, stdio).
  *

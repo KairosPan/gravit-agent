@@ -14,7 +14,7 @@
  * cycle can read it before it is set (tests/bots.test.ts refuses it as a bot id). */
 export const DESK_PRESET = "gravit-desk";
 
-/** The conversation's preset id (src/router-preset.ts): Gravit's one router conversation, which answers or starts
+/** The conversation's preset id (src/router-preset.ts): gravit's one router conversation, which answers or starts
  * a task and runs no shell. Here beside {@link DESK_PRESET} because the desk guard (src/desk-tools.ts
  * `installDeskGuard`) judges both presets' agents, and that module loads this leaf alone. */
 export const CONVERSATION_PRESET = "gravit-router";

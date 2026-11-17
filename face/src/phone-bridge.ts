@@ -8,7 +8,7 @@
  * recipient: it long-polls the account's inbox (src/phone.ts `inbox`) - only the operator's own texts are ever in it -
  * and sends through the account's send route (src/phone.ts `send`), naming each send's kind.
  *
- * WHERE A TEXT GOES (one-entry plan 3). To Gravit's one conversation once src/desk.ts binds it (`router`): its post,
+ * WHERE A TEXT GOES (one-entry plan 3). To gravit's one conversation once src/desk.ts binds it (`router`): its post,
  * its `/stop`, its `/status` lines (`conversation <id>`, `tasks: <n> running, <m> waiting for you`), and `/new` answered
  * that there is one conversation. Unbound - `FACE_ROUTER=0`, or a conversation that could not be installed - to the
  * desk conversation, as below. The desk conversation stays the outlet either way.
@@ -20,7 +20,7 @@
  * `contextFor`, asked the reply's `<network>:<id>`). A post the conversation refuses is answered with its line, and an
  * opened turn's answer comes back through the outlet - the bridge is the conversation's outlet from install to dispose.
  * Five commands are the bridge's own: /status, /pause [duration], /mute <duration>, /new and /stop, in any case, with or
- * without the bot's name after them; any other /word is text for Gravit. There is no /resume and no /unmute: the phone
+ * without the bot's name after them; any other /word is text for gravit. There is no /resume and no /unmute: the phone
  * only ever makes the desk quieter (§5.8, D19). A post or a /new that takes more than 30 s is answered that the desk is
  * slow; a refusal that comes later is still answered when it does. Every line the bridge says is a `chat` reply to the
  * network the text came from.
@@ -85,8 +85,8 @@ export const CURSOR_FILE = "inbox.cursor";
 const RESUMES = "a terminal resumes it: npm run desk -- resume";
 const PAUSE_USAGE = "/pause takes Nm, Nh or Nd - 30m, 2h, 1d - or nothing; nothing was paused";
 const RENEWED = "a new desk conversation";
-/** `/new`'s answer once the phone reaches Gravit's one conversation: there is no other to open. */
-export const ONE_CONVERSATION = "there is one conversation: Gravit's; /new opens no other. /stop cuts its turn under way";
+/** `/new`'s answer once the phone reaches gravit's one conversation: there is no other to open. */
+export const ONE_CONVERSATION = "there is one conversation: gravit's; /new opens no other. /stop cuts its turn under way";
 const SLOW = "the desk is slow to take this; it will answer when it can";
 /** What `/stop` cancels the turn under way with. */
 const STOP_REASON = "stopped from the phone";
@@ -119,7 +119,7 @@ const COMMAND = /^\/(status|pause|mute|new|stop)(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]
 /**
  * `text` as one of the bridge's own commands - `/status`, `/pause [duration]`, `/mute <duration>`, `/new`,
  * `/stop`, in any case (`/Status`, `/PAUSE@botname 2h`) - with what follows it as `arg`, trimmed, when
- * anything does; anything else, any other `/word` included, is `undefined`: text for Gravit. The argument is left as typed: a
+ * anything does; anything else, any other `/word` included, is `undefined`: text for gravit. The argument is left as typed: a
  * duration stays exact (src/desk.ts `parseDuration`).
  * @param text - the message's text.
  */
@@ -131,7 +131,7 @@ export function parseCommand(text: string): Command | undefined {
   return arg === undefined || arg === "" ? { cmd } : { cmd, arg };
 }
 
-/** Gravit's one conversation as the phone reaches it (src/conversation.ts, src/tasks.ts `phoneConversation`):
+/** gravit's one conversation as the phone reaches it (src/conversation.ts, src/tasks.ts `phoneConversation`):
  * `post`, a text's post (pause, fence, key); `stop`, its turn under way cut, the queue behind it kept - whether one was;
  * `carry`, what a graceful stop carried answered (src/desk.ts calls it once the outlet is set; the bridge does not);
  * `status`, its session and how many of its tasks run and wait for the operator; `note`, what the desk sent the phone
@@ -148,7 +148,7 @@ export interface PhoneConversation {
  * cursor; the desk conversation, as the bridge uses it; `status`, what `/status` reads (src/desk.ts `deskStatus`);
  * `log`, where a line goes (stderr); `clock`, the timers (the global ones); `contextFor`, what a reply to one of the desk's
  * messages carries to the conversation - the watch's alert and its annotation (src/watch.ts `contextFor`), `undefined`
- * for a message it does not know or while there is no watch; `router`, Gravit's one conversation when it is bound
+ * for a message it does not know or while there is no watch; `router`, gravit's one conversation when it is bound
  * (read at each message): then a text is posted to it, not to the desk conversation, and `/new`, `/status` and `/stop`
  * are its (one-entry plan 3) - `undefined`, or no `router`, and the desk conversation answers as before
  * (`FACE_ROUTER=0`). The desk conversation stays the outlet either way. */

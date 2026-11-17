@@ -1,7 +1,7 @@
 // face/tests/readthrough-smoke.test.ts
 /** The read-through on a real boot: the running registry lists `read_through` and both rows are listed active; a
  * `gravit-desk` session sees it, a bot's session and the source reader's do not, and the conversation's allow list
- * does not name it; through the real registry a Gravit root session's call is priced, rendered with its event and
+ * does not name it; through the real registry a gravit root session's call is priced, rendered with its event and
  * recorded as a task's; a desk session with no run open is refused `ALERT_ONLY`, and inside a run opened through
  * `readThroughLane` its call is accepted with no event line, closed with the run, counted as given once the lane marks
  * it sent, and refused `ALREADY_GIVEN` in a later run of the same event; a rival outside the fence is refused by name; and the fake quote
@@ -156,7 +156,7 @@ test("read-through smoke: who sees read_through, the lane, the fence and the rec
       return realFetch(input, init);
     }) as typeof fetch;
 
-    // 3. a Gravit root session's call: priced, its event in the block, recorded as a task's
+    // 3. a gravit root session's call: priced, its event in the block, recorded as a task's
     const task = answerOf(await run(ARGS, gravit));
     assert.equal(task.ok, true);
     assert.match(task.id, ID_RE);

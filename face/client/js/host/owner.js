@@ -41,7 +41,7 @@ export function postVia(fetch) {
   };
 }
 
-export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit face' }) { // en-kept: the device's label at the Account, the product's name
+export function startOwner({ store, post, subtle, keys, flag, label = 'gravit face' }) { // en-kept: the device's label at the Account, the product's name
   let closed = false;
   let flight = null;        // the pairing in the air: a plain ready() joins it, one with a code (or a sign-in) runs after it
   let asked = false;        // a page that never paired has asked the door, and that ask is still standing

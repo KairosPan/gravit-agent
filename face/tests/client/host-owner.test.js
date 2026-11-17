@@ -26,7 +26,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 // the stand-in's page, its signers as each test names them
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 const pageWith = (owners, pendingDevices = []) => ({ ...fx('account'), signers: { owners, threshold: 1, pendingDevices } });
-const ownerRow = kid => ({ id: `device:${kid}`, kind: 'device', label: 'Gravit face' });
+const ownerRow = kid => ({ id: `device:${kid}`, kind: 'device', label: 'gravit face' });
 
 // ---- the fake door: the Account's own rules, written here independently of the client's modules ----
 const DOMAIN = { name: 'AgentAccountSignTransaction', version: '1', chainId: 424242 };
@@ -152,7 +152,7 @@ test('a fresh page pairs with the code and signs', async () => {
   assert.deepEqual(Object.keys(first.body.jwk).sort(), ['crv', 'kty', 'x', 'y'], 'only the public half');
   assert.equal(first.body.jwk.kty, 'EC');
   assert.equal(first.body.jwk.crv, 'P-256');
-  assert.equal(first.body.label, 'Gravit face');
+  assert.equal(first.body.label, 'gravit face');
   const kid = kidOfJwk(first.body.jwk);
   assert.deepEqual(r.o(), { role: 'needs-code', kid, refusal: null, busy: false });
 

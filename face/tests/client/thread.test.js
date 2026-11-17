@@ -14,7 +14,7 @@ const conv = (over = {}) => ({ id: 's1', title: 'T', kind: 'gravit', members: ['
 const msg = (over = {}) => ({ id: 'e1', seq: 1, at: NOW, from: 'gravit', kind: 'text', text: 'hello', data: {}, ...over });
 const gate = (kind, over = {}) => msg({ id: 'ev-1', seq: 1.5, kind, from: 'gravit', text: 'Your call: buy $10 of BTC/USD · market · paper-1', data: { eventId: 'ev-1', sessionId: 's1', toolName: 'mcp__account__portfolio_live_order', callId: 'c9', venue: 'paper-1', line: 'Account seat - mcp__account__portfolio_live_order: side=buy usd=10 symbol=BTC/USD venue=paper-1' }, ...over });
 
-test("the operator's words are a blue bubble on the right, Gravit's a grey one on the left, a system line is centred", () => {
+test("the operator's words are a blue bubble on the right, gravit's a grey one on the left, a system line is centred", () => {
   const you = renderMessage(msg({ from: 'you', text: 'hi there' }), conv(), state);
   assert.match(you, /class="msg you"/); assert.match(you, /bubble you/); assert.match(you, /hi there/);
   const g = renderMessage(msg(), conv(), state);
@@ -50,7 +50,7 @@ test("a bot's words in a group carry the sender's name from the message", () => 
   assert.match(html, /bubble grey/);
 });
 
-test("Gravit's text renders through the markdown hook when one is set, escaped otherwise; an interrupted answer is cut-marked", () => {
+test("gravit's text renders through the markdown hook when one is set, escaped otherwise; an interrupted answer is cut-marked", () => {
   setMarkdown(null);
   const plain = renderMessage(msg({ text: 'a <b>bold</b> claim', data: { markdown: true } }), conv(), state);
   assert.match(plain, /a &lt;b&gt;bold&lt;\/b&gt; claim/);
@@ -58,7 +58,7 @@ test("Gravit's text renders through the markdown hook when one is set, escaped o
   const rich = renderMessage(msg({ text: 'hello', data: { markdown: true } }), conv(), state);
   assert.match(rich, /<p>HELLO<\/p>/);
   const you = renderMessage(msg({ from: 'you', text: 'hello' }), conv(), state);
-  assert.doesNotMatch(you, /HELLO/, 'only Gravit speaks markdown');
+  assert.doesNotMatch(you, /HELLO/, 'only gravit speaks markdown');
   setMarkdown(null);
   const cut = renderMessage(msg({ text: 'The first pivot looks like', data: { markdown: true, interrupted: true } }), conv(), state);
   assert.match(cut, /class="cut">Interrupted</);
@@ -185,7 +185,7 @@ test('helpers: chip, key, ticker, withTickers', () => {
   assert.match(withTickers('a & b'), /a &amp; b/);
 });
 
-test("a member's answer offers Trace; Gravit's and the operator's do not", () => {
+test("a member's answer offers Trace; gravit's and the operator's do not", () => {
   const room = conv({ id: 'room', kind: 'group', members: ['gravit', 'buffett'] });
   const answer = msg({ id: 'e9', from: 'buffett', text: 'Hold', data: { name: 'Buffett', markdown: true, memberSessionId: 'm1', memberTurn: 3 } });
   const h = renderMessage(answer, room, state);
@@ -215,7 +215,7 @@ test('a loaded trace draws its context lines and words, no tool call; loading an
   assert.doesNotMatch(other, /Checked the book/);
 });
 
-// plan 2 of the Lunhui run view, task 4: Gravit's composed answer, its working notes folded above it
+// plan 2 of the Lunhui run view, task 4: gravit's composed answer, its working notes folded above it
 const RUN = '20261027T201627Z-6937d208';
 const KEY = `cn-market/${RUN}/environment,sentiment`;
 const composed = (over = {}) => msg({ id: 'p7', seq: 7, kind: 'composed', text: '弱势日，<b>跌多</b>涨少。', data: { callId: '7', strategy: 'cn-market', run: RUN, summary: '弱势日，<b>跌多</b>涨少。', blocks: [{ kind: 'breadth', title: '涨跌<i>分布</i>' }, { kind: 'ladder' }, { kind: 'sources' }], choices: [], modules: ['environment', 'sentiment'] }, ...over });
@@ -229,7 +229,7 @@ const turn = () => [
 ];
 const withView = entry => ({ ...state, lunhui: { views: entry ? { [KEY]: entry } : {}, ui: {} } });
 
-test("the turn's Gravit words before a composed answer fold into one Working notes disclosure above it", async () => {
+test("the turn's gravit words before a composed answer fold into one Working notes disclosure above it", async () => {
   const { foldNotes } = await import('../../client/js/render/lunhui/notes.js');
   assert.deepEqual([...foldNotes(turn())], [['p7', ['e2', 'e4', 'e5']]]);
   setMarkdown(null);
@@ -404,7 +404,7 @@ test('two keys in one message are secrets 0 and 1; a revealed one draws Hide sec
   assert.equal((renderThread(conv({ messages: [m] }), state, NOW).match(/secret-mask/g) ?? []).length, 2);
 });
 
-test("a key in Gravit's bubble, a bot's, a context row and a composed answer is not masked", () => {
+test("a key in gravit's bubble, a bot's, a context row and a composed answer is not masked", () => {
   const text = `the key ${SK}`;
   const plain = [
     renderMessage(msg({ text }), conv(), state),
@@ -555,11 +555,11 @@ test('a task line links its task and folds its body', () => {
   assert.match(renderMessage(taskMsg({ form: 'report', task: 't3', status: 'odd', title: null, body: '' }), conv(), state), />Task · Task · odd</);
   // no task id: the line alone, no link
   assert.match(renderMessage(taskMsg({ form: 'report', status: 'failed', title: 'X', body: 'b' }), conv(), state), /<summary>Task · X · Failed<\/summary>/);
-  // a worker's own lines: the brief and the steer are Gravit's bubbles under their labels, a recovery and a stop centred lines
+  // a worker's own lines: the brief and the steer are gravit's bubbles under their labels, a recovery and a stop centred lines
   const brief = renderMessage(taskMsg({ form: 'brief' }, 'Scan filings\n\nRead the 10-Q'), conv(), state);
   assert.match(brief, /^<div class="msg left"><div class="sender-name">Task instructions<\/div><div class="msg-row"><span[^>]*class="av[^"]*"[\s\S]*<div class="bubble grey">/);
   assert.match(brief, /Read the 10-Q/);
-  assert.match(renderMessage(taskMsg({ form: 'steer' }, 'Carry on'), conv(), state), /<div class="sender-name">Gravit relays<\/div>[\s\S]*Carry on/);
+  assert.match(renderMessage(taskMsg({ form: 'steer' }, 'Carry on'), conv(), state), /<div class="sender-name">gravit relays<\/div>[\s\S]*Carry on/);
   assert.match(renderMessage(taskMsg({ form: 'recovery' }, 'The face restarted while you worked.'), conv(), state), /^<div class="sysline">[^<]+<\/div>$/);
   assert.equal(renderMessage(taskMsg({ form: 'stopped' }, 'Stopped by the conversation.'), conv(), state), '<div class="sysline">Stopped</div>');
   withTable({ 'thread.task.line': '{status} — {title}' }, () => {

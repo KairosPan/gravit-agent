@@ -1,4 +1,4 @@
-// face/client/js/render/markdown.js — Gravit's markdown renderer, set once: the app hands in the DOM-built renderer
+// face/client/js/render/markdown.js — gravit's markdown renderer, set once: the app hands in the DOM-built renderer
 // (wire/markdown.js) at boot, tests a stub, and with none set the text is escaped. The thread and a composed answer's
 // summary both draw through it (its own module, so render/thread.js and render/lunhui/composed.js need not import each other).
 import { esc } from '../html.js';

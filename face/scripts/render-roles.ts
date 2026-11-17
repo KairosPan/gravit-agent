@@ -1,4 +1,4 @@
-/** Regenerates `bots/gravit/agent.cordis.yml`, the mirror of Gravit's composition, from
+/** Regenerates `bots/gravit/agent.cordis.yml`, the mirror of gravit's composition, from
  * `roles/`, `dsh/profile/cycle.md` and the run protocols (`dsh/profile/lunhui-run.md` and `lunhui-module.md`): the one way that file is written (a hand edit fails
  * tests/roles.test.ts).
  *

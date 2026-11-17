@@ -1,8 +1,8 @@
-/** Markdown for Gravit bubbles, DOM-built.
+/** Markdown for gravit bubbles, DOM-built.
  *
- * Gravit answers in markdown — headings, bold tickers, GFM tables — and a
+ * gravit answers in markdown — headings, bold tickers, GFM tables — and a
  * plain-text bubble shows the asterisks and pipes literally. This renders the
- * subset Gravit actually writes, with the same discipline as the rest of the
+ * subset gravit actually writes, with the same discipline as the rest of the
  * client: every string lands via `textContent`, no `innerHTML` path at all, so
  * nothing in the text can smuggle markup. Anything outside the subset falls
  * through as literal text inside a paragraph — degraded, never dropped.

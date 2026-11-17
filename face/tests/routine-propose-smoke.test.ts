@@ -1,7 +1,7 @@
 // face/tests/routine-propose-smoke.test.ts
 /** A routine from a message to its first run on a REAL composed tree (docs/superpowers/plans/2026-11-14-desk-page-3-
  * routines-from-messages.md, Task 4): the desk as main.ts installs it - `installDesk` with its clock rows, before the
- * conversation -, then Gravit's one conversation and its tasks (src/tasks.ts `installRouter` over src/conversation.ts
+ * conversation -, then gravit's one conversation and its tasks (src/tasks.ts `installRouter` over src/conversation.ts
  * `installConversation` and `installTasks`, given `home`, so the conversation carries src/routine-tools.ts's two tools),
  * the desk bound to it. One boot, on Monday 2026-11-16 by the injected clock:
  * 1. an operator prompt over the browser's Remote wire has the stub call `routine_propose` - a daily 09:30 ET schedule, so
@@ -283,7 +283,7 @@ async function post<T>(f: Face, path: string, body: object): Promise<{ status: n
   return { status: res.status, json: (await res.json()) as T };
 }
 
-test("a browser message has Gravit propose a routine; the card's confirm adds it; the injected clock reaches its slot and it runs once, Succeeded, the proposal confirmed", { skip, timeout: 240_000 }, async () => {
+test("a browser message has gravit propose a routine; the card's confirm adds it; the injected clock reaches its slot and it runs once, Succeeded, the proposal confirmed", { skip, timeout: 240_000 }, async () => {
   home = await mkdtemp(join(tmpdir(), "face-routine-propose-home-"));
   made.push(home);
   const rawRoot = await mkdtemp(join(tmpdir(), "face-routine-propose-root-"));

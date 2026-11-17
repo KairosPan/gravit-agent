@@ -302,7 +302,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   assert.equal(btc.s.route.id, 'coin:BTC', 'the route keeps the Account key whole');
   assert.match(html, /^<main class="main mkts mk-page"><a id="page-back" class="back-link page-back" href="#\/markets">‹ Markets<\/a>/);
   assert.match(html, /<div class="mk-who"><span class="mk-av mk-av-lg" aria-hidden="true">BTC<\/span><div><h1 class="head-title">BTC<\/h1><span class="mk-sub">Crypto · BTC\/USDT<\/span><\/div><\/div>/);
-  assert.match(html, /<button type="button" class="btn" data-action="handToGravit" data-id="coin:BTC">[\s\S]*?Hand to Gravit<\/button>/);
+  assert.match(html, /<button type="button" class="btn" data-action="handToGravit" data-id="coin:BTC">[\s\S]*?Hand to gravit<\/button>/);
   assert.match(html, /<button type="button" class="btn mk-on" data-action="toggleWatch" data-id="coin:BTC" aria-pressed="true">[\s\S]*?Watching<\/button>/);
   // no Buy, no Sell, no Trade: this page does not sign for the Account
   for (const word of [/>Buy</, />Sell</, />Trade</, /data-action="(buy|sell|trade)/i]) assert.doesNotMatch(html, word, String(word));
@@ -343,8 +343,8 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
     `·${stamp('2026-10-22T07:35:46.806Z')} · Buy 0.001 BTC · BTC / USDT · limit 59,352.9 · $0.00canceled · You`,
     `·${stamp('2026-10-22T07:35:46.798Z')} · Sell 0.002 BTC · BTC / USDT · limit 63,226.6 · $0.00open · You`,
   ]);
-  // Gravit on it: the conversations that name its base as a word
-  const gravit = section(html, 'Gravit on it');
+  // gravit on it: the conversations that name its base as a word
+  const gravit = section(html, 'gravit on it');
   assert.match(gravit, /<a class="mk-line" href="#\/messages\/s1">[\s\S]*?Is BTC breaking out\?/);
   assert.doesNotMatch(gravit, /s2|cbBTC/);
   // before the Account's reads answer, nothing is claimed of what is held, working or stated: each part says Loading…
@@ -372,7 +372,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
     paper: { row: { key: 'equity:NVDA', asset: 'NVDA', class: 'equity', amount: 3, usd: 547.2 }, positions: [], cost: [{ key: 'equity:NVDA', words: 'cost known for 3 of 3 NVDA' }] } } });
   assert.deepEqual(linesOf(section(papered.html, 'You here')).map(text), ['·3 NVDA · $547.20 Papercost known for 3 of 3 NVDA']);
   assert.match(section(nvda.html, 'On the statement'), /<p class="mk-empty">Nothing on the statement about it yet\.<\/p>/);
-  assert.equal(section(nvda.html, 'Gravit on it'), '');
+  assert.equal(section(nvda.html, 'gravit on it'), '');
   // a range chosen and still reading: Loading…, that range pressed; one answered with no closes: No history
   const reading = R.candlesLoading(R.setRange(nvda.s, { id: 'stock:NVDA', range: '5D' }), { id: 'stock:NVDA', range: '5D' });
   const loading = section(renderMarketsScreen(reading, NOW), 'Price history');
@@ -405,7 +405,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   assert.match(cn, /<dt>Volume<\/dt><dd>200万股<\/dd>/);
   assert.match(cn, /class="btn mk-on" data-action="toggleWatch" data-id="cn:600519" aria-pressed="true">/);
   assert.match(cn, /data-action="handToGravit" data-id="cn:600519"/);
-  assert.match(section(cn, 'Gravit on it'), /600519 into the close/);
+  assert.match(section(cn, 'gravit on it'), /600519 into the close/);
   assert.doesNotMatch(cn, /Across venues|You hold|You here|Order book|Latest trades|Funding|On the statement/);
   // a key no read lists, and an old face id, are no page: the table
   assert.match(page('coin:GONE').html, /^<main class="main mkts">/);
@@ -417,7 +417,7 @@ test('on a page that signs, a market\'s page carries Buy, and Sell where the mar
   const page = (id, over = {}) => screen({ route: { screen: 'markets', id }, account: true, role: 'signs', ...over }).html;
   const buy = id => `<button type="button" class="btn" data-action="openTicket" data-id="${id}" data-side="buy">Buy</button>`;
   const sell = id => `<button type="button" class="btn" data-action="openTicket" data-id="${id}" data-side="sell">Sell</button>`;
-  // BTC is held: Buy and Sell before Hand to Gravit and Watch
+  // BTC is held: Buy and Sell before Hand to gravit and Watch
   const btc = keys(page('coin:BTC'));
   assert.ok(btc.startsWith(`<div class="mk-d-acts">${buy('coin:BTC')}${sell('coin:BTC')}<button type="button" class="btn" data-action="handToGravit"`), btc);
   // DOGE is not held: Buy alone
@@ -624,13 +624,13 @@ test("a failed history read says so under the range seg — the Account's senten
   assert.doesNotMatch(again, /Loading…/);
 });
 
-test("an event's page finds the conversations that name it by its name, as Hand to Gravit names it", () => {
+test("an event's page finds the conversations that name it by its name, as Hand to gravit names it", () => {
   const fed = 'Will the Fed cut rates at its December meeting?';
   const html = screen({
     route: { screen: 'markets', id: 'event:predict:SI-FEDCUT-DEC' }, predictions: fx('explore-predictions'), tab: 'predictions',
     conversations: [conv('s1', { title: `${fed} The odds into the meeting` }), conv('s2', { title: 'SI-FEDCUT-DEC sizing' })],
   }).html;
-  const gravit = section(html, 'Gravit on it');
+  const gravit = section(html, 'gravit on it');
   assert.match(gravit, /<a class="mk-line" href="#\/messages\/s1">/);
   assert.doesNotMatch(gravit, /s2/);
 });

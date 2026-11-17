@@ -1,7 +1,7 @@
 /** THE ACCOUNT'S OWN NOTICES — what the account itself tells the operator's phone, with no desk turn: a fill (kind `fill`, as each one is
  * told to the pages: service.ts paperSaid and toldFill), a Guard card raised (kind `card`, as the ledger takes its row), a browser let in
  * by a code (kind `device`, as the ledger takes its row) and a network's last line before it is disconnected (sent through that network
- * alone, identity.ts disconnect). Plain text, one line, no button and no link: a card is answered in Gravit (Account › Cards), never from the
+ * alone, identity.ts disconnect). Plain text, one line, no button and no link: a card is answered in gravit (Account › Cards), never from the
  * phone, and nothing sent links to the face. */
 import { NETWORK_NAME, type Network } from "./kinds.ts";
 import type { LedgerRow } from "../../agent/ledger.ts";
@@ -53,12 +53,12 @@ export function fillNotice(f: FillFields): string {
   return noLinks(oneLine(["Filled", what, ...(f.paper ? ["Paper"] : []), f.venueName].join(" · ")));
 }
 
-/** `Your call · <the card's own line> — waiting in Gravit` for a card raised (a `card` row, `pending`); undefined for every other row */
+/** `Your call · <the card's own line> — waiting in gravit` for a card raised (a `card` row, `pending`); undefined for every other row */
 export function cardNotice(row: LedgerRow): string | undefined {
   if (!row || row.kind !== "card" || row.outcome !== "pending") return undefined;
   const reason = typeof row.reason === "string" ? oneLine(noLinks(row.reason)) : "";
   if (reason === "") return undefined;
-  return `Your call · ${reason} — waiting in Gravit`;
+  return `Your call · ${reason} — waiting in gravit`;
 }
 
 /** `A browser was let in to sign for the account with a code (<label> · <kid8>). …` for a device admitted by the code its terminal printed
@@ -76,10 +76,10 @@ export function deviceNotice(row: LedgerRow): string | undefined {
 
 const NEW_YORK_CLOCK = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
-/** `Gravit's <Network> was disconnected from the account at <h:mm> ET. …` — the last line a network is sent before its token goes, its time
+/** `gravit's <Network> was disconnected from the account at <h:mm> ET. …` — the last line a network is sent before its token goes, its time
  * on New York's clock */
 export function disconnectNotice(network: Network, at: number): string {
   const p = Object.fromEntries(NEW_YORK_CLOCK.formatToParts(new Date(at)).map((x) => [x.type, x.value]));
   const clock = `${Number(p.hour) % 24}:${p.minute}`;
-  return `Gravit's ${NETWORK_NAME[network]} was disconnected from the account at ${clock} ET. Not you? Connect it again under Account › Identity.`;
+  return `gravit's ${NETWORK_NAME[network]} was disconnected from the account at ${clock} ET. Not you? Connect it again under Account › Identity.`;
 }

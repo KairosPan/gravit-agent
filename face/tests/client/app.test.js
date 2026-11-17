@@ -182,7 +182,7 @@ test('answersFrom reads only its own card: two pending cards asking the same que
   assert.deepEqual(answersFrom(b, [{ id: 'q1' }], 'ev-b'), { answers: [{ id: 'q1', selected: ['Short'] }] });
 });
 
-test("the markdown the app installs for Gravit's words is the rendered HTML, never the word undefined", () => {
+test("the markdown the app installs for gravit's words is the rendered HTML, never the word undefined", () => {
   const html = withMiniDocument(() => gravitMarkdown('**NVDA** leads; see [the filing](https://www.sec.gov/x)\n\n| sym | chg |\n|---|---|\n| NVDA | +3.1% |'));
   assert.doesNotMatch(String(html), /undefined/);
   assert.match(html, /^<div class="md">/);

@@ -1,9 +1,9 @@
 // face/client/js/render/lunhui/notes.js — a composed answer's working notes (plan 2 of the Lunhui run view, task 4): the
-// words Gravit wrote on its way to the answer, folded into one closed disclosure placed above it, so the answer reads first.
+// words gravit wrote on its way to the answer, folded into one closed disclosure placed above it, so the answer reads first.
 import { esc } from '../../html.js';
 import { th } from '../../i18n/words.js';
 
-// composed id → the ids of the Gravit text messages it folds: those after the latest operator message (or an earlier
+// composed id → the ids of the gravit text messages it folds: those after the latest operator message (or an earlier
 // composed answer) before it, up to it. Tool rows, system lines and anything else stay where they are.
 export function foldNotes(messages) {
   const out = new Map();
