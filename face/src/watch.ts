@@ -1085,35 +1085,40 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   /** Ask the owner's lessons on a price alert the phone got (`deps.lessons`), beside the send chain and never on it nor
    * among the flights dispose waits for, so no send, no post and no shutdown waits for the memory: its block goes on
    * the send chain as the alert's reply (with the alert's kind; with no reply when the outlet queued the alert), and
-   * the conversation is told only once that send was not
-   * refused - a note with no block is told at once. One block a `key` an ET day (`lessons:<key>` among the dated
-   * memories), marked only by a block that was not refused or a note told. Nothing is sent or told once dispose has
-   * begun; a throw anywhere is one `watch lessons` line. */
+   * the conversation is told only once that send was not refused, or once a block of the same `phoneKey` went - a
+   * note with no block is told at once. One block a `phoneKey` an ET day (`lessons-phone:<phoneKey>` among the dated
+   * memories; `key` stands in for an answer that gives none), marked only by a block that was not refused; one note a
+   * `key` an ET day (`lessons:<key>`), marked when it is told. Nothing is sent or told once dispose has begun; a throw
+   * anywhere is one `watch lessons` line. */
   function askLessons(rec: AlertHit, result: DeliverResult): void {
     const lessons = deps.lessons;
     if (lessons === undefined) return;
-    const replyTo = "sent" in result ? result.sent[0] : undefined;
-    const kind = rec.urgent === true ? URGENT : ALERT;
     /* tracked by nothing: dispose never waits for an ask, whose answer it would drop anyway */
     void (async () => {
       try {
+        const replyTo = "sent" in result ? result.sent[0] : undefined;
+        const kind = rec.urgent === true ? URGENT : ALERT;
         const answer = await lessons(rec);
         if (stopped || answer === undefined) return;
-        const said = `lessons:${answer.key}`;
-        if (saidOn.has(said)) return;
+        const noteSaid = `lessons:${answer.key}`;
+        const phoneSaid = `lessons-phone:${answer.phoneKey ?? answer.key}`;
         const tell = (): void => {
-          saidOn.set(said, clock.now());
-          if (answer.note === undefined) return;
+          if (answer.note === undefined || saidOn.has(noteSaid)) return;
+          saidOn.set(noteSaid, clock.now());
           lessonsNotes.set(rec.id, { text: answer.note, at: clock.now() });
           noteLine({ kind: "alert", alert: rec.id, symbol: rec.symbol, lessons: true, text: answer.note });
         };
         const phone = answer.phone;
-        if (phone === undefined) {
-          if (answer.note !== undefined) tell();
+        if (phone === undefined || saidOn.has(phoneSaid)) {
+          tell();
           return;
         }
         onSendChain(async () => {
-          if (stopped || saidOn.has(said)) return;
+          if (stopped) return;
+          if (saidOn.has(phoneSaid)) {
+            tell();
+            return;
+          }
           let sent: DeliverResult;
           try {
             sent = await deps.deliver(phone, replyTo === undefined ? kind : { ...kind, replyTo });
@@ -1122,6 +1127,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
             return;
           }
           if ("undelivered" in sent || stopped) return;
+          saidOn.set(phoneSaid, clock.now());
           if ("sent" in sent && answer.note !== undefined) {
             for (const id of sent.sent) {
               const messageId = messageIdOf(id);

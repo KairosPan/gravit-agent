@@ -11,8 +11,8 @@
  * - The ask ({@link createAlertLessons}): the shape-checked symbol, its market and the facts computed here, nothing
  *   else; the memory is opened first, so a memory not connected reads nothing at the Market, and the open, the bars
  *   and the recall share one budget of {@link ALERT_ASK_MS}. A read that loses its race is left to finish and ignored.
- *   A fault is one log line; not connected, a home that was never made among it, is none. The ask never throws or
- *   rejects.
+ *   A fault, and a throw nothing else caught, is one log line; not connected, a home that was never made among it, is
+ *   none. The ask never throws or rejects.
  * - The block ({@link alertBlock}) and the note ({@link alertNote}): built by code under a fixed head, each lesson's
  *   words escaped (src/echo.ts) and cut to {@link ALERT_WORDS_MAX} characters, the block at most
  *   {@link ALERT_BLOCK_MAX}. A lesson's id and a need are shown only in the memory's own shapes.
@@ -153,8 +153,10 @@ export function alertNote(symbol: string, asked: Asked): string | undefined {
   return out.join("\n");
 }
 
-/** `phone`: the block; `note`: the conversation's text; `key`: the symbol, the hit's date and the lessons' and untold ids. */
-export interface AlertLessonsAnswer { phone?: string; note?: string; key: string }
+/** `phone`: the block; `phoneKey`, with the block: the symbol, the hit's date and the applying lessons' ids alone - what
+ * the phone is shown -, which the watch gates the block on; `note`: the conversation's text; `key`: the symbol, the
+ * hit's date and the lessons' and untold ids, which the watch gates the note on. */
+export interface AlertLessonsAnswer { phone?: string; phoneKey?: string; note?: string; key: string }
 
 /** The memory's door, the Market's bars read in-process, the log, and the clock and timer the ask runs on. */
 export interface AlertLessonsDeps {
@@ -245,13 +247,24 @@ export function createAlertLessons(deps: AlertLessonsDeps): (hit: AlertHit) => P
     if (note === undefined) return undefined;
     const phone = alertBlock(symbol, asked);
     const key = `${symbol}:${hit.date}:${idsOf(asked.lessons)}|${idsOf(asked.untold)}`;
-    return phone === undefined ? { note, key } : { phone, note, key };
+    return phone === undefined ? { note, key } : { phone, phoneKey: `${symbol}:${hit.date}:${idsOf(asked.lessons)}`, note, key };
+  };
+  /** One line for a throw nothing above caught: the symbol when it has its market's shape, else `a hit`. */
+  const unexpected = (hit: AlertHit, error: unknown): undefined => {
+    try {
+      const market = marketOfHit(hit);
+      const name = market !== undefined && shapedSymbol(hit, market) ? hit.symbol : "a hit";
+      say(`memory alert: ${name}: ${shown(memoryFaultWords(error), FAULT_MAX)}`);
+    } catch {
+      say(`memory alert: a hit: ${shown(memoryFaultWords(error), FAULT_MAX)}`);
+    }
+    return undefined;
   };
   return (hit) => {
     try {
-      return ask(hit).catch(() => undefined);
-    } catch {
-      return Promise.resolve(undefined);
+      return ask(hit).catch((error: unknown) => unexpected(hit, error));
+    } catch (error) {
+      return Promise.resolve(unexpected(hit, error));
     }
   };
 }

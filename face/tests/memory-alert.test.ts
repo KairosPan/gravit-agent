@@ -234,7 +234,9 @@ test("createAlertLessons: a held US hit that fell asks once as gravit-face with 
   });
   assert.deepEqual(s.asked, ["venue=cboe&symbol=NVDA&interval=1d&range=6M"]);
   const asked = askedOf({ lessons: [A] });
-  assert.deepEqual(answer, { phone: alertBlock("NVDA", asked), note: alertNote("NVDA", asked), key: "NVDA:2026-03-02:no-add-before-earnings|" });
+  assert.deepEqual(answer, {
+    phone: alertBlock("NVDA", asked), phoneKey: "NVDA:2026-03-02:no-add-before-earnings", note: alertNote("NVDA", asked), key: "NVDA:2026-03-02:no-add-before-earnings|",
+  });
   assert.equal(s.t.live(), 0, "no timer is left");
   assert.deepEqual(s.logs, []);
 });
@@ -257,6 +259,35 @@ test("createAlertLessons: the key sorts the lessons' and the untold ids; untold 
   });
   const two = depsOf({ answer: async () => answerOf({ applies: [{ ...CARD_A, id: "z-l" }, { ...CARD_A, id: "a-l" }] as RecallAnswer["applies"] }) });
   assert.equal((await createAlertLessons(two.deps)(hitOf()))!.key, "NVDA:2026-03-02:a-l,z-l|");
+});
+
+test("createAlertLessons: phoneKey is the symbol, the date and the applying lessons alone - the untold ids change only key", async () => {
+  const untold = [{ id: "b-need", needs: [{ what: "fact", fact: "industry" }] }] as unknown as RecallAnswer["untold"];
+  const bare = await createAlertLessons(depsOf().deps)(hitOf());
+  const withUntold = await createAlertLessons(depsOf({ answer: async () => answerOf({ applies: [CARD_A], untold }) }).deps)(hitOf());
+  assert.equal(bare!.phoneKey, "NVDA:2026-03-02:no-add-before-earnings");
+  assert.equal(withUntold!.phoneKey, bare!.phoneKey);
+  assert.equal(withUntold!.phone, bare!.phone, "the same block");
+  assert.notEqual(withUntold!.key, bare!.key);
+  const noBlock = await createAlertLessons(depsOf({ answer: async () => answerOf({ untold }) }).deps)(hitOf());
+  assert.equal(noBlock!.phoneKey, undefined, "no block, no phoneKey");
+});
+
+test("createAlertLessons: an unexpected throw inside the ask is one log line, the symbol or a hit, and undefined", async () => {
+  const s = depsOf();
+  const answer = await createAlertLessons({ ...s.deps, now: () => { throw new Error("the clock\nbroke"); } })(hitOf());
+  assert.equal(answer, undefined);
+  assert.deepEqual(s.logs, ["memory alert: NVDA: the clock broke"]);
+  const odd = depsOf();
+  const hit = hitOf();
+  Object.defineProperty(hit, "trigger", { get: () => { throw new Error("no trigger"); } });
+  assert.equal(await createAlertLessons(odd.deps)(hit), undefined);
+  assert.deepEqual(odd.logs, ["memory alert: NVDA: no trigger"]);
+  const unshaped = depsOf();
+  const bad = hitOf({ symbol: "NV\nDA" });
+  Object.defineProperty(bad, "trigger", { get: () => { throw new Error("no trigger"); } });
+  assert.equal(await createAlertLessons(unshaped.deps)(bad), undefined);
+  assert.deepEqual(unshaped.logs, ["memory alert: a hit: no trigger"]);
 });
 
 test("createAlertLessons: an A share is asked in CN, its bars read as changeFacts reads them while trading", async () => {

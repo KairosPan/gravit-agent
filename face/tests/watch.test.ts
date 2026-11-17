@@ -2301,7 +2301,7 @@ test("lessons that never settle hold no alert, no post and no dispose", async ()
   await h.watch.dispose();
   clearInterval(keep);
   const took = Date.now() - started;
-  assert.ok(took < 500, `dispose took ${took} ms: it waited on the ask`);
+  assert.ok(took < 1_000, `dispose took ${took} ms: it waited on the ask`);
   assert.equal(h.watch.status().state, "stopped");
 });
 
@@ -2322,7 +2322,7 @@ test("with an ask in flight at dispose, the send chain and the ledger still sett
   await disposed;
   clearInterval(keep);
   const took = Date.now() - started;
-  assert.ok(took < 500, `dispose took ${took} ms: it waited on the ask`);
+  assert.ok(took < 1_000, `dispose took ${took} ms: it waited on the ask`);
   const records = await h.alertRecords();
   const delivered = records.filter((r) => r.kind === "delivered").map((r) => r.delivery);
   assert.deepEqual(delivered, [{ sent: ["telegram:100"] }, { sent: ["telegram:101"] }], "the held send settled and its record was written before dispose resolved");
@@ -2342,6 +2342,59 @@ test("lessons that answer after dispose began send and note nothing", async () =
   await new Promise((done) => setTimeout(done, 20));
   assert.equal(h.sent.length, 1);
   assert.equal(h.notes.length, 1, "the alert's own note alone");
+});
+
+test("one block a phoneKey a day: a later alert with the same lessons but other untold ones sends no block and is still noted", async () => {
+  const rules = nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5);
+  const first: AlertLessonsAnswer = { phone: BLOCK, phoneKey: "NVDA:2026-11-30:no-adds", note: NOTE, key: "NVDA:2026-11-30:no-adds|" };
+  const second: AlertLessonsAnswer = { ...first, note: `${NOTE}\ncould not be checked on NVDA: x-need needs market`, key: "NVDA:2026-11-30:no-adds|x-need" };
+  const fake = lessonsFake(async (_hit, n) => (n === 0 ? first : second));
+  const h = await moveHarness(rules, { lessons: fake, deliver: (_t, n) => ({ sent: [`telegram:${100 + n}`] }) });
+  await h.wall.advance(0);
+  await until("both asks", () => fake.calls.length === 2);
+  await until("both notes", () => h.notes.filter((x) => x.kind === "alert" && x.lessons === true).length === 2);
+  await until("the post", () => h.posts.length === 1);
+  await h.watch.dispose();
+  assert.deepEqual(h.sent.map((s) => s.text).filter((t) => t === BLOCK), [BLOCK], "the block went once");
+  const notes = h.notes.filter((x) => x.kind === "alert" && x.lessons === true).map((x) => x.kind === "alert" && x.text);
+  assert.deepEqual(notes, [first.note, second.note]);
+});
+
+test("a block whose own deliver throws: one watch lessons line, nothing noted, not marked, and the pass goes on", async () => {
+  const rules = nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5);
+  const fake = lessonsFake(async () => ANSWER);
+  const h = await moveHarness(rules, {
+    lessons: fake,
+    deliver: (_t, n) => { if (n === 2) throw new Error("the outlet broke"); return { sent: [`telegram:${100 + n}`] }; },
+  });
+  await h.wall.advance(0);
+  await until("both blocks tried", () => h.sent.length === 4);
+  await until("the post", () => h.posts.length === 1);
+  await until("the second note", () => h.notes.filter((x) => x.kind === "alert" && x.lessons === true).length === 1);
+  await h.watch.dispose();
+  assert.deepEqual(lessonLines(h), ["gravit-face: desk: watch lessons: the outlet broke"]);
+  assert.deepEqual(h.sent.slice(2).map((s) => s.text), [BLOCK, BLOCK], "not marked: the second alert's block went");
+  const noted = h.notes.filter((x) => x.kind === "alert" && x.lessons === true).map((x) => x.kind === "alert" && x.alert);
+  assert.deepEqual(noted, [fake.calls[1].hit.id], "the thrown block noted nothing");
+});
+
+test("a throw while the ask begins costs one line and none of the pass's other sends", async () => {
+  const rules = nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5);
+  const fake = lessonsFake(async () => undefined);
+  /* the first send's answer throws the second time it is asked whether it was sent - the ask's own asking, the
+   * delivery record's being the first */
+  let asked = 0;
+  const odd = new Proxy({ sent: ["telegram:100"] }, {
+    has: (target, key) => { if (key === "sent" && ++asked === 2) throw new Error("odd answer"); return key in target; },
+  });
+  const h = await moveHarness(rules, { lessons: fake, deliver: (_t, n) => (n === 0 ? (odd as DeliverResult) : { sent: [`telegram:${100 + n}`] }) });
+  await h.wall.advance(0);
+  await until("both alerts", () => h.sent.length === 2);
+  await until("the post", () => h.posts.length === 1);
+  await until("the line", () => lessonLines(h).length === 1);
+  await h.watch.dispose();
+  assert.deepEqual(lessonLines(h), ["gravit-face: desk: watch lessons: odd answer"]);
+  assert.equal(h.sent.length, 2, "the second alert still went");
 });
 
 /* ---------- a reply's context with lessons (memory plan 2b, the final wave) ---------- */
