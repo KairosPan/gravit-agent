@@ -2,7 +2,10 @@
  * <subject> for <service>` — for a service beside the account to act on. It moves no money, changes no setting and is read by no limit:
  * the ledger's two rows of it, the door's "taken" row and the outcome row with the sentence, are all it leaves. Signed only (the unsigned
  * door refuses it), taken within ATTEST_TTL_MS of its signing, and its four fields bounded before the "taken" row is written, so no long
- * text enters the hash-chained ledger. What the service does with the account's yes is the service's own */
+ * text enters the hash-chained ledger. An attest is taken ONCE: the same envelope arriving again — in the same run, or after the account
+ * restarts (the rebuild marks it taken) — is refused as a used nonce is, never answered from the first answer's cache as the other owner
+ * types are, so a service that acts on the account's yes is never told yes twice for one signature. What the service does with the
+ * account's yes is the service's own */
 
 /** an attest is signed and sent at once: an envelope kept for later is refused */
 export const ATTEST_TTL_MS = 600_000;

@@ -733,10 +733,12 @@ export class AccountEngine {
     }
 
     // The same instruction again: the first answer, and nothing runs twice. An owner's instruction is ONE instruction whoever of the owners
-    // signed first (two signatures changing places are not a new one); an agent's is its own. Answers older than the nonce window are let go
+    // signed first (two signatures changing places are not a new one); an agent's is its own. Answers older than the nonce window are let go.
+    // An attest is the one exception (account/attest.ts): a service acts on its yes, so the same envelope again is refused below as a used
+    // nonce is, and never answered from this cache
     const key = isOwnerAction(action) ? `owner:${hash}` : `${signer}:${hash}`;
     for (const [k, kept] of this.results) if (now - kept.at > RESULTS_KEPT_MS) this.results.delete(k);
-    const seen = this.results.get(key);
+    const seen = action.type === "attest" ? undefined : this.results.get(key);
     if (seen) return seen.out;
     if (this.taken.has(key)) return this.refused(no("E_ACCOUNT_NONCE", { message: "an earlier run of this account already took this instruction: it is not taken twice", detail: { nonce: action.nonce, verdict: "used" } }), envelope, signer);
     if (signers.size < this.state.threshold && isOwnerAction(action)) return this.refused(no("E_ACCOUNT_THRESHOLD", { message: `this account needs ${this.state.threshold} signers; ${signers.size} signed`, detail: { threshold: this.state.threshold, signed: [...signers] } }), envelope, signer);

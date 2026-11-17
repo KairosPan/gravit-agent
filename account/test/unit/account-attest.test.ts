@@ -1,6 +1,6 @@
 /** ATTEST (account/attest.ts, account/sign.ts attest): the account vouching that a device of its owner signed a sentence. The door bounds
- * its four fields before its "taken" row, takes it only signed and only within ATTEST_TTL_MS, answers the same envelope with its first
- * answer, and changes nothing but its ledger; a restart replays it as nothing. Nothing leaves the process. */
+ * its four fields before its "taken" row, takes it only signed and only within ATTEST_TTL_MS, takes the same envelope once (a repeat is refused
+ * as a used nonce is, never answered from the first answer's cache), and changes nothing but its ledger; a restart replays it as nothing. Nothing leaves the process. */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -148,13 +148,37 @@ describe("attest: the owner's device signs a sentence, and the account keeps the
     expect(await x.svc.exchange(x.envelope(x.device, GOOD, START - ATTEST_TTL_MS + 1000))).toEqual({ ok: true, kind: "account", summary: SENTENCE });
   });
 
-  it("the same envelope a second time: the first answer again, and no new row", async () => {
+  it("the same envelope a second time: refused as a used nonce is, never the first answer again, and no taken or ok row added", async () => {
     const x = await paired();
     const env = x.envelope(x.device, GOOD);
-    const first = await x.svc.exchange(env);
+    expect(await x.svc.exchange(env)).toEqual({ ok: true, kind: "account", summary: SENTENCE });
     const count = x.rows().length;
+    const again = refusal(await x.svc.exchange(env));
+    expect([again.code, again.message]).toEqual(["E_ACCOUNT_NONCE", "this nonce was used before"]);
+    const added = x.rows().slice(count);
+    expect(added.filter((r) => r.kind === "action")).toHaveLength(0);
+    expect(added.every((r) => r.kind === "account-refusal")).toBe(true);
+    // a third time, the same
+    expect(refusal(await x.svc.exchange(env)).code).toBe("E_ACCOUNT_NONCE");
+  });
+
+  it("another owner type keeps its cached first answer for the same envelope", async () => {
+    const x = await paired();
+    const env = x.envelope(x.device, { type: "setWatch", venue: "frontline", symbol: "BTC", on: "on" });
+    const first = await x.svc.exchange(env);
     expect(await x.svc.exchange(env)).toEqual(first);
-    expect(x.rows()).toHaveLength(count);
+  });
+
+  it("the same envelope after a restart on the same home, inside its ten minutes: refused, and no taken or ok row added", async () => {
+    const home = fresh();
+    const one = await paired(home);
+    const env = one.envelope(one.device, GOOD);
+    expect(await one.svc.exchange(env)).toEqual({ ok: true, kind: "account", summary: SENTENCE });
+    const two = await run(home, 60_000);
+    const count = two.rows().length;
+    const again = refusal(await two.svc.exchange(env));
+    expect(again.code).toBe("E_ACCOUNT_NONCE");
+    expect(two.rows().slice(count).filter((r) => r.kind === "action")).toHaveLength(0);
   });
 
   it("prepare: what is signed, field for field, on the simulation's chain; a draft off its bounds is refused with its sentence", async () => {
