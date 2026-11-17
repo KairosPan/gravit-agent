@@ -517,7 +517,8 @@ function memoryPageStates() {
     ['memory-page-not-connected-no-install', loaded(on, 'lessons', noInstall)],
     // the owner's acts (memory owner acts plan Task 4): the three tabs while the page signs, each row's keys in place of its
     // commands; a page the Account answered does not sign, its line under the head; the act's drawer ready for an arm, with
-    // What you sign; waiting for the words of a retire; a void refused, its words kept; an edit done, with the file it wrote
+    // What you sign; waiting for the words of a retire; a void refused, its words kept and its command under them; an edit
+    // done, with the file it wrote; an arm whose prepare the Account did not answer; an accept whose card has a source
     ...memoryActStates(on, loaded),
   ];
 }
@@ -547,6 +548,13 @@ function memoryActStates(on, loaded) {
   const editDone = R.memoryActDone(R.memoryActSigning(R.memoryActPrepared(R.memoryActPreparing(R.memoryActShown(R.memoryActOpen(waitingOn, { act: 'edit', subject: proposal.id }),
     { show: { kind: 'proposal', proposal } })), { prepared: attest('edit', proposal.id) })),
   { done: { ok: true, act: 'edit', subject: proposal.id, lesson: 'chase-gap', path: '/srv/owner/memory/lessons/chase-gap.md' } });
+  // a prepare the Account did not answer: the face's sentence and, under it, the arm's own command from the lessons read
+  const armUnreachable = R.memoryActRefused(R.memoryActPreparing(R.memoryActShown(R.memoryActOpen(lessonsOn, { act: 'arm', subject: card.id }),
+    { show: { kind: 'card', lesson: card.id, state: 'unarmed', text: card.file.text } })), { message: said('memory.act.noAnswer') });
+  // an accept ready, the proposed card with its source
+  const sourced = { ...proposal, card: { ...proposal.card, source: ['d-20261103-0a1b2c3d', 'the owner\'s note of 2026-11-03'] } };
+  const acceptSource = R.memoryActPrepared(R.memoryActPreparing(R.memoryActShown(R.memoryActOpen(waitingOn, { act: 'accept', subject: proposal.id }),
+    { show: { kind: 'proposal', proposal: sourced } })), { prepared: attest('accept', proposal.id) });
   return [
     ['memory-page-lessons-signs', lessonsOn],
     ['memory-page-waiting-signs', waitingOn],
@@ -556,6 +564,8 @@ function memoryActStates(on, loaded) {
     ['memory-page-act-retire-words', retireWords],
     ['memory-page-act-void-refused', voidRefused],
     ['memory-page-act-edit-done', editDone],
+    ['memory-page-act-arm-unreachable', armUnreachable],
+    ['memory-page-act-accept-source', acceptSource],
   ];
 }
 

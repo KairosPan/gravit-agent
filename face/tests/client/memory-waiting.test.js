@@ -149,6 +149,11 @@ test('while the page signs, each proposal carries its keys, and the review comma
   // an id off the proposal's shape carries no key
   const odd = signingDraw(memoryWaiting({ proposals: [{ ...memoryWaitingProposals()[0], id: 'p-x' }] }));
   assert.doesNotMatch(odd, /memoryActOpen/);
+  assert.match(odd, /<code class="mp-command">npx --no gravit-memory review/, 'a proposal with no key keeps the review command');
+  // one proposal of several without a key: the command stays
+  const some = signingDraw(memoryWaiting({ proposals: [...memoryWaitingProposals(), { ...memoryWaitingProposals()[0], id: 'p-x' }] }));
+  assert.match(some, /data-act="accept"/);
+  assert.match(some, /<code class="mp-command">npx --no gravit-memory review/);
 });
 
 test('the Waiting tab under ZH', () => {

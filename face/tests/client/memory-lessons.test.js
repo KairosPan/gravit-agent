@@ -242,6 +242,16 @@ test('while the page signs, a card carries the keys its state allows in place of
   assert.doesNotMatch(html, /does not sign for the account/);
 });
 
+test('while the page signs, a card whose text the read says is cut has no key for the act that would show it: its command stays', () => {
+  const cut = copy => ({ ...copy, cut: true });
+  const st = signing(loaded(memoryLessons({ lessons: [unarmedLesson({ file: cut(unarmedLesson().file) }), armedLesson({ armed: cut(armedLesson().armed) })] })));
+  const [unarmed, armed] = [...renderMemoryScreen(st, NOW).matchAll(/<article class="mp-lesson">[\s\S]*?<\/article>/g)].map(m => m[0]);
+  assert.doesNotMatch(unarmed, /memoryActOpen/);
+  assert.match(unarmed, /<code class="mp-command">npx --no gravit-memory arm add-below-stop/);
+  assert.doesNotMatch(armed, /memoryActOpen/);
+  assert.match(armed, /<code class="mp-command">npx --no gravit-memory retire no-chasing/);
+});
+
 test('for any role but signs the keys are absent and the commands drawn; a role that is not unknown says the browser does not sign', () => {
   for (const role of ['unknown', 'pending', 'asked', 'needs-code', 'signed-out', 'none']) {
     const st = R.ownerStanding(loaded(memoryLessons({ lessons: [armedLesson(), changedLesson()] })), { role, kid: '' });

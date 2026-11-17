@@ -5,7 +5,7 @@
 // and value, each fact it defines with its definition -; then the decisions past their horizon with no review, as text, the
 // count of decisions with no wrong if, and the review command; Nothing waits for you when no proposal and no decision waits.
 // While this page signs for the Account, each proposal carries the keys of the owner's acts it allows (host/memory-acts.js),
-// and the review command stands only for the decisions past their horizon.
+// and the review command stands only for the decisions past their horizon and for a proposal drawn with no key.
 // Every text from the memory is made visible (visible.js) and then escaped; no id is a link and a class comes from the face's
 // own tables alone; no empty text is drawn in quotes.
 import { esc } from '../html.js';
@@ -58,7 +58,7 @@ export function proposalHtml(p, now, keys = '') {
 /** The Waiting tab's body for a connected waiting read: `read` its body, `page` the screen's slice, `now` the clock's time,
  *  against which a proposal's day carries its year when it is another; `signs`, whether this page signs for the Account: then
  *  each proposal carries the keys of the acts it allows (host/memory-acts.js), and the review command stands only for the
- *  decisions past their horizon, which have none. */
+ *  decisions past their horizon, which have none, and for a proposal whose id fits no key. */
 export function waitingHtml(read, page, now, signs = false) {
   const proposals = Array.isArray(read?.proposals) ? read.proposals.filter(p => p && typeof p === 'object') : [];
   const past = strings(read?.pastHorizon);
@@ -68,6 +68,8 @@ export function waitingHtml(read, page, now, signs = false) {
   const pastHtml = past.length
     ? `<div class="mp-past"><h2 class="mp-section-head">${esc(t('memory.waiting.pastHorizon'))}</h2><p class="mp-ids">${shown(past.join(t('common.list.sep')))}</p></div>`
     : '';
-  const command = !signs || past.length ? terminalHtml([read?.command]) : '';
-  return `<div class="mp-body mp-waiting">${proposals.map(p => proposalHtml(p, now, signs ? actKeysHtml(proposalActs(p), p.id) : '')).join('')}${pastHtml}${count}${command}</div>`;
+  const keys = proposals.map(p => (signs ? actKeysHtml(proposalActs(p), p.id) : ''));
+  // the review command goes only when every proposal drawn got its keys and no decision is past its horizon
+  const command = !signs || past.length || keys.some(k => k === '') ? terminalHtml([read?.command]) : '';
+  return `<div class="mp-body mp-waiting">${proposals.map((p, i) => proposalHtml(p, now, keys[i])).join('')}${pastHtml}${count}${command}</div>`;
 }

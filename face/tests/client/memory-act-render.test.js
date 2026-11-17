@@ -1,7 +1,8 @@
 // The owner's act drawer on the Memory screen (memory owner acts plan Task 4, render/memory-act.js) over states built with the
 // real reducers: its title, what the act acts on (a card's text, a discard's two texts, a proposal, a decision), the owner's
-// words box for a worded act, What you sign, the go key and its states, a refusal with Prepare again, done (an edit's file),
-// and every text from the memory made visible and escaped.
+// words box for a worded act, What you sign, the go key and its states, a refusal with Prepare again while the page signs and
+// the act's own terminal command when the reads hold one, done (an edit's file), and every text from the memory made visible
+// and escaped.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducers as R } from '../../client/js/reducers/index.js';
@@ -10,7 +11,9 @@ import { renderMemoryAct } from '../../client/js/render/memory-act.js';
 import { said } from '../../client/js/i18n/words.js';
 import { withTable } from '../../client/js/i18n/words.js';
 import { ZH } from '../../client/js/i18n/zh.js';
-import { memoryWaitingProposals, memoryDecisionRows } from './helpers/memory-page.js';
+import {
+  memoryWaitingProposals, memoryDecisionRows, memoryLessons, memoryWaiting, memoryDecisions, armedLesson, changedLesson, unarmedLesson, decisionRow,
+} from './helpers/memory-page.js';
 
 const NOW = Date.parse('2026-11-16T15:00:00.000Z');
 const on = R.nav(emptyState(), { screen: 'memory', tab: 'lessons' });
@@ -138,4 +141,83 @@ test('words with a direction mark and markup are text, the mark visible; the sub
 test('under ZH: the title, the keys and the heads in the table', () => {
   const html = withTable(ZH, () => draw(R.memoryActWords(shown(opened('retire', 'no-chasing'), CARD), { words: '' })));
   assert.doesNotMatch(text(html), /Retire|Why, in your own words|What you sign/);
+});
+
+// the screen with its three reads loaded: the lessons, the waiting and the decisions as the face answers them
+function withReads(st = on, { lessons = [unarmedLesson(), changedLesson(), armedLesson()], waiting = memoryWaiting({ proposals: memoryWaitingProposals() }), decisions = memoryDecisions({ items: memoryDecisionRows() }) } = {}) {
+  let out = R.memoryPageLoaded(st, { read: 'lessons', data: memoryLessons({ lessons }), at: NOW });
+  out = R.memoryPageLoaded(out, { read: 'waiting', data: waiting, at: NOW });
+  return R.memoryPageLoaded(out, { read: 'decisions', data: decisions, at: NOW });
+}
+const refusedOn = (st, act, subject, show) => R.memoryActRefused(R.memoryActPrepared(R.memoryActPreparing(shown(opened(act, subject, st), show)), { prepared: PREPARED }), { message: said('memory.act.noAnswer') });
+const TERMINAL = '<div class="mp-commands"><div class="mp-dim">At the terminal, in face/</div>';
+
+test("a refused drawer draws, under the refusal, the act's own terminal command from the reads the page holds", () => {
+  const st = withReads();
+  const [fresh] = memoryWaitingProposals();
+  const [row] = memoryDecisionRows();
+  const cases = [
+    ['arm', 'add-below-stop', CARD, unarmedLesson().commands.arm],
+    ['retire', 'no-chasing', CARD, armedLesson().commands.retire],
+    ['discard', 'trim-into-strength', { kind: 'card', lesson: 'trim-into-strength', state: 'changed', text: 'a\n', armedText: 'b\n' }, changedLesson().commands.review],
+    ['accept', fresh.id, { kind: 'proposal', proposal: fresh }, memoryWaiting().command],
+    ['reject', fresh.id, { kind: 'proposal', proposal: fresh }, memoryWaiting().command],
+    ['void', row.view.line.id, { kind: 'decision', decision: row.view.line }, row.command],
+  ];
+  for (const [act, subject, show, command] of cases) {
+    const html = draw(refusedOn(st, act, subject, show));
+    assert.match(html, /<p class="mp-act-said">The Account did not answer: nothing was signed<\/p>/, act);
+    const at = html.indexOf(TERMINAL);
+    assert.ok(at > html.indexOf('mp-act-said'), `${act}: the command under the refusal`);
+    assert.ok(html.includes(`<code class="mp-command">${command.replace(/"/g, '&quot;')}</code>`), `${act}: ${html}`);
+  }
+});
+
+test('a refused drawer draws no command when the reads hold none, nor while the act is not refused', () => {
+  const bare = withReads(on, { lessons: [unarmedLesson({ commands: {} })], waiting: memoryWaiting({ command: undefined }), decisions: memoryDecisions({ items: [decisionRow('d-20261114-0a1b2c3d', {}, { void: true })] }) });
+  const [fresh] = memoryWaitingProposals();
+  for (const [act, subject, show] of [['arm', 'add-below-stop', CARD], ['accept', fresh.id, { kind: 'proposal', proposal: fresh }], ['void', 'd-20261114-0a1b2c3d', { kind: 'decision', decision: memoryDecisionRows()[0].view.line }], ['arm', 'no-such-card', CARD]]) {
+    assert.ok(!draw(refusedOn(bare, act, subject, show)).includes('mp-commands'), act);
+  }
+  assert.ok(!draw(refusedOn(on, 'arm', 'add-below-stop', CARD)).includes('mp-commands'), 'no read loaded: none');
+  assert.ok(!draw(R.memoryActPrepared(R.memoryActPreparing(shown(opened('arm', 'add-below-stop', withReads()), CARD)), { prepared: PREPARED })).includes('mp-commands'), 'ready: none');
+  // a command from the memory is made visible and escaped
+  const mark = '\u202e';
+  const odd = withReads(on, { lessons: [unarmedLesson({ commands: { arm: `npx arm ${mark}<b>` } })] });
+  const html = draw(refusedOn(odd, 'arm', 'add-below-stop', CARD));
+  assert.ok(!html.includes(mark));
+  assert.match(html, /<code class="mp-command">npx arm \\u202e&lt;b&gt;<\/code>/);
+});
+
+test('Prepare again is drawn only while the page still signs', () => {
+  const refused = st => draw(R.memoryActRefused(ready('arm', 'no-chasing', CARD), { message: 'the signature does not match the instruction' }));
+  assert.match(refused(on), /Prepare again/);
+  const signs = R.ownerStanding(on, { role: 'signs', kid: 'k1' });
+  assert.match(draw(R.memoryActRefused(R.memoryActPrepared(R.memoryActPreparing(shown(opened('arm', 'no-chasing', signs), CARD)), { prepared: PREPARED }), { message: 'no' })), /Prepare again/);
+  const dropped = R.ownerStanding(signs, { role: 'none' });
+  const html = draw(R.memoryActRefused(R.memoryActPrepared(R.memoryActPreparing(shown(opened('arm', 'no-chasing', dropped), CARD)), { prepared: PREPARED }), { message: 'the signature does not match the instruction' }));
+  assert.doesNotMatch(html, /Prepare again/);
+  assert.match(html, /the signature does not match the instruction/);
+});
+
+test("an accept's and an edit's drawer draws the card's source when it has one; a void's whose and by and the decided day", () => {
+  const [fresh] = memoryWaitingProposals();
+  const sourced = { ...fresh, card: { ...fresh.card, source: ['d-20261103-0a1b2c3d', `a note ${'\u202e'}<b>`] } };
+  for (const act of ['accept', 'edit']) {
+    const html = draw(ready(act, fresh.id, { kind: 'proposal', proposal: sourced }));
+    const words = text(html);
+    assert.ok(words.includes('Source'), act);
+    assert.ok(words.includes('d-20261103-0a1b2c3d'), act);
+    assert.match(html, /a note \\u202e&lt;b&gt;/, act);
+    assert.ok(!html.includes('\u202e'));
+  }
+  assert.ok(!text(draw(ready('accept', fresh.id, { kind: 'proposal', proposal: fresh }))).includes('Source'), 'no source, no head');
+  assert.ok(!text(draw(ready('reject', fresh.id, { kind: 'proposal', proposal: sourced }))).includes('Source'), 'a reject draws none');
+
+  const line = decisionRow('d-20261114-0a1b2c3d', { t: '2026-11-14T12:00:00.000Z', decided_at: '2026-11-03T12:00:00.000Z', whose: 'owner', by: 'gravit-face', backfilled: true }).view.line;
+  const html = draw(R.memoryActWords(shown(opened('void', line.id), { kind: 'decision', decision: line }), { words: '' }));
+  const words = text(html);
+  assert.ok(words.includes('Nov 3'), words);
+  assert.ok(!words.includes('Nov 14'), 'the decided day, not the registration date');
+  assert.match(html, /<span class="mp-who">owner · by gravit-face<\/span>/);
 });

@@ -2275,6 +2275,8 @@ export const ZH = Object.freeze({
   'memory.act.done': '已完成',
   'memory.act.editDone': '编辑该文件，然后在这里启用它',
   'memory.act.notSigning': '此浏览器不为账户签名',
+  'memory.act.noAnswer': '账户没有回应：什么都没有签署',
+  'memory.act.source': '来源',
   'memory.health.home': '主目录',
   'memory.health.ledgers': '账本',
   'memory.health.lines': '{n} 行',

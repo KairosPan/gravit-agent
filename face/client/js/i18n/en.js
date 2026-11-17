@@ -2288,6 +2288,8 @@ export const EN = Object.freeze({
   'memory.act.done': 'Done',
   'memory.act.editDone': 'Edit the file, then arm it here',
   'memory.act.notSigning': 'This browser does not sign for the account',
+  'memory.act.noAnswer': 'The Account did not answer: nothing was signed',
+  'memory.act.source': 'Source',
   // the Memory screen's Health tab (render/memory-health.js)
   'memory.health.home': 'Home',
   'memory.health.ledgers': 'Ledgers',

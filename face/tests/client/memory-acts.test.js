@@ -248,15 +248,49 @@ test("a refused signature has the page learn its standing again; another refusal
   assert.equal(others, 0, 'a refusal not about the standing reads nothing');
 });
 
-test('a refusal that says it changed while it was shown asks the reads again', async () => {
+test('a refusal the face marks changed asks the reads again; its words alone do not', async () => {
   const r = rig();
-  r.queue(ACT, { status: 409, body: { ok: false, error: 'it changed while it was shown: nothing was done' } });
+  r.queue(ACT, { status: 409, body: { ok: false, error: 'the card changed while it was shown: nothing was armed.', changed: true } });
   r.acts.open('arm', 'no-chasing');
   await settle();
   r.acts.go();
   await settle();
   assert.equal(r.a().status, 'refused');
+  assert.equal(r.a().message, 'the card changed while it was shown: nothing was armed.');
   assert.deepEqual(r.done, ['arm'], 'the page is stale by its own account');
+
+  const s = rig();
+  s.queue(ACT, { status: 409, body: { ok: false, error: 'it changed while it was shown: nothing was done' } });
+  s.acts.open('arm', 'no-chasing');
+  await settle();
+  s.acts.go();
+  await settle();
+  assert.equal(s.a().status, 'refused');
+  assert.deepEqual(s.done, [], 'the sentence is not matched: only changed: true reads again');
+});
+
+test("a prepare the Account did not answer - the proxy's 503 { unreachable }, of the face's prepare or the Account's - says so in the face's words", async () => {
+  const NO_ANSWER = 'The Account did not answer: nothing was signed';
+  const r = rig();
+  r.owner.prepareAnswer = { status: 503, body: { ok: false, unreachable: 'ECONNREFUSED' } };
+  r.acts.open('arm', 'no-chasing');
+  await settle();
+  assert.equal(r.a().status, 'refused');
+  assert.equal(sayOf(r.a().message), NO_ANSWER);
+
+  const s = rig();
+  s.queue(PREPARE, { status: 503, body: { ok: false, unreachable: 'disabled' } });
+  s.acts.open('arm', 'no-chasing');
+  await settle();
+  assert.equal(s.a().status, 'refused');
+  assert.equal(sayOf(s.a().message), NO_ANSWER);
+
+  // a prepare refused with a sentence of its own keeps it
+  const t = rig();
+  t.owner.prepareAnswer = { status: 409, body: { ok: false, refusal: { code: 'E_ACCOUNT_THRESHOLD', message: 'this account needs 2 signers; 1 signed' } } };
+  t.acts.open('arm', 'no-chasing');
+  await settle();
+  assert.equal(t.a().message, 'this account needs 2 signers; 1 signed');
 });
 
 test("the Account's prepare refused ends refused with its words; a signer that will not sign ends refused with its words", async () => {
@@ -319,8 +353,20 @@ test('close empties the slot, and a late answer of either route changes nothing'
   s.acts.close();
   out();
   await settle();
-  assert.equal(s.a(), null);
-  assert.deepEqual(s.done, [], 'the late act read nothing again');
+  assert.equal(s.a(), null, 'the late act changed nothing in the drawer');
+  assert.deepEqual(s.done, ['arm'], 'a success that lands after the drawer was closed still reads the memory again');
+
+  const u = rig();
+  u.acts.open('arm', 'no-chasing');
+  await settle();
+  u.queue(ACT, { status: 409, body: { ok: false, error: 'this was done already' } });
+  const late = u.hold(ACT);
+  u.acts.go();
+  await settle();
+  u.acts.close();
+  late();
+  await settle();
+  assert.deepEqual(u.done, [], 'a late refusal that is not a change reads nothing again');
 
   // a quiet timer standing when it closes asks nothing
   const t = rig();
@@ -356,6 +402,12 @@ test("the acts a row's state allows, as the face's prepare allows them", () => {
   assert.deepEqual(lessonActs(brokenLesson()), ['arm', 'retire']);
   assert.deepEqual(lessonActs(brokenLesson({ file: { sha256: 'c'.repeat(64), text: 'x', fault: 'no front matter' } })), ['retire'], 'a file that does not parse is not armed');
   assert.deepEqual(lessonActs(armedLesson({ id: 'Not-A-Lesson' })), [], 'an id off the lesson shape: none');
+  // a text the read says is cut: no key for the act that would show it
+  const cutCopy = copy => ({ ...copy, cut: true });
+  assert.deepEqual(lessonActs(unarmedLesson({ file: cutCopy(unarmedLesson().file) })), [], 'an arm shows the file');
+  assert.deepEqual(lessonActs(armedLesson({ armed: cutCopy(armedLesson().armed) })), [], 'a retire shows the armed copy');
+  assert.deepEqual(lessonActs(changedLesson({ file: cutCopy(changedLesson().file) })), ['retire'], 'a changed card whose file is cut: retire alone');
+  assert.deepEqual(lessonActs(changedLesson({ armed: cutCopy(changedLesson().armed) })), ['arm'], 'a changed card whose armed copy is cut: arm alone');
   const [fresh, change, retire] = memoryWaitingProposals();
   assert.deepEqual(proposalActs(fresh), ['accept', 'reject', 'edit']);
   assert.deepEqual(proposalActs(change), ['accept', 'reject', 'edit']);

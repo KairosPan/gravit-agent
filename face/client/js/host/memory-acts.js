@@ -6,11 +6,15 @@
 // last keystroke, asks the face's prepare again with them, trimmed, then the Account's. go signs the Account's preparation
 // through the owner device (host/owner.js sign) and posts `{ act, subject, words, envelope }` to `POST /data/memory/act`, the
 // same trimmed words the preparation was asked with; done, it calls afterDone(act), which reads the lessons, the waiting and
-// the decisions again, as does a refusal that says it changed while it was shown. The page computes no digest and holds no
-// key: the draft is the face's, what to sign the Account's, the signature the owner device's. One act at a time; an answer
-// for an act closed, or for words typed since, changes nothing. And the acts a row's state allows, as the face's prepare
-// allows them, for the keys the tabs draw. Nothing here touches the DOM.
-import { refusalOf } from './owner-view.js';
+// the decisions again, as does a refusal the face marks `changed` - each even when the drawer was closed meanwhile, for the
+// memory moved all the same. A prepare refused with no sentence of its own (the proxy's `{ unreachable }`: the Account did
+// not answer) says so in the face's words. The page computes no digest and holds no key: the draft is the face's, what to
+// sign the Account's, the signature the owner device's. One act at a time; an answer for an act closed, or for words typed
+// since, changes nothing in the drawer. And the acts a row's state allows, as the face's prepare allows them, for the keys
+// the tabs draw: none on a card whose text the read says is cut, which the face acts on at the terminal alone. Nothing here
+// touches the DOM.
+import { refusalOf, whyOf } from './owner-view.js';
+import { said } from '../i18n/words.js';
 import { decisionMarks } from './memory-page-view.js';
 import { isId, MEMORY_ACTS, WORDED_ACTS } from '../reducers/memory-page.js';
 
@@ -19,8 +23,8 @@ export { MEMORY_ACTS, WORDED_ACTS };
 export const ACT_QUIET_MS = 300;
 
 const PREPARE = '/data/memory/prepare', ACT = '/data/memory/act';
-// the face's sentence for an act whose content changed between what was shown and the Account's yes (src/memory-acts.ts)
-const CHANGED = 'it changed while it was shown: nothing was done'; // en-kept: the face's refusal, matched as the route words it
+// a prepare's refusal: its own sentence, else the face's word that the Account did not answer and nothing was signed
+const prepareRefusal = r => whyOf(r) || said('memory.act.noAnswer');
 // each act's subject's shape, as the face's prepare checks it
 const LESSON = /^[a-z0-9][a-z0-9-]{1,39}$/, PROPOSAL = /^p-\d{8}-[0-9a-f]{8}$/, DECISION = /^d-\d{8}-[0-9a-f]{8}$/;
 const SUBJECT = { arm: LESSON, retire: LESSON, discard: LESSON, accept: PROPOSAL, edit: PROPOSAL, reject: PROPOSAL, void: DECISION };
@@ -34,14 +38,16 @@ const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const fitting = (acts, subject) => acts.filter(act => actFits(act, subject));
 
 /** The acts a lesson row's state allows: arm a card whose file parses and that is neither armed nor refused; retire an armed,
- *  changed or broken one; discard a changed one. */
+ *  changed or broken one; discard a changed one - each only when the text it shows is not cut (an arm's file, a retire's
+ *  armed copy, a discard's both). */
 export function lessonActs(row) {
   if (!isObject(row)) return [];
   const parses = isObject(row.file) && isObject(row.file.card) && row.file.fault === undefined;
+  const fileWhole = row.file?.cut !== true, armedWhole = row.armed?.cut !== true;
   const acts = [];
-  if (parses && ARMABLE.includes(row.state)) acts.push('arm');
-  if (row.state === 'armed' || row.state === 'changed' || row.state === 'broken') acts.push('retire');
-  if (row.state === 'changed') acts.push('discard');
+  if (parses && fileWhole && ARMABLE.includes(row.state)) acts.push('arm');
+  if (armedWhole && (row.state === 'armed' || row.state === 'changed' || row.state === 'broken')) acts.push('retire');
+  if (fileWhole && armedWhole && row.state === 'changed') acts.push('discard');
   return fitting(acts, row.id);
 }
 
@@ -74,7 +80,7 @@ export function startMemoryActs({ store, owner, post, schedule, cancelTimer, aft
     let r;
     try { r = await post(PREPARE, words ? { act: a.act, subject: a.subject, words } : { act: a.act, subject: a.subject }); } catch { r = null; }
     if (!current(m)) return;
-    if (!okAt(r) || !isObject(r.body.show)) { refuse(m, refusalOf(r).message); return; }
+    if (!okAt(r) || !isObject(r.body.show)) { refuse(m, prepareRefusal(r)); return; }
     store.dispatch('memoryActShown', { show: r.body.show });
     const draft = r.body.draft;
     if (!isObject(draft)) {
@@ -87,7 +93,7 @@ export function startMemoryActs({ store, owner, post, schedule, cancelTimer, aft
     let p;
     try { p = await owner.prepare(draft); } catch { p = null; }
     if (!current(m)) return;
-    if (!okAt(p) || !Array.isArray(p.body.shown)) { refuse(m, refusalOf(p).message); return; }
+    if (!okAt(p) || !Array.isArray(p.body.shown)) { refuse(m, prepareRefusal(p)); return; }
     ready = { words, prepared: p.body };
     store.dispatch('memoryActPrepared', { prepared: p.body });
   }
@@ -146,8 +152,10 @@ export function startMemoryActs({ store, owner, post, schedule, cancelTimer, aft
         if (!signed?.ok) { refuse(m, signed?.said ?? refusalOf(null).message); return; }
         let r;
         try { r = await post(ACT, { act: a.act, subject: a.subject, ...(WORDED_ACTS.includes(a.act) ? { words } : {}), envelope: signed.envelope }); } catch { r = null; }
-        if (!current(m)) return;
-        if (okAt(r) && r.body.ok === true) {
+        // done, or found changed: the memory moved, and the page reads it again whether or not the drawer is still open
+        const done = okAt(r) && r.body.ok === true, changed = r?.body?.changed === true;
+        if (!current(m)) { if (done || changed) afterDone(a.act); return; }
+        if (done) {
           ready = null;
           store.dispatch('memoryActDone', { done: r.body });
           afterDone(a.act);
@@ -155,7 +163,7 @@ export function startMemoryActs({ store, owner, post, schedule, cancelTimer, aft
         }
         const why = refusalOf(r);
         refuse(m, why.message);
-        if (r?.body?.error === CHANGED) afterDone(a.act);
+        if (changed) afterDone(a.act);
         // the door did not take the signature (the device may be dropped): the page learns its standing again, as the owner
         // device's submit does, after the refusal is drawn and outside the drawer's flow
         if (why.standing && store.get().owner?.role === 'signs') void Promise.resolve(owner.ready?.()).catch(() => {});
