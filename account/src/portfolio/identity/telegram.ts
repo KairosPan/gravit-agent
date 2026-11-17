@@ -1,10 +1,10 @@
-/** THE CONNECTED POLLER — Telegram, once the owner signed connectNetwork: the long poll of getUpdates for the bot Gravit speaks as, the
+/** THE CONNECTED POLLER — Telegram, once the owner signed connectNetwork: the long poll of getUpdates for the bot gravit speaks as, the
  * loop of the face's old bridge (face/src/telegram.ts installTelegramBridge: run, poll, take, its backoff and its once-a-minute lines)
  * without anything the desk does — the desk reads the inbox (inbox.ts) through the account.
  *
  * Each update, in order:
- *   - a text from the bound operator (`from.id` and the chat's id both the operator's id, in a private chat): if the Chat with Gravit row
- *     ticks Telegram, appended to the inbox as `telegram:<message_id>` (with the message it replies to); else answered "Chat with Gravit
+ *   - a text from the bound operator (`from.id` and the chat's id both the operator's id, in a private chat): if the Chat with gravit row
+ *     ticks Telegram, appended to the inbox as `telegram:<message_id>` (with the message it replies to); else answered "Chat with gravit
  *     is off on Telegram: Account › Identity turns it on." and kept nowhere;
  *   - anything else from the operator in a private chat (a photo, a sticker, a file) is answered "text only, please" and kept nowhere;
  *   - a person who is not the operator, in a private chat: counted in Not you (store.ts Strangers — a reference, a masked id, a count and a
@@ -91,7 +91,7 @@ export interface TelegramConnectorDeps {
   strangers: Strangers;
   /** the senders' references the owner blocked */
   blocked: () => string[];
-  /** whether the Chat with Gravit row ticks Telegram */
+  /** whether the Chat with gravit row ticks Telegram */
   chatOn: () => boolean;
   /** a line to the operator */
   reply: (text: string) => Promise<void>;

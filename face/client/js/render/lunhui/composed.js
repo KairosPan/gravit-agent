@@ -1,4 +1,4 @@
-// face/client/js/render/lunhui/composed.js — Gravit's composed answer (plan 2 of the Lunhui run view): the summary as Gravit
+// face/client/js/render/lunhui/composed.js — gravit's composed answer (plan 2 of the Lunhui run view): the summary as gravit
 // wrote it, through the markdown renderer, then the blocks in the call's order, each drawn by the face from the run's view
 // model — never from model markup. While the view is on its way a block is a skeleton line; a view that could not be read
 // is one line with a Retry under the summary, never a blank.

@@ -76,7 +76,7 @@ test("apply refuses a bad config with its reason", () => {
 /* The text function runs at every assembly and `apply` never calls it, so an
  * unusable TZ - "" resolves to "Etc/Unknown", which Intl refuses; "Foo/Bar"
  * resolves to undefined - would mount cleanly and then throw (or print
- * "(undefined)") in every Gravit prompt. Node re-reads TZ on assignment, so the
+ * "(undefined)") in every gravit prompt. Node re-reads TZ on assignment, so the
  * real resolution is exercised; the key is put back (or deleted) in `finally`. */
 test("an unusable TZ is rendered in UTC and labelled, never thrown at assembly", () => {
   const saved = process.env.TZ;
@@ -105,7 +105,7 @@ test("an unusable TZ is rendered in UTC and labelled, never thrown at assembly",
 /* The roles section lists what the ASSEMBLING scope can call, the gate dsh-tool-web and
  * dsh-tool-subagent put on their own sections: a role child, whose allow list restricts the
  * `role_<id>` tools away, is told of none; a `subagent_fork` child - seeded, unrestricted - sees
- * every role tool, so it gets Gravit's text unchanged and its inherited prefix stays byte-identical
+ * every role tool, so it gets gravit's text unchanged and its inherited prefix stays byte-identical
  * (roles-smoke pins that on a real boot); a role whose tool never registered is not advertised.
  * These contexts carry no agent, so the header half of the gate (`isRootOrFork`, the last test)
  * reads them as a root. */
@@ -120,7 +120,7 @@ test("gravit: the roles section follows dsh's subagent section and lists exactly
   assert.equal(tree.lookups.length, 0, "nothing is looked up at mount: the gate is read at every assembly");
   const textFor = (visible: string[]) => (section.text as (c: unknown) => string)({ scope: { visible } });
   const all = textFor(["read", "role_probe", "role_auditor"]);
-  assert.equal(all, rolesText(roles), "every role tool visible: the whole list, as Gravit and a fork child read it");
+  assert.equal(all, rolesText(roles), "every role tool visible: the whole list, as gravit and a fork child read it");
   assert.match(all, /^Roles\. /);
   assert.ok(all.includes("- role_probe — probes the fixture") && all.includes("- role_auditor — audits"));
   assert.equal(textFor(["read", "grep"]), "", "no role tool visible (a role child's allow list removed them): nothing");
@@ -157,8 +157,8 @@ test("gravit: the roles intro says the call returns the role's report and that a
 
 /* The cycle section is gated the way the roles section is: on what the ASSEMBLING scope can call
  * (and on the header, the last test). `create_goal` is the probe because the contract is written
- * for the session that opens a goal - Gravit, and a `subagent_fork` child, which resolves every
- * tool Gravit does and so reads the identical text (its inherited prefix stays byte-identical;
+ * for the session that opens a goal - gravit, and a `subagent_fork` child, which resolves every
+ * tool gravit does and so reads the identical text (its inherited prefix stays byte-identical;
  * roles-smoke pins that on a real boot) - while a role child, whose allow list removed the goal
  * tools, is not given the face's contract. */
 test("gravit: the cycle section sits just before the persona suffix, is literal, and is blank where create_goal is not visible", () => {
@@ -171,20 +171,20 @@ test("gravit: the cycle section sits just before the persona suffix, is literal,
   assert.equal(section.interpolate, false);
   assert.equal(tree.lookups.length, 0, "nothing is looked up at mount: the gate is read at every assembly");
   const textFor = (visible: string[]) => (section.text as (c: unknown) => string)({ scope: { visible } });
-  assert.equal(textFor(["read", "create_goal", "update_goal"]), cycle, "create_goal visible (Gravit, or a fork child): the cycle, verbatim");
+  assert.equal(textFor(["read", "create_goal", "update_goal"]), cycle, "create_goal visible (gravit, or a fork child): the cycle, verbatim");
   assert.equal(textFor(["read", "grep"]), "", "create_goal not visible (a role child's allow list removed it): nothing");
   tree.unload();
   assert.equal(tree.sections.length, 0, "unloading the preset revision takes the cycle section out with the date's");
 });
 
 /* Visibility alone admits every UNRESTRICTED child: a plain `subagent` spawn, a workflow or a ralph
- * worker resolves `create_goal` and every role tool as Gravit does. So both sections also read the
+ * worker resolves `create_goal` and every role tool as gravit does. So both sections also read the
  * assembling session's header (`context.agent.session.header`): a delegated child (`origin:
  * "subagent"`) that is not a fork (`isSeeded` false) reads neither - it inherits no prefix to keep
  * identical, and `create_goal` needs a direct human turn on a top-level agent, which it never has -
- * while a `subagent_fork` child (seeded) and a root session read Gravit's text, byte for byte. The
+ * while a `subagent_fork` child (seeded) and a root session read gravit's text, byte for byte. The
  * scope here resolves every tool, so only the header can blank a section. */
-test("gravit: both sections are blank for a delegated child that is not a fork, and Gravit's text for a fork child and a root session", () => {
+test("gravit: both sections are blank for a delegated child that is not a fork, and gravit's text for a fork child and a root session", () => {
   const tree = fakeScope();
   const roles = [{ tool: "role_probe", summary: "probes the fixture" }, { tool: "role_auditor", summary: "audits" }];
   const cycle = "# The research cycle\n\nStep 0 — ask once.";
@@ -218,13 +218,13 @@ test("validateGravitConfig: desk must be a non-empty string when given", () => {
 });
 
 /* The two contracts share one slot and two different jobs - the cycle opens goals, the desk never orders -
- * so a preset carries one or the other: Gravit's row the cycle, the desk's row (src/desk-preset.ts) the
+ * so a preset carries one or the other: gravit's row the cycle, the desk's row (src/desk-preset.ts) the
  * desk. A row carrying both is refused at the mount rather than mounting two contracts that contradict. */
 test("validateGravitConfig: a preset carries the cycle contract or the desk contract, not both", () => {
   const both = "a preset carries the cycle contract or the desk contract, not both";
   assert.equal(validateGravitConfig({ cycle: "C", desk: "D" }), both);
   assert.equal(validateGravitConfig({ roles: [], cycle: "C", desk: "D" }), both);
-  assert.equal(validateGravitConfig({ cycle: "C" }), undefined, "the cycle alone: Gravit's row");
+  assert.equal(validateGravitConfig({ cycle: "C" }), undefined, "the cycle alone: gravit's row");
   assert.equal(validateGravitConfig({ desk: "D" }), undefined, "the desk alone: the desk's row");
   const tree = fakeScope();
   assert.throws(() => apply(tree.ctx, { cycle: "C", desk: "D" }), (e: Error) => e.message === `gravit: ${both}`, "apply refuses the mount with it");
@@ -235,7 +235,7 @@ test("validateGravitConfig: a preset carries the cycle contract or the desk cont
  * tool gate: it never looks a tool up, at mount or at assembly, and a scope that can call nothing still
  * reads it. Only the header gates it, as it does the cycle's: a delegated child that is not a fork reads
  * nothing; a root session and a fork child read the text verbatim. It takes the cycle's slot (a preset
- * carries one contract or the other), and a config without `desk` - Gravit's own among them - mounts none. */
+ * carries one contract or the other), and a config without `desk` - gravit's own among them - mounts none. */
 test("the desk section registers only with a desk key, after the persona, and is blank for a non-fork child", () => {
   const tree = fakeScope();
   apply(tree.ctx, { desk: "D" });

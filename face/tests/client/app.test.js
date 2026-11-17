@@ -96,9 +96,9 @@ test('the store writes only the prefs, never the conversations, and never loads 
   assert.deepEqual(store.get().conversations, []);
   store.dispatch('toggleRail');
   const saved = JSON.parse(storage.getItem(PREFS_KEY));
-  assert.deepEqual(Object.keys(saved).sort(), ['codeFont', 'codeSize', 'lang', 'lastSeen', 'railCollapsed', 'textFont', 'textSize', 'theme']);
+  assert.deepEqual(Object.keys(saved).sort(), ['boxOpen', 'codeFont', 'codeSize', 'lang', 'lastSeen', 'railCollapsed', 'textFont', 'textSize', 'theme']);
   assert.equal(saved.railCollapsed, true);
-  assert.deepEqual(prefsOf(emptyState()), { theme: 'system', lang: 'en', textSize: 15, codeSize: 12, textFont: '', codeFont: '', railCollapsed: false, lastSeen: {} });
+  assert.deepEqual(prefsOf(emptyState()), { theme: 'system', lang: 'en', textSize: 15, codeSize: 12, textFont: '', codeFont: '', railCollapsed: false, boxOpen: false, lastSeen: {} });
 });
 
 test('settle routes by the hash and says which hash the address bar should show', () => {
@@ -189,7 +189,7 @@ test('answersFrom reads only its own card: two pending cards asking the same que
   assert.deepEqual(answersFrom(b, [{ id: 'q1' }], 'ev-b'), { answers: [{ id: 'q1', selected: ['Short'] }] });
 });
 
-test("the markdown the app installs for Gravit's words is the rendered HTML, never the word undefined", () => {
+test("the markdown the app installs for gravit's words is the rendered HTML, never the word undefined", () => {
   const html = withMiniDocument(() => gravitMarkdown('**NVDA** leads; see [the filing](https://www.sec.gov/x)\n\n| sym | chg |\n|---|---|\n| NVDA | +3.1% |'));
   assert.doesNotMatch(String(html), /undefined/);
   assert.match(html, /^<div class="md">/);

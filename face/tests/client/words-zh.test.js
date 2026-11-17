@@ -220,7 +220,7 @@ test('the glossary is well formed: a register, notes, terms with a zh and a note
   }
   assert.equal(new Set(GLOSSARY.terms.map(t => t.en)).size, GLOSSARY.terms.length, 'one term per en');
   assert.ok(GLOSSARY.keep.every(k => typeof k === 'string' && k) && new Set(GLOSSARY.keep).size === GLOSSARY.keep.length);
-  for (const name of ['Gravit', 'token']) assert.ok(GLOSSARY.keep.includes(name), name);
+  for (const name of ['gravit', 'token']) assert.ok(GLOSSARY.keep.includes(name), name);
   for (const name of ['Account', 'Lunhui']) assert.ok(!GLOSSARY.keep.includes(name) && GLOSSARY.terms.some(t => t.en === name), `${name} is a term, not a kept name`);
 });
 
@@ -268,8 +268,8 @@ test('each ZH value carries exactly its EN key\'s params', () => {
 
 test('ZH holds no Latin word but a kept name or a param', () => {
   assert.deepEqual(latinOffenders(ZH, GLOSSARY), []);
-  const glossary = { keep: ['Gravit', 'ET', 'tok/s', 'Noto Sans SC', 'xoxb-', 'token'] };
-  assert.deepEqual(latinOffenders(bad({ 'a.b': 'Gravit 正在运行 {n} tok/s，{name}' }), glossary), []);
+  const glossary = { keep: ['gravit', 'ET', 'tok/s', 'Noto Sans SC', 'xoxb-', 'token'] };
+  assert.deepEqual(latinOffenders(bad({ 'a.b': 'gravit 正在运行 {n} tok/s，{name}' }), glossary), []);
   assert.deepEqual(latinOffenders(bad({ 'a.b': '打开 Noto Sans SC，粘贴 token（xoxb-…）' }), glossary), []);
   // no English key name or word passes for a key: EN draws none of Enter, Esc... in its values, and Delete, End, Home are words
   assert.deepEqual(latinOffenders(bad({ 'a.b': '按 Enter 或 Esc' }), glossary), ["a.b: Latin 'Enter'", "a.b: Latin 'Esc'"]);
@@ -279,7 +279,7 @@ test('ZH holds no Latin word but a kept name or a param', () => {
   assert.deepEqual(latinOffenders(bad({ 'shortcuts.note': '⌘ 是 Ctrl' }), { keep: ['Ctrl'] }), [], 'Ctrl is in EN\'s values, so it is kept by name');
   assert.deepEqual(latinOffenders(bad({ 'a.b': '纽约时间 {from}–{to} ET' }), glossary), []);
   assert.deepEqual(latinOffenders(bad({ 'a.b': '已连接 Telegram' }), glossary), ["a.b: Latin 'Telegram'"]);
-  assert.deepEqual(latinOffenders(bad({ 'a.b': '打开 gravit' }), glossary), ["a.b: Latin 'gravit'"], 'a kept name is case-sensitive');
+  assert.deepEqual(latinOffenders(bad({ 'a.b': '打开 Gravit' }), glossary), ["a.b: Latin 'Gravit'"], 'a kept name is case-sensitive');
   assert.deepEqual(latinOffenders(bad({ 'a.b': '共 {n} 个 ETH' }), glossary), ["a.b: Latin 'ETH'"], 'a kept name is not a piece of a longer word');
   assert.deepEqual(latinOffenders(bad({ 'a.b': '发送 Tokens' }), glossary), ["a.b: Latin 'Tokens'"]);
   assert.deepEqual(latinOffenders(bad({ 'a.b': '一个 URL 和一个 ID' }), glossary), ["a.b: Latin 'URL'", "a.b: Latin 'ID'"]);
@@ -314,7 +314,7 @@ test('the glossary is held: a key whose EN holds a term has the term\'s zh, unle
 test('no term\'s zh is in keep, and each term\'s except names a key whose EN holds the term', () => {
   assert.deepEqual(keptTermOffenders(GLOSSARY), []);
   assert.deepEqual(exceptOffenders(EN, GLOSSARY), []);
-  assert.deepEqual(keptTermOffenders({ keep: ['Gravit', 'token', 'Account'], terms: [{ en: 'Account', zh: 'Account' }, { en: 'tokens', zh: 'token' }, { en: 'Run', zh: '运行' }] }), ['Account: zh \'Account\' is in keep', 'tokens: zh \'token\' is in keep']);
+  assert.deepEqual(keptTermOffenders({ keep: ['gravit', 'token', 'Account'], terms: [{ en: 'Account', zh: 'Account' }, { en: 'tokens', zh: 'token' }, { en: 'Run', zh: '运行' }] }), ['Account: zh \'Account\' is in keep', 'tokens: zh \'token\' is in keep']);
   const glossary = { keep: [], terms: [{ en: 'limit', zh: '额度', except: { 'account.orderType.limit': { why: 'the order type', zh: '限价' }, 'common.save': 'stale', 'common.gone': 'no such key' } }] };
   assert.deepEqual(exceptOffenders({ 'account.orderType.limit': 'limit', 'common.save': 'Save' }, glossary),
     ['limit: except common.save: its EN value does not hold the term', 'limit: except common.gone: not a key of EN']);
@@ -329,8 +329,8 @@ test('no term\'s zh is in keep, and each term\'s except names a key whose EN hol
 
 test('ZH\'s punctuation and spacing are the register\'s', () => {
   assert.deepEqual(punctuationOffenders(ZH, EN), []);
-  const en = { 'a.b': 'Gravit is running', 'a.c': 'Gravit is running.', 'a.d': { one: '{n} task', other: '{n} tasks.' } };
-  const ok = Object.freeze({ 'a.b': 'Gravit 正在运行', 'a.c': 'Gravit 正在运行。', 'a.d': '{n} 个任务' });
+  const en = { 'a.b': 'gravit is running', 'a.c': 'gravit is running.', 'a.d': { one: '{n} task', other: '{n} tasks.' } };
+  const ok = Object.freeze({ 'a.b': 'gravit 正在运行', 'a.c': 'gravit 正在运行。', 'a.d': '{n} 个任务' });
   assert.deepEqual(punctuationOffenders(ok, en), []);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接，Telegram：已开启（ET）；打开 {name}…' }), en), [], 'full-width marks next to Latin take no space');
   // ASCII , : ? ! after a Chinese character (a space between allowed), wherever in the value: Chinese marks are full-width
@@ -369,8 +369,8 @@ test('ZH\'s punctuation and spacing are the register\'s', () => {
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接（Telegram），已开启：{n} 个' }), en), []);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '正在运行。' }), en), ['a.b: ends in 。 where EN has no full stop']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.c': '正在运行。', 'a.d': '{n} 个任务。' }), en), [], 'EN ends in a full stop (a plural\'s either form)');
-  assert.deepEqual(punctuationOffenders(bad({ 'a.b': 'Gravit正在运行' }), en), ['a.b: no space between a Chinese character and Latin']);
-  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '正在运行Gravit' }), en), ['a.b: no space between a Chinese character and Latin']);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': 'gravit正在运行' }), en), ['a.b: no space between a Chinese character and Latin']);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '正在运行gravit' }), en), ['a.b: no space between a Chinese character and Latin']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '第3轮' }), en), ['a.b: no space between a Chinese character and a digit']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '3个任务' }), en), ['a.b: no space between a Chinese character and a digit']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{n}个任务' }), en), ['a.b: no space between a Chinese character and a {param}']);

@@ -24,8 +24,11 @@ export const reducers = {
   tradeResultsLoading: s => results(s, { status: 'loading' }),
   tradeResultsLoaded: (s, { data, at } = {}) => results(s, { status: 'ready', data, at, message: null }),
   tradeResultsFailed: (s, { at, message = null } = {}) => results(s, { status: 'error', at, message }),
-  // a ticket on a market: a buy of its first outcome where nothing else is given; a new ticket clears what was said
-  ticketOpen: (s, { id, side, venue, outcome } = {}) => (typeof id === 'string' && id !== '' ? tr(s, {
+  // a ticket on a market: a buy of its first outcome where nothing else is given; a new ticket clears what was said, and one on
+  // another market or side (another page tag, the same hash) brings back the box's tag dropped by ×
+  ticketOpen: (s, { id, side, venue, outcome } = {}) => (typeof id === 'string' && id !== '' ? tr({
+    ...s, boxDetached: s.trade.ticket?.id === id && s.trade.ticket?.side === (side === 'sell' ? 'sell' : 'buy') ? s.boxDetached : null,
+  }, {
     ticket: {
       id, side: side === 'sell' ? 'sell' : 'buy', venue: typeof venue === 'string' && venue ? venue : null,
       outcome: Number.isInteger(outcome) && outcome >= 0 ? outcome : 0,

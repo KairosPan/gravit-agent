@@ -84,3 +84,9 @@ test("router.md names the follow-up tag", () => {
   assert.ok(text.includes("[follow-up \u00b7 task"));
   assert.ok(Buffer.byteLength(text) <= ROUTER_MAX_BYTES);
 });
+
+test("router.md names the page tag and still fits 2,500 bytes", () => {
+  const text = readRouter();
+  assert.ok(text.includes("[on screen \u00b7 "), "names the page tag");
+  assert.ok(Buffer.byteLength(text) <= 2_500, `${Buffer.byteLength(text)} bytes`);
+});

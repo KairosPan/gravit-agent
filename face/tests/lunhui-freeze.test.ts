@@ -143,7 +143,7 @@ test("freeze rows: names, inject and one tool each; apply refuses a missing back
     assert.equal(tools[source].name, toolName);
     assert.deepEqual(tools[source].parameters.required, source === "quotes" ? ["strategy", "symbols"] : ["strategy"]);
     assert.match(tools[source].description, /8 次/);
-    assert.match(tools[source].description, /Gravit/);
+    assert.match(tools[source].description, /gravit/);
     if (source !== "quotes") assert.match(tools[source].description, /cn-market/);
     assert.throws(() => row.apply(fakeScope().ctx, {}), (error: any) => error.message.startsWith(`${rowName}: `) && /lunhui-runs/.test(error.message));
     for (const fetch of ["fixtures", join(root, "missing"), join(root, "alpha", "THESIS.md"), 7]) {

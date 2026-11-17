@@ -1,12 +1,12 @@
 // face/plugins/lunhui/lib/present.mjs
 /**
- * The composition check of `lunhui_present` (run view spec §5.2, M15, M16, M20): Gravit picks,
+ * The composition check of `lunhui_present` (run view spec §5.2, M15, M16, M20): gravit picks,
  * orders, titles and focuses blocks from the face's catalog, and `checkPresent` says yes or why not
  * against the same view model the route serves (`buildView`) and its digest (`viewDigest`). Pure:
  * no clock, no I/O, nothing written. A refusal is a thrown `LunhuiError`, `NOT_A_MARKET_RUN` or
  * `INVALID_PRESENT` with "<field>: <reason>".
  *
- * The number rule (`unsupportedNumbers`): every number Gravit writes must be one the digest holds,
+ * The number rule (`unsupportedNumbers`): every number gravit writes must be one the digest holds,
  * in any form a reader would accept - "4,774" for 4774, "1.3%" for −1.33%, "41%" for 0.41,
  * full-width digits. Text is normalised, run ids and dates are dropped, times "H:MM" are compared
  * as "HH:MM" against the digest's times, and a number with d decimals is supported when some digest

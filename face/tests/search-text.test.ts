@@ -12,7 +12,7 @@ const call = (seq: number, callId: string, name: string, args: unknown): StoredE
 const result = (seq: number, callId: string, body: string, extra: Record<string, unknown> = {}, data: Record<string, unknown> = {}): StoredEvent =>
   ({ type: "tool/result", seq, data: { message: { role: "tool", toolCallId: callId, content: [text(body)], ...extra }, ...data } });
 
-test("the operator's words, Gravit's answer, a phone message and a compaction summary are lines", () => {
+test("the operator's words, gravit's answer, a phone message and a compaction summary are lines", () => {
   const lines = linesOf([
     user(1, "  看看茅台  ", undefined, 10),
     assistant(2, [text("茅台估值偏高"), text("注意风险")], 11),

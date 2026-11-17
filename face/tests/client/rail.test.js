@@ -174,10 +174,10 @@ test('Messages is current on a task, history or strategy page', () => {
   }
 });
 
-test("a sender's name: You, Gravit, a bot's display name from the list, else its id", () => {
+test("a sender's name: You, gravit, a bot's display name from the list, else its id", () => {
   const s = listed([conv('a')]);
   assert.equal(senderName('you', s), 'You');
-  assert.equal(senderName('gravit', s), 'Gravit');
+  assert.equal(senderName('gravit', s), 'gravit');
   assert.equal(senderName('buffett', s), 'Buffett Type');
   assert.equal(senderName('ghost', s), 'ghost');
 });

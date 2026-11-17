@@ -13,5 +13,5 @@ test("index.html loads its assets under /client/ and speaks English", () => {
   assert.ok(refs.length >= 3, `expected the stylesheet, the fonts and the script, got ${refs.length}`);
   for (const ref of refs) assert.ok(ref.startsWith("/client/") || ref.startsWith("https://fonts.g"), ref);
   assert.match(page, /<html lang="en">/);
-  assert.match(page, /<title>Gravit<\/title>/);
+  assert.match(page, /<title>gravit<\/title>/);
 });

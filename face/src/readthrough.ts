@@ -1,5 +1,5 @@
 /** The read-through rows: which rivals a company's own bad news points to,
- * Gravit's inference and never an order, as in-process dsh rows - boot.ts
+ * gravit's inference and never an order, as in-process dsh rows - boot.ts
  * composes them right after the analog rows, in the same project layer, below
  * everything the operator writes, so an operator row with one of these ids
  * replaces that row's config (a replacement restates `recordDir`) and

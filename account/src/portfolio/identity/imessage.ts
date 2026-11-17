@@ -6,15 +6,15 @@
  * `<home>/identity/imessage.cursor` (the last sequence handled), Photon catching up from there.
  *
  * Each event, in order:
- *   - a 1:1 iMessage text from the operator's number (service "iMessage", no `;+;` in the chat GUID, not Gravit's own): appended to the
- *     inbox as `imessage:<GUID>` (with the GUID it replies to) if the Chat with Gravit row ticks iMessage — or if it is one of the phone's
+ *   - a 1:1 iMessage text from the operator's number (service "iMessage", no `;+;` in the chat GUID, not gravit's own): appended to the
+ *     inbox as `imessage:<GUID>` (with the GUID it replies to) if the Chat with gravit row ticks iMessage — or if it is one of the phone's
  *     commands, which the desk reads whatever the row says; else answered with the chat-off line and kept nowhere;
  *   - anything else from the operator in that 1:1 chat (a photo, a voice note) is answered "text only, please" and kept nowhere;
  *   - a 1:1 iMessage from anyone else, the operator's own email handle included: counted in Not you unless blocked, never answered;
  *     A text whose GUID is blank, or whose `imessage:<GUID>` fails WIRE_ID (kinds.ts), is not stored — the face would drop it — and is said
  *     in a line at most once a minute; a reply-to GUID that fails it is left off;
  *   - an SMS or an RCS message, from anyone, the operator's number included: dropped, said in a line at most once a minute;
- *   - a group, Gravit's own message, and every other event: dropped.
+ *   - a group, gravit's own message, and every other event: dropped.
  * Only then does the cursor move past it. A text the inbox cannot store closes the stream there, the cursor before it, and the stream is
  * opened again after a backoff, so Photon hands it over again. A GUID the inbox holds, or a sequence at or below the cursor, is skipped.
  *
@@ -48,7 +48,7 @@ export interface ImessageConnectorDeps {
   strangers: Strangers;
   /** the senders' references the owner blocked */
   blocked: () => string[];
-  /** whether the Chat with Gravit row ticks iMessage */
+  /** whether the Chat with gravit row ticks iMessage */
   chatOn: () => boolean;
   /** a line to the operator */
   reply: (text: string) => Promise<void>;
@@ -336,12 +336,12 @@ export class ImessageConnector implements Connector {
       const at = this.d.clock.now();
       if (at - this.smsSaidAt >= RECORD_EVERY_MS) {
         this.smsSaidAt = at;
-        this.d.log("identity: an SMS or RCS message reached Gravit's iMessage line: dropped, as every one is (iMessage only)");
+        this.d.log("identity: an SMS or RCS message reached gravit's iMessage line: dropped, as every one is (iMessage only)");
       }
       return true;
     }
     if (isGroupChat(m.chatGuid)) {
-      this.passedOver("an iMessage in a group chat reached Gravit's line");
+      this.passedOver("an iMessage in a group chat reached gravit's line");
       return true;
     }
     if (m.from !== this.d.secret.phone) {

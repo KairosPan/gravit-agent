@@ -32,7 +32,7 @@ export const refuse = {
   notGravit: () =>
     new AnalogError(
       "NOT_GRAVIT",
-      "the analog tool is called by Gravit alone (a root session or its fork); a delegated child cannot call it: tell Gravit what to measure",
+      "the analog tool is called by gravit alone (a root session or its fork); a delegated child cannot call it: tell gravit what to measure",
     ),
   badViewId: () => new AnalogError("BAD_VIEW_ID", "a view id is an- followed by a date YYYYMMDD, a dash and 8 hex digits"),
   noSuchView: () => new AnalogError("NO_SUCH_VIEW", "no view is kept under this id"),

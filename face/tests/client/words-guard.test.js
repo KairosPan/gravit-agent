@@ -18,11 +18,11 @@ const KEPT_FILES = {
   'i18n/en.js': 'the English table itself',
   'i18n/zh.js': 'the Chinese table',
   'wire/api.js': 'transport errors, read by code',
-  'wire/markdown.js': "Gravit's words",
+  'wire/markdown.js': "gravit's words",
 };
 
 // the en-kept markers under client/js
-const EN_KEPT = 72;
+const EN_KEPT = 74;
 
 const texts = src => englishLiterals(src, 'snippet.js').map(l => l.text);
 

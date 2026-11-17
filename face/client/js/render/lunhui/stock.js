@@ -1,7 +1,7 @@
 // face/client/js/render/lunhui/stock.js — the stock drawer (plan 3 of the Lunhui run view, task 4; spec §5.4): one pool name
 // of the opening answer's view, on the right — its header, the pool line, its minute line against the view's own limits (the
 // limit lines, the seal marks, volume bars, the slider and its readout) with a derived headline and a note, the tiles, the
-// owner's lessons when it is one of the run's leaders (lessons.js), the run's claims that cite it, and Ask Gravit / Open in Markets. Every number comes from the view; every word it holds is escaped.
+// owner's lessons when it is one of the run's leaders (lessons.js), the run's claims that cite it, and Ask gravit / Open in Markets. Every number comes from the view; every word it holds is escaped.
 import { esc, attrs, cls } from '../../html.js';
 import { yuan, fix2, signedPct, count } from './block.js';
 import { intradaySvg, cursorPatch, minuteLabel, sealIndex, atLimitUp, atLimitDown, limitsOf, includesUp } from './intraday.js';
@@ -139,7 +139,7 @@ export function stockDrawerHtml(state) {
   return shell(name, pool + sec(t('lunhui.stock.minuteLine'), minuteLine(view, f)) + tiles(f) + yours + sec(t('lunhui.stock.inRun'), cited(f)) + keys, sub);
 }
 
-/** The words Ask Gravit sends about the open stock, or null when no stock of a loaded view is open. */
+/** The words Ask gravit sends about the open stock, or null when no stock of a loaded view is open. */
 export function askText(state) {
   const open = state?.lunhui?.stock;
   const entry = open ? state.lunhui.views?.[open.key] : null;

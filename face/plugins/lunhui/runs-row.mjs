@@ -3,8 +3,8 @@
  * `lunhui-runs` - the Lunhui backbone row (modules spec §5.2, A1). It provides the `lunhuiRuns`
  * service every other Lunhui row injects - strategy and run anchoring, the run's states, the
  * per-run write mutex and the freeze budget - and registers one tool, `lunhui_read_run`, the
- * Gravit-facing view of a run: its `run.json`, its counts and each artifact's headline, so Gravit
- * coordinates without reading files; without a run, the strategy's newest sealed runs, so Gravit
+ * gravit-facing view of a run: its `run.json`, its counts and each artifact's headline, so gravit
+ * coordinates without reading files; without a run, the strategy's newest sealed runs, so gravit
  * finds the market run a strategy run cites.
  *
  * For the module rows it reads a module's context - sealing the run on the first read (A4) - and
@@ -441,7 +441,7 @@ async function artifactsOf(dir, named) {
 const RECENT_RUNS = 5;
 
 /**
- * `lunhui_read_run` without a run (A5: Gravit finds the day's, or the previous trading day's,
+ * `lunhui_read_run` without a run (A5: gravit finds the day's, or the previous trading day's,
  * cn-market run from a strategy channel): the strategy's newest sealed runs, at most
  * `RECENT_RUNS`, newest first by run id, each `{ run, session, sealed_at, snapshot_id, artifacts }`
  * - `artifacts` the modules `run.json` names accepted. Of the last `PREVIOUS_RUNS` run ids only,

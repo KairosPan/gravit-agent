@@ -1,8 +1,8 @@
 // face/client/js/render/task.js — a task's full process (one-entry plan 2 Task 8): #/task/<id> is its worker's transcript,
 // read-only. The head: back to Messages, the task's title, its state (the rail's dot and short status), its strategy, the
 // keys its state allows (Stop, Continue), Working and the jobs chip and Details as on Messages. The thread as the thread
-// draws it — a Lunhui composed answer included, its follow-ups sent to Gravit by app.js — with its gates answerable as on
-// the task's line. In place of a composer one line: to change course, tell Gravit (a link to Messages).
+// draws it — a Lunhui composed answer included, its follow-ups sent to gravit by app.js — with its gates answerable as on
+// the task's line. In place of a composer one line: to change course, tell gravit (a link to Messages).
 import { esc, cls } from '../html.js';
 import { th } from '../i18n/words.js';
 import { icon } from '../icons.js';

@@ -78,10 +78,10 @@ test('sizes and progress read B, KB and MB, the progress in the total\'s unit', 
 
 test('the limits line and the model refusal read as the spec writes them', () => {
   assert.equal(limitsLine(DEFAULT_LIMITS), 'Images: up to 20 a message, 20 MB each');
-  assert.equal(spoken(modelRefusalLine()), "Gravit's model takes no images. Remove the image, or run Gravit on a model that does.");
+  assert.equal(spoken(modelRefusalLine()), "gravit's model takes no images. Remove the image, or run gravit on a model that does.");
   const bot = spoken(modelRefusalLine('news-scout'));
   assert.equal(bot.split('news-scout').length - 1, 2);
-  assert.ok(!bot.includes('Gravit'));
+  assert.ok(!bot.includes('gravit'));
 });
 
 test('base64 is canonical for every length, and a 3 MB array encodes without a stack overflow', () => {

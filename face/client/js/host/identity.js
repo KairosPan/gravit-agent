@@ -271,7 +271,7 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     const p = c.pending;
     if (!p.sender.id || !p.bot.id || !p.bot.username) { set({ error: CONNECT_WORDS.noSender() }); return; }
     const network = c.network === 'slack' || c.network === 'imessage' ? c.network : 'telegram';
-    // iMessage's handles are numbers, with no @: the line Gravit speaks from, and the operator's number
+    // iMessage's handles are numbers, with no @: the line gravit speaks from, and the operator's number
     const imessage = network === 'imessage';
     const seed = {
       network, pending: p.id, botId: p.bot.id, speaksAs: imessage ? p.bot.username : `@${p.bot.username}`, operatorId: p.sender.id,

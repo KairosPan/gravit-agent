@@ -3,7 +3,7 @@
  * (connectVenue whose connector is live:paper: a new paper book, or a kept one continued). They reach no money, no card, no limit, no device
  * and no paper account's record (its top-up and reset stay signed). Every other act is the signed door's alone (POST /api/exchange).
  *
- * Who can knock: any program on this machine (the server's fence turns away another site's page), Gravit's shell included — the accepted
+ * Who can knock: any program on this machine (the server's fence turns away another site's page), gravit's shell included — the accepted
  * residual of §6. The ledger's row of an unsigned act names its signer `local`, and a restart brings back only an unsigned row of one of
  * these types (restore.ts); a `local` row of any other type is skipped and said */
 import { isAgentAction, isOwnerAction } from "./sign.ts";

@@ -16,12 +16,13 @@ import { fileURLToPath } from "node:url";
 export type OwnerVerdict = "ownerless" | "face-signs" | "stop";
 
 /** the label the face pairs its owner device under (face/client/js/host/owner.js) */
-export const FACE_DEVICE_LABEL = "Gravit face";
+/** the label the face pairs under; matched without case, so a device paired as "Gravit face" before the 2026-11-16 rename still counts */
+export const FACE_DEVICE_LABEL = "gravit face";
 export const DEFAULT_ACCOUNT_URL = "http://127.0.0.1:4820";
 
 export const SENTENCE: Record<OwnerVerdict, string> = {
   ownerless: "No owner yet: nobody is locked out. The face pairs as the first owner with the code the Account prints.",
-  "face-signs": 'A device labelled Gravit face is an owner. A label is a hint, not a proof: open the face\'s Account screen and check that its device line reads "This page signs for the account".',
+  "face-signs": 'A device labelled gravit face is an owner. A label is a hint, not a proof: open the face\'s Account screen and check that its device line reads "This page signs for the account".',
   stop: "STOP: no owner device is the face's, and the Account serves no page of its own any more. In order: from a face browser that already signs, let this one in under its Settings › Devices; with none, run the retired page from 9614314c on the same home (git worktree add <dir> 9614314c, npm ci and npm run account there with this Account stopped) and let the face in from that page's Settings › Devices, or sign its device out there so that the Account prints a new code the face pairs with; --fresh only last: it throws away the owner, the venues, the agents and their limits.",
 };
 
@@ -41,7 +42,7 @@ export function ownerStanding(signers: unknown): { verdict: OwnerVerdict; lines:
   const waiting = Array.isArray(signers.pendingDevices) ? signers.pendingDevices.length : 0;
   const lines = owners.length ? owners.map((o) => `${o.kind} · ${o.label}`) : ["no owner"];
   lines.push(`devices waiting: ${waiting}`);
-  const verdict: OwnerVerdict = !owners.length ? "ownerless" : owners.some((o) => o.kind === "device" && o.label === FACE_DEVICE_LABEL) ? "face-signs" : "stop";
+  const verdict: OwnerVerdict = !owners.length ? "ownerless" : owners.some((o) => o.kind === "device" && typeof o.label === "string" && o.label.toLowerCase() === FACE_DEVICE_LABEL) ? "face-signs" : "stop";
   lines.push(SENTENCE[verdict]);
   return { verdict, lines };
 }

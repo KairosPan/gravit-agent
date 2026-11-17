@@ -2,7 +2,7 @@
 
 A personal agent that grows with your investing experience — and connects to a wider world of agents.
 
-Today Gravit is a research and paper-trading companion for investors and traders, on US equities and A-shares. A persona that grows with the user, and an interface by which Gravit discovers and calls other agents, are stated product direction, not shipped features. Gravit is the product name.
+Today gravit is a research and paper-trading companion for investors and traders, on US equities and A-shares. A persona that grows with the user, and an interface by which gravit discovers and calls other agents, are stated product direction, not shipped features. gravit is the product name.
 
 ## Today, tomorrow, and further out
 
@@ -10,11 +10,11 @@ Today Gravit is a research and paper-trading companion for investors and traders
 
 **Tomorrow — a persona that understands you and grows with you.** Planned, not built. An agent with its own name and character, that speaks up on its own and grows as the user's investing experience changes. Proactive contact would build on the desk that already phones, watches, and reports. A dedicated memory module is part of this direction and is not yet designed. User-preference modelling, personality formation, and autonomous growth are planned. None of them runs today. The research prompt the agent runs with now (`dsh/profile/persona.md`) is not this persona. Git history, strategy directories, bot journals, and session histories are a persistent record of decisions and interactions. They are not that module.
 
-**Further out — an open, connected agent.** Planned, not built. Gravit holds an external identity and, outbound only, discovers and calls other agents. No such interface exists, and no agent network exists here. Inbound calls from other agents are out of scope.
+**Further out — an open, connected agent.** Planned, not built. gravit holds an external identity and, outbound only, discovers and calls other agents. No such interface exists, and no agent network exists here. Inbound calls from other agents are out of scope.
 
 ## How trust is earned
 
-Auditability, forward paper trading, and the operator's final judgment are how Gravit earns trust and forms a shared judgment with the user. They are the present discipline of the research and trading partner, not the definition of the product.
+Auditability, forward paper trading, and the operator's final judgment are how gravit earns trust and forms a shared judgment with the user. They are the present discipline of the research and trading partner, not the definition of the product.
 
 ## How it works today
 
@@ -82,12 +82,12 @@ cd account && npm ci && npm run account   # 127.0.0.1:4820
 | Path | What |
 |---|---|
 | `face/` | the chat face: hosts dsh in-process and serves the page at `127.0.0.1:3090` |
-| `account/` | the Account service and the seat Gravit uses |
+| `account/` | the Account service and the seat gravit uses |
 | `market/` | the market service: keyless public reads, A shares, AKShare |
 | `desk/` | the pre-close brief's standing order, the watch rules, and the desk journal |
 | `strategies/` | one directory per strategy (`_template` is the copy source) |
 | `bots/` | operator-authored bot voices |
-| `roles/` | one-shot roles Gravit can call |
+| `roles/` | one-shot roles gravit can call |
 | `dsh/` | the harness profile template, the research-cycle contract, and the skill packs |
 | `docs/` | frozen research inputs, the face's design prototypes, and the dsh upgrade guide |
 
@@ -95,16 +95,16 @@ The project's design documents (the charter, the as-built reference, the roadmap
 
 ## License
 
-Gravit is licensed under the Apache License 2.0 (`Apache-2.0`); the full text is in `LICENSE`. `NOTICE` names the parts that come from Linqi Zhe's repository, which carry the same license.
+gravit is licensed under the Apache License 2.0 (`Apache-2.0`); the full text is in `LICENSE`. `NOTICE` names the parts that come from Linqi Zhe's repository, which carry the same license.
 
 ## 中文
 
 与你的投资经验共同成长的个人代理，连接更广阔的代理世界。
 
-今天的 Gravit 是面向投资者和交易者的研究与纸面交易伙伴（美股与 A 股）。随使用者成长的人格，以及对外发现并调用其他代理的接口，是产品方向，尚未交付。Gravit 是产品名。
+今天的 gravit 是面向投资者和交易者的研究与纸面交易伙伴（美股与 A 股）。随使用者成长的人格，以及对外发现并调用其他代理的接口，是产品方向，尚未交付。gravit 是产品名。
 
-今天是研究与交易的伙伴：一个操作者、一台机器，操作者保留最终判断。明天（计划，未实现）是能理解使用者并与之共同成长的人格：有自己的名字和性格，会主动开口，主动联系建立在已有的桌面电话、盯盘和盘前报告上。专门的记忆模块在计划中，尚未设计。用户偏好建模、性格形成和自主成长都未实现。更远（计划，未实现）是开放、相连的代理：Gravit 持有对外身份，只出站去发现并调用别的代理。入站不在范围内。没有这样的接口，也没有代理网络。
+今天是研究与交易的伙伴：一个操作者、一台机器，操作者保留最终判断。明天（计划，未实现）是能理解使用者并与之共同成长的人格：有自己的名字和性格，会主动开口，主动联系建立在已有的桌面电话、盯盘和盘前报告上。专门的记忆模块在计划中，尚未设计。用户偏好建模、性格形成和自主成长都未实现。更远（计划，未实现）是开放、相连的代理：gravit 持有对外身份，只出站去发现并调用别的代理。入站不在范围内。没有这样的接口，也没有代理网络。
 
-可审计的研究、向前的纸面交易和操作者的最终判断，是 Gravit 取得信任、与使用者形成共同判断的方式，不是产品的定义。git 历史、策略目录、bot journal 和会话历史是决策与交互的持久记录，不是记忆模块。
+可审计的研究、向前的纸面交易和操作者的最终判断，是 gravit 取得信任、与使用者形成共同判断的方式，不是产品的定义。git 历史、策略目录、bot journal 和会话历史是决策与交互的持久记录，不是记忆模块。
 
 今天的机制：`market/` 提供公开行情（含美股与 A 股，A 股经腾讯与 AKShare）；`account/` 是操作者的账户，席位只在纸面 venue 上下单，每一笔写都要过门禁卡和账户自己的卡；`strategies/<name>/` 是一条策略。`status.yaml` 的状态为 `idea | researching | validated | paper | retired`。`THESIS.md` 写证伪标准（指标、阈值、窗口）。`journal.md` 记证据，纸面交易记下账户返回的数字和订单号。一个研究周期以一次提交留下审计轨迹，或由操作者提交。2026-10-24 起，点时数据床、回放通道和前视防护已从树中移除，证据来自向前的纸面交易。桌面侧包括电话（Telegram 或 Slack）、按交易所日历触发的常设指令、美股与 A 股的盯盘，以及每条策略的盘前报告。桌面回合只通知操作者；该预设没有 shell，也没有下单工具，写入只留在 `desk/journal/`。界面在 Settings › Language 中在 English 与 中文之间切换界面文字。

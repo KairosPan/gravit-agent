@@ -1245,7 +1245,7 @@ const FACE_CLOCK: DeskClock = {
  *   under; `quotes` the desk's quote source, the Market's reads (src/market-quotes.ts); `memory` the brief's reader of
  *   the memory ({@link deskBuiltins}); `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
  *   `agentDefaultModel` and `llm` a firing's route needs - a firing on a context without them could not run; `on` the
- *   root bus; `deliver` the desk conversation's; `note`, what a firing sent noted in Gravit's one conversation; `log`, stderr by default; `now`, the owner's clock - the wall clock
+ *   root bus; `deliver` the desk conversation's; `note`, what a firing sent noted in gravit's one conversation; `log`, stderr by default; `now`, the owner's clock - the wall clock
  *   by default - under the face's timers; `seams`, for tests.
  */
 export function createDeskSchedule(opts: {

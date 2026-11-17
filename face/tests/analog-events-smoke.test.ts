@@ -1,15 +1,15 @@
 // face/tests/analog-events-smoke.test.ts
 /** The event analogs on a real boot (analogs spec §5.2, §6.5): the source reader's preset is listed whole, the running
- * registry lists `analog_events` and Gravit's view `role_source_reader`, and the two analog rows are listed active,
+ * registry lists `analog_events` and gravit's view `role_source_reader`, and the two analog rows are listed active,
  * with no `analog_chart` in the registry (withdrawn 2026-11-13);
  * Discover's abilities listing (src/abilities.ts) over the booted tree reads both shipped declarations, the event
  * analog and the read-through, `on`, every declared tool registered, `source-reader` and `analog-guide` present; a
  * session created on `role-source-reader` sees exactly `web_fetch` and `web_search` - `web_fetch` in its own layer,
- * given by the face (src/source-reader.ts), proved here on the real tree; a Gravit session, a PDF page reader's and a
+ * given by the face (src/source-reader.ts), proved here on the real tree; a gravit session, a PDF page reader's and a
  * bot's see no `web_fetch`, the last two no analog tool either, and neither the conversation's allow list nor the
  * desk's names the reader's tools; through the real registry the reader's `web_fetch` reaches dsh's http provider,
  * which refuses a loopback address before any socket opens, until the fortieth page, after which the guard refuses
- * the next; `analog_events` for Gravit measures one event on a stub market and stores the view, its source counted
+ * the next; `analog_events` for gravit measures one event on a stub market and stores the view, its source counted
  * as verified only once the page record holds it; the view route serves the stored view with the cookie, refuses
  * another site's page and answers 404 for an id it does not hold; the reader cannot call `analog_events`; and the stub saw only `/api/candles` on `cboe`.
  *
@@ -141,7 +141,7 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
       tools.execute({ callId: `events-smoke-${call++}`, name, arguments: args, agent, signal: new AbortController().signal });
     const textOf = (result: { content?: { text?: string }[] }): string => result.content?.[0]?.text ?? "";
 
-    // 1. the reader's preset whole; analog_events registered, role_source_reader in Gravit's view; the rows active
+    // 1. the reader's preset whole; analog_events registered, role_source_reader in gravit's view; the rows active
     const presets = ctx.get("agentPresets") as { list(): Promise<{ id: string; broken?: string }[]> };
     const roster = await presets.list();
     const readerPreset = roster.find((p) => p.id === "role-source-reader");
@@ -150,7 +150,7 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
     assert.ok(names(tools.schemas()).includes("analog_events"), "analog_events is registered");
     const gravit = await create();
     const gravitTools = names(tools.schemas(gravit));
-    assert.ok(gravitTools.includes("role_source_reader"), `Gravit's view lists role_source_reader; saw ${gravitTools.join(", ")}`);
+    assert.ok(gravitTools.includes("role_source_reader"), `gravit's view lists role_source_reader; saw ${gravitTools.join(", ")}`);
     const listedRows = pluginListing(panelDeps(ctx, process.cwd(), home)).rows;
     assert.equal(names(tools.schemas()).includes("analog_chart"), false, "the chart analog is withdrawn: no analog_chart is registered");
     for (const id of ["analog-views", "analog-events"]) {
@@ -184,7 +184,7 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
     assert.deepEqual(names(tools.schemas(reader)), ["web_fetch", "web_search"], "the reader sees web_fetch and web_search, nothing else");
 
     // 3. no other session sees web_fetch; the PDF reader and a bot see no analog tool; the allow lists name none
-    assert.equal(gravitTools.includes("web_fetch"), false, "Gravit's session has no web_fetch");
+    assert.equal(gravitTools.includes("web_fetch"), false, "gravit's session has no web_fetch");
     const pdfTools = names(tools.schemas(await create("role-pdf-page-reader")));
     const botTools = names(tools.schemas(await create("probe")));
     for (const [who, seen] of [["the PDF page reader", pdfTools], ["the fixture bot", botTools]] as const) {
@@ -210,10 +210,10 @@ test("analog events smoke: the reader's two tools and their fences, and analog_e
     assert.equal(over.isError, true, "the forty-first page is refused");
     assert.match(textOf(over), /at most 40 pages/, `by the reader's budget; saw ${textOf(over)}`);
     const gravitFetch = await run("web_fetch", { url: PROBE }, gravit);
-    assert.equal(gravitFetch.isError, true, "Gravit's session has no web_fetch to call");
+    assert.equal(gravitFetch.isError, true, "gravit's session has no web_fetch to call");
     assert.doesNotMatch(textOf(gravitFetch), /non-public IP address/, "and its call never reached the provider");
 
-    // 5. analog_events for Gravit: one event and one anchor, each source verified only once the page record holds it
+    // 5. analog_events for gravit: one event and one anchor, each source verified only once the page record holds it
     const views = ctx.get("analogViews") as AnalogViews | undefined;
     assert.ok(views !== undefined, "analogViews must be provided");
     assert.equal(views.pageOpened(SOURCE), false, "the refused fetches noted no page");

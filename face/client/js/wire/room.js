@@ -71,7 +71,7 @@ export function foldMembers(items) {
  * a member too (a member's cwd IS the channel's, so it resolves to the same
  * channel and returns the same roster), while the member's own projection
  * carries no members - so the strip would read the whole roster `idle` and
- * Gravit `organizing` whenever the member itself is mid-turn.
+ * gravit `organizing` whenever the member itself is mid-turn.
  * @param {unknown} projection - the session's own `room` projection value.
  * @param {ReadonlySet<string>} memberIds - every id the header fold made a member.
  * @param {string|null|undefined} sessionId - the session on screen.
@@ -85,11 +85,11 @@ export function isMemberSession(projection, memberIds, sessionId) {
 /** @typedef {{id: string, name: string, state: string, gravit?: boolean, broken?: string, sessionId?: string}} Chip */
 
 /**
- * The participants strip (spec §6): Gravit first, then every rostered bot,
+ * The participants strip (spec §6): gravit first, then every rostered bot,
  * then any member the roster no longer carries (`left`). States, in
  * precedence: a pending gate on the member's session → `waiting` (on the operator);
  * while `called`, the live fine state if any; else the projection's coarse
- * state; else `idle`. Gravit is `organizing` while the projection says so,
+ * state; else `idle`. gravit is `organizing` while the projection says so,
  * or - before the session is a room - while the list says it is running.
  * @param {{roster: ReadonlyArray<{id: string, name: string, broken?: string}>, projection: any, members: Record<string, {sessionId?: string, name?: string}>, gates: Set<string>, fine: Map<string, string>, running: boolean, gravitName?: string}} input
  * @returns {Chip[]}

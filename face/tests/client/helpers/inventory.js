@@ -32,15 +32,15 @@ export const listings = () => ({
     { server: 'akshare', phase: 'failed', tools: [] },
   ], agentTools: [], rows: [] }),
   bots: shelf({ ok: true, bots: [
-    { id: 'gravit', name: 'Gravit', description: 'host', isDefault: true, listed: true },
+    { id: 'gravit', name: 'gravit', description: 'host', isDefault: true, listed: true },
     buffett,
   ] }),
-  agents: shelf({ ok: true, main: { name: 'Gravit', runtime: 'dsh 0.2.0-rc.2' },
+  agents: shelf({ ok: true, main: { name: 'gravit', runtime: 'dsh 0.2.0-rc.2' },
     local: [{ bin: 'codex', label: 'Codex', found: true, version: '0.9', auth: { state: 'ok', account: 'pan' }, tool: 'agent_codex' }, { bin: 'gone', label: 'Gone', found: false, auth: { state: 'unknown' } }],
     candidates: [{ bin: 'claude', label: 'Claude Code', version: '2.1' }] }),
   memory: shelf({ ok: true, groups: [
     { name: 'mechanics', skills: [{ name: 'rules', description: 'The five honest-eval rules' }] },
-    { name: 'style-gravit', skills: [{ name: 'voice', description: 'How Gravit writes' }] },
+    { name: 'style-gravit', skills: [{ name: 'voice', description: 'How gravit writes' }] },
   ] }),
 });
 

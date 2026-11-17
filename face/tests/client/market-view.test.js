@@ -1,6 +1,6 @@
 // The Markets view: the Account's explore items as the table's rows — tabs, prices by kind, the source word, the legs across
 // venues — beside the face's A-share (cn:) rows, and a market's page with what is held, working and stated for it (spec
-// 2026-10-22 §6.1), over the stand-in's answers (tests/fixtures/account/); what Hand to Gravit says of a market. And the face's
+// 2026-10-22 §6.1), over the stand-in's answers (tests/fixtures/account/); what Hand to gravit says of a market. And the face's
 // own ids and English words from the cn wire's enums (spec 2026-10-19 §7 Stage 2).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -786,7 +786,7 @@ test('no icon URL survives any view (an item given an https icon by hand)', () =
   assert.deepEqual([btc.icon, btc.at[0].icon, avax.icon, fed.icon, fed.outcomes[0].icon, quoteBtc.icon, compare.rows[0].icon, candles.icon, candles.candles[0].icon], Array(9).fill(ICON));
 });
 
-// ── What Hand to Gravit says of a market ──
+// ── What Hand to gravit says of a market ──
 
 test('handWordsOf: an Account key by its base and name; a face id by its watchlist or search asset, else its own; anything else null', () => {
   const m = markets({

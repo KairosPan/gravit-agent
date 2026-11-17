@@ -200,7 +200,7 @@ async function openEvents(port: number, cookie: string): Promise<EventsClient> {
   return { clientId: String(ready.clientId), next, close: () => socket.close() };
 }
 
-test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gravit can ask, both fences hold", { skip: gated && "set FACE_SMOKE=1" }, async () => {
+test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, gravit can ask, both fences hold", { skip: gated && "set FACE_SMOKE=1" }, async () => {
   const home = mkdtempSync(join(tmpdir(), "face-smoke-"));
   setupFaceProfile(home);
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
@@ -219,7 +219,7 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     const port = boundPort(ctx);
     const base = `http://127.0.0.1:${port}`;
 
-    /* Gravit's VOICE, drilled. `bootFace` already refuses a tree missing the
+    /* gravit's VOICE, drilled. `bootFace` already refuses a tree missing the
      * `userQuestions` SERVICE; this is its model-facing half, and the two fail
      * INDEPENDENTLY - dsh-base mounts the service and no tool row for it, so
      * the face booted healthy, offered the model its whole toolset, and could
@@ -316,7 +316,7 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     const index = await fetch(`${base}/`, { headers: { cookie }, redirect: "manual" });
     assert.equal(index.status, 200);
     assert.equal(index.headers.get("content-type"), "text/html; charset=utf-8");
-    assert.match(await index.text(), /<title>Gravit<\/title>/, "the page at / is gravit-ui (spec 2026-10-19)");
+    assert.match(await index.text(), /<title>gravit<\/title>/, "the page at / is gravit-ui (spec 2026-10-19)");
 
     // the `prefix /client` route - registerStatic's other half, and the only
     // place it is exercised against a real webserver rather than a recorder.

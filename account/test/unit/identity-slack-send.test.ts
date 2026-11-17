@@ -237,7 +237,7 @@ describe("sending on Slack, through the account", () => {
     const c = slack.calls.filter((x) => x.method === "chat.postMessage").at(-1)!;
     expect(c.authorization).toBe(`Bearer ${slack.tokens.bot}`);
     expect(c.url).toBe("/api/chat.postMessage");
-    // a chat with no network goes by the Chat with Gravit row
+    // a chat with no network goes by the Chat with gravit row
     const plain = await send({ kind: "chat", text: "and AAPL is 230" });
     expect(plain).toEqual({ ok: true, sent: [`slack:${slack.posted.at(-1)!.ts}`] });
     // a long text in parts of at most 4,000 before escaping, each its own id
@@ -413,7 +413,7 @@ describe("sending on Slack, through the account", () => {
     svc.identity!.onFill({ side: "buy", qty: 10, symbol: "NVDA.US", price: 183, venueName: "Paper <b>&</b> broker.example", paper: true });
     await until(() => slack.posted.length >= 2);
     await pause(100);
-    expect(texts()).toEqual(["Your call · Buy 10 NVDA · limit 183.00 · see &lt;link&gt; or evil·example — waiting in Gravit", "Filled · Buy 10 NVDA·US at 183 · Paper · Paper &lt;b&gt;&amp;&lt;/b&gt; broker·example"]);
+    expect(texts()).toEqual(["Your call · Buy 10 NVDA · limit 183.00 · see &lt;link&gt; or evil·example — waiting in gravit", "Filled · Buy 10 NVDA·US at 183 · Paper · Paper &lt;b&gt;&amp;&lt;/b&gt; broker·example"]);
     for (const t of texts()) expect(t).not.toMatch(/https?:|evil\.example|broker\.example/);
   });
 });

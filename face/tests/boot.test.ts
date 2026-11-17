@@ -174,7 +174,7 @@ test("an operator patch now reaches the base-owned storage rows", () => {
   assert.deepEqual(row?.config, { root: "/tmp/x" });
 });
 
-/* AKShare is the market's (market/README.md): Gravit reaches it through the
+/* AKShare is the market's (market/README.md): gravit reaches it through the
  * market row's market_akshare, and the face composes no AKShare row and runs no
  * AKShare process. The retired env switch and an operator's stale patch both
  * stay inert. */
@@ -271,7 +271,7 @@ test("composeFace mounts the Account seat from FACE_ACCOUNT_SEAT_DIR and FACE_AC
     assert.equal(config.command, process.execPath);
     assert.deepEqual(config.args, ["/tmp/face-test-seat/node_modules/tsx/dist/cli.mjs", "src/portfolio/mcp.ts"]);
     assert.equal(config.cwd, "/tmp/face-test-seat");
-    assert.deepEqual(config.env, { PORTFOLIO_URL: "http://127.0.0.1:4899", PORTFOLIO_AGENT: "Gravit" });
+    assert.deepEqual(config.env, { PORTFOLIO_URL: "http://127.0.0.1:4899", PORTFOLIO_AGENT: "gravit" });
     assert.equal(config.toolCallTimeoutMs, 130_000);
     assert.equal(config.failOnStartupError, false);
   } finally {
@@ -423,16 +423,16 @@ test("composeFace resolves the home explicitly and leaves $DSH_HOME alone", () =
  * nothing would be SILENT, so the check is on the COMPOSED row rather than on
  * the patch list - the same reason the hmr and telemetry switches are guarded.
  * The key is the 0.2.0 one: `persona` is gone (commit 40792330c0), and a patch
- * still writing it would compose "fine" and leave Gravit nameless - so the old
+ * still writing it would compose "fine" and leave gravit nameless - so the old
  * key is asserted ABSENT, not merely the new one present. */
-test("composeFace sets Gravit's persona on dsh-base's system-prompt row", () => {
+test("composeFace sets gravit's persona on dsh-base's system-prompt row", () => {
   const home = freshHome();
   const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home });
   const row = composeEntries([patches]).find((r) => r.id === "system-prompt");
   assert.ok(row, "system-prompt row present");
   const config = row!.config as { personaPrefix?: string; persona?: string; personaSuffix?: string };
   const persona = config.personaPrefix ?? "";
-  assert.match(persona, /^You are Gravit/);
+  assert.match(persona, /^You are gravit/);
   assert.equal(persona, readPersona(PERSONA_PATH));
   assert.equal(config.persona, undefined, "the 0.1.1 key must not be written");
   assert.equal(config.personaSuffix, undefined, "no suffix: 0.1.1 had none, and it defaults to ''");
@@ -565,7 +565,7 @@ test("composeFace refuses a missing roles directory, naming it", () => {
 });
 
 /* The cycle contract is read where the roles are and refused the same way: an empty `cycle.md` (or an
- * oversized one) refuses the compose with its path, so Gravit never boots with a silently blank
+ * oversized one) refuses the compose with its path, so gravit never boots with a silently blank
  * contract - the section would just not exist, and nothing else would say so. `cyclePath` points the
  * read at a fixture; the roles root is a valid fixture, so the cycle is the only thing that can fail. */
 test("composeFace refuses an empty cycle file, naming it", async () => {
@@ -602,7 +602,7 @@ test("composeFace refuses a missing cycle file, its message opening with the pat
 
 /* The desk's contract is read beside the cycle's and handed back, not composed: `bootFace` declares the
  * `gravit-desk` preset from it once the tree has settled (src/desk-preset.ts), so it rides on no static
- * row - Gravit's own `gravit` row never carries it. A bad file refuses the compose with its path, before
+ * row - gravit's own `gravit` row never carries it. A bad file refuses the compose with its path, before
  * any plugin loads, exactly as a bad cycle file does. `deskPath` points the read at a fixture. */
 test("composeFace returns the desk text and refuses an empty desk.md with its path", async () => {
   const home = freshHome();
@@ -613,7 +613,7 @@ test("composeFace returns the desk text and refuses an empty desk.md with its pa
     assert.equal(shipped.desk, readDesk(DESK_PATH), "unset, the repository's dsh/profile/desk.md");
     const gravit = composeEntries([shipped.patches]).find((entry) => entry.id === "preset-gravit");
     const rows = (gravit?.config as { plugins: Array<{ id: string; config: Record<string, unknown> }> }).plugins;
-    assert.equal("desk" in rows.find((row) => row.id === "gravit")!.config, false, "Gravit's own row never carries the desk's contract");
+    assert.equal("desk" in rows.find((row) => row.id === "gravit")!.config, false, "gravit's own row never carries the desk's contract");
 
     const deskPath = join(dir, "desk.md");
     await writeFile(deskPath, "  Inform; never order.\n");
@@ -632,7 +632,7 @@ test("composeFace returns the desk text and refuses an empty desk.md with its pa
 
 /* Spec §4.1 L3: dsh-base's default candidates are AGENTS.md and CLAUDE.md; the
  * face sets the row's two candidate lists (the patch carries dsh-base's
- * `maxBytes` beside them, a named config replaces the row's) so Gravit reads
+ * `maxBytes` beside them, a named config replaces the row's) so gravit reads
  * GRAVIT.md and its local twin and nothing else. Composed AFTER the operator
  * layers, like the persona patch, and guarded like it. */
 test("composeFace patches agent-instructions to GRAVIT.md and GRAVIT.local.md, after the operator layers", () => {
@@ -719,7 +719,7 @@ test("a composition without an agent-instructions row gets no instructions patch
 
 /* The run protocols are read where the cycle is and refused the same way: a protocols directory
  * without lunhui-run.md, or with it but without lunhui-module.md, or without memory.md, refuses the
- * compose, its message opening with the missing file, so Gravit never boots the Lunhui rows without
+ * compose, its message opening with the missing file, so gravit never boots the Lunhui rows without
  * the order they are driven in. `protocolsDir` points the read at a fixture directory. */
 test("composeFace refuses a protocols directory with no lunhui-run.md, no lunhui-module.md or no memory.md, its message opening with the path", async () => {
   const home = freshHome();

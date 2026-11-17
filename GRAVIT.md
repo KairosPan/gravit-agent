@@ -1,18 +1,18 @@
 # GRAVIT.md — the workspace, for every agent dsh runs here
 
-Read by Gravit, its role children and the bots: facts and rules of this tree, never
+Read by gravit, its role children and the bots: facts and rules of this tree, never
 anyone's identity. When this file and the tree disagree, the tree is right.
 
 Three layers. MARKET is the market service, read through `mcp__market__*` (keyless, no
 card; AKShare for A shares is `mcp__market__market_akshare`). ACCOUNT is the operator's
 Account, reached through the seat (`mcp__account__*`, paper venues only). STRATEGY is
-`strategies/`: one directory per strategy, Gravit's arena.
+`strategies/`: one directory per strategy, gravit's arena.
 
 ## Where things are
 
 - `strategies/<name>/` — `THESIS.md`, `journal.md`, `status.yaml`; `strategies/_template` is
   the copy source.
-- `roles/` — Gravit's role library; `bots/` — the operator's voices. Both are the operator's.
+- `roles/` — gravit's role library; `bots/` — the operator's voices. Both are the operator's.
 
 ## Reads
 
@@ -48,16 +48,16 @@ member. Caps per operator message: 3 rounds, 10 bot messages, 2 peer continuatio
 
 ## The Account seat
 
-`mcp__account__*`: Gravit's seat at the operator's Account — paper venues only; a write stops for a
+`mcp__account__*`: gravit's seat at the operator's Account — paper venues only; a write stops for a
 card here, then one there; after a `card` answer, `portfolio_wait`; see `account-seat-guide`.
 The operator trades the same Account by hand from the face's Trade screen, an owner device that
-passes no gate of this tree's, only the Account's cap; a position Gravit did not open may be the
+passes no gate of this tree's, only the Account's cap; a position gravit did not open may be the
 owner's, and the statement names who.
 `mcp__memory__*`: the owner's record of decisions and lessons; you record and propose, the owner arms.
 
 ## The desk
 
-`desk/` is the operator's; Gravit writes only `desk/journal/`. A desk turn informs; it never
+`desk/` is the operator's; gravit writes only `desk/journal/`. A desk turn informs; it never
 orders, asks, opens a goal or commits. `desk_quotes` is the price now, never evidence. Desk
 turns are refused while `GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh` or `.agents` is under
 `desk/journal/`.

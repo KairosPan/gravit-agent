@@ -67,14 +67,14 @@ export const slackAppLink = (appId: string, teamId: string): string => `https://
 export const escapeSlack = (text: string): string => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** The app manifest the owner pastes into Slack's "Create an app › From a manifest": Socket Mode (no request URL, so nothing reaches this
- * machine from outside), a bot user named Gravit, the Messages tab writable so the operator can DM it, the three bot scopes (chat:write,
+ * machine from outside), a bot user named gravit, the Messages tab writable so the operator can DM it, the three bot scopes (chat:write,
  * im:history, users:read) and the one event, message.im. The app-level token's connections:write is asked for on Slack's own page. */
 export const SLACK_MANIFEST: string = JSON.stringify(
   {
-    display_information: { name: "Gravit" },
+    display_information: { name: "gravit" },
     features: {
       app_home: { home_tab_enabled: false, messages_tab_enabled: true, messages_tab_read_only_enabled: false },
-      bot_user: { display_name: "Gravit", always_online: true },
+      bot_user: { display_name: "gravit", always_online: true },
     },
     oauth_config: { scopes: { bot: ["chat:write", "im:history", "users:read"] } },
     settings: {

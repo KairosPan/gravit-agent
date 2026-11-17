@@ -331,6 +331,14 @@ describe("the agents, one by one", () => {
     // the mode as every read wires it: guard (Guard) or open (Beast)
     expect(r.body.mode).toBe("guard");
   });
+
+  it("a key let in as Gravit still owns the flights its seat opens as gravit (the face's seat name since 2026-11-16)", async () => {
+    const seat = simKey("gravit-case");
+    ok(await own({ type: "approveAgent", agentAddress: seat.address, agentName: "Gravit", validUntil: Date.now() + 30 * DAY }));
+    svc.openFlight({ id: "gravit", name: "gravit", code: "GR" }, "read the paper account");
+    const a = (await get("/api/account/agents")).body.agents.find((x: { address: string }) => x.address === seat.address);
+    expect(a.flights.map((f: { request: string }) => f.request)).toContain("read the paper account");
+  });
 });
 
 describe("the net worth curve", () => {

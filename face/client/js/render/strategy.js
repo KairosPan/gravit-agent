@@ -3,7 +3,7 @@
 // latest backtest, the research runs, the backtests, the journal and the files, from /data/channels/overview;
 // then the strategy's tasks and its standing orders, each the rail's line; then the paper positions of the venue its
 // status.yaml names (or a line saying it names none, never a guessed venue).
-// Everything here was written by Gravit or the operator into the channel's directory: text through esc, the thesis
+// Everything here was written by gravit or the operator into the channel's directory: text through esc, the thesis
 // through the thread's DOM-built markdown.
 import { esc, cls } from '../html.js';
 import { fmtClock, fmtDate } from '../time.js';

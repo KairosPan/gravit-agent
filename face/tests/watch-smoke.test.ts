@@ -874,7 +874,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     const rtReply = phone[expected.length + 1];
     const [reason, blank, ...block] = rtReply.text.split("\n");
     assert.deepEqual([rtReply.replyTo, reason, blank], [rtAt, RT_REASON, ""], `a reply under the alert: the reason, a blank line; saw ${JSON.stringify(rtReply.text)}`);
-    assert.equal(block[0], "推演 · Gravit 的推断，不是下单 · 确定度 中", "then the block's head");
+    assert.equal(block[0], "推演 · gravit 的推断，不是下单 · 确定度 中", "then the block's head");
     /* the read-through service keeps the wall clock here (its row's `now` is test-only config, which a patch cannot
      * carry), and a print of another New York day than its now is dated */
     const stampDay = etDate(new Date()) === "2026-12-01" ? "" : "12-01 ";

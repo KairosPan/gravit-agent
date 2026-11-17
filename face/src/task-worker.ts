@@ -9,7 +9,7 @@
  * pins no permission, so a worker gets what a browser conversation gets: order cards wait for the operator there.
  *
  * Everything the model supplied - the strategy's name, the bot's, the title, the brief - is checked before any session
- * exists ({@link TaskInputError}). A bot is one the operator made available to Gravit (the one roster, src/roster.ts)
+ * exists ({@link TaskInputError}). A bot is one the operator made available to gravit (the one roster, src/roster.ts)
  * and dsh lists, unbroken; never the default, the desk's, the conversation's or a role's preset.
  * @module
  */
@@ -94,7 +94,7 @@ export async function strategyDir(root: string, name: string): Promise<string> {
 
 /** What a worker is told at the end of every brief. */
 export const TASK_FOOTER = `---
-This is a task from Gravit's conversation with the operator, who does not read this session. When you are done, call task_report once with status "ready" and at most 600 characters: what you found or did, and where the full result is. If you cannot go on, call it with "blocked" and what you need, or "failed" and why. At each milestone call it with "progress" and one short line. Ask the operator with ask_user_question only when you cannot go on without an answer; order cards wait for the operator in the browser.`;
+This is a task from gravit's conversation with the operator, who does not read this session. When you are done, call task_report once with status "ready" and at most 600 characters: what you found or did, and where the full result is. If you cannot go on, call it with "blocked" and what you need, or "failed" and why. At each milestone call it with "progress" and one short line. Ask the operator with ask_user_question only when you cannot go on without an answer; order cards wait for the operator in the browser.`;
 
 /** The brief's text: the title, the brief, then {@link TASK_FOOTER}. */
 export function briefText(title: string, brief: string): string {
@@ -236,7 +236,7 @@ export function taskReportTool(): DeskToolDefinition {
   return {
     name: "task_report",
     description:
-      "Report this task to Gravit's conversation with the operator. \"progress\": one short line at a milestone (it shows on the task's " +
+      "Report this task to gravit's conversation with the operator. \"progress\": one short line at a milestone (it shows on the task's " +
       "line and reaches nobody). \"ready\": what you found or did and where the full result is. \"blocked\": what you need to go on. " +
       "\"failed\": why you cannot. At most 600 characters.",
     parameters: {

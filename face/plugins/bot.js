@@ -21,18 +21,18 @@
  * — so they cover every agent joined to that revision and nothing else.
  * dsh-subagent composes a child the same way. The persona section is named
  * `deployment:persona-prefix` at the central prefix order: a scoped section of
- * that name SHADOWS the deployment's global prefix, which is Gravit's persona
+ * that name SHADOWS the deployment's global prefix, which is gravit's persona
  * (NEW packages/core/system-prompt/src/index.ts:125-127, 179, 251-253), as
- * 0.1.1's `deployment:persona` did. Gravit's `personaSuffix` is not touched;
+ * 0.1.1's `deployment:persona` did. gravit's `personaSuffix` is not touched;
  * the face sets none (PLAN S1).
  *
  * MASK ONLY. A row with `maskOnly: true` and NO persona registers the mask
  * and nothing else: no persona section, so the deployment's global prefix -
- * Gravit's persona - stays in every prompt of the preset that mounts it. The
- * `gravit-desk` preset does (src/desk-preset.ts): Gravit's voice under the
+ * gravit's persona - stays in every prompt of the preset that mounts it. The
+ * `gravit-desk` preset does (src/desk-preset.ts): gravit's voice under the
  * desk's allow list. The opt-in is explicit and exact - `true` and no persona
  * key at all - so a bot composition that merely LOST its persona is still
- * refused, rather than mounting a voice that speaks as Gravit. The mask, its
+ * refused, rather than mounting a voice that speaks as gravit. The mask, its
  * re-expansion and its unload are the same code either way.
  *
  * ACTIVATION IS EAGER. dsh 0.2.0 mounts a preset when it is DECLARED, not at
@@ -66,7 +66,7 @@ export const inject = ["systemPrompt", "tools"];
  *  packages/core/system-prompt/src/index.ts:179), restated rather than imported
  *  because this file imports nothing (see the header). tests/bot-plugin.test.ts
  *  pins it to the installed constant, so a rename upstream fails a test instead
- *  of silently turning the bot's persona into a SECOND persona beside Gravit's. */
+ *  of silently turning the bot's persona into a SECOND persona beside gravit's. */
 export const PERSONA_PREFIX_SECTION = "deployment:persona-prefix";
 
 /** The dsh system prompt is a strict `{{…}}` template with no escape; a bot's

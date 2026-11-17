@@ -111,7 +111,7 @@ export interface AnnotatorDeps {
   root: string;
   on: SessionEventsOn;
   deliver: DeskConversation["deliver"];
-  /** Note a reply `deliver` did not refuse as a line in Gravit's one conversation (src/conversation.ts `note`, through
+  /** Note a reply `deliver` did not refuse as a line in gravit's one conversation (src/conversation.ts `note`, through
    * src/desk.ts); none when absent. */
   note?: (line: DeskLine) => void;
   budget?: () => Promise<BudgetState>;

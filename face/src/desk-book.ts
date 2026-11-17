@@ -64,7 +64,7 @@
  * regular session alone, all three sessions (pre-market, regular, after-hours) when left out; `forms`, only on a
  * filing rule, a list of 8-K, 8-K/A and 4, all three by default; `cooldown`, the level's grammar, 30m by default, on
  * any kind but gap - a kind's own key left empty on another kind counts as absent, as any empty optional key does;
- * `annotate`, true by default on a move_pct or gap rule and needing no plan there (the alert gets Gravit's reason; a
+ * `annotate`, true by default on a move_pct or gap rule and needing no plan there (the alert gets gravit's reason; a
  * plan, when given, is checked too), false by default on a filing rule and true there only with a `plan`; a `plan`
  * is one line of at most 300 characters; `urgent`, false by default - true sends the rule's alerts
  * `urgent`, through the account's quiet hours (src/phone.ts); a level is never urgent. An id is defined once: a second rule with it is refused
@@ -524,7 +524,7 @@ function ruleVerdict(raw: unknown, index: number, file: string, first: boolean |
     }
   }
 
-  /* A move or gap rule's alert gets Gravit's reason by default (ruling 2); a filing rule's check stays opt-in. */
+  /* A move or gap rule's alert gets gravit's reason by default (ruling 2); a filing rule's check stays opt-in. */
   const annotate = raw.annotate === undefined || raw.annotate === null ? ruleKind !== "filing" : raw.annotate;
   if (typeof annotate !== "boolean") return annotateFault(raw.annotate);
 

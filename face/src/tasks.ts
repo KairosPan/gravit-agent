@@ -601,7 +601,7 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
   };
 }
 
-/** Gravit's one conversation as the phone bridge reaches it (src/phone-bridge.ts `PhoneConversation`; src/desk.ts
+/** gravit's one conversation as the phone bridge reaches it (src/phone-bridge.ts `PhoneConversation`; src/desk.ts
  * binds it): `post`, `stop`, `carry` and `note` are the conversation's; `status` names its session and counts its tasks - `running`
  * those running or stalled, `waiting` those waiting for the operator at a gate.
  * @param conversation - the conversation's handle.

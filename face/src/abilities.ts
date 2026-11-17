@@ -1,9 +1,9 @@
 // face/src/abilities.ts
-/** Abilities: what a plugin under `face/plugins/<folder>/` says Gravit can do with it, in a
+/** Abilities: what a plugin under `face/plugins/<folder>/` says gravit can do with it, in a
  * declaration of its own, `ability.json` (spec 2026-11-13 Abilities on Discover, §4.1–§4.2).
  *
  * A declaration is one UTF-8 JSON object of at most {@link ABILITY_MAX_BYTES} bytes. Its text
- * is for a person browsing Discover: Gravit never reads the file, and nothing here changes a
+ * is for a person browsing Discover: gravit never reads the file, and nothing here changes a
  * prompt, a preset, a tool or a role. {@link validateAbility} checks one parsed object field by
  * field, in the order of {@link AbilityFile}, and keeps only the fields it names: a Gravit-Field
  * manifest's `kind`, `url`, `homepage`, `by`, `needs` and `writes` pass unread. Every string is
@@ -93,7 +93,7 @@ export interface AbilityFile {
   icon: string | null;
   /** What it does and how it runs; `\n` separates paragraphs. */
   about: string;
-  /** Questions a person could put to Gravit. */
+  /** Questions a person could put to gravit. */
   asks: string[];
   /** What it does not tell you. */
   limits: string[];
@@ -103,7 +103,7 @@ export interface AbilityFile {
   rows: string[];
   /** The role ids it uses. */
   roles: string[];
-  /** The skills that teach Gravit to use it. */
+  /** The skills that teach gravit to use it. */
   skills: string[];
   /** The Chinese overlay, or `null` when the file has none. */
   zh: AbilityText | null;
@@ -345,7 +345,7 @@ export function readAbilities(root: string): { abilities: AbilityFile[]; refused
 /* ---------- the listing: GET /data/abilities.json (spec §4.3) ---------- */
 
 /** An ability's state: its own rows' and tools', by {@link abilityState}. It says nothing of
- *  the desk or of Gravit's conversation. */
+ *  the desk or of gravit's conversation. */
 export type AbilityState = "on" | "off" | "starting" | "failed";
 
 /** One ability as the listing serves it, built field by field from its declaration and the

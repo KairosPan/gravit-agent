@@ -1,5 +1,5 @@
 // face/tests/conversation.test.ts
-/** The conversation (src/conversation.ts): Gravit's one router session, on `gravit-router`, in its own folder under
+/** The conversation (src/conversation.ts): gravit's one router session, on `gravit-router`, in its own folder under
  * the harness home, found again through the desk's ledger and supervised like the desk (spec 2026-11-08 §5.2, §5.10).
  * Offline: a fake root context, a fake bus, node's mocked timers for the deadline.
  *
@@ -1069,7 +1069,7 @@ test("a phone text logged in a turn a browser steer named still answers the phon
   assert.deepEqual(handle.turnOrigin(), { kind: "web" });
 });
 
-test("a failed phone turn tells the phone Gravit could not answer, never the desk", async (t) => {
+test("a failed phone turn tells the phone gravit could not answer, never the desk", async (t) => {
   const home = await scratch("deliver-failed");
   const tree = new FakeConversationTree();
   const sent: Delivered[] = [];
@@ -1079,7 +1079,7 @@ test("a failed phone turn tells the phone Gravit could not answer, never the des
   tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "error", error: { message: "boom" } } });
   await until(() => sent.length === 1, "the delivery");
   assert.equal(sent[0]!.opts.network, "telegram");
-  assert.match(sent[0]!.text, /^Gravit could not answer: /);
+  assert.match(sent[0]!.text, /^gravit could not answer: /);
   assert.doesNotMatch(sent[0]!.text, /desk/);
 });
 

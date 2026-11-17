@@ -1,5 +1,5 @@
 // face/client/js/render/lunhui/block.js — the anatomy every composed-answer block shares (spec §5.3): the face's label, small
-// and grey, then Gravit's headline (block.title, escaped as written), then the readout line that answers the control.
+// and grey, then gravit's headline (block.title, escaped as written), then the readout line that answers the control.
 import { esc, attrs, cls } from '../../html.js';
 
 export const label = words => `<div class="lh-label">${esc(words)}</div>`;
@@ -10,8 +10,8 @@ const TONE = { STRONG: 'up', EXPANDING: 'up', RELAY: 'up', WEAK: 'down', CONTRAC
 export const pill = state => `<span class="${cls('chip', TONE[state] ?? 'grey')}">${esc(state ?? '—')}</span>`;
 export const count = n => Number(n).toLocaleString('en-US');
 // an amount in yuan, in plan 1's digest grammar (lib/view.mjs turnoverText) with one tier more: X.XX万亿 from 1e12, X.XX亿
-// from 1e8, then the face's own X.XX万 from 1e4 (the digest has no 万 tier), else whole yuan. Gravit's number rule checks
-// Gravit's own text, not the face's tiles, so this tier changes nothing Gravit may write.
+// from 1e8, then the face's own X.XX万 from 1e4 (the digest has no 万 tier), else whole yuan. gravit's number rule checks
+// gravit's own text, not the face's tiles, so this tier changes nothing gravit may write.
 export function yuan(v) {
   const n = Number(v);
   if (v == null || !Number.isFinite(n)) return '—';

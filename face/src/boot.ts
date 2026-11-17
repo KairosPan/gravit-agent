@@ -247,13 +247,13 @@ export interface FaceBootOptions {
   /** The bots directory (`bots/`); tests point it at a fixture. Defaults to the repository's. */
   botsRoot?: string;
   /** The role library (`roles/`); tests point it at a fixture. Defaults to the repository's.
-   * {@link composeFace} reads it and renders Gravit's default preset from it, so a MISSING
+   * {@link composeFace} reads it and renders gravit's default preset from it, so a MISSING
    * roles directory, or a role it cannot read, refuses the compose with that path (spec
    * §5.1): a face that ships `bots/` ships `roles/` beside it. */
   rolesRoot?: string;
   /** The research-cycle contract (`dsh/profile/cycle.md`); tests point it at a fixture. Defaults
    * to the repository's. {@link composeFace} reads it beside the roles and hands the text to
-   * Gravit's default preset as the `gravit` row's `cycle` (src/cycle.ts), so a MISSING, empty or
+   * gravit's default preset as the `gravit` row's `cycle` (src/cycle.ts), so a MISSING, empty or
    * oversized file refuses the compose with that path: a face that ships `roles/` ships the
    * contract they are called under. */
   cyclePath?: string;
@@ -269,7 +269,7 @@ export interface FaceBootOptions {
   routerPath?: string;
   /** The directory the run protocols are read from (`dsh/profile/`, src/protocols.ts); tests point
    * it at a fixture. Defaults to the repository's. {@link composeFace} reads them beside the cycle
-   * and hands them to Gravit's default preset as the `gravit` row's `protocols`, refusing the
+   * and hands them to gravit's default preset as the `gravit` row's `protocols`, refusing the
    * compose the same way, path-first; {@link bootFace} reads the memory's from it again for the
    * conversation's preset. */
   protocolsDir?: string;
@@ -380,7 +380,7 @@ export function globalInstructionAudit(home: string, env: Record<string, string 
  * layer, the machine-local home layer (`$DSH_HOME/cordis.patch.yml`, which
  * outranks the per-profile one), the caller's in-memory
  * {@link FaceBootOptions.extraPatches} (usually none), the telemetry switch,
- * the hmr switch, Gravit's persona, the instructions patch (src/instructions.ts),
+ * the hmr switch, gravit's persona, the instructions patch (src/instructions.ts),
  * then the face's host rows last - among them the default preset, rendered
  * here from `roles/` (src/roles.ts), `dsh/profile/cycle.md` (src/cycle.ts) and the
  * run protocols (src/protocols.ts)
@@ -489,7 +489,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
   const telemetry = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID));
   if (telemetry !== undefined) patches.push(telemetry);
   if (rows.has(HMR_ROW_ID)) patches.push({ id: HMR_ROW_ID, disabled: true });
-  /* Gravit's persona: the one config value dsh-base leaves empty on purpose
+  /* gravit's persona: the one config value dsh-base leaves empty on purpose
    * ("The deployment persona is a deployment choice", base :502-507, row
    * `config: { personaPrefix: '' }`). 0.2.0 renamed the key: `persona`
    * (section `deployment:persona`) became `personaPrefix`, rendered as section
@@ -546,7 +546,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * declares them from the `roles` this function hands back once the tree has
    * settled, since eager activation would mount their masks before the MCP
    * rows' tools exist and nothing needs them before the first role call. None
-   * of Gravit's rows masks a host tool, so Gravit's
+   * of gravit's rows masks a host tool, so gravit's
    * roster is the host's plus the role tools; no persona is shadowed. `bots/gravit`
    * supplies only the display metadata (`definitionFor`'s preset.yml read): its
    * `agent.cordis.yml` is a MIRROR of this render, for readers, held to it by
@@ -564,7 +564,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
   const cycle = readCycle(opts.cyclePath ?? CYCLE_PATH);
   /* The desk's contract, read HERE beside the cycle so a bad file refuses the
    * compose - and with it the boot, before any plugin loads - with its path,
-   * rather than listing `gravit-desk` broken once the tree is up. Gravit's own
+   * rather than listing `gravit-desk` broken once the tree is up. gravit's own
    * row never carries it: a preset carries one contract or the other. */
   const desk = readDesk(opts.deskPath ?? DESK_PATH);
   const protocols = readProtocols(opts.protocolsDir);
@@ -714,7 +714,7 @@ async function assertEntriesActive(ctx: Context): Promise<void> {
  *   index.ts:208): the room pins every member session `read-only` through it. */
 const REQUIRED_SERVICES: ReadonlyArray<readonly [service: string, consequence: string]> = [
   ["approval", "every order card would fail closed invisibly"],
-  ["userQuestions", "Gravit could not ask the operator anything"],
+  ["userQuestions", "gravit could not ask the operator anything"],
   ["typertGateway", "no approval answerer - every order would be denied 'no approval channel is available'"],
   ["permissionPresets", "room members could not be pinned read-only"],
 ];
@@ -867,9 +867,9 @@ interface GateEventsLike {
  * Spike 3 measured that dsh runs `tools/pre-execute` before it resolves
  * visibility, so a desk or masked-bot model that named a hidden order tool
  * raised a card that could only park, and an approved one would then fail
- * `unknown tool` at dispatch. The same held for Gravit in the default
+ * `unknown tool` at dispatch. The same held for gravit in the default
  * configuration, where Gate 1 is closed and no order tool is registered: an
- * unregistered order tool called from Gravit no longer raises a card that
+ * unregistered order tool called from gravit no longer raises a card that
  * could never dispatch. The listener reads `tools` lazily, from its own
  * context at call time; `tools` is not in its inject list, so its arming and
  * re-arming above are unchanged, and while no registry is live it decides as
@@ -1223,7 +1223,7 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
     const tools = ctx.get("tools") as { schemas(): ToolSchemaLike[] } | undefined;
     if (tools?.schemas().some((schema) => schema.name === ASK_USER_TOOL) !== true) {
       throw new Error(
-        `${BIN}: ${ASK_USER_TOOL} is not registered - Gravit would have no way to ask the operator` +
+        `${BIN}: ${ASK_USER_TOOL} is not registered - gravit would have no way to ask the operator` +
           ` anything, silently (the \`tool-ask-user\` overlay row mounts it)`,
       );
     }
@@ -1262,13 +1262,13 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
     }
     /* `defaultId = selectedDefault ?? default` (NEW packages/preset/
      * agent-preset-registry/src/index.ts:74): a Settings-supplied default
-     * could otherwise move every preset-less session off Gravit. Without
+     * could otherwise move every preset-less session off gravit. Without
      * `profileContext` no settings service exists, so this holds today; the
      * check keeps it from drifting silently. */
     if (presets.defaultId !== DEFAULT_PRESET) {
       throw new Error(
         `${BIN}: the preset registry's default is "${presets.defaultId}", not "${DEFAULT_PRESET}" -` +
-          ` every session that names no preset would leave the Gravit composition`,
+          ` every session that names no preset would leave the gravit composition`,
       );
     }
     /* S6: every non-default bot, declared NOW - after Gate 2 is armed, before
@@ -1306,8 +1306,8 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * eagerly at the declaration, so it must find the settled tree - a name the tree lacks is dropped
      * with one warning and admitted when it registers; a preset with none of its names is listed broken,
      * which the roster check below refuses. Not survivable either: a refused declaration throws into this
-     * try's catch. The role tools in Gravit's preset (plugins/role.mjs, D20) name `role-<id>` only when
-     * they are called, so a `session/create` racing these declarations creates Gravit as usual; a role
+     * try's catch. The role tools in gravit's preset (plugins/role.mjs, D20) name `role-<id>` only when
+     * they are called, so a `session/create` racing these declarations creates gravit as usual; a role
      * called before its preset is declared fails that call with dsh's agent-preset/not-found. Disposed
      * with the root, as the bots and the desk are. */
     for (const role of roles) await declarePreset(ctx, rolePresetDefinition(role), "role preset");

@@ -103,7 +103,7 @@ test("every shipped bot's plugin row lands on the real face/plugins/bot.js, and 
   const protocols = readProtocols();
   const gravitUrl = pathToFileURL(GRAVIT_PLUGIN_ABS).href;
   assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-reviewer", "cn-stock-analyst", "pdf-page-reader", "source-reader"], "the repository ships five roles: the two analysts, the reviewer, the PDF page reader and the source reader");
-  assert.deepEqual(rowsOf(gravit).map((row) => row.id), ["gravit", "role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst", "role-pdf-page-reader", "role-source-reader"], "Gravit's preset has its five role rows");
+  assert.deepEqual(rowsOf(gravit).map((row) => row.id), ["gravit", "role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst", "role-pdf-page-reader", "role-source-reader"], "gravit's preset has its five role rows");
   assert.deepEqual(gravit.plugins[0], { id: "gravit", name: gravitUrl, config: { roles: roles.map((role) => ({ tool: role.tool, summary: role.description })), cycle, protocols } },
     "the mirror's relative plugin path rebases to the real face/plugins/gravit.js");
   assert.deepEqual(gravit.plugins, gravitRows(roles, { plugin: gravitUrl, rolePlugin: ROLE_PLUGIN_URL, cycle, protocols }),
@@ -114,7 +114,7 @@ test("every shipped bot's plugin row lands on the real face/plugins/bot.js, and 
 test("the gravit definition is exactly its id, published metadata and the rows it is given (a file: URL passes through)", async () => {
   const root = await makeBotsRoot();
   assert.deepEqual(definitionFor(root, "gravit", [{ id: "gravit", name: GRAVIT_PLUGIN_URL, config: {} }]), {
-    id: "gravit", name: "Gravit", description: "the principal agent",
+    id: "gravit", name: "gravit", description: "the principal agent",
     plugins: [{ id: "gravit", name: GRAVIT_PLUGIN_URL, config: {} }],
   });
 });
@@ -133,7 +133,7 @@ test("definitionFor with rows never reads the composition file, and rebases the 
     { id: "skills", name: SKILLS_PLUGIN, config: { customSkillDirs: ["./skills"] } },
   ];
   assert.deepEqual(definitionFor(root, "gravit", rows), {
-    id: "gravit", name: "Gravit", description: "the principal agent",
+    id: "gravit", name: "gravit", description: "the principal agent",
     plugins: [
       { id: "gravit", name: GRAVIT_PLUGIN_URL, config: {} },
       { id: "relative", name: pathToFileURL(resolve(root, "gravit", "../../face/plugins/gravit.js")).href, config: {} },

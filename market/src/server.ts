@@ -1,4 +1,4 @@
-/** The market: the Market part's keyless public data behind one API on this machine, which the account and Gravit's face reach. It
+/** The market: the Market part's keyless public data behind one API on this machine, which the account and gravit's face reach. It
  * holds no wallet, no home and no key, and writes nothing to disk. It serves no page: every request outside /api/ is 404 with
  * MARKET_NO_PAGE.
  *
@@ -27,7 +27,7 @@ import { mountStream } from "./follows.ts";
 
 export const MARKET_PORT = 4821;
 
-export const MARKET_NO_PAGE = "The market serves no page: its screens are Gravit's face (Markets). This address answers its API under /api/.";
+export const MARKET_NO_PAGE = "The market serves no page: its screens are gravit's face (Markets). This address answers its API under /api/.";
 
 /** the Host values that are this machine's own: 127.0.0.1, localhost or [::1], with or without a port */
 const LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;

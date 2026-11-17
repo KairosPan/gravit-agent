@@ -1,4 +1,4 @@
-/** One whole cn-market run on a real boot (modules spec §10 item 2, A22, §5.10, §5.11): Gravit, played by
+/** One whole cn-market run on a real boot (modules spec §10 item 2, A22, §5.10, §5.11): gravit, played by
  * the stub, freezes the index (opening the run), the limit-up pools and the boards into that run, delegates to
  * role_cn_market_analyst, then to role_cn_reviewer (no market_run: the run is the market run), and reads the run
  * back; each role child, played by the stub too, reads its module's context and submits an artifact it builds
@@ -7,7 +7,7 @@
  * environment.json, sentiment.json and theme.json each an OK artifact, and the reviewer's counterevidence.json
  * one item against the sentiment, all named in artifacts[] and each passing its contract again when re-read
  * against a digest rebuilt from the sealed run's files; metrics.json's calls within budget and submitted
- * listing the four; the channel's runs card listing the run with four chips; Gravit's prompt carrying the run
+ * listing the four; the channel's runs card listing the run with four chips; gravit's prompt carrying the run
  * protocol.
  *
  * The boot: a temp DSH_HOME, port 0, the seat off, the default model the stub, `lunhui-runs`
@@ -205,7 +205,7 @@ function reviewArtifact(context: Context) {
   };
 }
 
-test("market run smoke: Gravit freezes three sources into one run, the analyst submits three OK artifacts built from its contexts, the reviewer its counterevidence, the run reads back sealed and on the runs card, the owner's lessons on its leaders asked once and kept", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+test("market run smoke: gravit freezes three sources into one run, the analyst submits three OK artifacts built from its contexts, the reviewer its counterevidence, the run reads back sealed and on the runs card, the owner's lessons on its leaders asked once and kept", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
   const RealDate = Date;
   const bots = await makeBotsRoot();
   const fixtureRoles = await mkdtemp(join(tmpdir(), "face-market-run-roles-"));
@@ -255,7 +255,7 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
     const headers = new Map<string, Session["header"]>();
     /** Each child's brief, by its session id: the analyst's or the reviewer's. */
     const briefs = new Map<string, string>();
-    /** The child's run id, read from its brief; Gravit's, from the index freeze's reply. */
+    /** The child's run id, read from its brief; gravit's, from the index freeze's reply. */
     const runFrom = (text: string) => need(/"run":"([^"]+)"/.exec(text)?.[1] ?? /run (\S+?)[。.]?$/m.exec(text)?.[1], "a run id");
     const script = (request: GenerateOptions): StubReply => {
       if (request.purpose !== undefined) return { kind: "text", text: "fixture" };
@@ -284,7 +284,7 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
         const context = JSON.parse(results[step - 1]) as Context;
         return { kind: "tool", name: `lunhui_submit_${module}`, args: { strategy: "cn-market", run, analysis: JSON.stringify(BUILD[module](context)) } };
       }
-      /* Gravit: the protocol's four steps, one tool per request. */
+      /* gravit: the protocol's four steps, one tool per request. */
       const trigger = lastHuman(request);
       if (results.length === 0) return trigger && textOf(trigger) === "RUN_MARKET" ? { kind: "tool", name: "lunhui_freeze_index", args: { strategy: "cn-market" } } : { kind: "text", text: "PARENT_DONE" };
       const run = runFrom(results[0]);
@@ -305,13 +305,13 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
     const gravit = ctx.agents.get(SessionId(sessionId))!;
     await remote(base, cookie, "session/prompt", { request: { requestId: `market-run-${crypto.randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: "RUN_MARKET" }] } });
     const gravitRequests = () => requested.get(sessionId) ?? [];
-    await waitFor("Gravit's last request", () => gravitRequests().some((r) => toolTexts(r).length >= 6));
+    await waitFor("gravit's last request", () => gravitRequests().some((r) => toolTexts(r).length >= 6));
     await gravit.whenIdle();
 
-    /* Gravit's side: the protocol in its prompt, every tool result a success, the run read back last. */
+    /* gravit's side: the protocol in its prompt, every tool result a success, the run read back last. */
     const gravitResults = toolTexts(gravitRequests().at(-1)!);
-    assert.ok(textOf(gravitRequests()[0].messages[0]).includes(RUN_HEADING), "Gravit's prompt carried the lunhui:run protocol");
-    assert.equal(gravitResults.length, 6, `six tool results came back to Gravit: ${gravitResults.map((t) => t.slice(0, 120)).join(" | ")}`);
+    assert.ok(textOf(gravitRequests()[0].messages[0]).includes(RUN_HEADING), "gravit's prompt carried the lunhui:run protocol");
+    assert.equal(gravitResults.length, 6, `six tool results came back to gravit: ${gravitResults.map((t) => t.slice(0, 120)).join(" | ")}`);
     for (const text of gravitResults) assert.doesNotMatch(text, /^Error:/, `no tool call failed: ${text.slice(0, 300)}`);
     const run = runFrom(gravitResults[0]);
     assert.deepEqual(gravitResults.slice(0, 3).map((t) => [JSON.parse(t).run, JSON.parse(t).source, JSON.parse(t).session]),

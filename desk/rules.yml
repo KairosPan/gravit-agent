@@ -3,7 +3,7 @@
 # A symbol is a US ticker or six digits for an A share; filings are US only.
 # urgent: true lets a rule's alerts through quiet hours (Account › Identity); no rule is urgent unless it says so.
 # A US move_pct rule also judges pre-market from 04:00 and after-hours to 20:00 ET; sessions: regular keeps it to the session.
-# A move or gap rule's alert gets Gravit's reason unless annotate: false; a plan, when given, is checked too.
+# A move or gap rule's alert gets gravit's reason unless annotate: false; a plan, when given, is checked too.
 # A fall the desk finds to be the company's own event may also get a read-through: the rivals it points to (never an order).
 # This file is public, and so are the names on it.
 - id: holding-move

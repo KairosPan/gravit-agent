@@ -1,7 +1,7 @@
 // face/client/js/render/lunhui/ladder.js — the limit-up ladder block: one row per rung, top down — the rung number (a button that
 // picks it), the names that sealed it (first seal, breaks), a gap row where nothing got there, the misses and the breaks with
 // today's change — and, at the right, how many of the rung below got through, as a number and a meter. The readout answers the
-// picked rung (default: the focus Gravit gave, else the height). A name whose code the view's stocks hold is a stock link
+// picked rung (default: the focus gravit gave, else the height). A name whose code the view's stocks hold is a stock link
 // (block.js stockLink); any other is escaped text.
 import { esc, attrs, cls } from '../../html.js';
 import { label, headline, readout, count, signedPct, stockLink } from './block.js';

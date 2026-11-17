@@ -48,7 +48,7 @@ export const refuse = {
   notGravit: () =>
     new ReadThroughError(
       "NOT_GRAVIT",
-      "read_through is called by Gravit alone (a root session or its fork); a delegated child cannot call it",
+      "read_through is called by gravit alone (a root session or its fork); a delegated child cannot call it",
     ),
   internal: () =>
     new ReadThroughError("INTERNAL", "an internal error; its detail goes to the face's log only. Retry once; if it fails again, tell the operator"),

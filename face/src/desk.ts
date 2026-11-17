@@ -2,7 +2,7 @@
  * with the sleep watch that writes into it, the `OFF` switch that pauses the desk, and the status
  * route that reads them back.
  *
- * The desk is Gravit's always-on side (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md):
+ * The desk is gravit's always-on side (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md):
  * the face kept running by launchd as a user service (§5.2), and, in the later plans, the clock,
  * the watch and the phone bridge that work in it. Of what §8 gives this module - the ledger, the
  * budget, the `OFF` switch, the two desk tools, the `/desk` page and `/data/desk/*` - P0 holds the
@@ -170,7 +170,7 @@ export interface TurnUsage {
  * skipped as already in the session (src/desk-conversation.ts). A `desk-fetch` is one `web_fetch` a desk agent made that
  * reached dispatch (spec 2026-11-07 §5.6, charter A1 and D29): its session and the URL as the model asked it, cut at
  * src/desk-tools.ts `DESK_FETCH_URL_MAX` characters - written whatever the fetch then answered, so the operator sees
- * every page a desk turn opened (src/desk-tools.ts `installDeskGuard`'s fetch record). A `conversation` names Gravit's one
+ * every page a desk turn opened (src/desk-tools.ts `installDeskGuard`'s fetch record). A `conversation` names gravit's one
  * router conversation when the face opens one (src/conversation.ts, spec 2026-11-08 §5.10): `created` when the ledger
  * named none, `new` when the one it named could not be had or was not the conversation; a face resumes the last
  * ({@link lastConversation}). */
@@ -1115,7 +1115,7 @@ export async function noteBudgetSpent(
  * is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. Standing orders and annotations wait for midnight ET, or
  * raise budget.dailyTokens in standing.yml` - numbers as `en-US` writes them, and no `of <cap>` for a state that has
  * none. The budget caps the unattended work - standing orders and annotations - not the phone's texts, which reach
- * Gravit's one conversation unbudgeted (one-entry plan 3); the desk session's fallback answers a refused text with
+ * gravit's one conversation unbudgeted (one-entry plan 3); the desk session's fallback answers a refused text with
  * {@link budgetPhoneLine}.
  * @param state - the day's budget.
  */
@@ -1127,7 +1127,7 @@ export function budgetReplyLine(state: BudgetState): string {
 
 /**
  * The phone's line for a text the desk session refused while the day's budget is spent - only on its fallback
- * (`FACE_ROUTER=0`, or a conversation that could not be installed; Gravit's one conversation takes texts unbudgeted):
+ * (`FACE_ROUTER=0`, or a conversation that could not be installed; gravit's one conversation takes texts unbudgeted):
  * `the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET; your text was not taken.
  * It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml`.
  * @param state - the day's budget.
@@ -1667,7 +1667,7 @@ export interface DeskHandle {
   schedule?: Promise<ScheduleHandle | undefined>;
   watchRow?: Promise<WatchHandle | undefined>;
   routines?: Promise<RoutineClock | undefined>;
-  /** Bind Gravit's one conversation, once main.ts has installed it (`deps.router`): the phone's texts, `/stop` and
+  /** Bind gravit's one conversation, once main.ts has installed it (`deps.router`): the phone's texts, `/stop` and
    * `/status` go to it, the desk session is never ensured, and once the outlet is set the conversation answers what a
    * graceful stop carried (its `carry`); `undefined` - the install failed - and the desk session answers the phone as
    * with `FACE_ROUTER=0`, its own boot answering the carries. The first call counts; a desk without `deps.router`
@@ -1897,7 +1897,7 @@ async function readAlertsCached(home: string): Promise<{ records: (RailAlert | R
  *   (no calendar needs it: the market clock is builtin); `schedule`, the clock's seams for tests - its
  *   clock, calendar (the XNYS one), calendars (either market's), script runner, builtins, tick and grace;
  *   `alertDeadlineMs`, an alert's annotation turn's deadline, {@link ALERT_DEADLINE_MS} when absent - a test seam;
- *   `router`, whether Gravit's one conversation is coming (main.ts: `FACE_ROUTER` not `0`) - then the bridge and the
+ *   `router`, whether gravit's one conversation is coming (main.ts: `FACE_ROUTER` not `0`) - then the bridge and the
  *   desk conversation's start wait for {@link DeskHandle.bindRouter}: bound, the phone reaches that conversation and the
  *   desk session is neither ensured nor started (firings and annotations keep their fresh sessions, and the desk
  *   conversation stays the outlet and the pause's choke point); bound to nothing, the desk works as without it;
@@ -2017,7 +2017,7 @@ export function installDesk(
       clock,
       log,
     });
-  /* Gravit's one conversation, once main.ts binds it (`deps.router`, below); `note` hands it what the firings, the
+  /* gravit's one conversation, once main.ts binds it (`deps.router`, below); `note` hands it what the firings, the
    * annotations and the watch sent the phone - a no-op until it is bound, and always with `FACE_ROUTER=0`. */
   let routed: PhoneConversation | undefined;
   const note = (line: DeskLine): void => {
@@ -2050,7 +2050,7 @@ export function installDesk(
       log,
     });
   let disposing: Promise<void> | undefined;
-  /* Gravit's one conversation, once main.ts binds it (`deps.router`): until then the bridge sets the outlet but reads no
+  /* gravit's one conversation, once main.ts binds it (`deps.router`): until then the bridge sets the outlet but reads no
    * inbox, so no phone text reaches the desk session first; the schedule and the watch do not wait. Dispose and
    * quiesce end the wait too. */
   let decide: () => void = () => {};
@@ -2080,7 +2080,7 @@ export function installDesk(
         /* a reply's alert and its annotation (spec §16 H1b): the watch is installed after the bridge, so it is read at
          * each reply - none until it runs, and none in a face that runs none */
         contextFor: (messageId) => watch?.contextFor(messageId),
-        /* bound once, before the bridge reads: Gravit's one conversation takes the phone's texts */
+        /* bound once, before the bridge reads: gravit's one conversation takes the phone's texts */
         router: () => routed,
         hold: decided,
       });

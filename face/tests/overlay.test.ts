@@ -8,7 +8,7 @@ import {
 /** The default preset a composition hands the overlay: the definition `composeFace` renders from `roles/`. */
 const GRAVIT: AgentPresetConfig = {
   id: "gravit",
-  name: "Gravit",
+  name: "gravit",
   description: "the principal agent",
   plugins: [],
 };
@@ -99,7 +99,7 @@ test("preset-gravit declares exactly the definition it was handed", () => {
 
 test("preset-kairos re-declares the default's definition under the pre-rename id", () => {
   assert.equal(LEGACY_PRESET, "kairos");
-  assert.equal(LEGACY_PRESET_DESCRIPTION, "Gravit under its id before 2026-10-08, kept so sessions created before the rename still open");
+  assert.equal(LEGACY_PRESET_DESCRIPTION, "gravit under its id before 2026-10-08, kept so sessions created before the rename still open");
   const row = rowsById().get(presetRowId(LEGACY_PRESET))!;
   assert.equal(row.name, "@deepseek-ai/dsh-agent-preset");
   assert.deepEqual(row.config, { ...GRAVIT, id: "kairos", description: LEGACY_PRESET_DESCRIPTION });

@@ -1,5 +1,5 @@
 // face/src/router-preset.ts
-/** The conversation's preset, `gravit-router`: Gravit in the operator's one conversation, answering what a few
+/** The conversation's preset, `gravit-router`: gravit in the operator's one conversation, answering what a few
  * reads answer and starting a task for anything longer (docs/superpowers/specs/2026-11-08-one-entry-router-design.md
  * §5.2).
  *
@@ -9,7 +9,7 @@
  *   in place of the text's `<REPO>` placeholder in the `gravit:router` section - and, as its `protocols`, the
  *   memory's section alone (`gravit:memory`, src/protocols.ts `readMemoryProtocol`), never the Lunhui protocols.
  *   No roles, no cycle, no desk: plugins/gravit.js refuses a row that carries the router beside either contract.
- * - `plugins/bot.js` in its MASK-ONLY mode, `{ maskOnly: true, allow: ROUTER_ALLOW }`, so Gravit's persona
+ * - `plugins/bot.js` in its MASK-ONLY mode, `{ maskOnly: true, allow: ROUTER_ALLOW }`, so gravit's persona
  *   stays and the conversation sees {@link ROUTER_ALLOW} ∩ the tree.
  *
  * NO SHELL AND NO FILE WRITES. The conversation reads files, the market's keyless reads and the Account seat's
@@ -55,8 +55,8 @@ export function routerPresetDefinition(opts: { router: { text: string; root: str
   const router = { text: opts.router.text, root: opts.router.root };
   return {
     id: CONVERSATION_PRESET,
-    name: "Gravit · conversation",
-    description: "Gravit in the operator's one conversation: answers, or starts a task and routes it",
+    name: "gravit · conversation",
+    description: "gravit in the operator's one conversation: answers, or starts a task and routes it",
     plugins: [
       { id: GRAVIT_ROW_ID, name: GRAVIT_PLUGIN_URL, config: opts.protocols === undefined ? { router } : { router, protocols: [...opts.protocols] } },
       { id: "router-mask", name: BOT_PLUGIN_URL, config: { maskOnly: true, allow: [...ROUTER_ALLOW] } },

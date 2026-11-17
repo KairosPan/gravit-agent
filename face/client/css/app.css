@@ -203,7 +203,7 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .msg-row { display: flex; align-items: flex-end; gap: 8px; }
 .msg-body { max-width: 66%; min-width: 0; }
 .msg-body.wide { max-width: 80%; }
-/* Gravit's composed answer (the Lunhui run view): wider than a card, the summary over the face's blocks; its working
+/* gravit's composed answer (the Lunhui run view): wider than a card, the summary over the face's blocks; its working
    notes folded above it, closed until opened */
 .msg-body.composed { max-width: min(820px, 100%); }
 .lh-answer { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border-radius: 18px 18px 18px 4px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-card); overflow-wrap: anywhere; }
@@ -424,6 +424,8 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
    64 px squares; an image not loaded yet an empty frame; a file (or an image the host cannot give back) its card */
 .you-body { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 66%; min-width: 0; }
 .you-body .bubble.you { max-width: 100%; }
+.you-from { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); font-size: calc(12px * var(--fs)); }
+.you-from svg { flex: none; }
 .you-files { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .you-image, .you-thumb { padding: 0; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-2); overflow: hidden; cursor: zoom-in; }
 .you-image img { display: block; max-width: 240px; max-height: 320px; height: auto; object-fit: contain; }
@@ -434,7 +436,7 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .bubble.grey { background: var(--surface-2); }
 .bubble.green { background: var(--up-fill); display: flex; flex-direction: column; gap: 8px; }
 .bubble .line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-/* Gravit's markdown (js/wire/markdown.js): headings, lists, code, fences, quotes, rules, GFM tables, links that look
+/* gravit's markdown (js/wire/markdown.js): headings, lists, code, fences, quotes, rules, GFM tables, links that look
    like links; insets on --surface so they read against the grey bubble */
 .md p { margin: 0 0 8px; white-space: pre-wrap; }
 .md > :last-child { margin-bottom: 0; }
@@ -520,7 +522,7 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .task-usage { font-size: calc(12px * var(--fs)); color: var(--dim); font-variant-numeric: tabular-nums; }
 .task-keys { display: flex; flex-wrap: wrap; gap: 6px; }
 /* a task's full process (#/task/<id>): back to Messages, the title, the state, the strategy and the keys in the head; in
-   place of a composer one line that sends the operator to Gravit */
+   place of a composer one line that sends the operator to gravit */
 .task-back { flex: none; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-pill); color: var(--dim); }
 .task-back:hover { background: var(--hover); color: var(--text); }
 .task-head-state { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: calc(13px * var(--fs)); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -900,7 +902,7 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .tool-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--dim); }
 .disc-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: calc(12px * var(--fm)); line-height: 1.5; background: var(--surface-2); border-radius: var(--radius-s); padding: 12px; }
 .disc-broken { color: var(--down); font-weight: 700; font-size: calc(13px * var(--fs)); }
-/* Available to Gravit (one-entry plan 4): the one roster's switch, its track filled while on, greyed while the roster is
+/* Available to gravit (one-entry plan 4): the one roster's switch, its track filled while on, greyed while the roster is
    unread or unreadable */
 .switch { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 4px; background: none; border: 0; color: var(--text); font-size: calc(13px * var(--fs)); font-weight: 600; cursor: pointer; }
 .switch-track { flex: none; position: relative; width: 34px; height: 20px; border-radius: var(--radius-pill); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); }
@@ -1423,4 +1425,81 @@ button.tk-at:hover { border-color: var(--dim); }
   .rail .brand { margin-right: 2px; }
   .rail .rail-group { gap: 1px; }
   .rail .nav-item, .rail .account, .rail .rail-lines .line-key { width: 38px; }
+}
+/* the display face (kairos-studio's titles): the brand, the page heads, the big numbers, in Instrument Serif at its one weight */
+.brand-name, .list-title, .empty-title, .plug-name, .disc-head .head-title, .acct-head .head-title, .mk-head .head-title, .tp-head .head-title, .mk-who .head-title, .networth, .mk-big { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.01em; }
+
+/* ---- the gravit box (plan 1 of the box, render/box.js): half a ball on the right edge, the panel over the page ---- */
+.gbox { display: contents; }
+.gbox-ball { position: fixed; right: -28px; bottom: 40px; z-index: 40; display: flex; align-items: center; justify-content: flex-start; width: 56px; height: 56px; padding: 0 0 0 9px; border: 0; border-radius: var(--radius-pill); background: var(--primary); color: var(--on-primary); box-shadow: var(--shadow-lift); transition: transform .16s ease; }
+.gbox-ball:hover { transform: translateX(-8px); }
+/* while it has focus (a Tab, or Minimize handing focus back) the whole ball slides in; the ring on a keyboard's focus alone */
+.gbox-ball:focus { transform: translateX(-30px); outline: none; }
+.gbox-ball:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; }
+.gbox-g { display: inline-flex; justify-content: center; width: 12px; font-size: calc(17px * var(--fs)); font-weight: 800; }
+.gbox-badge { position: absolute; top: -6px; left: -8px; min-width: 18px; height: 18px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-pill); background: var(--accent); color: var(--on-accent); border: 2px solid var(--surface); font-size: calc(10px * var(--fs)); font-weight: 800; font-variant-numeric: tabular-nums; }
+.gbox-dot { position: absolute; left: 8px; bottom: 7px; width: 10px; height: 10px; border-radius: var(--radius-pill); background: var(--accent); border: 2px solid var(--primary); }
+.gbox-dot.steady { opacity: 1; }
+.gbox-dot.pulse { animation: gbox-pulse 1.4s ease-in-out infinite; }
+@keyframes gbox-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.gbox-panel { position: fixed; right: 24px; bottom: 24px; z-index: 40; width: 400px; height: min(600px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border: 1px solid var(--card-border); border-radius: 16px; box-shadow: var(--shadow); transform-origin: 100% 100%; animation: gbox-grow .18s ease-out; }
+@keyframes gbox-grow { from { opacity: 0; transform: translateX(16px) scale(.96); } to { opacity: 1; transform: none; } }
+.gbox-head { flex: none; display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--border); }
+.gbox-head h2 { margin: 0; font-size: calc(15px * var(--fs)); font-weight: 650; }
+.gbox-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--primary); color: var(--on-primary); font-size: calc(13px * var(--fs)); font-weight: 800; }
+.gbox-key { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--dim); }
+.gbox-key:hover { background: var(--hover); color: var(--text); }
+.gbox-head > a.gbox-key { margin-left: auto; }
+.gbox-waiting { flex: none; }
+.gbox-waiting:empty { display: none; }
+.gbox-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.gbox-body > .thread { padding: 14px 16px 16px; gap: 14px; scroll-padding: 14px; }
+.gbox-earlier { align-self: center; padding: 4px 10px; border-radius: var(--radius-pill); color: var(--accent-ink); font-size: calc(12px * var(--fs)); font-weight: 600; text-decoration: none; }
+.gbox-earlier:hover { background: var(--accent-soft); }
+.gbox-empty { margin: auto; padding: 24px 16px; text-align: center; font-size: calc(13px * var(--fs)); }
+.gbox-waiting { max-height: 45%; overflow-y: auto; padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.gbox-waiting-head { margin: 0; font-size: calc(11px * var(--fs)); font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+.gbox-line { display: flex; flex-direction: column; gap: 6px; font-size: calc(13px * var(--fs)); }
+.gbox-line-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.gbox-line .task-gate { max-width: none; }
+.gbox-line .task-gate-there a { color: var(--accent-ink); font-weight: 600; text-decoration: none; }
+.gbox-line .task-gate-there a:hover { text-decoration: underline; }
+.gbox-more { align-self: flex-start; color: var(--accent-ink); font-size: calc(12px * var(--fs)); font-weight: 600; text-decoration: none; }
+.gbox-more:hover { text-decoration: underline; }
+.gbox-stub { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border: 1px solid var(--card-border); border-radius: var(--radius-s); background: var(--surface); font-size: calc(13px * var(--fs)); }
+.gbox-stub > span { font-weight: 600; }
+.gbox-stub > a { flex: none; color: var(--accent-ink); font-weight: 600; text-decoration: none; }
+.gbox-stub > a:hover { text-decoration: underline; }
+.gbox-body .bubble { font-size: calc(13px * var(--fs)); overflow-wrap: anywhere; }
+.gbox-body .md-tablewrap { max-width: 100%; overflow-x: auto; }
+.gbox-body img { max-width: 100%; height: auto; }
+.gbox-chips { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 12px 0; border-top: 1px solid var(--border); background: var(--surface); }
+.gbox-chips + .composer { border-top: 0; padding-top: 6px; }
+.gbox-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 26px; padding: 0 4px 0 9px; border: 1px solid var(--card-border); border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent-ink); font-size: calc(12px * var(--fs)); font-weight: 600; }
+.gbox-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gbox-chip > svg, .gbox-attach > svg { flex: none; }
+.gbox-chip-x { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; color: inherit; }
+.gbox-chip-x:hover { background: var(--hover); color: var(--text); }
+.gbox-attach { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px dashed var(--card-border); border-radius: var(--radius-pill); background: transparent; color: var(--dim); font-size: calc(12px * var(--fs)); font-weight: 600; }
+.gbox-attach:hover { background: var(--hover); color: var(--text); }
+.gbox-panel .composer { flex: none; padding: 10px 12px 12px; border-top: 1px solid var(--border); background: var(--surface); }
+.gbox-panel .composer-box { padding: 6px; box-shadow: none; }
+.gbox-panel .composer-menu { left: 12px; width: calc(100% - 24px); }
+.gbox-panel .status-line { flex: none; padding: 0 12px 8px; }
+/* beside a drawer (every box screen's is min(460px, 100%) wide): the ball tucks under its left edge, the panel stands left of it */
+.gbox[data-aside="drawer"] .gbox-ball { right: calc(min(460px, 100%) - 28px); z-index: 29; }
+.gbox[data-aside="drawer"] .gbox-panel { right: calc(min(460px, 100%) + 24px); }
+/* beside Trade's open ticket, once the ticket stands in its own column (.tp's container at 900 px and more: from 1024 px with
+   the rail folded to its icons and Trade's 28 px padding, from 1181 px with its 36 px, the ticket 380 px wide from 1240 px of
+   container): the panel stands left of it */
+@media (min-width: 1024px) { .gbox[data-aside="ticket"] .gbox-panel { right: calc(28px + 340px + 24px); } }
+@media (min-width: 1181px) { .gbox[data-aside="ticket"] .gbox-panel { right: calc(36px + 340px + 24px); } }
+@media (min-width: 1380px) { .gbox[data-aside="ticket"] .gbox-panel { right: calc(36px + 380px + 24px); } }
+@media (max-width: 907px) { .gbox[data-aside="drawer"] .gbox-panel { display: none; } }
+@media (max-width: 860px) {
+  .gbox-panel { left: 12px; right: 12px; bottom: 12px; width: auto; height: 72vh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gbox-ball { transition: none; }
+  .gbox-panel, .gbox-dot.pulse { animation: none; }
 }

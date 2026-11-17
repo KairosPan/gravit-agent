@@ -1,7 +1,7 @@
-/** The Account: the user's real accounts behind one API, which the MCP seat and Gravit's face reach. It serves no page: the owner's
- * screens are Gravit's face (Markets, Trade, Account); every request outside /api/ is 404 with NO_PAGE.
+/** The Account: the user's real accounts behind one API, which the MCP seat and gravit's face reach. It serves no page: the owner's
+ * screens are gravit's face (Markets, Trade, Account); every request outside /api/ is 404 with NO_PAGE.
  *
- *   npm run account                   → http://127.0.0.1:4820 · the Account: real accounts only, connected from Gravit's face, trading on
+ *   npm run account                   → http://127.0.0.1:4820 · the Account: real accounts only, connected from gravit's face, trading on
  *                                       (`npm run portfolio` is the same; `--read-only` places and moves nothing; `--live-cap 100` is the most
  *                                       one order or movement may be worth)
  *   npm run account -- --classic      → the original simulated statement (no account layer); `--mm` there reads the real `mm` CLI
@@ -41,7 +41,7 @@
  *   POST /api/account/wallet/challenge {address, wallet, chainId}   the sentence a wallet signs to show an address is the owner's (EIP-4361)
  *   POST /api/account/wallet/prove {address, signature}            that signature, checked; the address is then proven, not watched
  *   POST /api/account/signin/start {connector}     a venue's own OAuth sign-in (Robinhood): the page to open, and its state — started
- *                                      only from Gravit's face, whose x-gravit-face-origin names the callback (none: 400)
+ *                                      only from gravit's face, whose x-gravit-face-origin names the callback (none: 400)
  *   GET  /api/account/signin/status?state=         how that sign-in stands
  *   GET  /api/account/signin/callback              where the face forwards the venue's navigation back (its own
  *                                      /data/account/signin/callback, the one the start registered)
@@ -182,7 +182,7 @@ import { connectMarket, type MarketLink } from "./market/link.ts";
 import { marketDown } from "./market/client.ts";
 
 /** what every request outside /api/ is answered (404), with or without the account layer: the Account serves no page */
-export const NO_PAGE = "The Account serves no page: its owner's screens are Gravit's face (Markets, Trade, Account). This address answers its API under /api/.";
+export const NO_PAGE = "The Account serves no page: its owner's screens are gravit's face (Markets, Trade, Account). This address answers its API under /api/.";
 /** the MCP seat an agent mounts (mcp.ts), by its absolute path: the command the face hands an agent's owner runs from any folder */
 const MCP_ENTRY = fileURLToPath(new URL("./mcp.ts", import.meta.url));
 
@@ -262,7 +262,7 @@ export function parseAgent(raw: unknown): AgentId {
   return { id, name, code };
 }
 
-/** the face's origin as the browser reached it (Gravit's face proxies the account under /data/account), from the one header the face sets
+/** the face's origin as the browser reached it (gravit's face proxies the account under /data/account), from the one header the face sets
  * on the wallet's challenge and the sign-in's start: an http:// origin on this machine — 127.x.x.x, localhost or [::1], a port or none, no
  * path — given once; anything else, or none, is undefined and the account builds on its own Host as before. Safe to take from any local
  * caller: such an origin can only send a sign-in's code back, or name a wallet sentence's domain, to a server on this same machine */
@@ -284,7 +284,7 @@ export function faceOriginOf(req: express.Request): string | undefined {
  * else — no script */
 function signedInPage(error?: string): string {
   const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Robinhood sign-in</title><style>:root{--paper:#f6f1e7;--ink:#1d1a16;--dim:#6b6358}@media (prefers-color-scheme:dark){:root{--paper:#17150f;--ink:#ece4d4;--dim:#a39a8a}}body{margin:0;padding:56px 16px;background:var(--paper);color:var(--ink);font:17px/1.55 Georgia,"Times New Roman",serif}main{max-width:520px;margin:0 auto}h1{font-weight:400;font-size:28px;margin:0 0 12px}p{color:var(--dim);margin:0}</style></head><body><main><h1>${error ? "The sign-in did not finish" : "Signed in at Robinhood"}</h1><p>${error ? esc(error) : "Go back to Gravit: it carries on from here. This tab can be closed."}</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Robinhood sign-in</title><style>:root{--paper:#f6f1e7;--ink:#1d1a16;--dim:#6b6358}@media (prefers-color-scheme:dark){:root{--paper:#17150f;--ink:#ece4d4;--dim:#a39a8a}}body{margin:0;padding:56px 16px;background:var(--paper);color:var(--ink);font:17px/1.55 Georgia,"Times New Roman",serif}main{max-width:520px;margin:0 auto}h1{font-weight:400;font-size:28px;margin:0 0 12px}p{color:var(--dim);margin:0}</style></head><body><main><h1>${error ? "The sign-in did not finish" : "Signed in at Robinhood"}</h1><p>${error ? esc(error) : "Go back to gravit: it carries on from here. This tab can be closed."}</p></main></body></html>`;
 }
 
 /** the refusals that say the signer is not one the account takes: answered 401, every other refusal 409 */
@@ -502,9 +502,9 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   // instruction, which names the sign-in by its state.
   app.post("/api/account/signin/start", wrap(async (req, res) => {
     if (!svc.account) return void res.status(404).json({ ok: false, error: "the account layer is not mounted" });
-    // a sign-in starts from Gravit's face, whose callback forwards the venue's navigation here: without the face's origin, nothing is asked
+    // a sign-in starts from gravit's face, whose callback forwards the venue's navigation here: without the face's origin, nothing is asked
     const face = faceOriginOf(req);
-    if (!face) return void res.status(400).json({ ok: false, refusal: no("E_ACCOUNT_BAD_ACTION", { message: "a venue's sign-in starts from Gravit's face, under Account › Venues: open it there" }) });
+    if (!face) return void res.status(400).json({ ok: false, refusal: no("E_ACCOUNT_BAD_ACTION", { message: "a venue's sign-in starts from gravit's face, under Account › Venues: open it there" }) });
     const kind = String((req.body as { connector?: unknown }).connector ?? "");
     const signIn = svc.signIn(kind);
     if (!signIn) return void bad(res, `there is no sign-in for "${kind.slice(0, 40)}"`);
@@ -521,7 +521,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     const q = req.query as Record<string, unknown>;
     const state = text(q.state) ?? "";
     const signIn = svc.signInHolding(state);
-    const r = signIn ? await signIn.finish({ state, code: text(q.code), error: text(q.error), error_description: text(q.error_description), iss: text(q.iss) }) : no("E_ACCOUNT_BAD_ACTION", { message: "this sign-in is not one this server started, or it ran out: start it again from Gravit, under Account › Venues" });
+    const r = signIn ? await signIn.finish({ state, code: text(q.code), error: text(q.error), error_description: text(q.error_description), iss: text(q.iss) }) : no("E_ACCOUNT_BAD_ACTION", { message: "this sign-in is not one this server started, or it ran out: start it again from gravit, under Account › Venues" });
     res.status(isRefusal(r) ? 400 : 200).type("html").send(signedInPage(isRefusal(r) ? r.message : undefined));
   }));
 
@@ -1055,9 +1055,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   };
   const port = Number(at("--port") ?? 4820);
   const classic = args.includes("--classic");
-  // the `mm` reads stand in for the simulated statement's MetaMask: a real account connects MetaMask from Gravit's face instead
+  // the `mm` reads stand in for the simulated statement's MetaMask: a real account connects MetaMask from gravit's face instead
   const live = (args.includes("--mm") || process.env.PORTFOLIO_MM === "1") && classic;
-  if (!classic && args.includes("--mm")) console.log("--mm is for --classic: on your account, connect MetaMask from Gravit's face (Account › Venues)");
+  if (!classic && args.includes("--mm")) console.log("--mm is for --classic: on your account, connect MetaMask from gravit's face (Account › Venues)");
   // REAL orders and movements at venues connected live: on for the account (an airport where nothing takes off is no airport), off with
   // --read-only. With them on, the first owner pairs with a code printed here, in the terminal; every order is the owner's signature or
   // inside a limit the owner signed, and none is worth more than --live-cap
@@ -1090,9 +1090,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const r = service.restored;
   if (r) console.log(`restored from ${r.runs} earlier run${r.runs === 1 ? "" : "s"} (since ${r.from}): ${r.owner ? "your browser is still the owner" : "no owner yet"} · ${r.agents} agent${r.agents === 1 ? "" : "s"} · ${r.limits} limit${r.limits === 1 ? "" : "s"} · ${r.venues.length} venue${r.venues.length === 1 ? "" : "s"} connecting again · ${r.orders + r.payments} in flight followed again · ${r.mode}${r.skipped.length ? `\n  not brought back: ${r.skipped.join("; ")}` : ""}\n  (--fresh starts the account from nothing)`);
   const owned = (service.account?.state.owners.length ?? 0) > 0;
-  if (liveWrites) console.log(`TRADING IS ON · real orders and movements at the accounts you connect · at most $${liveWrites.capUsd} an order or a movement (--live-cap; --read-only turns it off) · every one is signed by you, or inside a limit you signed for an agent · money leaves a venue only for a place shown to be yours${owned ? "" : `\n  pairing code: ${liveWrites.pairingCode} — the first browser becomes the owner only with this code, typed on Gravit's face (Account)`}`);
-  else if (!classic) console.log(`read-only: nothing is traded or moved from this server (started with --read-only)${owned ? "" : `\n  pairing code: ${code} — the first browser becomes the owner only with this code, typed on Gravit's face (Account)`}`);
-  console.log(classic ? `simulated statement at ${srv.url} · ${service.accounts().length} accounts · MetaMask ${live ? "LIVE via mm" : "simulated (--mm for live)"} · no account layer · ledger ${service.ledgerPath()} · Ctrl-C to stop` : `your account at ${srv.url} · real accounts only: connect them on Gravit's face · ledger ${service.ledgerPath()} · Ctrl-C to stop`);
+  if (liveWrites) console.log(`TRADING IS ON · real orders and movements at the accounts you connect · at most $${liveWrites.capUsd} an order or a movement (--live-cap; --read-only turns it off) · every one is signed by you, or inside a limit you signed for an agent · money leaves a venue only for a place shown to be yours${owned ? "" : `\n  pairing code: ${liveWrites.pairingCode} — the first browser becomes the owner only with this code, typed on gravit's face (Account)`}`);
+  else if (!classic) console.log(`read-only: nothing is traded or moved from this server (started with --read-only)${owned ? "" : `\n  pairing code: ${code} — the first browser becomes the owner only with this code, typed on gravit's face (Account)`}`);
+  console.log(classic ? `simulated statement at ${srv.url} · ${service.accounts().length} accounts · MetaMask ${live ? "LIVE via mm" : "simulated (--mm for live)"} · no account layer · ledger ${service.ledgerPath()} · Ctrl-C to stop` : `your account at ${srv.url} · real accounts only: connect them on gravit's face · ledger ${service.ledgerPath()} · Ctrl-C to stop`);
   console.log(`market: ${marketUrl} · ${(await market.ready(3_000)) ? "answering" : "not answering yet: start it with cd market && npm run market"}`);
   // where the owner can connect, kept fresh without anyone asking: the venues' own answers to this network, and their terms matched to where
   // it is (live/availability.ts) — so the face and the agents know before anyone makes a key

@@ -137,7 +137,7 @@ test('a ticket: Where with the best marked and Paper, a public listing leading t
   assert.match(p, /<div class="tk-quote"><div class="tk-path">Fill it in to see what it would be\.<\/div><\/div>/);
   assert.match(goKey(p), /disabled/);
   assert.doesNotMatch(p, /What you sign|Your signature is good/);
-  assert.match(p, /<button type="button" class="btn tk-hand" data-action="handToGravit" data-id="coin:ETH">[\s\S]*?Hand to Gravit instead<\/button>/);
+  assert.match(p, /<button type="button" class="btn tk-hand" data-action="handToGravit" data-id="coin:ETH">[\s\S]*?Hand to gravit instead<\/button>/);
   // a sell from the form, a stock's unit in shares
   assert.match(panel(draw(stateWith({ ticket: ETH, fields: { side: 'sell' } }))), /<h2 class="tk-title">Sell ETH<\/h2>/);
   const nvda = panel(draw(stateWith({ kind: 'stocks', ticket: { id: 'stock:NVDA', side: 'buy', venue: 'broker', outcome: 0 } })));

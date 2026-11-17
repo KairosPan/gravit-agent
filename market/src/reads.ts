@@ -1,6 +1,6 @@
 /** THE MARKET'S PUBLIC READS, the face's Markets reads: what there is to trade (explore), a fresh price for a few A shares (quotes), one
  * market's price history (candles), its order book (book) and its latest trades (trades) — under names without "account", proxied by the
- * face under /data/market (face/src/market-proxy.ts) and read by Gravit through market:mcp. Each answers from the keyless public sources
+ * face under /data/market (face/src/market-proxy.ts) and read by gravit through market:mcp. Each answers from the keyless public sources
  * and China alone: the market keeps no venue connected (a connected venue's own reads are the account's, /api/account/connected/…), no
  * list of where the user can connect, and no market-down hold (the market never sees itself down).
  *

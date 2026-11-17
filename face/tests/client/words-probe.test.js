@@ -1,7 +1,7 @@
 // The words probe (plan 6, Task 10): the scanner reads the sources, the probe reads what the screens draw. Under a table whose
 // every value is its English wrapped in ⟦…⟧, every state of the corpus is drawn; what is left once the ⟦…⟧ runs are cut —
 // in the text and in the attributes a reader meets — must be words the corpus' own states and inputs hold (the operator's,
-// Gravit's, a venue's, a ticker), never the face's: a word the face draws from outside the table is reported.
+// gravit's, a venue's, a ticker), never the face's: a word the face draws from outside the table is reported.
 // The known words come from the corpus' content fields only (helpers/screens.js corpusStrings), never from its codes, and
 // from the literals the sources keep on screen on purpose (en-kept, the off-screen ones left out). An accepted limit: a word
 // the fixtures' own prose happens to hold (closed, filled, Paper, in a venue's note or an Account sentence) is known, so the
@@ -113,7 +113,9 @@ test('the known words hold no code word and no face word', () => {
   const ACCOUNT_PROSE = new Set(['via', 'watchOnly', 'what', 'label']);
   for (const w of ['live', 'Live', 'Markets']) {
     const from = [...(contributors.get(w) ?? [])];
-    assert.deepEqual(from.filter(k => !ACCOUNT_PROSE.has(k)), [], `${w} is known only from the Account's prose (known from ${from.join(', ')})`);
+    // the page tag's kept page names (host/page-tag.js) hold Markets as a code the router reads, never drawn as a word
+    const kept = w === 'Markets' ? ['en-kept'] : [];
+    assert.deepEqual(from.filter(k => !ACCOUNT_PROSE.has(k) && !kept.includes(k)), [], `${w} is known only from the Account's prose (known from ${from.join(', ')})`);
   }
 });
 

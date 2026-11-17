@@ -210,10 +210,10 @@ test('endLimit ends the scope it names', () => {
   assert.equal(draftOf('endLimit', [], { address: AGENT, allow: 'ex' }, NOW).scope, 'trade', 'trading where it names none');
   // a kind it does not know is refused, never ended as a trading limit
   for (const scope of ['mode', 'TRADE', 7]) assert.equal(draftOf('endLimit', [], { address: AGENT, scope, allow: 'ex' }, NOW), 'No limit of that kind to end', String(scope));
-  assert.equal(titleOf('endLimit', { name: 'Gravit', scope: 'venues' }), "End Gravit's limit to move money");
-  assert.equal(titleOf('endLimit', { name: 'Gravit', scope: 'payees' }), "End Gravit's payments limit");
-  assert.equal(titleOf('endLimit', { name: 'Gravit' }), "End Gravit's trading limit");
-  assert.equal(titleOf('limit', { name: 'Gravit', scope: 'earn' }), 'Give Gravit a limit');
+  assert.equal(titleOf('endLimit', { name: 'gravit', scope: 'venues' }), "End gravit's limit to move money");
+  assert.equal(titleOf('endLimit', { name: 'gravit', scope: 'payees' }), "End gravit's payments limit");
+  assert.equal(titleOf('endLimit', { name: 'gravit' }), "End gravit's trading limit");
+  assert.equal(titleOf('limit', { name: 'gravit', scope: 'earn' }), 'Give gravit a limit');
 });
 
 // ── every connector kind the Account offers (plan 4b Task 4; connect.js openConnect) ──
@@ -513,7 +513,7 @@ test('grantOf answers a sheet for every kind of ask', () => {
   // a venue on the page: the same limit with it ticked
   assert.deepEqual(spoken(grantOf(ask({ kind: 'venue', venue: 'paper' }), page, null)), { kind: 'limit', seed: { ...standing, asked: 'paper', budget: '', askedWords: said('Please') } });
   // a knock: let in at the ask's own address
-  assert.deepEqual(spoken(grantOf(ask({ kind: 'letIn', agentName: 'Gravit' }), page)), { kind: 'letIn', seed: { address: AGENT, name: 'Gravit', askedWords: 'Gravit asked: “Please”' } });
+  assert.deepEqual(spoken(grantOf(ask({ kind: 'letIn', agentName: 'gravit' }), page)), { kind: 'letIn', seed: { address: AGENT, name: 'gravit', askedWords: 'gravit asked: “Please”' } });
   // a top-up: into the agent's wallet (it has one), from the first account money moves from that is not an agent wallet
   const topup = spoken(grantOf(ask({ kind: 'topup', usd: '25' }), page));
   assert.deepEqual(topup, { kind: 'move', seed: { ...moveSeedOf(page, { from: 'ex', to: 'agent-claude-code', amount: '25' }), askedWords: said('Please') } });

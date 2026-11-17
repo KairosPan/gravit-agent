@@ -172,7 +172,7 @@ test("Review Focus 5: the turn's closing words after an ok proposal are not draw
 });
 
 // the routines drill, 2026-11-15: the one conversation runs on the `gravit-router` preset, so the live layer names that
-// preset as the speaker of Gravit's words (host/live.js speakerOf) while the tool rows and the card stay `gravit`'s
+// preset as the speaker of gravit's words (host/live.js speakerOf) while the tool rows and the card stay `gravit`'s
 test("the closing words are not drawn in the one conversation, whose speaker is its preset and not `gravit`", () => {
   const said = (id, seq, text) => ({ ...words(id, seq, text), from: 'gravit-router' });
   const ok = [you('e1', 1), said('e2', 2, 'Drafting it now.'), row('c1', 3), card({ seq: 3 }), said('e4', 4, 'Card is waiting in the browser.')];

@@ -416,7 +416,7 @@ export class ConflictWatch {
 
 /** where the connector keeps the ts of the last DM message it handled: `<home>/identity/slack.cursor`, the analogue of telegram.offset */
 export const CURSOR_FILE = "slack.cursor";
-/** what the operator is answered when Chat with Gravit does not tick Slack */
+/** what the operator is answered when Chat with gravit does not tick Slack */
 export const SLACK_CHAT_OFF = chatOffLine("slack");
 /** the backfill's page: conversations.history's limit */
 export const BACKFILL_PAGE = 100;
@@ -461,7 +461,7 @@ export interface SlackConnectorDeps {
   strangers: Strangers;
   /** the senders' references the owner blocked */
   blocked: () => string[];
-  /** whether the Chat with Gravit row ticks Slack */
+  /** whether the Chat with gravit row ticks Slack */
   chatOn: () => boolean;
   /** a line to the operator, in the DM */
   reply: (text: string) => Promise<void>;
@@ -482,7 +482,7 @@ export interface SlackConnectorDeps {
  *
  * Each message, live or backfilled:
  *   - the bound operator's text (an events_api envelope of this app and this team, a message in the DM `secret.channel`, from the
- *     operator's user id, no bot and no subtype but thread_broadcast): `!` commands rewritten to `/` (normalizeCommand); with Chat with Gravit not ticking
+ *     operator's user id, no bot and no subtype but thread_broadcast): `!` commands rewritten to `/` (normalizeCommand); with Chat with gravit not ticking
  *     Slack and no command, answered SLACK_CHAT_OFF and kept nowhere; else appended to the inbox as `slack:<ts>` (with `slack:<thread_ts>`
  *     as replyTo in a thread), and only then acked and the cursor moved past it. A text the inbox cannot store is held (not acked) and
  *     ends its socket, so nothing after it is handled there and the cursor stays before it: the next hello's backfill reads it again.

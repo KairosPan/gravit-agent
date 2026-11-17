@@ -1,5 +1,5 @@
 // face/src/conversation.ts
-/** The conversation: Gravit's one router session, the operator's one entry (docs/superpowers/specs/
+/** The conversation: gravit's one router session, the operator's one entry (docs/superpowers/specs/
  * 2026-11-08-one-entry-router-design.md §5.2, §5.10).
  *
  * WHERE IT LIVES. A runtime-root session of the `gravit-router` preset (src/router-preset.ts) whose cwd is
@@ -48,7 +48,7 @@
  * conversation's `deliver`, the pause's choke point (src/desk-conversation.ts), absent with the desk off, when nothing
  * is sent: a turn that logged a phone text - whatever message named it, a parked browser steer claimed first included -
  * sends its reply (src/desk-conversation.ts `replyOf`: the answer, the cut line, the
- * refusal; its failure line saying Gravit, not the desk) as `chat` to the network the last such text came through; a task report's turn sends it to the network of the
+ * refusal; its failure line saying gravit, not the desk) as `chat` to the network the last such text came through; a task report's turn sends it to the network of the
  * phone that asked for the task (its brief's `origin`, src/task-view.ts `briefOrigin`); every other turn - the
  * browser's, a web task's report - sends nothing. Deliveries go in turn order. Still no `desk-turn` is written.
  *
@@ -260,7 +260,7 @@ const CONVERSATION_LINES: ReplyLines = {
     : conversationFenceRefusalLine(path)),
   cutOffLine,
   formatDuration,
-  notAnsweredLine: (error) => `Gravit could not answer: ${error}; nothing was done - send it again later`,
+  notAnsweredLine: (error) => `gravit could not answer: ${error}; nothing was done - send it again later`,
 };
 
 /** The conversation's composition, the desk's three steps (src/desk-session.ts `deskSetup`): the model selection, the

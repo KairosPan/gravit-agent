@@ -1,5 +1,5 @@
 // Discover's host layer (spec 2026-10-19 §7 Stage 3): the six listings each alone (the abilities' since spec 2026-11-13
-// §4.4), the Gravit item's three reads, a skill's content, and the agent writes.
+// §4.4), the gravit item's three reads, a skill's content, and the agent writes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../../client/js/store.js';
@@ -195,7 +195,7 @@ test('a failed post leaves the switch as it was and shows the error', async () =
   await r.discover.load();
   assert.equal(await r.discover.toggleAvailable('agent', 'codex'), false);
   assert.deepEqual(r.d().roster, { status: 'ready', agents: ['codex'], bots: [] });
-  assert.deepEqual(spoken(r.d().status), { line: 'Available to Gravit: the roster file cannot be read', bad: true });
+  assert.deepEqual(spoken(r.d().status), { line: 'Available to gravit: the roster file cannot be read', bad: true });
   const unread = rig({ json: { ...ok, '/data/roster.json': { ok: false, corrupt: true } } });
   await unread.discover.load();
   assert.equal(await unread.discover.toggleAvailable('bot', 'buffett'), false, 'an unreadable roster posts nothing');

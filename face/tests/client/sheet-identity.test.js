@@ -14,19 +14,19 @@ import { t } from '../../client/js/i18n/words.js';
 
 const STEPS_1 = [
   'In Telegram, open @BotFather and send /newbot.',
-  'Pick a name for Gravit, then a username that ends in "bot".',
+  'Pick a name for gravit, then a username that ends in "bot".',
   'BotFather answers with a token. Copy it.',
-  'Paste it only here, never in a chat, not even with Gravit.',
+  'Paste it only here, never in a chat, not even with gravit.',
 ];
 const STEPS_2 = [
-  'On your phone, open the link or scan the code: Telegram opens Gravit\'s bot.',
+  'On your phone, open the link or scan the code: Telegram opens gravit\'s bot.',
   'Tap Start.',
   'Wait here: this sheet moves on when the bot hears you.',
 ];
 const STEPS_3 = [
   'Check the name, the handle and the message: they should be yours, sent a moment ago.',
-  'This is me: Gravit talks only with this Telegram account.',
-  'Not me: that sender is listed under Not you and never reaches Gravit. Say hi again from your own Telegram.',
+  'This is me: gravit talks only with this Telegram account.',
+  'Not me: that sender is listed under Not you and never reaches gravit. Say hi again from your own Telegram.',
 ];
 const ALL_TELEGRAM = 'chat=telegram;alerts=telegram;brief=telegram;cards=telegram;fills=telegram';
 const SEED = {
@@ -35,7 +35,7 @@ const SEED = {
 };
 const NOW = Date.parse('2026-11-04T15:00:00.000Z');
 const PENDING = {
-  id: SEED.pending, network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' },
+  id: SEED.pending, network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'gravit' },
   link: 'https://t.me/gravit_desk_bot', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'waiting',
 };
 const decode = s => s.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
@@ -61,7 +61,7 @@ test('sheet 1: Bot token, a password field with Paste and Next, where it is kept
   assert.match(html, /data-action="identityPaste">Paste</);
   assert.match(html, /data-action="identityNext"[^>]*>Next</);
   assert.ok(html.includes('Kept in: Account · :4820'));
-  assert.ok(decode(html).includes("Never in: Gravit's box · ~/.dsh"));
+  assert.ok(decode(html).includes("Never in: gravit's box · ~/.dsh"));
   assert.deepEqual(listOf(html), STEPS_1);
   // the steps sit above the last button row, the keys Cancel and Next
   const ol = html.indexOf('<ol class="sheet-steps">');
@@ -113,7 +113,7 @@ test('connectNetwork is built from its seed alone, the fingerprint and never the
   // ruling 4: the routing now with Telegram ticked in every row
   assert.equal(connectRoutingOf({ ok: true, routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] } }), ALL_TELEGRAM);
   assert.equal(connectRoutingOf(null), ALL_TELEGRAM);
-  assert.deepEqual(rowsSentOn('chat=telegram;alerts=;brief=telegram;cards=;fills=', 'telegram'), ['Chat with Gravit', 'Pre-close brief']);
+  assert.deepEqual(rowsSentOn('chat=telegram;alerts=;brief=telegram;cards=;fills=', 'telegram'), ['Chat with gravit', 'Pre-close brief']);
 });
 
 // ── Task 3: Disconnect, What reaches you where with quiet hours, and Block ──
@@ -179,27 +179,27 @@ const SLACK_STEPS_1 = [
   'Paste the manifest above and create the app.',
   'In Basic Information › App-Level Tokens, generate a token with the connections:write scope. It starts with xapp-. Paste it in the first field.',
   'In Install App, install the app to your workspace and copy the Bot User OAuth Token. It starts with xoxb-. Paste it in the second field.',
-  'Paste them only here, never in a chat, not even with Gravit.',
+  'Paste them only here, never in a chat, not even with gravit.',
 ];
 const SLACK_STEPS_2 = [
-  'Open the link or scan the code: Slack opens Gravit\'s app.',
+  'Open the link or scan the code: Slack opens gravit\'s app.',
   'In its Messages tab, send it any message, for example hi.',
   'Wait here: this sheet moves on when the app hears you.',
 ];
 const SLACK_STEPS_3 = [
   'Check the name, the handle and the message: they should be yours, sent a moment ago.',
-  'This is me: Gravit talks only with this Slack account, in this direct message.',
-  'Not me: that sender is listed under Not you and never reaches Gravit. Say hi again from your own Slack account.',
+  'This is me: gravit talks only with this Slack account, in this direct message.',
+  'Not me: that sender is listed under Not you and never reaches gravit. Say hi again from your own Slack account.',
 ];
 const SLACK_NOTE_WORDS = 'On Slack, type the phone\'s commands with ! — !status, !pause 30m, !mute 30m, !new, !stop.';
-const MANIFEST = '{\n  "display_information": {\n    "name": "Gravit"\n  },\n  "x": "<b>&"\n}';
+const MANIFEST = '{\n  "display_information": {\n    "name": "gravit"\n  },\n  "x": "<b>&"\n}';
 const ALL_BOTH = 'chat=slack,telegram;alerts=slack,telegram;brief=slack,telegram;cards=slack,telegram;fills=slack,telegram';
 const SLACK_SEED = {
   network: 'slack', pending: 'fedcba9876543210fedcba9876543210', botId: 'T0FAKE001:U0BOT0001', speaksAs: '@gravit', operatorId: 'T0FAKE001:U0OPER7QK',
   talksOnlyWith: '@pan', routing: ALL_BOTH, keyHash: 'c'.repeat(64), salt: 'd'.repeat(32),
 };
 const SLACK_PENDING = {
-  id: SLACK_SEED.pending, network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit' }, workspace: 'Fake Co',
+  id: SLACK_SEED.pending, network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'gravit' }, workspace: 'Fake Co',
   link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'waiting',
 };
 const slackAt = (step, manifest = MANIFEST) => R.identityConnectSet(
@@ -243,7 +243,7 @@ test('sheet 1: Connect Slack · 1 of 3 · App tokens — the manifest with Copy,
   assert.match(html, /<label class="field-label" for="identity-bot-token">Bot token \(xoxb-…\)<\/label>/);
   assert.ok(html.indexOf('identity-app-token') < html.indexOf('identity-bot-token'), 'the app-level token first');
   assert.ok(html.includes('Kept in: Account · :4820'));
-  assert.ok(decode(html).includes("Never in: Gravit's box · ~/.dsh"));
+  assert.ok(decode(html).includes("Never in: gravit's box · ~/.dsh"));
   assert.deepEqual(listOf(html), SLACK_STEPS_1);
   const ol = html.indexOf('<ol class="sheet-steps">');
   const lastRow = html.lastIndexOf('<div class="btn-row">');
@@ -287,17 +287,17 @@ const imAt = () => R.identityConnectOpen(R.nav(emptyState(NOW), { screen: 'accou
 
 test("iMessage's steps lists, word for word", () => {
   assert.deepEqual(connectSteps(1, 'imessage'), [
-    'Make a free Photon account and create a project used only for Gravit.',
+    'Make a free Photon account and create a project used only for gravit.',
     "In the project's Settings, copy the project ID and the project secret.",
     'Paste them below, then pick your country or region and type your mobile number.',
   ]);
   assert.deepEqual(connectSteps(2, 'imessage'), [
-    "On your iPhone, open the link or scan the code with the camera: a new message opens, addressed to Gravit's number. Send hi.",
-    'Wait here: this sheet moves on when Gravit hears you from your number.',
+    "On your iPhone, open the link or scan the code with the camera: a new message opens, addressed to gravit's number. Send hi.",
+    'Wait here: this sheet moves on when gravit hears you from your number.',
   ]);
   assert.deepEqual(connectSteps(3, 'imessage'), [
-    'This is me: Gravit talks only with this number, on iMessage.',
-    'Not me: that sender is listed under Not you and never reaches Gravit. Say hi again from your own iPhone.',
+    'This is me: gravit talks only with this number, on iMessage.',
+    'Not me: that sender is listed under Not you and never reaches gravit. Say hi again from your own iPhone.',
   ]);
   assert.deepEqual(connectSteps(4, 'imessage'), []);
 });
@@ -305,7 +305,7 @@ test("iMessage's steps lists, word for word", () => {
 test('sheet 1: Connect iMessage · 1 of 3 · Photon project — one line on Photon, its guide on top with the button to Photon, three fields, where the secret is kept', () => {
   const html = renderConnectDrawer(imAt());
   assert.match(html, /<aside class="drawer sheet" aria-label="Connect iMessage · 1 of 3 · Photon project">/);
-  assert.match(decode(html), /Gravit's iMessage goes through Photon, and your messages pass through its servers\./);
+  assert.match(decode(html), /gravit's iMessage goes through Photon, and your messages pass through its servers\./);
   assert.match(html, /<a class="btn-sm sheet-link" href="https:\/\/app\.photon\.codes" target="_blank" rel="noopener noreferrer">Open Photon ↗<\/a>/);
   assert.match(html, /<input id="identity-photon-project" class="input" type="text" autocomplete="off"/);
   assert.match(html, /<input id="identity-photon-secret" class="input" type="password" autocomplete="off"/);
@@ -319,7 +319,7 @@ test('sheet 1: Connect iMessage · 1 of 3 · Photon project — one line on Phot
   assert.match(html, /<option value="CN">China \+86<\/option>/);
   assert.match(renderConnectDrawer({ ...imAt(), identity: { ...imAt().identity, connect: { ...imAt().identity.connect, region: 'CN' } } }), /<option value="CN" selected>/);
   assert.ok(html.includes('Kept in: Account · :4820'));
-  assert.ok(decode(html).includes("Never in: Gravit's box · ~/.dsh"));
+  assert.ok(decode(html).includes("Never in: gravit's box · ~/.dsh"));
   assert.doesNotMatch(html, /<form/);
   // the guide once, above the fields, the button in its first step
   const ol = html.indexOf('<ol class="sheet-steps">');

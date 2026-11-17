@@ -1,7 +1,7 @@
 /** Gate 2, the per-order approval gate: what makes a write of the Account
  * seat raise a card.
  *
- * Gravit's only order path is its seat at Linqi's Account (`account-seat.ts`):
+ * gravit's only order path is its seat at Linqi's Account (`account-seat.ts`):
  * the seat's twelve writes — every tool that places, changes or cancels an
  * order, moves money, pays or sets leverage — and any tool under the face's
  * own seat prefix the face has not classified stop for a human here first,
@@ -20,7 +20,7 @@
  * object is a plain unfrozen spread, `:1445`), and the body then re-resolves
  * the tool by its CURRENT name (`:1578`) — so a `tools/execute` wrapper can
  * rename a guard-approved call into a seat write after the fact. Nothing here
- * changes that, and Gravit has an unrestricted shell besides. Per charter
+ * changes that, and gravit has an unrestricted shell besides. Per charter
  * Rule 2 — enforce below the layer that runs arbitrary code, or admit the gate
  * is prose — this gates the model's ordinary tool calls. It is not
  * containment. `face/README.md` says so where an operator will read it.
@@ -200,10 +200,10 @@ export function effectiveApprovalPolicy(
  * `prepareExecution`, and only then `dispatchToolBody`'s `ToolNotFoundError`),
  * so a model that names such a tool still reaches this gate: the desk's or a
  * bot's masked one, and in the default configuration - Gate 1 closed, no
- * order tool registered - Gravit's too. Asking there would raise a card that
+ * order tool registered - gravit's too. Asking there would raise a card that
  * can only park with no browser, and an approved call would then fail
  * `unknown tool` at dispatch. Denying instead means an unregistered order
- * tool called from Gravit no longer raises a card that could never dispatch,
+ * tool called from gravit no longer raises a card that could never dispatch,
  * and under `never` no policy sentence sends the operator to a setting that
  * cannot help.
  * @param name - the registered tool name (`exec.name`).

@@ -85,6 +85,19 @@ export function taskLineHtml({ task, gate, status }, group, state, open) {
   return lineHtml(task.id, dot, task.title, status, `${originOf(task)}${strategy}${steps}${end}${usageOf(task.usage)}${keys(task, state.tasks.busy.includes(task.id))}`, open, task.bot);
 }
 
+/** A line waiting on the operator, as the gravit box draws it (box spec §6.6): always open, no disclosure — the rail's dot,
+ * the title and the status, then the worker's gate, answered there with the thread's own keys, or, while the page has not
+ * seen that gate, the rail's words and a link to the task's page. */
+export function waitingLineHtml({ task, gate, status }, state) {
+  const record = gate ? (state.conversations ?? []).find(c => c.id === task.id) : null;
+  const head = `<div class="gbox-line-head"><span class="${cls('task-dot', dotOf({ task, gate }, 'you'))}"></span>` +
+    `<span class="task-title">${esc(maskExcerpt(task.title ?? ''))}</span><span class="task-status">${esc(status)}</span></div>`;
+  // a gate the read says waits but this page has not seen (after a reload): the rail's words and the way to the task's page
+  const end = record ? `<div class="task-gate">${gateHtml(record, gate, state, { rail: true })}</div>`
+    : `<div class="task-gate-there"><a href="#/task/${esc(encodeURIComponent(task.id))}">${th('tasks.gateOpen')} ›</a></div>`;
+  return `<div${attrs({ class: 'gbox-line', 'data-task': task.id })}>${head}${end}</div>`;
+}
+
 /** The rail: '' while it has no line. `open` is the ids the page holds open. */
 export function renderTaskRail(state, now, { open = null } = {}) {
   const rail = railOf(state, now);

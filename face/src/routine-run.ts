@@ -15,7 +15,7 @@
  *    fence refused is `error` with the fence's line; its `headline` is {@link splitAnswer}'s, cut to
  *    {@link HEADLINE_MAX};
  * 5. an answer longer than its headline is a report: a `report` record, its body cut to {@link REPORT_BODY_MAX}, and a
- *    line noted into Gravit's one conversation (`deps.note`, src/conversation.ts `noteMessage`, fenced as data there).
+ *    line noted into gravit's one conversation (`deps.note`, src/conversation.ts `noteMessage`, fenced as data there).
  *    A one-line answer posts nothing. Nothing ever goes to the phone;
  * 6. the session's dispose, awaited at most {@link RUN_DISPOSE_MS}, and only then the supervision's end.
  *
@@ -180,7 +180,7 @@ function cut(text: string, max: number): string {
  * stamp and timer; `deadlineMs` the turn's deadline, {@link DEFAULT_TURN_DEADLINE_MS} by default; `createAgent` a fresh
  * desk agent (src/desk-session.ts `createDeskAgent`); `resolveRoute` the desk's route (`undefined`: its own); `on` the
  * root bus; `supervise` src/desk-session.ts `superviseDeskTurns`, the default; `state` the desk's state for the wake
- * (none when absent, when it fails or when it has not answered by the open's deadline, with one line); `note` a report's line into Gravit's one conversation (src/desk.ts
+ * (none when absent, when it fails or when it has not answered by the open's deadline, with one line); `note` a report's line into gravit's one conversation (src/desk.ts
  * binds it); `log` where a line goes (stderr). */
 export interface RunDeps {
   home: string;

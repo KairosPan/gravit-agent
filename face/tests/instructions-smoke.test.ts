@@ -1,7 +1,7 @@
 /** What dsh-agent-instructions publishes onto a session's log at its first
  * request, on a real tree, after the face's agent-instructions patch (Task 2):
  * GRAVIT.md and GRAVIT.local.md from the .git root down to the cwd, never
- * AGENTS.md or CLAUDE.md, for Gravit, for a channel session and for a bot.
+ * AGENTS.md or CLAUDE.md, for gravit, for a channel session and for a bot.
  * Own file, gated: one boot per process. */
 import "./helpers/no-market.ts";
 import "./helpers/no-memory.ts";
@@ -91,8 +91,8 @@ test("instructions smoke: GRAVIT.md and its local twin reach every first request
       return JSON.stringify(baseline);
     };
     const gravit = await baselineOf({ cwd: root });
-    assert.ok(gravit.includes(MARK.root), "GRAVIT.md reaches Gravit");
-    assert.ok(gravit.includes(MARK.local), "GRAVIT.local.md reaches Gravit");
+    assert.ok(gravit.includes(MARK.root), "GRAVIT.md reaches gravit");
+    assert.ok(gravit.includes(MARK.local), "GRAVIT.local.md reaches gravit");
     assert.equal(gravit.includes(MARK.agents), false, "AGENTS.md never does");
     assert.equal(gravit.includes(MARK.claude), false, "CLAUDE.md never does");
     const channel = await baselineOf({ cwd: join(root, "strategies", "x") });

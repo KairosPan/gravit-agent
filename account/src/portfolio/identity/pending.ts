@@ -188,7 +188,7 @@ const refusal = (message: string): Refusal => no("E_ACCOUNT_BAD_ACTION", { messa
 export const operatorHandleOf = (sender: { id: string; handle: string }, network: Network): string =>
   network === "imessage" || sender.handle !== "" ? sender.handle : maskId(sender.id);
 
-/** whom Gravit speaks as, as connectNetwork signs it: the bot's @username — on iMessage the pool number, with no @ */
+/** whom gravit speaks as, as connectNetwork signs it: the bot's @username — on iMessage the pool number, with no @ */
 export const speaksAsOf = (network: Network, bot: { username: string }): string => (network === "imessage" ? bot.username : `@${bot.username}`);
 
 /** iMessage's key, its two halves: the project ID and its secret either side of the first NUL (an ID never holds one) — or undefined */
