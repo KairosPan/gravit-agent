@@ -63,6 +63,14 @@ function chips(state) {
     `<button type="button" class="gbox-chip-x" data-action="boxDetach" aria-label="${off}" title="${off}">${icon('x', 12, 2.2)}</button></span></div>`;
 }
 
+/** How long the panel's grow lasts as the box opens, in ms: app.css's gbox-grow runs as long. */
+export const BOX_GROW_MS = 180;
+
+// the grow on the panel (spec §6.3), drawn only while it runs: `grow` is how far it has come since the box opened (app.js), so
+// a panel render() writes again inside it carries on from there, and one written after it stands still
+const growAttrs = grow => (typeof grow === 'number' && grow >= 0 && grow < BOX_GROW_MS
+  ? { 'data-grow': true, style: grow > 0 ? `animation-delay:-${Math.round(grow)}ms` : null } : {});
+
 function panel(state, now, composer, page) {
   const conv = (state.conversations ?? []).find(c => c.id === state.tasks.conversation);
   const working = conv?.running ? `<span class="status up"><span class="status-dot"></span>${th('thread.working')}</span>` : '';
@@ -72,12 +80,13 @@ function panel(state, now, composer, page) {
     `<a class="gbox-key" href="#/messages" aria-label="${open}" title="${open}">${icon('openIn', 18)}</a>` +
     `<button type="button" class="gbox-key" data-action="boxClose" aria-label="${minimize}" title="${minimize}">${icon('chevDown', 18, 2.2)}</button></header>`;
   const say = renderComposer({ menu: composer?.menu ?? null, files: composer?.files ?? [], note: composer?.note ?? '' });
-  return `<section${attrs({ class: 'gbox-panel', role: 'dialog', 'aria-modal': 'false', 'aria-label': HOST_NAME })}>${head}<div class="gbox-waiting">${waiting(state, now)}</div>` +
+  return `<section${attrs({ class: 'gbox-panel', role: 'dialog', 'aria-modal': 'false', 'aria-label': HOST_NAME, ...growAttrs(page.grow) })}>${head}<div class="gbox-waiting">${waiting(state, now)}</div>` +
     `<div class="gbox-body">${body(state, now, page)}</div>${chips(state)}${say}${renderStatus(state.status)}</section>`;
 }
 
 /** The box on this screen: '' where it does not stand or a sheet covers it; the panel while open, else the ball. `composer`
- *  is Messages' { menu, files, note }; `page` the thread's { revealed, anchor, rail } and `mac` for the shortcut's name. */
+ *  is Messages' { menu, files, note }; `page` the thread's { revealed, anchor, rail }, `mac` for the shortcut's name and `grow`
+ *  the ms since the box opened while its grow runs (else none: the panel drawn still). */
 export function renderBox(state, now, composer = {}, page = {}) {
   if (!boxShown(state) || boxCovered(state)) return '';
   const aside = boxAside(state);

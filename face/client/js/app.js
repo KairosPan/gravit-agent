@@ -82,7 +82,7 @@ import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
 import { onScreenId, boxOpenHere, boxShown } from './host/sessions.js';
 import { boxCovered, boxAside, boxAttached } from './host/box-view.js';
 import { pageTagOf } from './host/page-tag.js';
-import { renderBox } from './render/box.js';
+import { renderBox, BOX_GROW_MS } from './render/box.js';
 import { createAccountStream } from './wire/account-stream.js';
 import { createMarketStream } from './wire/market-stream.js';
 import { discoverWallets, proveWallet } from './wire/wallet.js';
@@ -639,6 +639,7 @@ export function boot(win, host = {}) {
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
   let sayFocus = false;     // ⌥⌘N from another screen: the composer takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
+  let boxGrowAt = null;     // when the gravit box last opened, while its panel's grow runs: a render then draws the grow on from there
 
   function applyTheme(theme) {
     if (theme === 'cream' || theme === 'black') doc.documentElement.dataset.theme = theme; else delete doc.documentElement.dataset.theme;
@@ -672,7 +673,7 @@ export function boot(win, host = {}) {
     // the scroll keep's anchor: the message drawn first at the anchor seq last time, where it stood, and the document's
     // scroll (a narrow window scrolls the page, not the thread)
     const docAt = doc.scrollingElement?.scrollTop ?? null;
-    const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, results: root.querySelector('.conv-results')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
+    const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, results: root.querySelector('.conv-results')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop, waiting: root.querySelector('.gbox-waiting')?.scrollTop };
     if (scrolls.rows != null) rowsAt = scrolls.rows;
     // a disclosure the person opened (its Raw, a trace; tool calls are stored but not drawn) is the page's, not the store's: open again by its id
     // (a job's disclosure is the store's: open while it is the job open, never kept open by the page)
@@ -711,8 +712,11 @@ export function boot(win, host = {}) {
     // an operator image at full size, over everything (D34: Esc closes it after a menu)
     const lit = lightboxOf(s);
     const lightHtml = lit ? lightboxHtml(lit) : '';
-    // the gravit box over the screen (it draws nothing where it does not stand), under the shortcut sheet
-    const boxHtml = renderBox(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail, mac });
+    // the gravit box over the screen (it draws nothing where it does not stand), under the shortcut sheet; its panel grows only
+    // inside BOX_GROW_MS of its opening (this write replaces the panel, and a grow on every redraw would move its keys away from
+    // the operator's click on a page that redraws on each quote)
+    if (boxGrowAt !== null && now() - boxGrowAt >= BOX_GROW_MS) boxGrowAt = null;
+    const boxHtml = renderBox(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail, mac, grow: boxGrowAt === null ? null : now() - boxGrowAt });
     root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen) + boxHtml + scHtml + overlayHtml + lightHtml;
     const note1 = doc.getElementById('composer-note');
     if (note0 && note1 && note0 !== note1 && typeof note1.replaceWith === 'function') note1.replaceWith(note0);
@@ -768,6 +772,10 @@ export function boot(win, host = {}) {
     if (main && sameScreen && scrolls.main != null) main.scrollTop = scrolls.main;
     const drawerBody = root.querySelector('.drawer-body');
     if (drawerBody && last.drawer && last.drawer === drawerOf(s) && scrolls.drawer != null) drawerBody.scrollTop = scrolls.drawer;
+    // what waits on you in the open gravit box: a strip that scrolls (a question's options and its Answer key under them), kept
+    // where the operator scrolled it, or every quote's redraw would put it back at the top
+    const strip = root.querySelector('.gbox-waiting');
+    if (strip && scrolls.waiting != null) strip.scrollTop = scrolls.waiting;
     // a section asked for (a pill's Usage): scrolled to after the drawer's own keep, once
     if (detailsAt !== null) {
       doc.getElementById(detailsAt)?.scrollIntoView?.({ block: 'start' });
@@ -2345,9 +2353,10 @@ export function boot(win, host = {}) {
     store.dispatch('setListOpen', true);
     doc.getElementById('cq')?.focus();
   }
-  // the gravit box opened: the conversation read in it (the store's subscription), marked seen, its composer focused with the
-  // caret after the draft
+  // the gravit box opened: its panel grows (once: render() draws the grow while it runs), the conversation read in it (the
+  // store's subscription), marked seen, its composer focused with the caret after the draft
   function openBox() {
+    boxGrowAt = now();
     store.dispatch('boxOpen');
     const s = store.get();
     const c = s.conversations.find(x => x.id === s.tasks?.conversation);
