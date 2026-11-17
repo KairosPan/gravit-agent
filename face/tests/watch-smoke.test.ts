@@ -916,7 +916,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
       (await readFile(join(memoryHome, "recalls.jsonl"), "utf8")).split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l) as RecallLine)
         .filter((l) => l.kind === "recall");
     assert.deepEqual((await recalls()).filter((l) => l.symbol === LS), [], "ORCL was never asked about before the case");
-    assert.ok((await recalls()).length > 0, "every price alert the phone got before was asked about");
+    assert.ok((await recalls()).length > 0, "the memory was asked about at least one earlier price alert");
     assert.ok((await recalls()).every((l) => l.by === FACE_MEMORY_NAME && (l.applied ?? []).length === 0),
       "each by the face, and the card applied to none of them: the earlier cases sent nothing more");
     /* ORCL joins the book, held and with a watch level of its own, priced under it */

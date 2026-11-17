@@ -1106,7 +1106,9 @@ and every other seat write (`not checked for this tool`), and an order whose fie
 **Nothing waits on the memory.** The check never rejects and settles within 3,000 ms; Gate 2 asks
 the card when it settles or at 4,000 ms, whichever is first. With no home, a disabled row, a fault or
 a slow read, the card is asked as it would be with no memory and says why no lesson is shown (`not
-connected` with the opener's words, or a line's `the memory did not answer in time`). A write that
+connected` with the opener's words, or a line's `the memory did not answer in time`). A home that was
+never made is not connected too: a line's recall that finds none makes the whole card `not connected`,
+`no memory here: run gravit-memory init`, with no line's fault, no lesson count and no log line. A write that
 fails is logged and shown on the card; no order is held, retried or refused for it. The only orders
 the gate refuses are the red line with no override and the two call-id refusals above.
 
@@ -1115,7 +1117,10 @@ ask the memory through one function: one `recall` as `gravit-face`, given what m
 (`considering`), the symbol and its market when one was placed, and the face's own facts with their
 sources when there are any; opening the memory and the recall race one timer, and a recall that
 loses is left to finish and ignored (`the memory did not answer in time`). It never throws or
-rejects: a fault is its words, a memory not connected the opener's.
+rejects: a fault is its words, a memory not connected the opener's. An open or a recall that
+rejects with the package's `E_NO_HOME` — a home nobody made, the default fresh install and the agent
+box's empty volume — is not connected, not a fault, in the words `no memory here: run gravit-memory
+init`.
 
 **Under an alert** (`src/memory-alert.ts`, `src/watch.ts`). When the watch's pass delivers a price
 alert to the phone, it asks the memory which of the owner's lessons apply, as `gravit-face`,
@@ -1136,7 +1141,9 @@ the price against the book's average cost; equal counts as up. The facts:
 | `unrealized_pct` | a held name's price over its average cost, in % | `the watch's quote over the desk's book's average cost` |
 | `change_5d_pct`, `change_20d_pct`, `change_60d_pct` | as at the order card, from the Market's daily bars, read within `ALERT_FACTS_MS`, 1,500 ms | `the Market's daily bars, base close <date>` |
 
-The bars read and the recall share `ALERT_ASK_MS`, 3,000 ms, the recall taking what the bars left.
+The memory is opened first, so a memory not connected, a disabled row among it, reads nothing at the
+Market. Opening, the bars read and the recall share `ALERT_ASK_MS`, 3,000 ms, the recall taking what
+the open and the bars left.
 The ask starts once the alert is delivered, beside the send chain and tracked by nothing: no send,
 no annotation post and no shutdown waits for it, and an answer that comes once the watch has stopped
 is dropped. When a lesson applies, the block goes on the send chain as a reply under the alert, with
@@ -1150,30 +1157,49 @@ and <n> more
 
 Red lines first, then caveats; at most `ALERT_LESSONS_MAX`, 3, lines, each lesson's words with every
 character `src/echo.ts` escapes written as its `\uXXXX` escape and cut to `ALERT_WORDS_MAX`, 400
-characters; the block at most `ALERT_BLOCK_MAX`, 700, a line that would pass it left out; `and <n>
-more` counts what was left out and what the memory did not show. The conversation is told the block
+characters; the block at most `ALERT_BLOCK_MAX`, 700: the first lesson that would take it past 700
+characters ends it, and the rest are counted; `and <n> more` counts what was left out and what the
+memory did not show. The conversation is told the block
 once its send was not refused, then, for lessons the memory could not tell, at most
 `ALERT_UNTOLD_MAX`, 3, lines `could not be checked on <SYMBOL>: <lesson id> needs <need>, <need>` and
 past them `and <n> more could not be checked`, and last `recall <recall id>` — a line
 `[alert · <SYMBOL> · lessons]` quoted as desk data as every desk line is (id `note-lessons:<alert
 id>`), a lesson's id and a need shown only in the memory's own shapes, else as `a lesson` and `a
 fact`. With only lessons that could not be told, the phone gets nothing and the conversation is told
-at once. A block is sent once a day per symbol: its key is the symbol, the hit's date and the ids of
-the lessons that apply and of those not told, kept among the watch's dated memories, and a later
-alert with the same key sends and tells nothing more, though its recall is still made. With no
-home, a disabled row, a fault or a slow read there is no block; a fault is one line, `memory alert:
-<SYMBOL>: <the fault>`, a memory not connected none. The block is not a record in `alerts.jsonl`,
-so the Desk's News does not show it.
+at once. A block is sent once a day per symbol: the phone's key (`phoneKey`) is the symbol, the
+hit's date and the ids of the lessons that apply — what the phone is shown — and a later alert with
+the same phone's key sends no block; the note's key adds the ids of the lessons not told, and a
+later alert whose note's key differs (bars that came late, say) is still told to the conversation.
+Both are kept among the watch's dated memories, in the process: after a restart the block can go
+again under the symbol's next alert that day. The recall is made every time. With no home, a home
+that was never made, a disabled row, a fault or a slow read there is no block; a fault, and any
+throw in the ask, is one line, `memory alert: <SYMBOL>: <the fault>` (`a hit` for a symbol off its
+market's shape), a memory not connected none. The block is not a record in `alerts.jsonl`, so the
+Desk's News does not show it.
+
+A phone reply carries the lessons too. When a block's send went, the watch keeps, in memory, each
+message id it went out as against the alert's id and the note; a reply to the block carries the
+alert's text as sent, then `lessons:` and the note; a reply to the alert's own message carries what
+it did before — the alert's text and its annotation when there is one — then `lessons:` and the note,
+when one was made for that alert; all cut at 4,000 characters. Nothing of this is written to
+`alerts.jsonl`: it is kept 48 hours, as the watch's dated memories are, and a restart forgets it, so
+after a restart a reply to the alert carries what it did before and a reply to the block nothing.
 
 **On a Lunhui run** (`src/memory-lunhui.ts`, `src/memory-lunhui-routes.ts`). When a sealed run's
 view is first read, the face asks the memory, as `gravit-face`, which of the owner's lessons apply
 to buying each of the run's leaders: the names sealed on the ladder's rungs of two boards and up,
 the highest rung first and a rung's own order kept, each code once and six digits only, at most
-`LEADERS_MAX`, 5 (`leadersOf`). A run with nothing above one board has no leader and asks nothing.
-A run is asked once, and only within `LUNHUI_FRESH_MS`, 86,400,000 ms (a day), of the `frozenAt` its
-view gives: an older run, or one whose time does not parse, is `not checked` (`lessons were not
-checked for this run`), as is one that froze no limit-up pool; a memory not connected is answered
-`not connected` with the opener's words, kept nowhere, and asked again at the next read. Each leader
+`LEADERS_MAX`, 5 (`leadersOf`). A run with nothing above one board has no leader and makes no
+recall: its answer is `checked` with no leader, kept as any other. A run is asked once, and only
+within `LUNHUI_FRESH_MS`, 86,400,000 ms (a day), of the `frozenAt` its view gives: an older run, or
+one whose time does not parse, is `not checked` (`lessons were not checked for this run`), as is one
+that froze no limit-up pool (`the run froze no limit-up pool`); a kept file that cannot be read back
+is `not checked` too (`the kept answer could not be read`), and nothing is asked. A memory not
+connected is answered `not connected` with the opener's words, kept nowhere, and asked again at the
+next read; so is a home that was never made, found by the first leader's recall: the ask ends there,
+the other leaders are not recalled, nothing is kept and nothing is logged, and once the home is made
+a later read asks. An open that throws for any other reason is answered the same way and logged in
+one line. Each leader
 is asked `buy`, its code and the market `CN`, with the order card's price facts (`price`,
 `change_1d_pct` and the three bar changes from the Market, each leader's read within
 `FACT_READ_MS`, 2,000 ms, the leaders' reads together) and `industry`, the frozen pool's 所属行业,
@@ -1190,11 +1216,13 @@ runs service's refusals answer the view route's fixed texts (404 `no such strate
 400 `bad run id`, 409 `run not sealed`, 503 `lunhui not mounted`), anything else 500 `lessons
 failed`. The page (`client/js/host/memory-lunhui.js`, `client/js/render/lunhui/lessons.js`) asks a
 run's lessons once per page, by its view's own names, and draws the view without waiting for them;
-a failed read is not asked again until a reload, and a `not connected` answer is kept by the page
-until a reload. Under the ladder, `Your lessons on the leaders` names each leader that carries
-something, a stock link with its boards, then its lines: a lesson's line is the order card's, then
-`and N more lessons`, `Could not be checked: needs …` and a leader's fault; a run not checked is one
-dim line by why. A leader's stock drawer shows the same lines under `Your lessons`. Words from the
+a failed read is asked once more, on a render no sooner than 5,000 ms after it failed (no timer is
+set), and after a second failure stays failed and draws nothing until a reload; a `not connected`
+answer is kept by the page until a reload. Under the ladder block, `Your lessons on the leaders`
+names each leader that carries something, a stock link with its boards, then its lines: a lesson's
+line is the order card's, then `and N more lessons`, `Could not be checked: needs …` and a leader's
+fault; a run not checked is one dim line by why. A leader's stock drawer shows the same lines under
+`Your lessons`; an answer with no ladder block shows them in the drawer alone. Words from the
 memory are made visible before they are drawn, as on the card. A purchase the owner then tells
 Gravit about settles the card through the memory's own occasion: the recalls of one symbol within a
 day are one occasion, so Gravit's own recall on the symbol and the owner's decision registered with
@@ -1251,14 +1279,14 @@ the operator to strike:
 1. The alert's block is always its own reply under the alert, never joined to the why turn's reply,
    so an alert that gets a why turn and has a lesson costs the phone one message more.
 2. The leaders are the ladder's top names chosen by code, not the leader module's candidates, which
-   are a model's; a day with nothing above one board has no leader and asks nothing.
+   are a model's; a day with nothing above one board has no leader and makes no recall.
 3. A batch and a late replay ask nothing: their quote is old, so their facts would not be the alert's.
 4. Held and up, or held and down, is the day's change on the hit's own quote - its change, else its
    price against its previous close - and only with neither the price against the average cost;
    equal counts as up.
 5. One block is sent once a day per symbol: a later alert that day with the same lessons applying
-   and the same ones not told sends and notes nothing more, though its recall is still made and the
-   memory counts the day as one occasion.
+   sends no block, and with the same ones not told notes nothing more either, though its recall is
+   still made and the memory counts the day as one occasion. The day is kept in the process alone.
 6. A leader is asked once and what came back is kept as it came, a recall that faulted with its
    words, never asked again; the recalls of one run go one after another.
 7. The block is not on the Desk's News, which reads `alerts.jsonl`: it is on the phone and in the
