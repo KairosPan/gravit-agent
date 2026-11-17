@@ -1377,6 +1377,8 @@ button.tk-at:hover { border-color: var(--dim); }
 .gbox-line { display: flex; flex-direction: column; gap: 6px; font-size: calc(13px * var(--fs)); }
 .gbox-line-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .gbox-line .task-gate { max-width: none; }
+.gbox-line .task-gate-there a { color: var(--accent-ink); font-weight: 600; text-decoration: none; }
+.gbox-line .task-gate-there a:hover { text-decoration: underline; }
 .gbox-more { align-self: flex-start; color: var(--accent-ink); font-size: calc(12px * var(--fs)); font-weight: 600; text-decoration: none; }
 .gbox-more:hover { text-decoration: underline; }
 .gbox-stub { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border: 1px solid var(--card-border); border-radius: var(--radius-s); background: var(--surface); font-size: calc(13px * var(--fs)); }

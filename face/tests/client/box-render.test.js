@@ -134,3 +134,10 @@ test('on a strategy\'s page the box leaves out the page\'s own lines', () => {
   assert.doesNotMatch(h, /data-task="t3"/); assert.match(h, /data-task="t4"/);
   assert.match(renderBox(R.boxOpen(waitingWith('strategy', 'beta', [{ id: 't3', strategy: 'beta' }])), NOW), /<div class="gbox-waiting"><\/div>/);
 });
+
+test('a task waiting on you whose card is not loaded yet: the rail\'s words and a link to its page', () => {
+  const s = at('desk', null, { convs: [conv('conv')], tasks: [task('t9', { state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c', tool: 'x' } })] });
+  const h = renderBox(R.boxOpen(s), NOW);
+  assert.match(h, /<div class="gbox-line" data-task="t9">[\s\S]*<div class="task-gate-there">To answer it, open View the full process <a href="#\/task\/t9">View the full process ›<\/a><\/div><\/div>/);
+  assert.doesNotMatch(h, /class="task-gate"/);
+});
