@@ -104,9 +104,9 @@ test("a ScreenFault of fault is 502 with one log line in memoryFaultWords' words
   const cause = Object.assign(new Error("owner.jsonl\nis not readable"), { code: "E_IO" });
   const faulted = routes(stubScreen(new ScreenFault("fault", cause)).screen);
   for (const path of PATHS) {
-    assert.deepEqual(await faulted.call(path), { status: 502, body: { ok: false, error: "the memory could not be read" } }, path);
+    assert.deepEqual(await faulted.call(path), { status: 502, body: { ok: false, error: "the memory could not be read", why: "owner.jsonl is not readable" } }, path);
   }
-  assert.equal(faulted.lines.length, PATHS.length, "one line a refusal");
+  assert.equal(faulted.lines.length, PATHS.length, "one line a path");
   for (const line of faulted.lines) assert.match(line, /owner\.jsonl is not readable/);
 
   const late = routes(stubScreen(new ScreenFault("late")).screen);
@@ -116,11 +116,52 @@ test("a ScreenFault of fault is 502 with one log line in memoryFaultWords' words
   assert.equal(late.lines.length, PATHS.length);
 });
 
+test("a fault whose cause carries the package's code serves why in one line of at most 200 characters, logged once a path until its words change or a read succeeds", async () => {
+  let fail: unknown = new ScreenFault("fault", Object.assign(new Error("this memory is version \"2\" and this gravit-memory reads version 1:\nuse a gravit-memory that reads it"), { code: "E_VERSION" }));
+  const screen = { lessons: () => (fail === undefined ? Promise.resolve(LESSONS) : Promise.reject(fail)) } as unknown as MemoryScreen;
+  const { call, lines } = routes(screen);
+  const why = "this memory is version \"2\" and this gravit-memory reads version 1: use a gravit-memory that reads it";
+  for (let i = 0; i < 3; i++) {
+    assert.deepEqual(await call("/data/memory/lessons"), { status: 502, body: { ok: false, error: "the memory could not be read", why } });
+  }
+  assert.deepEqual(lines, [`memory screen: /data/memory/lessons - the memory could not be read: ${why}`], "logged once over three requests");
+  fail = new ScreenFault("fault", Object.assign(new Error("config.json is not valid JSON"), { code: "E_CONFIG" }));
+  await call("/data/memory/lessons");
+  await call("/data/memory/lessons");
+  assert.equal(lines.length, 2, "logged again when its words change");
+  assert.match(lines[1], /config\.json is not valid JSON$/);
+  fail = undefined;
+  assert.equal((await call("/data/memory/lessons")).status, 200);
+  fail = new ScreenFault("fault", Object.assign(new Error("config.json is not valid JSON"), { code: "E_CONFIG" }));
+  await call("/data/memory/lessons");
+  assert.equal(lines.length, 3, "logged again after a read of the path succeeded");
+  fail = new ScreenFault("fault", Object.assign(new Error("x".repeat(400)), { code: "E_IO" }));
+  const long = await call("/data/memory/lessons");
+  assert.equal(Array.from(String(long.body.why)).length, 200);
+});
+
+test("a fault whose cause carries no code serves no why", async () => {
+  for (const cause of [new Error("planted words"), Object.assign(new Error("planted words"), { code: 7 }), undefined]) {
+    const { call } = routes(stubScreen(new ScreenFault("fault", cause)).screen);
+    const answer = await call("/data/memory/lessons");
+    assert.deepEqual(answer, { status: 502, body: { ok: false, error: "the memory could not be read" } });
+  }
+});
+
+test("decisions: a before the memory does not know is 404, not logged as a fault", async () => {
+  const notFound = new ScreenFault("fault", Object.assign(new Error("decision d-20260302-0f3a9c21 is not in the memory."), { code: "E_NOT_FOUND" }));
+  const { call, lines } = routes(stubScreen(notFound).screen);
+  assert.deepEqual(await call("/data/memory/decisions?before=d-20260302-0f3a9c21"), { status: 404, body: { ok: false, error: "no such decision" } });
+  assert.deepEqual(lines, []);
+});
+
 test("anything else thrown is a 500 with a fixed word; no screen bound is 503", async () => {
-  const thrown = routes(stubScreen(new Error("planted words")).screen);
+  const thrown = routes(stubScreen(new Error("planted\nwords")).screen);
   const answer = await thrown.call("/data/memory/lessons");
   assert.equal(answer.status, 500);
   assert.doesNotMatch(JSON.stringify(answer.body), /planted/);
+  await thrown.call("/data/memory/lessons");
+  assert.deepEqual(thrown.lines, ["memory screen: /data/memory/lessons - request failed: planted words"], "one line, in memoryFaultWords' words");
   const none = await routes(undefined).call("/data/memory/lessons");
   assert.equal(none.status, 503);
   assert.equal(none.body.ok, false);

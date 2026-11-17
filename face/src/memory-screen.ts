@@ -3,20 +3,22 @@
  * `MemoryStanding`).
  *
  * Only `lessons`, `decisions`, `review` and `status` are called: nothing here writes the memory, and nothing is kept
- * between calls. Each read opens the memory and races the open and the one library call against one timer of
- * {@link SCREEN_READ_MS}; a read that loses the race is left to finish and ignored, and rejects as the
- * {@link ScreenFault} `late`; a read that throws or rejects otherwise rejects as the fault `fault`, its error kept as
- * the cause. A standing that is not connected, and a read that rejects with the package's `E_NO_HOME` - a home that
- * was never made - answer `connected: false` with the words that say so and the command that makes the home.
+ * between calls but the reads out: one read of a kind at a time (the decisions' kind is their filter), a request while
+ * one is out awaiting it, past its bound too, so a slow memory is asked once. Each request races the open and the one
+ * library call against its own timer of {@link SCREEN_READ_MS}; one that loses the race rejects as the
+ * {@link ScreenFault} `late`, the read left to finish; a read that throws or rejects otherwise rejects as the fault
+ * `fault`, its error kept as the cause. A standing that is not connected answers `connected: false` with the face's
+ * words for it; a read that rejects with the package's `E_NO_HOME` - a home that was never made - with the package's
+ * words and the command that makes the home, the one not-connected answer that carries a command.
  *
  * Every command the screen shows is built here ({@link commandOf}), from ids that fit their shapes and the home of
  * the face's own standing: a row whose id does not fit carries none. A card's text is served at most
  * {@link SCREEN_TEXT_MAX} characters, marked `cut` when cut.
  * @module
  */
-import type { Card, CardRecord, DecisionView, Figure, LessonView, Memory, ProposalLine, Status } from "gravit-memory";
+import type { Card, CardRecord, Check, DecisionView, Figure, LessonView, Memory, ProposalLine, Status } from "gravit-memory";
 import { FACE_FACTS } from "./memory-facts.ts";
-import { NO_MEMORY_HERE, type MemoryStanding } from "./memory.ts";
+import { MEMORY_NO_HOME_NOTICE, MEMORY_NO_INSTALL_NOTICE, NO_MEMORY_HERE, type MemoryStanding } from "./memory.ts";
 
 /** How long one read may take, the open included. */
 export const SCREEN_READ_MS = 5_000;
@@ -34,8 +36,13 @@ const WORDS_PLACEHOLDER = "\"\u2026\"";
 /** The five commands the Health tab lists, in its order. */
 const HEALTH_COMMANDS = ["status", "verify", "reconcile", "review", "reseal"] as const;
 
-/** Not connected: why, the words that say so, and the command that makes the home. */
-export type NotConnected = { connected: false; why: "disabled" | "no install" | "no home named" | "no home"; say: string; command: string };
+/** Not connected: why, and the words that say so; `command`, for a home never made alone, the one that makes it. */
+export type NotConnected = { connected: false; why: "disabled" | "no install" | "no home named" | "no home"; say: string; command?: string };
+
+/** One row of what a card checks: a check, with its operator and value as the card has them, or (no `op`, no
+ *  `value`) a fact the card defines and does not check. `own`: the card's own definition of the fact; `definition`:
+ *  the face's, when `face` - the face computes the fact. */
+export interface CheckRow { fact: string; op?: Check["op"]; value?: Check["value"]; own: string | null; definition: string | null; face: boolean }
 
 /** A card's text as served: at most {@link SCREEN_TEXT_MAX} characters, `cut` when cut. */
 export interface LessonText { sha256: string; text: string; cut?: true; card?: Card; fault?: string }
@@ -44,8 +51,9 @@ export interface LessonText { sha256: string; text: string; cut?: true; card?: C
 export interface LessonRow {
   id: string; state: "armed" | "changed" | "broken" | "unarmed" | "retired" | "refused"; fault?: string; armedAt?: string;
   armed?: LessonText; file?: LessonText; record: CardRecord | null;
-  /** The facts the card checks; `face`: the face computes it. */
-  checks: { fact: string; definition: string | null; face: boolean }[];
+  /** Each check of the card that applies (the armed copy's, else the file's) in its order, then each fact it defines
+   *  and does not check. */
+  checks: CheckRow[];
   /** The terminal's command for each act the state allows. */
   commands: { arm?: string; retire?: string; review?: string };
 }
@@ -80,6 +88,14 @@ export function commandOf(home: string | undefined, words: readonly string[]): s
   return `${line} --home ${PLAIN_HOME.test(home) ? home : `"${home.replace(/["\\$`]/g, (ch) => `\\${ch}`)}"`}`;
 }
 
+/** What the screen says for a standing that is not connected, in the face's own words: with no home named, what
+ *  names one; with no install, what installs it; a disabled row, its standing's words. */
+function sayOf(why: "disabled" | "no install" | "no home named", say: string): string {
+  if (why === "no home named") return MEMORY_NO_HOME_NOTICE;
+  if (why === "no install") return MEMORY_NO_INSTALL_NOTICE;
+  return say;
+}
+
 /** Whether `error` is the package's for a home that was never made, judged by its `code` (src/memory-ask.ts). */
 const noHome = (error: unknown): boolean => typeof error === "object" && error !== null && (error as { code?: unknown }).code === "E_NO_HOME";
 
@@ -101,17 +117,21 @@ function bounded<T extends { sha256: string; text: string; card?: Card; fault?: 
 /** The face's facts by name. */
 const faceDefinitions = new Map(FACE_FACTS.map((f) => [f.fact, f.definition]));
 
-/** The facts `card` checks, each once in its order, then those it defines and does not check. */
-function checksOf(card: Card | undefined): LessonRow["checks"] {
+/** Each check of `card` in its order, with the card's own definition of its fact and the face's, then each fact the
+ *  card defines and does not check. */
+function checksOf(card: Card | undefined): CheckRow[] {
   if (card === undefined) return [];
-  const names: string[] = [];
-  for (const check of card.check ?? []) if (!names.includes(check.fact)) names.push(check.fact);
-  for (const fact of Object.keys(card.facts ?? {})) if (!names.includes(fact)) names.push(fact);
-  return names.map((fact) => {
+  const about = (fact: string): Omit<CheckRow, "fact" | "op" | "value"> => {
     const face = faceDefinitions.get(fact);
     const own = card.facts !== undefined && Object.hasOwn(card.facts, fact) ? card.facts[fact] : undefined;
-    return { fact, definition: face ?? own ?? null, face: face !== undefined };
-  });
+    return { own: own ?? null, definition: face ?? null, face: face !== undefined };
+  };
+  const checks = card.check ?? [];
+  const rows: CheckRow[] = checks.map((check) => ({ fact: check.fact, op: check.op, value: check.value, ...about(check.fact) }));
+  for (const fact of Object.keys(card.facts ?? {})) {
+    if (!checks.some((check) => check.fact === fact)) rows.push({ fact, ...about(fact) });
+  }
+  return rows;
 }
 
 /** The commands a lesson's state allows, none for an id off the lesson shape. */
@@ -155,8 +175,33 @@ export function createMemoryScreen(deps: {
   const setTimer = deps.setTimer ?? ((run: () => void, ms: number): unknown => setTimeout(run, ms));
   const clearTimer = deps.clearTimer ?? ((timer: unknown): void => clearTimeout(timer as ReturnType<typeof setTimeout>));
 
-  /** Opens the memory and runs `read` on it, both within one timer: the shaped answer, not connected, or a fault. */
-  function within<T>(read: (memory: Memory, home: string) => Promise<T>): Promise<T | NotConnected> {
+  /** The reads out now by kind, each until it settles, past its bound too. */
+  const out = new Map<string, Promise<unknown>>();
+
+  /** Opens the memory and runs `read` on it: the shaped answer, not connected, or the error. */
+  async function run<T>(read: (memory: Memory, home: string) => Promise<T>): Promise<T | NotConnected> {
+    const standing = await deps.open();
+    if (standing.connected !== true) return { connected: false, why: standing.why, say: sayOf(standing.why, standing.say) };
+    try {
+      return await read(standing.memory, standing.home);
+    } catch (error) {
+      if (noHome(error)) return { connected: false, why: "no home", say: NO_MEMORY_HERE, command: commandOf(standing.home, ["init"]) };
+      throw error;
+    }
+  }
+
+  /** The read of kind `kind`, one at a time: a request while one is out awaits it, past its bound too, so a slow
+   *  memory is asked once; each request waits within its own timer: the shaped answer, not connected, or a fault. */
+  function within<T>(kind: string, read: (memory: Memory, home: string) => Promise<T>): Promise<T | NotConnected> {
+    let pending = out.get(kind) as Promise<T | NotConnected> | undefined;
+    if (pending === undefined) {
+      const started = run(read);
+      pending = started;
+      out.set(kind, started);
+      const clear = (): void => { if (out.get(kind) === started) out.delete(kind); };
+      started.then(clear, clear);
+    }
+    const answer = pending;
     return new Promise((resolve, reject) => {
       let done = false;
       let timer: unknown;
@@ -166,22 +211,13 @@ export function createMemoryScreen(deps: {
         try {
           clearTimer(timer);
         } catch {
-          /* the timer fires into a settled read */
+          /* a timer that cannot be cleared fires into a read already settled, which ignores it */
         }
         settle();
       };
-      let home: string | undefined;
-      const run = async (): Promise<T | NotConnected> => {
-        const standing = await deps.open();
-        if (standing.connected !== true) return { connected: false, why: standing.why, say: standing.say, command: commandOf(undefined, ["init"]) };
-        home = standing.home;
-        return read(standing.memory, standing.home);
-      };
-      run().then(
-        (answer) => finish(() => resolve(answer)),
-        (error: unknown) => finish(() => (noHome(error)
-          ? resolve({ connected: false, why: "no home", say: NO_MEMORY_HERE, command: commandOf(home, ["init"]) })
-          : reject(new ScreenFault("fault", error)))),
+      answer.then(
+        (value) => finish(() => resolve(value)),
+        (error: unknown) => finish(() => reject(new ScreenFault("fault", error))),
       );
       try {
         timer = setTimer(() => finish(() => reject(new ScreenFault("late"))), SCREEN_READ_MS);
@@ -192,7 +228,7 @@ export function createMemoryScreen(deps: {
   }
 
   return {
-    lessons: () => within(async (memory, home) => {
+    lessons: () => within("lessons", async (memory, home) => {
       const read = await memory.lessons();
       const ownerChainBroken = read.ownerChainBroken === true;
       const lessons = read.lessons.map((view) => lessonRow(view, home));
@@ -200,7 +236,7 @@ export function createMemoryScreen(deps: {
         ? { connected: true as const, ownerChainBroken, lessons, reseal: commandOf(home, ["reseal"]) }
         : { connected: true as const, ownerChainBroken, lessons };
     }),
-    decisions: (filter) => within(async (memory, home) => {
+    decisions: (filter) => within(`decisions ${JSON.stringify(filterOf(filter))}`, async (memory, home) => {
       const read = await memory.decisions(filterOf(filter));
       const items = read.items.map(({ view, figures }): DecisionRow => {
         const id = view.line.id;
@@ -210,11 +246,11 @@ export function createMemoryScreen(deps: {
       });
       return { connected: true as const, items, more: read.more === true };
     }),
-    waiting: () => within(async (memory, home) => {
+    waiting: () => within("waiting", async (memory, home) => {
       const read = await memory.review();
       return { connected: true as const, proposals: read.proposals, pastHorizon: read.past_horizon, withoutWrongIf: read.without_wrong_if, command: commandOf(home, ["review"]) };
     }),
-    health: () => within(async (memory, home) => {
+    health: () => within("health", async (memory, home) => {
       const read: Status = await memory.status();
       return {
         connected: true as const, home: read.home, lines: read.lines, partial: read.partial, chains: read.chains, prices: read.prices,

@@ -39,6 +39,8 @@ const SAY_NO_INSTALL = "the memory is not connected: gravit-memory is not instal
 const SAY_NO_HOME = "the memory is not connected: this face runs on a scratch harness home and no memory home is named";
 /** The one line a face on a scratch harness home that names no memory home logs at boot (src/boot.ts). */
 export const MEMORY_NO_HOME_NOTICE = `${SAY_NO_HOME}; set FACE_MEMORY_HOME to name one`;
+/** What the memory screen says when the install is missing (src/memory-screen.ts): the standing's words and the fix. */
+export const MEMORY_NO_INSTALL_NOTICE = `${SAY_NO_INSTALL}; run npm ci in face/`;
 /** The longest fault {@link memoryFaultWords} gives, in characters. */
 const FAULT_MAX = 200;
 

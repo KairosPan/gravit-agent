@@ -8,8 +8,11 @@
  * - `GET /data/memory/status` - the home's health.
  *
  * Not connected is an answer, `ok: true` with `connected: false`. A parameter that does not fit, a repeated one or an
- * unknown one is a 400; a method other than GET a 405; no screen bound a 503. A read that faulted is a 502 and one log
- * line in `memoryFaultWords`' words; one past its bound a 504 and one log line. No route echoes anything the caller
+ * unknown one is a 400; a method other than GET a 405; no screen bound a 503; a `before` the memory does not know (the
+ * package's `E_NOT_FOUND`) a 404. A read that faulted is a 502, with `why` - the package's sentence in
+ * `memoryFaultWords`' words, one line of at most 200 characters - when its cause carries the package's code; one past
+ * its bound a 504; anything else thrown a 500 with a fixed word. A 502, a 504 and a 500 each log one line, logged again
+ * for a path only when its words change or after a read of that path succeeded. No route echoes anything the caller
  * sent.
  * @module
  */
@@ -31,6 +34,14 @@ const LIMIT_MAX = 200;
 
 const BAD_QUERY = "the request's parameters do not fit";
 const NOT_READY = "the memory screen is not ready";
+const NO_SUCH_DECISION = "no such decision";
+const DECISIONS_PATH = "/data/memory/decisions";
+
+/** The package's code a fault's cause carries (its `E_…`), when it carries a string one. */
+function codeOf(cause: unknown): string | undefined {
+  const code = typeof cause === "object" && cause !== null ? (cause as { code?: unknown }).code : undefined;
+  return typeof code === "string" ? code : undefined;
+}
 
 /** The query's parameters by name, each at most once and among `allowed`; anything else a 400. */
 function paramsOf(req: IncomingMessage, allowed: readonly string[]): Map<string, string> {
@@ -83,6 +94,14 @@ export function registerMemoryScreenRoutes(
   deps: { screen: () => MemoryScreen | undefined; log: (line: string) => void; isTrusted?: typeof isTrustedDataRequest },
 ): void {
   const isTrusted = deps.isTrusted ?? isTrustedDataRequest;
+  /** The last line logged for each path, kept until a read of that path succeeds. */
+  const logged = new Map<string, string>();
+  /** Logs `line` for `path` unless it is the line logged last for it. */
+  const logOnce = (path: string, line: string): void => {
+    if (logged.get(path) === line) return;
+    logged.set(path, line);
+    deps.log(line);
+  };
 
   const route = (path: string, read: (screen: MemoryScreen, req: IncomingMessage) => Promise<object>): void => {
     webServer.register({
@@ -94,15 +113,23 @@ export function registerMemoryScreenRoutes(
         try {
           const screen = deps.screen();
           if (screen === undefined) throw new HttpError(503, NOT_READY);
-          return send(res, 200, { ok: true, ...(await read(screen, req)) });
+          const answer = await read(screen, req);
+          logged.delete(path);
+          return send(res, 200, { ok: true, ...answer });
         } catch (err) {
           if (err instanceof HttpError) return send(res, err.status, { ok: false, error: err.message });
           if (err instanceof ScreenFault) {
-            deps.log(err.why === "late"
-              ? `memory screen: ${path} - ${err.message}`
-              : `memory screen: ${path} - ${err.message}: ${memoryFaultWords(err.cause)}`);
-            return send(res, err.why === "late" ? 504 : 502, { ok: false, error: err.message });
+            if (err.why === "late") {
+              logOnce(path, `memory screen: ${path} - ${err.message}`);
+              return send(res, 504, { ok: false, error: err.message });
+            }
+            const code = codeOf(err.cause);
+            if (code === "E_NOT_FOUND" && path === DECISIONS_PATH) return send(res, 404, { ok: false, error: NO_SUCH_DECISION });
+            const why = memoryFaultWords(err.cause);
+            logOnce(path, `memory screen: ${path} - ${err.message}: ${why}`);
+            return send(res, 502, code === undefined ? { ok: false, error: err.message } : { ok: false, error: err.message, why });
           }
+          logOnce(path, `memory screen: ${path} - request failed: ${memoryFaultWords(err)}`);
           return send(res, 500, { ok: false, error: "request failed" });
         }
       },
@@ -110,7 +137,7 @@ export function registerMemoryScreenRoutes(
   };
 
   route("/data/memory/lessons", (screen, req) => { paramsOf(req, []); return screen.lessons(); });
-  route("/data/memory/decisions", (screen, req) => screen.decisions(decisionsFilter(req)));
+  route(DECISIONS_PATH, (screen, req) => screen.decisions(decisionsFilter(req)));
   route("/data/memory/review", (screen, req) => { paramsOf(req, []); return screen.waiting(); });
   route("/data/memory/status", (screen, req) => { paramsOf(req, []); return screen.health(); });
 }

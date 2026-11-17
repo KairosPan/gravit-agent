@@ -34,7 +34,7 @@ import type { SeatEntryLike } from "../src/account-seat.ts";
 import { bootFace } from "../src/boot.ts";
 import { composedMemoryRow } from "../src/memory-row.ts";
 import { NO_MEMORY_HERE, memoryOpener } from "../src/memory.ts";
-import { createMemoryScreen } from "../src/memory-screen.ts";
+import { commandOf, createMemoryScreen } from "../src/memory-screen.ts";
 import { registerMemoryScreenRoutes } from "../src/memory-screen-routes.ts";
 import { setupFaceProfile } from "../src/setup.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
@@ -154,7 +154,7 @@ test("the screen's four reads over a made home: the cards, the decision, the pro
     const armed = rows.find((row) => row.id === ARMED);
     assert.ok(armed?.record !== null && armed?.record !== undefined, "the armed card carries its record");
     assert.equal(armed.record.owner.fired, 0);
-    assert.equal(armed.commands.retire, `npx --no gravit-memory retire ${ARMED} --reason "…" --home ${memoryHome}`);
+    assert.equal(armed.commands.retire, commandOf(memoryHome, ["retire", ARMED, "--reason", "\"\u2026\""]));
     const unarmed = rows.find((row) => row.id === UNARMED);
     assert.equal(unarmed?.record, null, "an unarmed card carries no record");
     assert.equal(unarmed?.commands.retire, undefined, "an unarmed card has nothing to retire");
@@ -178,7 +178,7 @@ test("the screen's four reads over a made home: the cards, the decision, the pro
     assert.equal(review.body.connected, true);
     const proposals = review.body.proposals as { id: string; lesson: string }[];
     assert.ok(proposals.some((p) => p.id === waiting.id && p.lesson === WAITING), `the waiting proposal is held: ${JSON.stringify(proposals)}`);
-    assert.equal(review.body.command, `npx --no gravit-memory review --home ${memoryHome}`);
+    assert.equal(review.body.command, commandOf(memoryHome, ["review"]));
 
     /* The health: the home and five sound chains. */
     const status = await face.read("/data/memory/status");
@@ -216,7 +216,7 @@ test("a second boot over a home never made: each read answers not connected, and
       const answer = await face.read(path);
       assert.equal(answer.status, 200, path);
       assert.deepEqual(answer.body, {
-        ok: true, connected: false, why: "no home", say: NO_MEMORY_HERE, command: `npx --no gravit-memory init --home ${never}`,
+        ok: true, connected: false, why: "no home", say: NO_MEMORY_HERE, command: commandOf(never, ["init"]),
       }, path);
     }
     assert.deepEqual(face.logged, [], "not connected is no fault");

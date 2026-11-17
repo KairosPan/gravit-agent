@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { Card, CardRecord, DecisionView, LessonView, Memory, ProposalLine, Review, Status } from "gravit-memory";
 import { FACE_FACTS } from "../src/memory-facts.ts";
-import { NO_MEMORY_HERE, type MemoryStanding } from "../src/memory.ts";
+import { MEMORY_NO_HOME_NOTICE, MEMORY_NO_INSTALL_NOTICE, NO_MEMORY_HERE, type MemoryStanding } from "../src/memory.ts";
 import { SCREEN_READ_MS, SCREEN_TEXT_MAX, ScreenFault, commandOf, createMemoryScreen } from "../src/memory-screen.ts";
 
 const HOME = "/h";
@@ -46,8 +46,9 @@ const connected = (memory: Memory) => async (): Promise<MemoryStanding> => ({ co
 const lesson = (view: Partial<LessonView> & Pick<LessonView, "id" | "state">): LessonView => ({ record: null, ...view });
 const text = (c: Card, body = `---\nid: ${c.id}\n---\n${c.words}\n`) => ({ sha256: "a".repeat(64), text: body, card: c });
 
-test("lessons: an armed card's checks, each fact once, and its retire command", async () => {
-  const armedCard = card("no-chasing", ["change_5d_pct", "sector", "change_5d_pct"], { sector: "the GICS sector of the symbol." });
+test("lessons: an armed card's checks, one row per check in the card's order, with its operator, value and both definitions", async () => {
+  const own5d = "The card's own words for the five-day change.";
+  const armedCard = card("no-chasing", ["change_5d_pct", "sector", "change_5d_pct"], { change_5d_pct: own5d, sector: "the GICS sector of the symbol." });
   const { memory, calls } = stubMemory({
     lessons: { ownerChainBroken: false, lessons: [lesson({ id: "no-chasing", state: "armed", armedAt: "2026-11-01T00:00:00Z", armed: text(armedCard), file: text(armedCard), record: RECORD })] },
   });
@@ -58,9 +59,10 @@ test("lessons: an armed card's checks, each fact once, and its retire command", 
   const [row] = answer.lessons;
   const face5d = FACE_FACTS.find((f) => f.fact === "change_5d_pct")!.definition;
   assert.deepEqual(row.checks, [
-    { fact: "change_5d_pct", definition: face5d, face: true },
-    { fact: "sector", definition: "the GICS sector of the symbol.", face: false },
-  ]);
+    { fact: "change_5d_pct", op: ">", value: 1, own: own5d, definition: face5d, face: true },
+    { fact: "sector", op: ">", value: 1, own: "the GICS sector of the symbol.", definition: null, face: false },
+    { fact: "change_5d_pct", op: ">", value: 1, own: own5d, definition: face5d, face: true },
+  ], "the card's own definition is kept beside the face's");
   assert.deepEqual(row.commands, { retire: `npx --no gravit-memory retire no-chasing --reason ${PH} --home /h` });
   assert.equal(row.record, RECORD);
   assert.equal(row.armedAt, "2026-11-01T00:00:00Z");
@@ -68,16 +70,19 @@ test("lessons: an armed card's checks, each fact once, and its retire command", 
   assert.deepEqual(calls.map(([name]) => name), ["lessons"]);
 });
 
-test("lessons: a fact the card defines and the face computes takes the face's definition; one defined nowhere is null", async () => {
-  const c = card("held-check", ["held", "mood"], { held: "the card's own words.", extra: "an extra fact." });
+test("lessons: a check of a list and of a word keeps its value; a fact the card defines and does not check is a row with no operator", async () => {
+  const c = { ...card("held-check", [], { held: "the card's own words.", session: "the part of the day.", extra: "an extra fact." }),
+    check: [{ fact: "held", op: "==", value: true }, { fact: "session", op: "in", value: ["open", "pre"] }, { fact: "mood", op: "==", value: "calm" }] } as Card;
   const { memory } = stubMemory({ lessons: { ownerChainBroken: true, lessons: [lesson({ id: "held-check", state: "unarmed", file: text(c) })] } });
   const answer = await createMemoryScreen({ open: connected(memory) }).lessons();
   assert.ok(answer.connected);
   assert.equal(answer.ownerChainBroken, true);
+  const held = FACE_FACTS.find((f) => f.fact === "held")!.definition;
   assert.deepEqual(answer.lessons[0].checks, [
-    { fact: "held", definition: FACE_FACTS.find((f) => f.fact === "held")!.definition, face: true },
-    { fact: "mood", definition: null, face: false },
-    { fact: "extra", definition: "an extra fact.", face: false },
+    { fact: "held", op: "==", value: true, own: "the card's own words.", definition: held, face: true },
+    { fact: "session", op: "in", value: ["open", "pre"], own: "the part of the day.", definition: null, face: false },
+    { fact: "mood", op: "==", value: "calm", own: null, definition: null, face: false },
+    { fact: "extra", own: "an extra fact.", definition: null, face: false },
   ]);
 });
 
@@ -199,14 +204,21 @@ test("health: the status's home, lines, partial, chains and prices; the face's f
   assert.doesNotMatch(JSON.stringify(answer), /secret-tag|"cards"|no-chasing/);
 });
 
-test("not connected: a standing that is not connected answers from every read with the init command and no --home", async () => {
-  const say = "the memory is not connected: the mcp-memory row is disabled";
-  const screen = createMemoryScreen({ open: async () => ({ connected: false, why: "disabled", say }) });
-  const expected = { connected: false, why: "disabled", say, command: "npx --no gravit-memory init" };
-  assert.deepEqual(await screen.lessons(), expected);
-  assert.deepEqual(await screen.decisions({}), expected);
-  assert.deepEqual(await screen.waiting(), expected);
-  assert.deepEqual(await screen.health(), expected);
+test("not connected: the three standings answer from every read in the face's own words, with no command", async () => {
+  const standings = [
+    ["disabled", "the memory is not connected: the mcp-memory row is disabled", "the memory is not connected: the mcp-memory row is disabled"],
+    ["no install", "the memory is not connected: gravit-memory is not installed", MEMORY_NO_INSTALL_NOTICE],
+    ["no home named", "the memory is not connected: this face runs on a scratch harness home and no memory home is named", MEMORY_NO_HOME_NOTICE],
+  ] as const;
+  assert.equal(MEMORY_NO_INSTALL_NOTICE, "the memory is not connected: gravit-memory is not installed; run npm ci in face/");
+  for (const [why, standingSay, say] of standings) {
+    const screen = createMemoryScreen({ open: async () => ({ connected: false, why, say: standingSay }) });
+    const expected = { connected: false, why, say };
+    assert.deepEqual(await screen.lessons(), expected, why);
+    assert.deepEqual(await screen.decisions({}), expected, why);
+    assert.deepEqual(await screen.waiting(), expected, why);
+    assert.deepEqual(await screen.health(), expected, why);
+  }
 });
 
 test("not connected: a read rejecting with E_NO_HOME is the home never made, with the init command for this home", async () => {
@@ -265,6 +277,37 @@ test("a late answer that then rejects is swallowed, not an unhandled rejection",
   await assert.rejects(pending, (error: unknown) => error instanceof ScreenFault && error.why === "late");
   rejectLate!(new Error("late"));
   await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("one read of a kind in flight: a second request awaits the first, even past its bound; the decisions keyed by their filter", async () => {
+  const timers: Array<() => void> = [];
+  const deps = { setTimer: (run: () => void) => { timers.push(run); return timers.length; }, clearTimer: () => {} };
+  const answers: Array<(value: unknown) => void> = [];
+  const asked: string[] = [];
+  const memory = {
+    lessons: () => { asked.push("lessons"); return new Promise((resolve) => { answers.push(resolve); }); },
+    decisions: (filter: unknown) => { asked.push(`decisions ${JSON.stringify(filter)}`); return Promise.resolve({ items: [], more: false }); },
+  } as unknown as Memory;
+  const screen = createMemoryScreen({ open: connected(memory), ...deps });
+  const first = screen.lessons();
+  const second = screen.lessons();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(asked, ["lessons"], "the second request awaits the first read");
+  timers[0]!();
+  await assert.rejects(first, (error: unknown) => error instanceof ScreenFault && error.why === "late");
+  const third = screen.lessons();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(asked, ["lessons"], "a read past its bound and still out is not asked again");
+  answers[0]!({ ownerChainBroken: false, lessons: [] });
+  assert.deepEqual(await second, { connected: true, ownerChainBroken: false, lessons: [] });
+  assert.deepEqual(await third, { connected: true, ownerChainBroken: false, lessons: [] });
+  const fourth = screen.lessons();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(asked, ["lessons", "lessons"], "once it answered, the next request reads again");
+  answers[1]!({ ownerChainBroken: false, lessons: [] });
+  await fourth;
+  await Promise.all([screen.decisions({ symbol: "NVDA" }), screen.decisions({ symbol: "NVDA" }), screen.decisions({ symbol: "AMD" })]);
+  assert.deepEqual(asked.slice(2), ['decisions {"symbol":"NVDA"}', 'decisions {"symbol":"AMD"}']);
 });
 
 test("commandOf: a home with a space is double-quoted; no home has no --home", () => {

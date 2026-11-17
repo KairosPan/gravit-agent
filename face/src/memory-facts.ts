@@ -31,9 +31,9 @@ export interface Facts { facts: Record<string, number | boolean | string>; sourc
 export const FACE_FACTS: readonly { fact: string; definition: string }[] = Object.freeze([
   { fact: "price", definition: "The last price, to two decimals, from the Market's quote." },
   { fact: "change_1d_pct", definition: "The last price over the previous close, in percent, both from the Market's quote." },
-  { fact: "change_5d_pct", definition: "The last price over the close 5 full sessions before the last full one, in percent, from the Market's daily bars." },
-  { fact: "change_20d_pct", definition: "The last price over the close 20 full sessions before the last full one, in percent, from the Market's daily bars." },
-  { fact: "change_60d_pct", definition: "The last price over the close 60 full sessions before the last full one, in percent, from the Market's daily bars." },
+  { fact: "change_5d_pct", definition: "The last price in the Market's quote over the close 5 full sessions before the last full one in the Market's daily bars, in percent." },
+  { fact: "change_20d_pct", definition: "The last price in the Market's quote over the close 20 full sessions before the last full one in the Market's daily bars, in percent." },
+  { fact: "change_60d_pct", definition: "The last price in the Market's quote over the close 60 full sessions before the last full one in the Market's daily bars, in percent." },
   { fact: "held", definition: "Whether the venue's account holds the symbol, from the Account's position on that venue." },
   { fact: "unrealized_pct", definition: "A long's last price over its entry price, in percent, from the Market's quote and the Account's entry price; none for a short." },
 ].map((entry) => Object.freeze(entry)));
