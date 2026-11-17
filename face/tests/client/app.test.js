@@ -89,9 +89,9 @@ test('the store writes only the prefs, never the conversations, and never loads 
   assert.deepEqual(store.get().conversations, []);
   store.dispatch('toggleRail');
   const saved = JSON.parse(storage.getItem(PREFS_KEY));
-  assert.deepEqual(Object.keys(saved).sort(), ['codeFont', 'codeSize', 'lang', 'lastSeen', 'railCollapsed', 'textFont', 'textSize', 'theme']);
+  assert.deepEqual(Object.keys(saved).sort(), ['boxOpen', 'codeFont', 'codeSize', 'lang', 'lastSeen', 'railCollapsed', 'textFont', 'textSize', 'theme']);
   assert.equal(saved.railCollapsed, true);
-  assert.deepEqual(prefsOf(emptyState()), { theme: 'system', lang: 'en', textSize: 15, codeSize: 12, textFont: '', codeFont: '', railCollapsed: false, lastSeen: {} });
+  assert.deepEqual(prefsOf(emptyState()), { theme: 'system', lang: 'en', textSize: 15, codeSize: 12, textFont: '', codeFont: '', railCollapsed: false, boxOpen: false, lastSeen: {} });
 });
 
 test('settle routes by the hash and says which hash the address bar should show', () => {

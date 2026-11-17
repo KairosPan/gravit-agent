@@ -15,6 +15,8 @@ export function emptyState() {
     codeFont: '',
     route: { screen: 'messages', id: null },
     railCollapsed: false,
+    // the Gravit box open on the screens that show no conversation (host/sessions.js boxShown), a saved preference
+    boxOpen: false,
     // the narrow-screen list is an in-page disclosure, never a saved preference
     listOpen: false,
     // files are being dragged over the page: the drop overlay shows over a screen with a composer (plan 4)

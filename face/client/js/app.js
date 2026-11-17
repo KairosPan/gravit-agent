@@ -144,7 +144,7 @@ export class Timers {
   }
 }
 
-// per-viewer conveniences only: the theme, the sizes and fonts, the rail's fold, the last conversation, what was seen (the watchlist keeps
+// per-viewer conveniences only: the theme, the sizes and fonts, the rail's fold, the Gravit box open, the last conversation, what was seen (the watchlist keeps
 // its own key, host/markets.js)
 export function readPrefs(storage) {
   try {
@@ -155,7 +155,7 @@ export function readPrefs(storage) {
     return {};
   }
 }
-export const prefsOf = s => ({ theme: s.theme, lang: s.lang, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, lastSeen: s.lastSeen });
+export const prefsOf = s => ({ theme: s.theme, lang: s.lang, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, boxOpen: s.boxOpen, lastSeen: s.lastSeen });
 export function initialState(storage, now = Date.now()) {
   const p = readPrefs(storage);
   const s = emptyState(now);
@@ -168,6 +168,7 @@ export function initialState(storage, now = Date.now()) {
     textFont: cleanFont(p.textFont),
     codeFont: cleanFont(p.codeFont),
     railCollapsed: p.railCollapsed === true,
+    boxOpen: p.boxOpen === true,
     lastSeen: p.lastSeen && typeof p.lastSeen === 'object' && !Array.isArray(p.lastSeen) ? p.lastSeen : {},
   };
 }
