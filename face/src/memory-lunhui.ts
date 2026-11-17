@@ -15,8 +15,9 @@
  *   being asked awaits that ask. A fault and a failed write are one log line each.
  *
  * The file is written under a temporary name beside it (flag `wx`, mode 0o600) and renamed into place, its directory
- * made 0o700 at the first write. Its path is built only from names the runs service accepted, each matching its copy
- * of the runs module's grammar.
+ * made 0o700 at the first write. The run is keyed, filed and named by the view's own `strategy` and `run` - the names
+ * the runs service resolved, whatever spelling the request used - each matching its copy of the runs module's grammar;
+ * a view whose names are missing or off it is refused as a strategy or a run that is not there.
  *
  * MODULE WEIGHT. src/desk.ts does not import it (tests/desk-weight.test.ts).
  * @module
@@ -166,8 +167,8 @@ function keptOf(v: unknown, strategy: string, run: string): LunhuiLessons | unde
   return { state: "checked", strategy, run, askedAt: v.askedAt, leaders };
 }
 
-/** A refusal the runs service would give, for a name its grammar refuses. */
-const refused = (code: "NOT_A_STRATEGY" | "BAD_RUN_ID"): Error => Object.assign(new Error(code === "BAD_RUN_ID" ? "bad run id" : "no such strategy"), { code });
+/** A refusal the runs service would give, for a view whose own names are missing or off their grammar. */
+const refused = (code: "NOT_A_STRATEGY" | "NO_SUCH_RUN"): Error => Object.assign(new Error(code === "NO_SUCH_RUN" ? "no such run" : "no such strategy"), { code });
 
 /** The store. `get` rejects only with the view's refusals. */
 export function createLunhuiLessons(deps: LunhuiLessonsDeps): LunhuiLessonsStore {
@@ -293,10 +294,13 @@ export function createLunhuiLessons(deps: LunhuiLessonsDeps): LunhuiLessonsStore
   };
 
   return {
-    async get(strategy, run) {
-      const view = await deps.view(strategy, run);
-      if (!STRATEGY_NAME_RE.test(strategy)) throw refused("NOT_A_STRATEGY");
-      if (!RUN_ID_RE.test(run)) throw refused("BAD_RUN_ID");
+    async get(asked, askedRun) {
+      const view = await deps.view(asked, askedRun);
+      /* the runs service's own names, not the request's spelling: it resolves a name to the one on disk */
+      const strategy = isObject(view) ? view.strategy : undefined;
+      const run = isObject(view) ? view.run : undefined;
+      if (typeof strategy !== "string" || !STRATEGY_NAME_RE.test(strategy)) throw refused("NOT_A_STRATEGY");
+      if (typeof run !== "string" || !RUN_ID_RE.test(run)) throw refused("NO_SUCH_RUN");
       const key = `${strategy}/${run}`;
       const held = kept.get(key);
       if (held !== undefined) return held;

@@ -420,3 +420,72 @@ test("a write that fails: one log line, the answer still given and kept in the p
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+/** A view that resolves any spelling of a name to its canonical one, as the runs service's realpath does. */
+const canonical = (strategy: string, run: string) => async (): Promise<unknown> => viewOf({ strategy, run });
+
+test("a request spelled otherwise: keyed and filed by the view's own names, asked once whichever comes first", async () => {
+  const spellings: Array<Array<[string, string]>> = [
+    [["CN-MARKET", "RUN-1"], ["cn-market", "run-1"]],
+    [["cn-market", "run-1"], ["CN-MARKET", "RUN-1"]],
+  ];
+  for (const [a, b] of spellings) {
+    const dir = await dirOf();
+    try {
+      const { store, memory } = storeOf(dir, { view: canonical("cn-market", "run-1") });
+      const first = await store.get(...a);
+      assert.deepEqual(await store.get(...b), first);
+      assert.equal(first.state === "checked" && first.strategy, "cn-market");
+      assert.equal(first.state === "checked" && first.run, "run-1");
+      assert.equal(memory.calls.length, 2, "one ask: two leaders");
+      assert.deepEqual(await readdir(dir), ["cn-market"]);
+      assert.deepEqual(await readdir(join(dir, "cn-market")), ["run-1.json"]);
+      const file = JSON.parse(await readFile(join(dir, "cn-market", "run-1.json"), "utf8"));
+      assert.deepEqual([file.strategy, file.run], ["cn-market", "run-1"]);
+      const restarted = storeOf(dir, { view: canonical("cn-market", "run-1") });
+      assert.deepEqual(await restarted.store.get("CN-MARKET", "RUN-1"), first);
+      assert.equal(restarted.memory.calls.length, 0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("an NFD spelling of an NFC strategy name: the canonical name's key and directory", async () => {
+  const nfc = "caf\u00e9";
+  const nfd = "cafe\u0301";
+  const dir = await dirOf();
+  try {
+    const { store, memory } = storeOf(dir, { view: canonical(nfc, "run-1") });
+    const first = await store.get(nfd, "run-1");
+    assert.equal(first.state === "checked" && first.strategy, nfc);
+    assert.deepEqual(await store.get(nfc, "run-1"), first);
+    assert.equal(memory.calls.length, 2);
+    assert.deepEqual(await readdir(dir), [nfc]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a view whose names are missing or off their grammar: a coded refusal, nothing read or written", async () => {
+  const views: Array<[Record<string, unknown>, string]> = [
+    [{ strategy: undefined }, "NOT_A_STRATEGY"],
+    [{ strategy: "../cn-market" }, "NOT_A_STRATEGY"],
+    [{ strategy: "cn.market" }, "NOT_A_STRATEGY"],
+    [{ run: undefined }, "NO_SUCH_RUN"],
+    [{ run: "run/1" }, "NO_SUCH_RUN"],
+    [{ run: "run.1" }, "NO_SUCH_RUN"],
+  ];
+  for (const [over, code] of views) {
+    const dir = await dirOf();
+    try {
+      const { store, memory, facts } = storeOf(dir, { view: async () => viewOf({ strategy: "cn-market", run: "run-1", ...over }) });
+      await assert.rejects(store.get("cn-market", "run-1"), (error: unknown) => (error as { code?: string }).code === code);
+      assert.equal(memory.calls.length, 0);
+      assert.equal(facts.length, 0);
+      assert.deepEqual(await readdir(dir), []);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
