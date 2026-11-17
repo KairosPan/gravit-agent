@@ -115,11 +115,15 @@ function routineCard(m, state) {
     `${c.note ? `<div class="dim">${esc(c.note)}</div>` : ''}${above}${ask}${under}${settled}</div>`;
 }
 
-function body(m, conv, state) {
+// a block that needs Messages' width, in the box's compact thread (box spec §6.5): its name and a link to Messages
+const stub = name => `<div class="gbox-stub"><span>${esc(name)}</span><a href="#/messages">${th('gbox.open')} ›</a></div>`;
+
+function body(m, conv, state, page = {}) {
   const d = m.data ?? {};
   switch (m.kind) {
-    // Gravit's composed answer, drawn from its run's view as the lunhui slice holds it
+    // Gravit's composed answer, drawn from its run's view as the lunhui slice holds it; in the box, one line to Messages
     case 'composed':
+      if (page.compact) return stub(t('gbox.stub.composed'));
       // (a history page reads its answers and sends nothing: their follow-ups are not drawn)
       return composedHtml(m, state?.lunhui?.views?.[viewOf(m).key], state?.lunhui?.ui?.[composedId(m, conv)], conv, state?.channels, { asks: state?.route?.screen !== 'history' });
     case 'card':
@@ -262,7 +266,7 @@ const REPORT_STATUS = {
   ready: () => t('thread.task.ready'), waiting: () => t('tasks.group.you'), blocked: () => t('tasks.status.blocked'),
   failed: () => t('tasks.status.failed'), stalled: () => t('tasks.status.stalled'),
 };
-function taskMessage(m, conv, state) {
+function taskMessage(m, conv, state, page = {}) {
   const d = m.data ?? {};
   if (d.form === 'report') {
     const known = typeof d.task === 'string' ? (state?.tasks?.items ?? []).find(task => task.id === d.task)?.title : null;
@@ -273,9 +277,12 @@ function taskMessage(m, conv, state) {
     // the event tables the report carries, under its line (analog event table §4.1), folded: each group closed, opened by a
     // click and kept open across renders by its id (the operator's choice, 2026-11-12: folded by default); none draws nothing
     // a task read that failed leaves them undrawable: its words, in one line
+    // in the box's compact thread, any table (or the line saying why it cannot be drawn) is one line to Messages
     const failed = reportTaskFailure(m, state);
-    const tables = failed ? `<div class="et-list"><div class="et-state et-failed">${esc(sayOf(failed.error))}</div></div>`
-      : eventTablesHtml(state, reportViews(m, typeof d.task === 'string' ? state?.analog?.tasks?.[d.task]?.task?.eventViews ?? null : null), { fold: m.id });
+    const views = reportViews(m, typeof d.task === 'string' ? state?.analog?.tasks?.[d.task]?.task?.eventViews ?? null : null);
+    const tables = page.compact ? (failed || views.length ? stub(t('gbox.stub.events')) : '')
+      : failed ? `<div class="et-list"><div class="et-state et-failed">${esc(sayOf(failed.error))}</div></div>`
+      : eventTablesHtml(state, views, { fold: m.id });
     return `<details class="sysline ctx" id="relay-${esc(conv.id)}-${esc(m.id)}"><summary>${head}</summary><pre>${esc(maskExcerpt(d.body ?? ''))}</pre></details>${tables}`;
   }
   if (d.form === 'recovery') return `<div class="sysline">${th('thread.task.recovery')}</div>`;
@@ -287,7 +294,7 @@ function taskMessage(m, conv, state) {
 export function renderMessage(m, conv, state, page = {}) {
   // a tool call is drawn nowhere (the operator's word, 2026-10-28): its gate, receipt or refusal is a message of its own
   if (m.kind === 'tool') return '';
-  if (m.kind === 'task') return taskMessage(m, conv, state);
+  if (m.kind === 'task') return taskMessage(m, conv, state, page);
   if (m.kind === 'desk') return deskLine(m, conv);
   // a producer-sourced user record (a runtime snapshot, a plugin notice, a member's delta) is context, folded away under its source;
   // a line the page itself writes (a round end, a child's report) stays a centred line
@@ -300,8 +307,8 @@ export function renderMessage(m, conv, state, page = {}) {
   if (m.from === 'you') return youMessage(m, conv, state, page);
   const name = conv.kind === 'group' && m.from !== 'gravit' ? `<div class="sender-name">${esc(m.data?.name ?? senderName(m.from, state))}</div>` : '';
   // plain talk keeps a bubble's width; every card and green bubble runs wider (spec §16), a composed answer wider still
-  const width = m.kind === 'composed' ? 'composed' : m.kind !== 'text' && 'wide';
-  return `<div class="msg left">${name}<div class="msg-row">${avatar(m.from, 28, state)}<div class="${cls('msg-body', width)}">${body(m, conv, state)}${trace(m, conv, state)}</div></div></div>`;
+  const width = m.kind === 'composed' && !page.compact ? 'composed' : m.kind !== 'text' && 'wide';
+  return `<div class="msg left">${name}<div class="msg-row">${avatar(m.from, 28, state)}<div class="${cls('msg-body', width)}">${body(m, conv, state, page)}${trace(m, conv, state)}</div></div></div>`;
 }
 
 // the three-dot row while the host streams a turn

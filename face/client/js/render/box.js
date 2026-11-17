@@ -3,7 +3,7 @@
 // it is opened a panel over the page with the one conversation's thread and Messages' own composer. Nothing drawn while
 // the box does not stand here or a sheet covers it; beside a drawer or Trade's open ticket it steps aside (by CSS).
 import { esc, attrs } from '../html.js';
-import { t, th } from '../i18n/words.js';
+import { t, th, tn } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { chordLabel, shortcut } from '../keys.js';
 import { HOST_NAME } from '../wire/speaker.js';
@@ -11,6 +11,8 @@ import { boxShown, boxOpenHere } from '../host/sessions.js';
 import { boxCovered, boxAside, ballMarks } from '../host/box-view.js';
 import { renderComposer, renderStatus } from './messages.js';
 import { renderThread } from './thread.js';
+import { waitingLineHtml } from './tasks.js';
+import { railOf } from '../host/rail-view.js';
 
 // the ball's name for a screen reader: Ask Gravit, then what waits, working, a new reply, as they apply
 function ballLabel({ waiting, working, fresh }) {
@@ -38,6 +40,17 @@ function body(state, now, page) {
   return `<div class="thread" id="thread">${earlier}${renderThread(conv, state, now, { ...page, compact: true })}</div>`;
 }
 
+// what waits on the operator, above the thread (spec §6.6): the rail's lines waiting on you, less, on a strategy's page, that
+// page's own (it draws them); at most three, then how many more Messages holds; nothing when none waits
+const WAITING_MAX = 3;
+function waiting(state, now) {
+  const here = state.route?.screen === 'strategy' ? state.route.id : null;
+  const lines = railOf(state, now).you.filter(l => here === null || l.task.strategy !== here);
+  if (!lines.length) return '';
+  const more = lines.length > WAITING_MAX ? `<a class="gbox-more" href="#/messages">${esc(tn('gbox.moreWaiting', lines.length - WAITING_MAX))}</a>` : '';
+  return `<h3 class="gbox-waiting-head">${th('tasks.group.you')}</h3>${lines.slice(0, WAITING_MAX).map(l => waitingLineHtml(l, state)).join('')}${more}`;
+}
+
 function panel(state, now, composer, page) {
   const conv = (state.conversations ?? []).find(c => c.id === state.tasks.conversation);
   const working = conv?.running ? `<span class="status up"><span class="status-dot"></span>${th('thread.working')}</span>` : '';
@@ -47,7 +60,7 @@ function panel(state, now, composer, page) {
     `<a class="gbox-key" href="#/messages" aria-label="${open}" title="${open}">${icon('openIn', 18)}</a>` +
     `<button type="button" class="gbox-key" data-action="boxClose" aria-label="${minimize}" title="${minimize}">${icon('chevDown', 18, 2.2)}</button></header>`;
   const say = renderComposer({ menu: composer?.menu ?? null, files: composer?.files ?? [], note: composer?.note ?? '' });
-  return `<section${attrs({ class: 'gbox-panel', role: 'dialog', 'aria-modal': 'false', 'aria-label': HOST_NAME })}>${head}<div class="gbox-waiting"></div>` +
+  return `<section${attrs({ class: 'gbox-panel', role: 'dialog', 'aria-modal': 'false', 'aria-label': HOST_NAME })}>${head}<div class="gbox-waiting">${waiting(state, now)}</div>` +
     `<div class="gbox-body">${body(state, now, page)}</div>${say}${renderStatus(state.status)}</section>`;
 }
 

@@ -2144,4 +2144,7 @@ export const ZH = Object.freeze({
   'gbox.minimize': '收起',
   'gbox.earlier': '消息中更早的内容 ›',
   'gbox.empty': '就这个页面问 Gravit。',
+  'gbox.moreWaiting': '消息中还有 {n} 项 ›',
+  'gbox.stub.composed': '综合回答',
+  'gbox.stub.events': '事件对标表',
 });

@@ -8305,3 +8305,18 @@ test('open, close, open reads once', async () => {
   openBox(f); closeBox(f); openBox(f); await settle();
   assert.equal(h.streams.filter(s => s.name === 'session/follow' && s.args.request.address.sessionId === 'conv').length, 1);
 });
+
+test('a card answered in the box is settled everywhere', async () => {
+  const { f, h, store } = boxRig('#/desk', { rows: [row('w1', { agentAvailable: true })], tasks: [taskRow('w1', { title: 'Size the order', state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c9', tool: 'x' } })] });
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  h.opts().onGate({ type: 'waterfall', event: 'approval/request', eventId: 'ev-9', agentId: 'w1', request: { toolName: 'mcp__account__portfolio_place_order', callId: 'c9', reason: 'paper' } });
+  await settle();
+  assert.match(f.html(), /<div class="gbox-line" data-task="w1">[\s\S]*data-action="answer" data-conv="w1" data-msg="ev-9" data-value="allowed-once"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'answer', conv: 'w1', msg: 'ev-9', value: 'allowed-once' } }); await settle();
+  assert.deepEqual(h.answered, [['ev-9', 'allowed-once']]);
+  assert.doesNotMatch(f.html(), /class="gbox-line"/, 'answered: no longer waiting in the box');
+  const gate = store.get().conversations.find(c => c.id === 'w1').messages.find(x => x.id === 'ev-9');
+  assert.equal(gate.answer, 'approved', 'the worker\'s record holds the answer the rail and the task page read');
+  store.timers.clear();
+});

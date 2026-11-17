@@ -455,7 +455,21 @@ export function namedStates() {
     // reply; the panel open on Markets with three messages and earlier ones; open on Account beside the Statement; open on Trade
     // beside a ticket; open on Discover with the conversation not listed yet
     ...boxStates(),
+    // the Gravit box (plan 1 of the box, Task 4): the panel open on the Desk with four tasks waiting on you (three lines and the
+    // count) and, in the compact thread, a composed answer and an event table each one line to Messages
+    ['box-panel-waiting', boxWaitingState()],
   ];
+}
+
+function boxWaitingState() {
+  const gated = ['bq1', 'bq2', 'bq3', 'bq4'];
+  const asks = gated.map(id => ({ id, title: 'Check ' + id, origin: 'web', state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c', tool: 'x' }, steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 }));
+  const said = [m('bq0', { from: 'you', text: 'How was the A-share market?' }),
+    m('bqc', { seq: 2, kind: 'composed', text: 'A weak day.', data: { callId: '2', strategy: 'cn-market', run: '20261027T201627Z-6937d208', summary: 'A weak day.', blocks: [{ kind: 'ladder' }], choices: [], modules: ['environment'] } }),
+    m('bqr', { seq: 3, from: 'system', kind: 'task', text: '[task · CEO analogs · ready]', data: { form: 'report', task: 'bq1', status: 'ready', title: 'CEO analogs', body: `Read ${EVENT_VIEW_ID}`, views: [EVENT_VIEW_ID] } })];
+  let s = R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('bx', { messages: said, loaded: true }), ...gated.map(id => conv(id))], channels: [], bots: [] }), { conversation: 'bx', tasks: asks, at: NOW }), { screen: 'desk', id: null });
+  for (const id of gated) s = R.hostGate(s, { convId: id, message: m('g' + id, { kind: 'card', text: 'Buy 1 NVDA', seq: 1.5, data: { eventId: 'g' + id, sessionId: id, title: 'Buy 1 NVDA', venue: 'paper' } }) });
+  return R.boxOpen(s);
 }
 
 // the Gravit box's states (plan 1 of the box, Task 2): Gravit's one conversation 'bx' named by the tasks, a screen it stands on

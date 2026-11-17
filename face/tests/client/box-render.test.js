@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderBox } from '../../client/js/render/box.js';
+import { renderThread } from '../../client/js/render/thread.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 
@@ -79,4 +80,57 @@ test('aside: a drawer, a ticket', () => {
   assert.match(renderBox({ ...at('account'), account: { ...at('account').account, statementOpen: true } }, NOW), /class="gbox" data-aside="drawer"/);
   assert.match(renderBox({ ...at('trade'), trade: { ...at('trade').trade, ticket: { id: 'stock:NVDA', side: 'buy', venue: null, outcome: 0 } } }, NOW), /class="gbox" data-aside="ticket"/);
   assert.match(renderBox(at('desk'), NOW), /^<div class="gbox">/);
+});
+
+// ---- Task 4: the compact thread and what waits on you
+const RUN = '20261027T201627Z-6937d208';
+const composedMessage = () => m('p7', { seq: 7, kind: 'composed', text: 'Weak day.', data: { callId: '7', strategy: 'cn-market', run: RUN, summary: 'Weak day.', blocks: [{ kind: 'ladder' }], choices: [], modules: ['environment'] } });
+const VIEW_ID = 'an-20261112-0a1b2c3d';
+const reportWithView = () => m('e70', { seq: 70, from: 'system', kind: 'task', text: '', data: { form: 'report', task: 't1', status: 'ready', title: 'Read the tape', body: `see ${VIEW_ID}`, views: [VIEW_ID] } });
+const convWith = messages => conv('conv', { messages, loaded: true });
+const state = emptyState();
+// tasks waiting on the operator, each carrying a gate, the screen navigated to `screen`/`id`; each spec its id and its strategy
+const waitingWith = (screen, id, specs) => {
+  let s = at(screen, id, { convs: [conv('conv'), ...specs.map(x => conv(x.id))], tasks: specs.map(x => task(x.id, { state: 'waiting', group: 'you', strategy: x.strategy, waitingFor: { kind: 'approval', id: 'c', tool: 'x' } })) });
+  for (const x of specs) s = R.hostGate(s, { convId: x.id, message: { id: 'ev-' + x.id, seq: 1.5, at: NOW, from: 'gravit', kind: 'card', text: 'Buy 1 NVDA', data: { eventId: 'ev-' + x.id, sessionId: x.id, title: 'Buy 1 NVDA', venue: 'paper' } } });
+  return s;
+};
+
+test('compact: a composed answer and an event table are one line to Messages', () => {
+  const h = renderThread(convWith([composedMessage(), reportWithView()]), state, NOW, { compact: true });
+  assert.equal((h.match(/class="gbox-stub"/g) ?? []).length, 2);
+  assert.doesNotMatch(h, /class="lh-answer|class="et-/);
+  assert.match(h, /<div class="gbox-stub"><span>Composed answer<\/span><a href="#\/messages">Open in Messages ›<\/a><\/div>/);
+  assert.match(h, /<div class="gbox-stub"><span>Event table<\/span><a href="#\/messages">Open in Messages ›<\/a><\/div>/);
+  assert.match(h, /id="relay-conv-e70"/, 'the report line itself stays');
+});
+
+test('not compact: the blocks as before', () => {
+  const h = renderThread(convWith([composedMessage(), reportWithView()]), state, NOW, {});
+  assert.doesNotMatch(h, /gbox-stub/);
+  assert.match(h, /class="et-list"/);
+});
+
+test('waiting lines: open, at most three, then the count', () => {
+  const h = renderBox(R.boxOpen(waitingAt('desk', 5)), NOW);
+  const waiting = h.slice(h.indexOf('class="gbox-waiting"'), h.indexOf('class="gbox-body"'));
+  assert.equal((waiting.match(/class="gbox-line"/g) ?? []).length, 3);
+  assert.match(waiting, /<h3 class="gbox-waiting-head">Waiting on you<\/h3>/);
+  assert.match(waiting, /<a class="gbox-more" href="#\/messages">2 more in Messages ›<\/a>/);
+  assert.doesNotMatch(waiting, /<details/);
+  assert.match(waiting, /<div class="gbox-line" data-task="t1">[\s\S]*?<div class="task-gate"><div class="card orange">[\s\S]*?data-action="answer" data-conv="t1" data-msg="ev-t1" data-value="allowed-once"/);
+  const three = renderBox(R.boxOpen(waitingAt('desk', 3)), NOW);
+  assert.equal((three.match(/class="gbox-line"/g) ?? []).length, 3);
+  assert.doesNotMatch(three, /gbox-more/, 'three fit: no count');
+  assert.match(renderBox(R.boxOpen(waitingAt('desk', 4)), NOW), />1 more in Messages ›</);
+});
+
+test('no line waiting: the strip is empty', () => {
+  assert.match(renderBox(R.boxOpen(at('desk')), NOW), /<div class="gbox-waiting"><\/div>/);
+});
+
+test('on a strategy\'s page the box leaves out the page\'s own lines', () => {
+  const h = renderBox(R.boxOpen(waitingWith('strategy', 'beta', [{ id: 't3', strategy: 'beta' }, { id: 't4' }])), NOW);
+  assert.doesNotMatch(h, /data-task="t3"/); assert.match(h, /data-task="t4"/);
+  assert.match(renderBox(R.boxOpen(waitingWith('strategy', 'beta', [{ id: 't3', strategy: 'beta' }])), NOW), /<div class="gbox-waiting"><\/div>/);
 });

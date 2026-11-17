@@ -2151,4 +2151,7 @@ export const EN = Object.freeze({
   'gbox.minimize': 'Minimize',
   'gbox.earlier': 'Earlier in Messages ›',
   'gbox.empty': 'Ask Gravit about this page.',
+  'gbox.moreWaiting': { one: '{n} more in Messages ›', other: '{n} more in Messages ›' },
+  'gbox.stub.composed': 'Composed answer',
+  'gbox.stub.events': 'Event table',
 });
