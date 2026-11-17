@@ -17,7 +17,20 @@
  * (a function is a DataCloneError), so no patch can carry it into a booted row; the freezes read the
  * system clock instead, which this file shifts - `Date` replaced for the boot's lifetime by one whose
  * "now" starts at Friday 2026-10-23 15:00 China time, the session the Eastmoney fixtures carry, and
- * advances in real time. Own file, gated. */
+ * advances in real time.
+ *
+ * THE OWNER'S LESSONS on the run (src/memory-lunhui.ts). Once the run is sealed, a store made by
+ * `createLunhuiLessons` over this boot's `lunhuiRuns` service, as main.ts makes it, is asked for the run. The memory
+ * is the real gravit-memory package over a home made by its own `initHome` under the system's temporary directory,
+ * opened through the face's own opener over the row the tree composed, with one caveat armed there through
+ * `Memory.owner` - in this test only - that says `careful` for `buy`, scoped to the market `CN`; the leaders' price
+ * facts are a stub, and the answers are kept in a directory under the system's temporary directory. The run was
+ * sealed moments ago, so it is fresh: the answer is `checked`, its leaders exactly `leadersOf` the run's own view -
+ * the fixture's limit-up pool has names on rungs of two boards and up, so there are some - each carrying the card
+ * and each asked once; the kept file holds the answer; a second ask of the store, and a fresh store over the same
+ * directory, add no recall.
+ *
+ * Own file, gated. */
 import "./helpers/no-market.ts";
 import "./helpers/no-memory.ts";
 import test from "node:test";
@@ -29,8 +42,14 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GenerateOptions } from "@deepseek-ai/dsh-llm";
 import { SessionId, type Session } from "@deepseek-ai/dsh-session";
+import { initHome, openMemory } from "gravit-memory";
 import { setupFaceProfile } from "../src/setup.ts";
+import type { SeatEntryLike } from "../src/account-seat.ts";
 import { bootFace } from "../src/boot.ts";
+import type { LunhuiViewService } from "../src/lunhui-view.ts";
+import { createLunhuiLessons, leadersOf } from "../src/memory-lunhui.ts";
+import { composedMemoryRow } from "../src/memory-row.ts";
+import { FACE_MEMORY_NAME, memoryOpener } from "../src/memory.ts";
 import { ROLES_ROOT, readRoles } from "../src/roles.ts";
 import { LUNHUI_RUN_PATH, readProtocol } from "../src/protocols.ts";
 import { readChannelBody } from "../src/channels.ts";
@@ -57,6 +76,9 @@ type Module = (typeof MODULES)[number];
 /** The run's four artifacts: the analyst's three, then the reviewer's. */
 const ARTIFACTS = [...MODULES, "counterevidence"] as const;
 const CONTRACTS: Record<(typeof ARTIFACTS)[number], any> = { environment: environmentContract, sentiment: sentimentContract, theme: themeContract, counterevidence: reviewContract };
+/** The one lesson armed in the memory. */
+const LESSON = "cn-buying-careful";
+const LESSON_WORDS = "Buying a limit-up leader the day after: size it small.";
 /** The run protocol's first line (`dsh/profile/lunhui-run.md`, the `lunhui:run` section), read from the file. */
 const RUN_HEADING = readProtocol(LUNHUI_RUN_PATH).split("\n")[0];
 
@@ -183,7 +205,7 @@ function reviewArtifact(context: Context) {
   };
 }
 
-test("market run smoke: Gravit freezes three sources into one run, the analyst submits three OK artifacts built from its contexts, the reviewer its counterevidence, the run reads back sealed and on the runs card", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+test("market run smoke: Gravit freezes three sources into one run, the analyst submits three OK artifacts built from its contexts, the reviewer its counterevidence, the run reads back sealed and on the runs card, the owner's lessons on its leaders asked once and kept", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
   const RealDate = Date;
   const bots = await makeBotsRoot();
   const fixtureRoles = await mkdtemp(join(tmpdir(), "face-market-run-roles-"));
@@ -191,9 +213,24 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
   const root = await realpath(await mkdtemp(join(tmpdir(), "face-market-run-root-")));
   const home = await mkdtemp(join(tmpdir(), "face-market-run-home-"));
   const fixtures = await fixtureDir();
+  const memoryDir = await mkdtemp(join(tmpdir(), "face-market-run-memory-"));
+  const keptDir = await mkdtemp(join(tmpdir(), "face-market-run-kept-"));
+  const memoryEnv = process.env.FACE_MEMORY_HOME;
   let dispose: (() => Promise<void>) | undefined;
   try {
     globalThis.Date = shiftedDate(FRIDAY);
+    /* The owner's memory, made by the package on the shifted clock, with one caveat armed by the owner's door:
+     * `careful` for `buy`, on the market CN; the environment names it for the boot. */
+    const memoryHome = join(memoryDir, "home");
+    assert.equal((await initHome(memoryHome)).created, true, "the package made the memory's home");
+    const owner = openMemory(memoryHome);
+    const proposal = await owner.propose("smoke-proposer", {
+      what: "new", lesson: LESSON, reason: "A caveat for the market run smoke.",
+      card: { id: LESSON, says: "careful", actions: ["buy"], strength: "caveat", scope: { market: ["CN"] }, words: LESSON_WORDS },
+    });
+    await owner.owner.edit(proposal.id);
+    await owner.owner.arm(LESSON);
+    process.env.FACE_MEMORY_HOME = memoryHome;
     for (const entry of readdirSync(ROLES_ROOT, { withFileTypes: true })) {
       if (entry.isDirectory()) await cp(join(ROLES_ROOT, entry.name), join(fixtureRoles, entry.name), { recursive: true });
     }
@@ -353,10 +390,50 @@ test("market run smoke: Gravit freezes three sources into one run, the analyst s
     assert.deepEqual(Object.keys(row.artifacts).sort(), [...ARTIFACTS].sort(), "four chips");
     for (const module of ARTIFACTS) assert.equal(row.artifacts[module].status, "OK");
     assert.equal(body.latestRun?.run, run, "and it is the latest run");
+
+    /* The owner's lessons on the run's leaders, asked once by the face's own code and kept. */
+    const runs = ctx.get("lunhuiRuns") as LunhuiViewService | undefined;
+    assert.ok(runs !== undefined, "the Lunhui rows are mounted");
+    const view = (strategy: string, runId: string): Promise<unknown> => runs.view(strategy, runId, { modules: [] });
+    const loader = ctx.get("loader") as { entries(): Iterable<SeatEntryLike> };
+    const open = memoryOpener(composedMemoryRow(loader.entries()));
+    const memoryLog: string[] = [];
+    const storeOf = () => createLunhuiLessons({
+      dir: keptDir, view, open,
+      facts: async () => ({ facts: { price: 10 }, sources: { price: "the smoke's stub quote" } }),
+      log: (line) => { memoryLog.push(line); },
+    });
+    type RecallLine = { kind: string; by: string; symbol?: string; market?: string; considering?: string[]; applied?: string[] };
+    const recalls = async (): Promise<RecallLine[]> =>
+      (await readFile(join(memoryHome, "recalls.jsonl"), "utf8")).split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l) as RecallLine)
+        .filter((l) => l.kind === "recall");
+    const leaders = leadersOf(await view("cn-market", run));
+    assert.ok(leaders.length > 0, "the fixture's pool has names on rungs of two boards and up");
+    const store = storeOf();
+    const lessons = await store.get("cn-market", run);
+    assert.ok(lessons.state === "checked", `a fresh run is checked; saw ${JSON.stringify(lessons)}`);
+    assert.deepEqual([lessons.strategy, lessons.run], ["cn-market", run], "keyed by the names the runs service gives");
+    assert.deepEqual(lessons.leaders.map((l) => ({ code: l.code, boards: l.boards })), leaders, "the leaders are leadersOf the run's view, in its order");
+    for (const leader of lessons.leaders) {
+      assert.equal(leader.fault, undefined, `${leader.code} was asked without a fault`);
+      assert.match(String(leader.recall), /\S/, `${leader.code}'s answer names its recall`);
+      assert.deepEqual(leader.lessons.map((l) => [l.id, l.strength, l.says, l.words]), [[LESSON, "caveat", "careful", LESSON_WORDS]],
+        `${leader.code} carries the card`);
+    }
+    const asked = await recalls();
+    assert.deepEqual(asked.map((l) => [l.by, l.symbol, l.market, l.considering, l.applied]),
+      leaders.map((l) => [FACE_MEMORY_NAME, l.code, "CN", ["buy"], [LESSON]]), "one recall a leader, in turn, by the face, for a buy in CN");
+    assert.deepEqual(JSON.parse(await readFile(join(keptDir, "cn-market", `${run}.json`), "utf8")), lessons, "the kept file holds the answer");
+    assert.deepEqual(await store.get("cn-market", run), lessons, "a second ask answers the same");
+    assert.deepEqual(await storeOf().get("cn-market", run), lessons, "and so does a fresh store, from the kept file");
+    assert.equal((await recalls()).length, asked.length, "neither added a recall");
+    assert.deepEqual(memoryLog, [], "no ask faulted");
   } finally {
     globalThis.Date = RealDate;
+    if (memoryEnv === undefined) delete process.env.FACE_MEMORY_HOME;
+    else process.env.FACE_MEMORY_HOME = memoryEnv;
     await dispose?.();
-    await Promise.all([bots, fixtureRoles, strategies, root, home, fixtures].map((dir) => rm(dir, { recursive: true, force: true })));
+    await Promise.all([bots, fixtureRoles, strategies, root, home, fixtures, memoryDir, keptDir].map((dir) => rm(dir, { recursive: true, force: true })));
   }
 });
 

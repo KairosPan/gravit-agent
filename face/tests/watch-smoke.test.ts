@@ -28,7 +28,18 @@
  * 11. THE READ-THROUGH: AVGO, held flat by its one `move_pct` rule until now, falls past it; its why post asks for a
  *     read-through, the model calls `read_through` with AMD as the one rival, and the reply under the alert is its
  *     reason with the block below it - one `direction` line in the record, the annotation's, and one `sent` line; a
- *     second crossing of the rule under the same close, past the cooldown, gets the face's one line instead.
+ *     second crossing of the rule under the same close, past the cooldown, gets the face's one line instead;
+ * 12. THE OWNER'S LESSONS: ORCL, added to the book here as a held name with a watch level, crosses it while up on the
+ *     day; the phone gets the alert, then a reply under it that is src/memory-alert.ts `alertBlock`'s text for the one
+ *     armed card, and the memory holds one recall of ORCL `by: "gravit-face"`. Every alert before it was asked too,
+ *     and none of them sent anything more: the card is scoped to ORCL. No desk agent was offered a memory tool.
+ *
+ * THE MEMORY. The owner's memory is the real gravit-memory package over a home made by its own `initHome` under the
+ * system's temporary directory, the environment naming it for the boot as tests/memory-gate-smoke.test.ts does, and
+ * opened through the face's own opener over the row the tree composed. One caveat is armed there through
+ * `Memory.owner` - in this test only - that says `careful` for `add`, scoped to ORCL. The watch's ask is
+ * `createAlertLessons` as main.ts builds it, its bars read a stub that reaches no Market; it is handed to `installDesk`
+ * and to case 3's re-installed watch.
  *
  * WHAT STANDS IN. The model is a stub on `stub/echo`, the tree's default route, every reply reporting all four token
  * buckets as in tests/desk-smoke.test.ts; it answers by the bracketed first line of the message it is answering. The
@@ -61,12 +72,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection } from "@deepseek-ai/dsh-agent";
 import type { GenerateOptions, StreamChunk } from "@deepseek-ai/dsh-llm";
+import { initHome, openMemory } from "gravit-memory";
+import type { SeatEntryLike } from "../src/account-seat.ts";
 import { bootFace, type BootedFace } from "../src/boot.ts";
 import {
   ALERTS_FILE, deskDir, FILINGS_FILE, FIRINGS_FILE, installDesk, MUTE_FILE, readBudget, readEvents, readRecords,
@@ -79,6 +93,9 @@ import { bjDate, etDate } from "../src/et.ts";
 import { isFilingRecord, type FilingRecord } from "../src/filings.ts";
 import { isFiringRecord, type FiringRecord } from "../src/firing.ts";
 import type { MarketSession } from "../src/market-clock.ts";
+import { alertBlock, createAlertLessons } from "../src/memory-alert.ts";
+import { composedMemoryRow } from "../src/memory-row.ts";
+import { FACE_MEMORY_NAME, memoryOpener } from "../src/memory.ts";
 import type { MarketQuote, MarketQuoteIdentity, MarketQuoteSource } from "../src/market-quotes.ts";
 import { setupFaceProfile } from "../src/setup.ts";
 import { renderOrder, writeStanding, type ArmEntry } from "../src/standing.ts";
@@ -137,6 +154,10 @@ const BS = ["B1", "B2", "B3", "B4", "B5", "B6"];
 const RT = "AVGO";
 const RT_RULE = "avgo-move";
 const RIVAL = "AMD";
+/** Case 12's name, held and watched only from that case on, and the one lesson armed on it. */
+const LS = "ORCL";
+const LS_LESSON = "orcl-adding-careful";
+const LS_WORDS = "Adding to ORCL on a green day: check the size first.";
 
 const HOLDINGS_YML = [
   "- symbol: NVDA",
@@ -280,7 +301,7 @@ type DeskTurnEvent = Extract<DeskEvent, { kind: "desk-turn" }>;
 /** One phone text: what the outlet was sent, and the message it replies to. */
 interface PhoneText { text: string; replyTo?: string }
 
-test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a cut and a failed annotation, the phone's state, a filing, the canary's annotation half, a read-through", {
+test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a cut and a failed annotation, the phone's state, a filing, the canary's annotation half, a read-through, the owner's lessons", {
   skip: gated && "set FACE_SMOKE=1", timeout: 240_000,
 }, async () => {
   let booted: BootedFace | undefined;
@@ -288,11 +309,28 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
   let rewatch: WatchHandle | undefined;
   let passed = false;
   const faceLog: string[] = [];
-  const env = { account: process.env.FACE_ACCOUNT_URL, edgar: process.env.ALPHA_EDGAR_USER_AGENT };
+  /** The lessons ask's own log: a fault is one line here. */
+  const memoryLog: string[] = [];
+  let memoryDir: string | undefined;
+  const env = { account: process.env.FACE_ACCOUNT_URL, edgar: process.env.ALPHA_EDGAR_USER_AGENT, memory: process.env.FACE_MEMORY_HOME };
   try {
     /* No read leaves the host: the Account URL is a closed port, and SEC has no contact but the fake's. */
     process.env.FACE_ACCOUNT_URL = "http://127.0.0.1:9";
     delete process.env.ALPHA_EDGAR_USER_AGENT;
+
+    /* The owner's memory, made by the package under the system's temporary directory, with one caveat armed by the
+     * owner's door: `careful` for `add`, on ORCL alone; the environment names it for the boot. */
+    memoryDir = await mkdtemp(join(tmpdir(), "face-watch-smoke-memory-"));
+    const memoryHome = join(memoryDir, "home");
+    assert.equal((await initHome(memoryHome)).created, true, "the package made the memory's home");
+    const owner = openMemory(memoryHome);
+    const proposal = await owner.propose("smoke-proposer", {
+      what: "new", lesson: LS_LESSON, reason: "A caveat for the watch smoke.",
+      card: { id: LS_LESSON, says: "careful", actions: ["add"], strength: "caveat", scope: { symbols: [LS] }, words: LS_WORDS },
+    });
+    await owner.owner.edit(proposal.id);
+    await owner.owner.arm(LS_LESSON);
+    process.env.FACE_MEMORY_HOME = memoryHome;
 
     /* ---------- the fixture ---------- */
     await rm(BASE, { recursive: true, force: true });
@@ -442,6 +480,14 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
       return new Response("not found", { status: 404 });
     };
 
+    /* The owner's lessons on a price alert, as main.ts builds them over the row the tree composed; the bars a stub. */
+    const loader = ctx.get("loader") as { entries(): Iterable<SeatEntryLike> };
+    const lessons = createAlertLessons({
+      open: memoryOpener(composedMemoryRow(loader.entries())),
+      candles: async () => ({ unreachable: "the watch smoke reaches no Market" }),
+      log: (line) => { memoryLog.push(line); },
+    });
+
     /* The desk, as main.ts installs it, with the watch's seams. */
     const sessionCtx = ctx as unknown as DeskConversationCtxLike;
     const install: NonNullable<DeskSessionDeps["installModelSelection"]> = (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref);
@@ -452,6 +498,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
       /* a why post's headline read stands in here: no test reaches the Market */
       watchRow: { calendars, clock: wall, tickMs: TICK_MS, edgar: { fetch: fakeEdgar, userAgent: UA }, news: async (symbols) => new Map(symbols.map((s) => [s, { headlines: [] }] as const)) },
       log: (line) => { faceLog.push(line); },
+      lessons,
     });
     wireReadThrough(ctx, { quotes, root: ROOT });
     const conversation = desk.conversation;
@@ -591,6 +638,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
       edgar: { fetch: fakeEdgar, userAgent: UA },
       tickMs: TICK_MS,
       log: (line) => { faceLog.push(line); },
+      lessons,
     });
     watch = rewatch;
     conversation.setState(() => rewatch!.stateText());
@@ -862,6 +910,51 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.equal((await annotated()).find((r) => r.pass === again.pass)?.directions, undefined, "it carried no block");
     assert.deepEqual((await lines()).filter((l) => l.kind === "direction").map((l) => l.id), [direction.id], "and the record holds no second direction");
 
+    /* ---------- 12. THE OWNER'S LESSONS ---------- */
+    type RecallLine = { kind: string; by: string; symbol?: string; market?: string; considering?: string[]; applied?: string[] };
+    const recalls = async (): Promise<RecallLine[]> =>
+      (await readFile(join(memoryHome, "recalls.jsonl"), "utf8")).split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l) as RecallLine)
+        .filter((l) => l.kind === "recall");
+    assert.deepEqual((await recalls()).filter((l) => l.symbol === LS), [], "ORCL was never asked about before the case");
+    assert.ok((await recalls()).length > 0, "every price alert the phone got before was asked about");
+    assert.ok((await recalls()).every((l) => l.by === FACE_MEMORY_NAME && (l.applied ?? []).length === 0),
+      "each by the face, and the card applied to none of them: the earlier cases sent nothing more");
+    /* ORCL joins the book, held and with a watch level of its own, priced under it */
+    tables.us.set(LS, { price: 199, prevClose: 200, asOf: "2026-12-01T15:40:00Z", changePct: -0.5 });
+    await writeFile(join(ROOT, "desk", "holdings.yml"), `${HOLDINGS_YML}- symbol: ${LS}\n  qty: 10\n  avg_cost: 150\n`);
+    await writeFile(join(ROOT, "desk", "levels.yml"), `${LEVELS_YML}${level([`symbol: ${LS}`, "kind: watch", "price: 203", "when: cross_up", "plan: size the add before anything", "expires: 2026-12-31", "annotate: false"])}\n`);
+    await tickAt("2026-12-01T15:40:05Z");
+    await phoneAt(expected.length + 2);
+    const [holdingsLine, levelsLine] = phone.slice(expected.length, expected.length + 2);
+    assert.match(holdingsLine.text, /^desk\/holdings\.yml changed \(sha256 [0-9a-f]{8}\): 3 loaded$/, `the book's change, said once; saw ${JSON.stringify(holdingsLine.text)}`);
+    assert.match(levelsLine.text, /^desk\/levels\.yml changed \(sha256 [0-9a-f]{8}\): 14 loaded$/, `and the levels'; saw ${JSON.stringify(levelsLine.text)}`);
+    heard([holdingsLine, levelsLine], "the two files' change lines, and no alert: ORCL is under its level");
+    assert.equal((await hits()).length, 14, "no record for ORCL under its level");
+    /* ORCL over its level, up on the day */
+    tables.us.set(LS, { price: 204, prevClose: 200, asOf: "2026-12-01T15:50:02Z", changePct: 2 });
+    await tickAt("2026-12-01T15:50:05Z");
+    const orcl = (await hitsSettled(15))[14];
+    assert.deepEqual([orcl.symbol, orcl.label, orcl.decision, orcl.holding?.qty], [LS, "watch", "send", 10], "ORCL's watch level fires, held, sent");
+    const orclAt = `telegram:${expected.length + 1}`;
+    await phoneAt(expected.length + 2);
+    const orclText = phone[expected.length].text;
+    assert.ok(orclText.startsWith(`${LS} 204 · ROBINHOOD 10:50:02 ET\n`), `its alert; saw ${JSON.stringify(orclText)}`);
+    const lsBlock = alertBlock(LS, {
+      lessons: [{ id: LS_LESSON, strength: "caveat", says: "careful", words: LS_WORDS, fired: 1, followed: 0, overridden: 0 }],
+      lessonsMore: 0, untold: [], untoldMore: 0,
+    });
+    assert.equal(lsBlock, `Your own lessons on ${LS}, not advice:\n· caveat (careful): "${LS_WORDS}" · fired 1 · followed 0 · overridden 0`,
+      "the block as the plan words it");
+    heard([{ text: orclText }, { text: lsBlock!, replyTo: orclAt }], "the alert, then the owner's lesson as a reply under it");
+    const lsAsked = (await recalls()).filter((l) => l.symbol === LS);
+    assert.deepEqual(lsAsked.map((l) => [l.by, l.market, l.considering, l.applied]), [[FACE_MEMORY_NAME, "US", ["add", "trim", "hold"], [LS_LESSON]]],
+      "one recall of ORCL, by the face, held and up on the day, the card applied");
+    /* no desk agent - the conversation's, an annotation's, the brief's - was offered a memory tool */
+    const offered = [...requests.values()].flat().flatMap((r) => (r.tools ?? []).map((t) => t.name));
+    assert.ok(offered.length > 0, "the desk's requests offered tools");
+    assert.deepEqual(offered.filter((name) => name.startsWith("mcp__memory__")), [], "and none of them a memory tool");
+    assert.deepEqual(memoryLog, [], "no ask faulted");
+
     /* ---------- ACROSS THE FILE ---------- */
     assert.deepEqual(phone, expected, "every text the desk sent went through the recorder, in order, and nothing else did");
     const all = await alerts();
@@ -880,9 +973,11 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
       ["the desk", () => desk?.dispose(0)],
       ["the face", () => booted?.dispose()],
       ["the fixture", () => rm(BASE, { recursive: true, force: true })],
+      ["the memory's home", () => (memoryDir === undefined ? undefined : rm(memoryDir, { recursive: true, force: true }))],
       ["the environment", () => {
         if (env.account === undefined) delete process.env.FACE_ACCOUNT_URL; else process.env.FACE_ACCOUNT_URL = env.account;
         if (env.edgar === undefined) delete process.env.ALPHA_EDGAR_USER_AGENT; else process.env.ALPHA_EDGAR_USER_AGENT = env.edgar;
+        if (env.memory === undefined) delete process.env.FACE_MEMORY_HOME; else process.env.FACE_MEMORY_HOME = env.memory;
       }],
     ]);
   }
