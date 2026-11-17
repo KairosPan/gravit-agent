@@ -37,6 +37,8 @@ import { installMemoryClock, memoryClockEnabled, type MemoryClock } from "./memo
 import { createMemoryGate, followAnswers, gateAccount, type GateNote, type MemoryGate } from "./memory-gate.ts";
 import { registerMemoryGateRoutes } from "./memory-gate-routes.ts";
 import { priceFacts } from "./memory-facts.ts";
+import { createLunhuiLessons } from "./memory-lunhui.ts";
+import { registerMemoryLunhuiRoute } from "./memory-lunhui-routes.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { claimsOf, deskDir, installDesk, type DeskHandle } from "./desk.ts";
@@ -545,6 +547,21 @@ wireReadThrough(booted.ctx, { quotes, root: process.cwd() });
 /* The owner's lessons on a price alert (src/memory-alert.ts), asked by the watch as `gravit-face` once the alert is
  * sent, over the memory and the Market's bars; handed to the desk whether it is on or off. */
 const lessons = createAlertLessons({ open: openMemory, candles: marketProxy.candles, log: (line) => { console.error(`${BIN}: ${line}`); } });
+/* A fresh Lunhui run's leaders as the owner's memory is asked about them (src/memory-lunhui.ts), once per run as
+ * `gravit-face`, over the runs service as provided at each read and the gate's price facts; the answers are kept
+ * under the harness home, whose directory is made at the first write. Behind http.ts's `/data` fence. */
+const lunhuiLessons = createLunhuiLessons({
+  dir: join(dshHome, "face", "memory", "lunhui"),
+  view: async (strategy, run) => {
+    const runs = booted.ctx.get("lunhuiRuns") as LunhuiViewService | undefined;
+    if (runs === undefined) throw Object.assign(new Error("lunhui not mounted"), { code: "NOT_MOUNTED" });
+    return runs.view(strategy, run, { modules: [] });
+  },
+  open: openMemory,
+  facts: (code) => priceFacts(gateFactReads, code, "CN"),
+  log: (line) => { console.error(`${BIN}: ${line}`); },
+});
+registerMemoryLunhuiRoute(booted.ctx.webServer, { store: () => lunhuiLessons, isTrusted: isTrustedDataRequest });
 desk = installDesk(booted.ctx.webServer, {
   home: dshHome,
   enabled: deskEnabled,
