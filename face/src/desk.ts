@@ -7,8 +7,8 @@
  * the watch and the phone bridge that work in it. Of what §8 gives this module - the ledger, the
  * budget, the `OFF` switch, the two desk tools, the `/desk` page and `/data/desk/*` - P0 holds the
  * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch and the Desk
- * panel's `POST /data/desk/pause` (the panel itself is client/desk-panel.js, in the chat page rather
- * than a `/desk` page), mounts the two desk tools and the desk's guard, which src/desk-tools.ts
+ * panel's `POST /data/desk/pause` (the panel was then client/desk-panel.js, in the chat page; since
+ * 2026-11-14 the Desk is its own screen, client/js/render/desk-page.js), mounts the two desk tools and the desk's guard, which src/desk-tools.ts
  * defines, and runs the phone bridge, src/phone-bridge.ts, over the account's inbox and send (src/phone.ts).
  * Of the ledger's files (§5.7) this module keeps `events.jsonl`, `OFF` and P3's `MUTE`;
  * {@link appendRecord} is the append path for the others, P2's firing

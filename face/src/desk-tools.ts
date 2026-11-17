@@ -13,7 +13,7 @@
  * (src/desk-preset.ts), and a mask filters every layer an agent inherits - the global one and its
  * preset's alike - so a tool registered in either would be hidden from the desk by its own mask, and
  * `tools.restrict` refuses to name a tool its scope does not inherit. An agent's own registrations are
- * the one layer no restriction filters (dsh-tools `view`). So `DESK_ALLOW` does not list these two,
+ * the one layer no restriction filters (dsh-tools `view`). So `DESK_ALLOW` does not list these three,
  * gravit's agents never see them, and the global view - `/data/plugins.json` - never lists them, as with
  * the role tools. They unwind with the agent. `web_fetch` lands in the same layer through a child plugin of the
  * agent's context that injects `web` ({@link webFetchLayer}): the agent's context reaches `tools` and

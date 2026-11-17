@@ -3,8 +3,9 @@
 One Node 22 process. It boots the DeepSeek Harness — dsh `0.2.1-rc.5`, pinned in
 `src/version.ts` — from the `face` profile (bundles: `@deepseek-ai/dsh-base`
 only), composes its policy defaults below the operator's patch layer and its own
-host rows on top of it, and serves the operator's client — Messages, Markets, Trade,
-Discover and Account — at http://127.0.0.1:3090/, behind the tokenized sign-in URL it prints at
+host rows on top of it, and serves the operator's client — Messages, the Desk, Markets, Trade,
+Discover, Account, Memory, History, a task's and a strategy's page — at http://127.0.0.1:3090/,
+behind the tokenized sign-in URL it prints at
 start. No build step — `tsx` runs the
 TypeScript directly. Specs: `../docs/superpowers/specs/2026-08-30-face-chat-light-design.md`
 and `../docs/superpowers/specs/2026-08-31-face-instruments-design.md` — dated
@@ -371,6 +372,12 @@ the gap as `asleep`.
 as its client by route A of `docs/superpowers/specs/2026-10-19-gravit-ui-on-face-design.md`:
 vanilla ES modules under `client/js`, one sheet, no bundler, no back end of its own —
 everything on screen is what dsh and the face's `/data` routes say (`DEVELOPMENT.md` §5).
+`client/js` is four layers: the store, one state object with pure reducers (`store.js`,
+`reducers/`); renderers that return HTML strings (`render/`, over `html.js`); the host layer
+(`host/`), whose impure halves (`live.js` and its kin) read dsh and the face's `/data` routes into
+the store beside pure views (`*-view.js`, `kinds.js`, `sessions.js`); and under it the wire
+(`wire/`: `api.js`, one unary call and one reconnecting socket, the only two ways the page talks
+to the host, then `mapper.js` and the other pure modules).
 All three of its stages are built:
 
 - **host-fed**: Messages — since one entry's plan 2 gravit's one conversation ("The conversation
@@ -495,7 +502,9 @@ All three of its stages are built:
 - **the words, the sizes and the keys** (the dsh UI port's plan 6): **the words** — every word
   the face writes (a label, a key, an aria-label, a status line, a sheet's line) is read from one
   English table, `client/js/i18n/en.js`, through `client/js/i18n/words.js`; the move changed no
-  byte of any screen, and plan 7 adds a Chinese table beside it. What anyone else wrote is drawn as
+  byte of any screen, and plan 7 adds a Chinese table beside it, `client/js/i18n/zh.js`. A new word
+  ships in both tables at once, under one key, `<area>.<part>.<name>` from the English (`zh.js`
+  holds no key `en.js` lacks; a word missing from it reads in English). What anyone else wrote is drawn as
   written: titles, your words, gravit's and the bots', Lunhui's output, dsh's and the Account's
   sentences, tickers, key names, numbers. **The sizes and fonts** — Settings › Text size, a stepper
   `− 15 px +` from 12 to 20, scales every text size; under **More font settings** (folded), Text
@@ -528,8 +537,9 @@ All three of its stages are built:
   and its paper positions; its roster editors left with one entry's plan 4), Discover
   (`#/discover`, the inventory of what gravit runs — "Discover" below), no tool
   call drawn (not in the thread, not in a member's Trace), a conversation's subagent children
-  ("Temporary subagents" below) and a room member's trace. There is no shop, no Mail and no
-  Memory: what the demo drew with no back end left the tree;
+  ("Temporary subagents" below) and a room member's trace. There is no shop and no Mail: what the
+  demo drew with no back end left the tree, its Memory with them (today's Memory screen is the
+  memory's, "The memory" below);
 - **since the graft's stage 2** (2026-10-24): Trade (`#/trade`) and the owner's keys on Markets
   and Account, live while this page signs for the Account as one of its owner devices ("The
   Account in the face" below).
@@ -800,7 +810,7 @@ touching the seat.
 | `FACE_MARKET_DIR` | the repo's `market/` | the market package `market:mcp` runs from |
 | `FACE_MARKET_URL` | `http://127.0.0.1:4821` | the running market: the row's `MARKET_URL`, the market proxy's `/data/market…` (which follows the row as composed), the desk's quotes, and the Lunhui freezes, which read this variable alone — so a patch that moves the row moves the screens and the desk but not Lunhui |
 
-## The memory — the owner's decisions and lessons (src/memory.ts + src/memory-row.ts + src/memory-clock.ts + src/memory-brief.ts + src/memory-guard.ts + src/memory-{facts,order,gate,gate-routes}.ts + src/memory-{ask,alert,lunhui,lunhui-routes}.ts + src/memory-screen.ts + src/memory-screen-routes.ts)
+## The memory — the owner's decisions and lessons (src/memory.ts + src/memory-row.ts + src/memory-clock.ts + src/memory-brief.ts + src/memory-guard.ts + src/memory-{facts,order,gate,gate-routes}.ts + src/memory-{ask,alert,lunhui,lunhui-routes}.ts + src/memory-screen.ts + src/memory-screen-routes.ts + src/memory-acts.ts + src/memory-acts-routes.ts)
 
 Since 2026-11-14 (memory plan 1, "gravit connects") the face composes a third project-owned MCP
 row, `mcp-memory` (`src/memory-row.ts`), right after the market's: the door of gravit-memory, the
@@ -2293,7 +2303,7 @@ file always writes "charter D…":
 ## Markets and Account
 
 The rail opens **Markets** (`#/markets`) — the markets by tab, China (the A shares) among them —
-and **Account** (`#/account/portfolio`, `money`, `venues`, `agents`, `cards`, `rules`), the
+and **Account** (`#/account/portfolio`, `money`, `venues`, `agents`, `cards`, `rules`, `identity`), the
 Account's wallet half. The Account serves no page (since 2026-11-01): these screens and Trade are
 its only page. Since plan A2 (2026-11-03) the face has two upstreams ("The Account in the face"
 below): Markets reads the market service's public rows (`../market/`, 127.0.0.1:4821, keyless,
@@ -3385,8 +3395,8 @@ a cut turn's restart line, not a brief or an alert. The bridge's own
 replies (a command's answer, the paused line) and Gate 2's card notice still go. A pause does not
 stop the one conversation in the browser, nor any task already started: they run on. Phone texts a
 graceful stop carried over a restart that a pause refuses at boot wait for a later boot with no
-pause in force (the lift alone does not post them). Set it from the phone (`/pause`), from `POST /data/desk/pause` (Markets ›
-Desk's **Pause**), or from a terminal:
+pause in force (the lift alone does not post them). Set it from the phone (`/pause`), from `POST /data/desk/pause` (the Desk
+screen's **Pause**), or from a terminal:
 
 ```bash
 cd face
@@ -4660,8 +4670,8 @@ each tool by name (`not registered` when the tree lacks it; never its registered
 which is written for the model), each role (`missing` when the face did not read it at boot), each
 skill as a link to its own page (`missing` when the skill registry does not list it), each row
 with its phase (Off, the State's own word, when it is disabled, not composed or has no phase) — a
-section drawn only when it has something. An ask is a key: pressing it goes to Messages and puts
-its words in gravit's composer, after whatever the composer holds; nothing is sent. The keys work
+section drawn only when it has something. An ask is a key: pressing it puts its words in gravit's
+composer — the box's where the box stands, else Messages' — after whatever the composer holds; nothing is sent. The keys work
 only while the ability is On and the page knows gravit's conversation: with none
 (`FACE_ROUTER=0`, or the tasks not read yet) they are disabled under `gravit's conversation is not
 available`, and with the ability not On they are disabled with no line. The page's text is the
@@ -7374,8 +7384,8 @@ it prints the `env_file` values resolved.
 `agent` (the face, dsh, gravit's shell, the seat) mounts an allowlist of the tree, never
 its root: read-write `face/`, `strategies/`, `bots/`, `roles/`; read-only `account/` and `market/` (the
 boxes' build contexts, the seat's and the `mcp-market` row's code — their `node_modules` the
-writable `account-modules` and `market-modules` volumes), `dsh/`, `docs/` and the root documents `GRAVIT.md`, `CLAUDE.md`, `AGENTS.md`,
-`Gravit-Design.md`, `DEVELOPMENT.md`, `ROADMAP.md`; an empty read-only `.git` (a tmpfs, the
+writable `account-modules` and `market-modules` volumes), `dsh/`, `docs/` and the root documents `GRAVIT.md`, `CLAUDE.md`, `AGENTS.md` (the design documents are
+gitignored, so a clone has none and the box mounts none); an empty read-only `.git` (a tmpfs, the
 root marker dsh's instruction files climb to, so `GRAVIT.md` reaches every session — no history in
 the box). **By design the root's `.env*` files (a venue's keys among them), `GRAVIT.local.md`
 and `compose.yml` are not in the box.** Beside them: `dsh-home`, `seat-home` (the seat's

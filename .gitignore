@@ -14,7 +14,7 @@
 .env.*
 *.env
 
-# scratch / run artifacts (CLAUDE.md §7)
+# scratch / run artifacts
 decisions/
 deck.png
 .playwright-mcp/

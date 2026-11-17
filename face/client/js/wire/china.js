@@ -1,4 +1,4 @@
-// The Account's China answers as the shapes the Markets store already draws: the ranking's rows (chinaRowsOf), a quote (LiveQuote), a
+// The market's China answers as the shapes the Markets store already draws: the ranking's rows (chinaRowsOf), a quote (LiveQuote), a
 // search's hits and the provider's state. Pure: no DOM, no fetch; the face holds no key and asks no upstream.
 import { normalizeAsset, number } from "./market-model.js";
 import { isLine } from "../i18n/words.js";
