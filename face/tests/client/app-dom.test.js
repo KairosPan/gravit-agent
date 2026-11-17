@@ -6,7 +6,7 @@ import { DESK_ROUTINES_POLL_MS } from '../../client/js/host/desk-routines.js';
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { boot as bootApp, Timers, DROP_QUIET_MS } from '../../client/js/app.js';
+import { boot as bootApp, Timers, DROP_QUIET_MS, PREFS_KEY } from '../../client/js/app.js';
 import { rowsOf, pairsOf } from '../../client/js/host/market-view.js';
 import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
@@ -8182,4 +8182,126 @@ test('Stop on a line posts /data/tasks/stop; a line opened stays open across a r
   await settle();
   assert.deepEqual(h.posted.filter(p => p[0].startsWith('/data/tasks/')), [['/data/tasks/stop', { task: 't1' }]]);
   store.timers.clear();
+});
+
+// ---- the Gravit box (plan 1 of the box, Task 3): it reads and writes the one conversation, nothing else
+const boxFollows = (h, id) => h.streams.filter(st => st.name === 'session/follow' && st.args.request.address.sessionId === id && !st.cancelled).length;
+const boxPrompts = h => h.calls.filter(c => c[0] === 'session/prompt').map(c => c[1].request);
+const boxRig = (hash, over = {}) => {
+  const f = fakeWindow({ hash, ...(over.storage ? { storage: over.storage } : {}) });
+  const h = host({ rows: [row('conv', { updatedAt: 30, agentAvailable: true }), ...(over.rows ?? [])], conversation: 'conv', tasks: over.tasks ?? [] });
+  const store = started(f, h);
+  return { f, h, store };
+};
+const openBox = f => f.click({ tagName: 'BUTTON', dataset: { action: 'boxOpen' } });
+const closeBox = f => f.click({ tagName: 'BUTTON', dataset: { action: 'boxClose' } });
+const typeSay = (f, text) => { const say = f.withId('say', { tagName: 'INPUT' }); say.value = text; f.fire('root', 'input', { target: say }); return say; };
+
+test('the box: the half ball on the Desk, and a click opens the conversation in it', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  assert.match(f.html(), /id="gbox-ball"/);
+  assert.equal(boxFollows(h, 'conv'), 0, 'the closed box reads nothing');
+  openBox(f); await settle();
+  assert.match(f.html(), /class="gbox-panel"/);
+  assert.match(f.html(), /id="say"/);
+  assert.equal(boxFollows(h, 'conv'), 1);
+  assert.equal(f.win.location.hash, '#/desk', 'the page behind never moves');
+  assert.equal(store.get().boxOpen, true);
+});
+
+test('the box sends to the conversation', async () => {
+  const { f, h } = boxRig('#/markets');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  typeSay(f, 'why is it down'); send(f); await settle();
+  assert.deepEqual(boxPrompts(h).map(r => [r.sessionId, r.content[0].text]), [['conv', 'why is it down']]);
+});
+
+test('a draft typed in the box is there on Messages', async () => {
+  const { f, h } = boxRig('#/messages');
+  await h.ready(); await settle();
+  await goTo(f, '#/desk');
+  openBox(f); await settle();
+  const say = typeSay(f, 'half a thought'); await settle();
+  await goTo(f, '#/messages');
+  assert.equal(say.value, 'half a thought');
+  assert.deepEqual(boxPrompts(h), [], 'nothing sent');
+});
+
+test('after Messages, opening starts no second read and marks the conversation seen', async () => {
+  const { f, h, store } = boxRig('#/messages');
+  await h.ready(); await settle();
+  assert.equal(boxFollows(h, 'conv'), 1);
+  await goTo(f, '#/desk');
+  h.rows[0].updatedAt = 44;
+  await store.live.refresh(); await settle();
+  assert.equal(store.get().conversations.find(c => c.id === 'conv').updatedAt, 44);
+  openBox(f); await settle();
+  assert.equal(boxFollows(h, 'conv'), 1);
+  const c = store.get().conversations.find(x => x.id === 'conv');
+  assert.equal(c.lastSeen, c.updatedAt);
+});
+
+test('closing leaves the read where it is', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  closeBox(f); await settle();
+  assert.equal(boxFollows(h, 'conv'), 1);
+  assert.equal(store.get().boxOpen, false);
+  assert.match(f.html(), /id="gbox-ball"/);
+});
+
+test("a task's page reads the worker; coming back reads the conversation again", async () => {
+  const { f, h } = boxRig('#/markets', { rows: [row('w1', { agentAvailable: true })], tasks: [taskRow('w1')] });
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  await goTo(f, '#/task/w1');
+  await goTo(f, '#/markets');
+  assert.equal(h.streams.filter(s => s.name === 'session/follow').map(s => s.args.request.address.sessionId).join(','), 'conv,w1,conv');
+});
+
+test('the open box survives a reload', async () => {
+  const storage = memoryStorage();
+  storage.setItem(PREFS_KEY, JSON.stringify({ boxOpen: true }));
+  const { f, h } = boxRig('#/desk', { storage });
+  await h.ready(); await settle();
+  assert.match(f.html(), /class="gbox-panel"/);
+  assert.equal(boxFollows(h, 'conv'), 1);
+});
+
+test('the routines are read while the box is open off the Desk', async () => {
+  const { f, h } = boxRig('#/markets');
+  await h.ready(); await settle();
+  assert.equal(h.reads.includes('/data/desk/routines'), false, 'not with the box closed');
+  openBox(f); await settle();
+  assert.ok(h.reads.includes('/data/desk/routines'));
+});
+
+test('the box follows a new conversation', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  h.rows.push(row('conv2', { updatedAt: 50, agentAvailable: true }));
+  h.inventory['/data/tasks'] = () => ({ ok: true, conversation: 'conv2', tasks: [] });
+  await store.live.refresh(); await store.tasks.refresh(); await settle();
+  assert.equal(boxFollows(h, 'conv2'), 1);
+  typeSay(f, 'and now'); send(f); await settle();
+  assert.deepEqual(boxPrompts(h).map(r => r.sessionId), ['conv2']);
+});
+
+test('a send right after opening reaches the conversation', async () => {
+  const { f, h } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f);
+  typeSay(f, 'quick'); send(f); await settle();
+  assert.deepEqual(boxPrompts(h).map(r => [r.sessionId, r.content[0].text]), [['conv', 'quick']]);
+});
+
+test('open, close, open reads once', async () => {
+  const { f, h } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); closeBox(f); openBox(f); await settle();
+  assert.equal(h.streams.filter(s => s.name === 'session/follow' && s.args.request.address.sessionId === 'conv').length, 1);
 });
