@@ -37,6 +37,7 @@ import { deskStatus, DESK_NOW } from './desk-status.js';
 import { deskNews, deskPageStatus, deskRoutines, deskNewsWithReports } from './desk-news.js';
 import {
   memoryLessons, memoryNotConnected, memoryWaiting, memoryProposals, armedLesson, changedLesson, unarmedLesson, retiredLesson, refusedLesson, brokenLesson, memoryReseal,
+  memoryDecisions, memoryDecisionRows, memoryWaitingProposals, memoryHealthFull,
 } from './memory-page.js';
 import { editorHtml, dropOverlay, lightboxHtml } from '../../../client/js/composer/view.js';
 import { DEFAULT_LIMITS } from '../../../client/js/composer/files.js';
@@ -463,12 +464,12 @@ export function namedStates() {
     ...memoryLunhuiStates(),
     // the Memory screen's frame (memory screen plan Task 2): before its reads answer; a memory not connected, its words and
     // the command that makes the home; a read that failed with nothing kept; one that failed over what it kept, with two
-    // proposals waiting; and its Lessons tab (memory screen plan Task 3)
+    // proposals waiting; its Lessons tab (memory screen plan Task 3); and its Decisions, Waiting and Health tabs (Task 4)
     ...memoryPageStates(),
   ];
 }
 
-// the Memory screen on Lessons, its reads answered at NOW
+// the Memory screen, on Lessons and then on each other tab, its reads answered at NOW
 function memoryPageStates() {
   const on = R.nav(emptyState(), { screen: 'memory', tab: 'lessons' });
   const loaded = (st, read, data) => R.memoryPageLoaded(st, { read, data, at: NOW });
@@ -484,6 +485,14 @@ function memoryPageStates() {
     ['memory-page-lessons-changed', R.memoryPageDiff(loaded(on, 'lessons', memoryLessons({ lessons: [changedLesson()] })), { id: 'trim-into-strength' })],
     ['memory-page-lessons-chain', loaded(on, 'lessons', memoryLessons({ ownerChainBroken: true, reseal: memoryReseal, lessons: [brokenLesson(), refusedLesson()] }))],
     ['memory-page-lessons-empty', loaded(on, 'lessons', memoryLessons())],
+    // the other three tabs (memory screen plan Task 4): an owner's and an agent's decisions, one void, one with what followed;
+    // a new card, a change and a retire waiting, with decisions past their horizon; nothing waiting; a home with the owner's
+    // chain broken and a partial line; a home naming no price source
+    ['memory-page-decisions', loaded(R.nav(on, { screen: 'memory', tab: 'decisions' }), 'decisions', memoryDecisions({ items: memoryDecisionRows(), more: true }))],
+    ['memory-page-waiting', loaded(R.nav(on, { screen: 'memory', tab: 'waiting' }), 'waiting', memoryWaiting({ proposals: memoryWaitingProposals(), pastHorizon: ['d-20261101-0a1b2c3d', 'd-20261102-1b2c3d4e'], withoutWrongIf: 2 }))],
+    ['memory-page-waiting-empty', loaded(R.nav(on, { screen: 'memory', tab: 'waiting' }), 'waiting', memoryWaiting())],
+    ['memory-page-health', loaded(R.nav(on, { screen: 'memory', tab: 'health' }), 'health', memoryHealthFull())],
+    ['memory-page-health-no-source', loaded(R.nav(on, { screen: 'memory', tab: 'health' }), 'health', memoryHealthFull({ prices: { url: '' } }))],
   ];
 }
 
@@ -1151,7 +1160,9 @@ const CONTENT_FIELDS = new Set([
 // words, what an untold lesson needs, a leader's fault; and of a Memory screen's read not connected the face's words and the
 // command that makes the home; of its lessons read the memory's texts - each card's id, fault, texts and their faults, a card's
 // words and codes and scope, what it checks and how each fact is defined, the face's commands and the reseal command, and
-// each case's date, symbol and action; `*` is any one key
+// each case's date, symbol and action; the symbol the owner typed; of its decisions read each decision's line and its void
+// command; of its waiting read each proposal whole and the ids past their horizon; of its health read the home, each ledger's
+// name, the price source's address and when it last ran, the face's facts and its commands; `*` is any one key
 const CONTENT = [['memoryGate', '*', 'gate'], ['memoryLunhui', '*', 'lessons', 'leaders', 'lessons', 'words'], ['memoryLunhui', '*', 'lessons', 'leaders', 'untold', 'needs'],
   ['memoryLunhui', '*', 'lessons', 'leaders', 'fault'],['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data'],
@@ -1163,7 +1174,11 @@ const CONTENT = [['memoryGate', '*', 'gate'], ['memoryLunhui', '*', 'lessons', '
   ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'words'], ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'says'], ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'strength'], ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'actions'],
   ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'scope', 'market'], ['memoryPage', 'lessons', 'data', 'lessons', '*', 'card', 'scope', 'symbols'],
   ['memoryPage', 'lessons', 'data', 'lessons', 'checks', 'fact'], ['memoryPage', 'lessons', 'data', 'lessons', 'checks', 'definition'], ['memoryPage', 'lessons', 'data', 'lessons', 'commands', '*'],
-  ['memoryPage', 'lessons', 'data', 'lessons', 'record', '*', 'date'], ['memoryPage', 'lessons', 'data', 'lessons', 'record', '*', 'symbol'], ['memoryPage', 'lessons', 'data', 'lessons', 'record', '*', 'action']];
+  ['memoryPage', 'lessons', 'data', 'lessons', 'record', '*', 'date'], ['memoryPage', 'lessons', 'data', 'lessons', 'record', '*', 'symbol'], ['memoryPage', 'lessons', 'data', 'lessons', 'record', '*', 'action'],
+  ['memoryPage', 'symbol'], ['memoryPage', 'decisions', 'data', 'items', 'view', 'line', '*'], ['memoryPage', 'decisions', 'data', 'items', 'command'],
+  ['memoryPage', 'waiting', 'data', 'proposals', '*'], ['memoryPage', 'waiting', 'data', 'pastHorizon'],
+  ['memoryPage', 'health', 'data', 'home'], ['memoryPage', 'health', 'data', 'lines'], ['memoryPage', 'health', 'data', 'partial'], ['memoryPage', 'health', 'data', 'chains', 'file'],
+  ['memoryPage', 'health', 'data', 'prices', 'url'], ['memoryPage', 'health', 'data', 'prices', 'last', 't'], ['memoryPage', 'health', 'data', 'facts', '*'], ['memoryPage', 'health', 'data', 'commands', '*']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 // the strings a content field holds that are an ability's declared parts, its tools' and skills' names in the abilities listing
 // (an array adds nothing to a path): drawn each whole, they pass as runs (abilityRuns below) and lend no known word

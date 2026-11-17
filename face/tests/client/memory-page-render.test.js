@@ -33,12 +33,14 @@ test('with two proposals waiting the third tab reads Waiting · 2; none, or a me
   assert.match(draw(loaded(on(), 'waiting', memoryNotConnected())), />Waiting<\/a>/);
 });
 
-test("before a read: Loading…; read: the Lessons tab's body, a tab not yet drawn one line naming it", () => {
+test("before a read: Loading…; read: the open tab's body, a body with nothing in its read drawn whole", () => {
   assert.match(draw(on()), /<p class="mp-dim">Loading…<\/p>/);
   const html = draw(loaded(on(), 'lessons', memoryLessons()));
   assert.match(html, /<div class="mp-body mp-lessons"><p class="mp-dim">No lesson yet<\/p><\/div>/);
   assert.doesNotMatch(html, /Loading/);
-  assert.match(draw(loaded(on('health'), 'health', { ok: true, connected: true })), /<p class="mp-body">Health<\/p>/);
+  assert.match(draw(loaded(on('health'), 'health', { ok: true, connected: true })), /<div class="mp-page"><div class="mp-body mp-health">/);
+  assert.match(draw(loaded(on('decisions'), 'decisions', { ok: true, connected: true })), /<div class="mp-page"><div class="mp-body mp-decisions">/);
+  assert.match(draw(loaded(on('waiting'), 'waiting', { ok: true, connected: true })), /<div class="mp-page"><div class="mp-body mp-waiting">/);
 });
 
 test("not connected: its words as given, made visible and escaped, the command in a code, and no tab body", () => {

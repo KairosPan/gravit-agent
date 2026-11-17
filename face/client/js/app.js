@@ -2174,6 +2174,8 @@ export function boot(win, host = {}) {
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
     else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
+    // the Memory screen's symbol box: the symbol trimmed, as typed, and the decisions read again for it (one read in flight)
+    else if (el.dataset?.action === 'memoryPageSymbol') { store.dispatch('memoryPageSymbol', { symbol: String(el.value ?? '').trim() }); void memoryPage.reread('decisions'); }
     else if (el.dataset?.action === 'convQuery') convSearch.type(el.value);
     else if (el.dataset?.action === 'scQuery') store.dispatch('setShortcutsQuery', el.value);
     else if (el.dataset?.action === 'setFont') act.typeFont(el);

@@ -1,0 +1,128 @@
+// The Memory screen's Decisions tab (memory screen plan Task 4, render/memory-decisions.js) over states built with the real
+// reducers: the decisions in the order given, under their symbol's head while no symbol is typed; each one's date, whose and
+// by, action, thesis, wrong if, what followed, marks and void command; a void one struck; the owner's words; the symbol box;
+// older decisions not shown; none; and text from the memory made visible and escaped.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { emptyState } from '../../client/js/data/empty.js';
+import { renderMemoryScreen } from '../../client/js/render/memory-page.js';
+import { decisionsHtml } from '../../client/js/render/memory-decisions.js';
+import { withTable } from '../../client/js/i18n/words.js';
+import { ZH } from '../../client/js/i18n/zh.js';
+import { memoryDecisions, memoryDecisionRows, decisionRow } from './helpers/memory-page.js';
+
+const NOW = Date.parse('2026-11-16T15:00:00.000Z');
+const on = R.nav(emptyState(), { screen: 'memory', tab: 'decisions' });
+const loaded = (data, st = on) => R.memoryPageLoaded(st, { read: 'decisions', data, at: NOW });
+const draw = (data, st = loaded(data)) => decisionsHtml(st.memoryPage.decisions.data, st.memoryPage, NOW);
+const count = (html, needle) => html.split(needle).length - 1;
+const text = html => html.replace(/<[^>]*>/g, ' ').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+const articles = html => [...html.matchAll(/<article class="mp-decision[^"]*">([\s\S]*?)<\/article>/g)].map(m => m[0]);
+
+test('the body is an mp-body; the decisions are drawn in the order given, under their symbol, one with none under No symbol', () => {
+  const html = draw(memoryDecisions({ items: memoryDecisionRows() }));
+  assert.match(html, /^<div class="mp-body mp-decisions">/);
+  const heads = [...html.matchAll(/<h2 class="mp-group-head">([^<]*)<\/h2>/g)].map(m => m[1]);
+  assert.deepEqual(heads, ['NVDA', 'AMD', 'No symbol'], 'each symbol once, in the order it is first met');
+  const order = ['d-20261114-0a1b2c3d', 'd-20261112-2c3d4e5f', 'd-20261113-1b2c3d4e', 'd-20261111-3d4e5f6a'];
+  const at = order.map(id => html.indexOf(`<span class="mp-id">${id}</span>`));
+  assert.ok(at.every(i => i > 0) && at.every((i, n) => n === 0 || i > at[n - 1]), 'newest first within a symbol');
+  const nvda = html.slice(html.indexOf('>NVDA</h2>'), html.indexOf('>AMD</h2>'));
+  assert.equal(count(nvda, '<article'), 2);
+});
+
+test("an owner's decision: its date, owner · by gravit-face, its action, its thesis in quotes, wrong if, what followed, Open, its void command", () => {
+  const [first] = articles(draw(memoryDecisions({ items: memoryDecisionRows() })));
+  const words = text(first);
+  assert.match(first, /<span class="mp-when">Nov 14<\/span>/);
+  assert.ok(words.includes('owner · by gravit-face'), words);
+  assert.match(first, /<span class="mp-action">buy<\/span>/);
+  assert.ok(words.includes('“The data-centre outlook was raised”'));
+  assert.ok(words.includes('wrong if: it closes under the gap'));
+  assert.match(first, /<li>after 5 sessions \+3\.20% \(\+1\.10% against the benchmark\)<\/li>/);
+  assert.match(first, /<li>after 20 sessions -0\.40%<\/li>/);
+  assert.doesNotMatch(first, /after 60 sessions/, 'a horizon not measured is not drawn');
+  assert.match(first, /<span class="chip live">Open<\/span>/);
+  assert.match(first, /At the terminal/);
+  assert.match(first, /<code class="mp-command">npx --no gravit-memory void d-20261114-0a1b2c3d --reason &quot;…&quot; --home \/srv\/owner\/memory<\/code>/);
+});
+
+test("an owner's words are drawn in quotes under In your words; a decision with none has neither", () => {
+  const [first, , , last] = articles(draw(memoryDecisions({ items: memoryDecisionRows() })));
+  assert.match(first, /<div class="mp-dim">In your words<\/div><div class="mp-words">“I buy the gap, small”<\/div>/);
+  assert.doesNotMatch(last, /In your words/);
+  assert.doesNotMatch(last, /wrong if:/, 'no wrong if: none drawn');
+});
+
+test("an agent's reviewed decision and a backfilled one: agent · by gravit, their marks", () => {
+  const [, , amd, hold] = articles(draw(memoryDecisions({ items: memoryDecisionRows() })));
+  assert.ok(text(amd).includes('agent · by gravit'));
+  assert.match(amd, /<span class="chip ok">Reviewed<\/span>/);
+  assert.doesNotMatch(amd, /chip live/);
+  assert.match(hold, /<span class="chip grey">Backfilled<\/span>/);
+  assert.match(hold, /<span class="mp-when">Nov 11<\/span>/);
+});
+
+test('a void decision is drawn struck with Void and carries no command', () => {
+  const html = draw(memoryDecisions({ items: memoryDecisionRows() }));
+  const voided = articles(html).find(a => a.includes('d-20261112-2c3d4e5f'));
+  assert.match(voided, /^<article class="mp-decision void">/);
+  assert.match(voided, /<span class="chip down">Void<\/span>/);
+  assert.doesNotMatch(voided, /mp-command/);
+  assert.doesNotMatch(voided, /At the terminal/);
+  assert.equal(count(html, 'class="mp-decision void"'), 1);
+});
+
+test('the symbol box: an input dispatching memoryPageSymbol, its value the slice\'s; typed, the decisions are drawn flat', () => {
+  const html = draw(memoryDecisions({ items: memoryDecisionRows() }));
+  assert.match(html, /<input id="mp-symbol" class="input mp-symbol" type="search" autocomplete="off" placeholder="Symbol" data-action="memoryPageSymbol" value="">/);
+  assert.match(html, /<label for="mp-symbol" class="sr-only">Filter by symbol<\/label>/);
+  const st = loaded(memoryDecisions({ items: memoryDecisionRows().filter(r => r.view.line.symbol === 'NVDA') }), R.memoryPageSymbol(on, { symbol: 'NVDA' }));
+  const flat = draw(null, st);
+  assert.match(flat, /data-action="memoryPageSymbol" value="NVDA"/);
+  assert.doesNotMatch(flat, /mp-group-head/, 'no heads while a symbol is typed');
+  assert.equal(articles(flat).length, 2);
+  const odd = draw(null, R.memoryPageSymbol(loaded(memoryDecisions()), { symbol: '"><b>' }));
+  assert.match(odd, /value="&quot;&gt;&lt;b&gt;"/, 'the value escaped');
+});
+
+test('more: Older decisions are not shown; none: No decision yet, the box still drawn', () => {
+  assert.match(draw(memoryDecisions({ items: memoryDecisionRows(), more: true })), /<p class="mp-dim">Older decisions are not shown<\/p><\/div>$/);
+  assert.doesNotMatch(draw(memoryDecisions({ items: memoryDecisionRows() })), /Older decisions/);
+  const none = draw(memoryDecisions());
+  assert.match(none, /<p class="mp-dim">No decision yet<\/p>/);
+  assert.match(none, /data-action="memoryPageSymbol"/);
+  assert.doesNotMatch(none, /<article/);
+});
+
+test('a thesis with a direction mark and markup is text with the mark visible; an id off its shape is text; wrong if and words too', () => {
+  const row = decisionRow('d-x<i>', { symbol: 'N<b>', thesis: 'buy <b>now</b>\u202e or never', wrong_if: '<i>gap</i>\u2066', words: 'mine\u200b<script>', whose: 'owner<u>', by: 'gravit\u202e' });
+  const html = draw(memoryDecisions({ items: [row] }));
+  assert.ok(html.includes('“buy &lt;b&gt;now&lt;/b&gt;\\u202e or never”'), html);
+  assert.ok(html.includes('wrong if: &lt;i&gt;gap&lt;/i&gt;\\u2066'));
+  assert.ok(html.includes('“mine\\u200b&lt;script&gt;”'));
+  assert.ok(html.includes('owner&lt;u&gt; · by gravit\\u202e'));
+  assert.match(html, /<span class="mp-id">d-x&lt;i&gt;<\/span>/);
+  assert.match(html, /<h2 class="mp-group-head">N&lt;b&gt;<\/h2>/);
+  assert.doesNotMatch(html, /[\u202e\u2066\u200b]/, 'no raw mark');
+  assert.doesNotMatch(html, /<b>|<i>|<script>|<u>/);
+});
+
+test('an action or a mark the face does not know is drawn as given, with no class from it', () => {
+  const row = decisionRow('d-20261110-4e5f6a7b', { action: 'swap" onclick="x' });
+  const html = draw(memoryDecisions({ items: [row] }));
+  assert.match(html, /<span class="mp-action">swap&quot; onclick=&quot;x<\/span>/);
+  assert.doesNotMatch(html, /class="[^"]*swap/);
+});
+
+test('the frame draws the Decisions tab for a connected decisions read', () => {
+  const html = renderMemoryScreen(loaded(memoryDecisions({ items: memoryDecisionRows() })), NOW);
+  assert.match(html, /<div class="mp-page"><div class="mp-body mp-decisions">/);
+});
+
+test('the Decisions tab under ZH', () => {
+  const html = withTable(ZH, () => draw(memoryDecisions({ items: memoryDecisionRows(), more: true })));
+  for (const word of ['无代码', '作废', '你的原话', '更早的决策未显示']) assert.ok(html.includes(word), word);
+  assert.ok(withTable(ZH, () => draw(memoryDecisions())).includes('还没有决策'));
+});

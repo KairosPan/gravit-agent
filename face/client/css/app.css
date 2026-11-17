@@ -857,6 +857,29 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .mp-fact { font: calc(12px * var(--fm)) var(--font-mono); overflow-wrap: anywhere; }
 .mp-def { color: var(--dim); overflow-wrap: anywhere; }
 .mp-commands { display: flex; flex-direction: column; gap: 6px; }
+/* the Decisions tab: the symbol box, then the decisions under their symbol's head, a void one struck */
+.mp-decisions, .mp-waiting, .mp-health { display: flex; flex-direction: column; gap: 12px; }
+.mp-filter { max-width: 280px; }
+.input.mp-symbol { height: 36px; font: calc(13px * var(--fm)) var(--font-mono); }
+.mp-group { display: flex; flex-direction: column; gap: 8px; }
+.mp-group-head { margin: 6px 0 0; font: 600 calc(14px * var(--fm)) var(--font-mono); overflow-wrap: anywhere; }
+.mp-decision, .mp-proposal { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.mp-decision-head, .mp-proposal-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.mp-who { font-size: calc(13px * var(--fs)); color: var(--dim); overflow-wrap: anywhere; }
+.mp-action { font-weight: 600; overflow-wrap: anywhere; }
+.mp-decision.void .mp-words { text-decoration: line-through; color: var(--dim); }
+.mp-yours { display: flex; flex-direction: column; gap: 2px; }
+.mp-followed { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font-size: calc(13px * var(--fs)); font-variant-numeric: tabular-nums; }
+/* the Waiting tab: a proposal each - what it is, who and when, its reason, its evidence, the card as written - then what is past its horizon */
+.mp-what { font-weight: 600; overflow-wrap: anywhere; }
+.mp-written { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.mp-past { display: flex; flex-direction: column; gap: 4px; }
+.mp-ids { margin: 0; font: calc(12px * var(--fm))/1.5 var(--font-mono); overflow-wrap: anywhere; }
+/* the Health tab: a section each - the home, the ledgers, the price source, the face's facts, the commands */
+.mp-section { display: flex; flex-direction: column; gap: 6px; }
+.mp-section-head { margin: 0; font-size: calc(14px * var(--fs)); font-weight: 600; }
+.mp-ledgers { display: flex; flex-direction: column; gap: 4px; }
+.mp-ledger { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 900px) {
   .dk-cols { grid-template-columns: minmax(0, 1fr); }
   .dk-body { padding: 18px 16px 32px; }

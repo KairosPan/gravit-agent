@@ -1,7 +1,8 @@
 // face/client/js/host/memory-page-view.js — the Memory screen's pure views (render/memory-lessons.js draws them): a card's armed
 // copy beside its file now, each line marked; one outcome side of a lesson's record by horizon, the median once the memory gives
-// one (from eight measured cases), else the cases measured at that horizon; and a card as one line of its codes. No DOM, no
-// words, no store: what comes from the memory comes back as it came, for the renderer to make visible and escape.
+// one (from eight measured cases), else the cases measured at that horizon; a card as one line of its codes; what followed a
+// decision at each measured horizon; and a decision's marks (render/memory-decisions.js). No DOM, no words, no store: what
+// comes from the memory comes back as it came, for the renderer to make visible and escape.
 
 /** The most characters of a card's text the face serves (src/memory-screen.ts SCREEN_TEXT_MAX). */
 export const SCREEN_TEXT_MAX = 16_384;
@@ -46,6 +47,26 @@ export function recordView(record, side) {
   return [...horizons].sort((a, b) => a - b).map(k => (finite(medians[k])
     ? { k, median: medians[k] }
     : { k, cases: cases.filter(c => changeAt(c, k) !== null).map(c => ({ decision: str(c.decision), date: str(c.date), symbol: str(c.symbol), action: str(c.action), change: changeAt(c, k) })) }));
+}
+
+// a change in percent, signed, to two places
+const signed = v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
+
+/** What followed a decision at each measured horizon, by k: its change and, when measured, its change against the
+ *  benchmark, each signed to two places; none when no horizon is measured. */
+export function followedLine(figures) {
+  const list = Array.isArray(figures) ? figures.filter(f => f && Number.isInteger(f.k) && finite(f.change_pct)) : [];
+  return [...list].sort((a, b) => a.k - b.k).map(f => ({ k: f.k, change: signed(f.change_pct), against: finite(f.vs_benchmark_pct) ? signed(f.vs_benchmark_pct) : null }));
+}
+
+/** A decision's marks, each that holds, in this order: 'void', 'open', 'reviewed', 'backfilled'. */
+export function decisionMarks(view) {
+  const marks = [];
+  if (view?.void === true) marks.push('void');
+  if (view?.open === true) marks.push('open');
+  if (view?.reviewed === true) marks.push('reviewed');
+  if (view?.line?.backfilled === true) marks.push('backfilled');
+  return marks;
 }
 
 /** A card as one line of words: its strength, what it says, its actions and its scope. */

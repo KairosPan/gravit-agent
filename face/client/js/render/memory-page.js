@@ -2,13 +2,17 @@
 // tabs as links - Lessons, Decisions, Waiting with the count of the proposals waiting, Health - and the open tab's read:
 // Loading… before it answers; a memory not connected, its words as the face gave them and the command that makes the home,
 // and no tab body; a failed read, one line with its words above what it kept, or Unavailable with nothing kept; else the
-// tab's body (the Lessons tab's: render/memory-lessons.js). Every text from the memory is made visible (visible.js) and then escaped.
+// tab's body (render/memory-lessons.js, memory-decisions.js, memory-waiting.js, memory-health.js). Every text from the memory is
+// made visible (visible.js) and then escaped.
 import { esc } from '../html.js';
 import { t, th, sayOf } from '../i18n/words.js';
 import { visible } from '../visible.js';
 import { MEMORY_TABS } from '../router.js';
 import { segLinks } from './controls.js';
 import { lessonsHtml } from './memory-lessons.js';
+import { decisionsHtml } from './memory-decisions.js';
+import { waitingHtml } from './memory-waiting.js';
+import { healthHtml } from './memory-health.js';
 
 const dim = text => `<p class="mp-dim">${esc(text)}</p>`;
 
@@ -34,9 +38,9 @@ function tabs(page, open) {
 
 const notConnected = data => `<p class="mp-say">${esc(visible(data.say))}</p><code class="mp-command">${esc(visible(data.command))}</code>`;
 
-// a tab's body, each in an mp-body: the Lessons tab's (render/memory-lessons.js); the others, drawn by the plan's later tasks,
-// here one line naming the tab
-const tabBody = (tab, data, page, now) => (tab === 'lessons' ? lessonsHtml(data, page, now) : `<p class="mp-body">${esc(tabWord(tab))}</p>`);
+// a tab's body, each in an mp-body, each drawn by its own renderer
+const BODIES = { lessons: lessonsHtml, decisions: decisionsHtml, waiting: waitingHtml, health: healthHtml };
+const tabBody = (tab, data, page, now) => (Object.hasOwn(BODIES, tab) ? BODIES[tab] : lessonsHtml)(data, page, now);
 
 function body(read, tab, page, now) {
   const failed = read.status === 'error' || read.message != null;

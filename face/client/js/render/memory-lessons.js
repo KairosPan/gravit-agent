@@ -14,9 +14,17 @@ import { isId } from '../reducers/memory-page.js';
 import { textDiff, recordView, cardLine, SCREEN_TEXT_MAX } from '../host/memory-page-view.js';
 import { lessonCount } from './lesson-line.js';
 
-const shown = v => esc(visible(v));
-const dim = text => `<p class="mp-dim">${esc(text)}</p>`;
-const command = line => `<code class="mp-command">${shown(line)}</code>`;
+/** A text from the memory, made visible and escaped (the other tabs draw theirs with it too). */
+export const shown = v => esc(visible(v));
+/** One dim line of the face's words. */
+export const dim = text => `<p class="mp-dim">${esc(text)}</p>`;
+/** One command the face built, in a code. */
+export const command = line => `<code class="mp-command">${shown(line)}</code>`;
+/** The commands given, each a string not empty, under At the terminal; nothing when none is. */
+export function terminalHtml(lines) {
+  const list = (Array.isArray(lines) ? lines : []).filter(v => typeof v === 'string' && v !== '');
+  return list.length ? `<div class="mp-commands"><div class="mp-dim">${esc(t('memory.lessons.terminal'))}</div>${list.map(command).join('')}</div>` : '';
+}
 
 // each state's words and its chip's colour; a state the face does not know is drawn as given, grey
 const STATES = {
@@ -38,7 +46,8 @@ const key = (action, id, word) => (isId(id) ? `<button type="button" class="btn-
 
 const pct = v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
 
-function lineOf(card) {
+/** A card's line of words: its strength, what it says, its actions and its scope, each made visible (the caller escapes it). */
+export function lineOf(card) {
   const c = cardLine(card);
   const sep = t('common.list.sep');
   const params = { strength: visible(c.strength), says: visible(c.says), actions: visible(c.actions.join(sep)) };
@@ -97,11 +106,7 @@ function checksHtml(checks) {
   return `<div class="mp-checks"><div class="mp-dim">${esc(t('memory.lessons.checks'))}</div><ul class="mp-check-list">${items.join('')}</ul></div>`;
 }
 
-function commandsHtml(commands) {
-  const lines = ['arm', 'retire', 'review'].map(k => commands?.[k]).filter(v => typeof v === 'string' && v !== '');
-  if (!lines.length) return '';
-  return `<div class="mp-commands"><div class="mp-dim">${esc(t('memory.lessons.terminal'))}</div>${lines.map(command).join('')}</div>`;
-}
+const commandsHtml = commands => terminalHtml(['arm', 'retire', 'review'].map(k => commands?.[k]));
 
 function lessonHtml(row, page) {
   const card = row.armed?.card ?? row.file?.card;

@@ -21,6 +21,7 @@ import { sayOf, setTable, said as wordLine, wordsEpoch } from '../../client/js/i
 import { EN } from '../../client/js/i18n/en.js';
 import { ZH } from '../../client/js/i18n/zh.js';
 import { deskNews, deskPageStatus, deskRoutines } from './helpers/desk-news.js';
+import { memoryDecisions, memoryDecisionRows, memoryLessons, armedLesson, changedLesson } from './helpers/memory-page.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -893,6 +894,66 @@ test('the Memory screen reads its open tab and what waits while it shows; anothe
   await settle();
   assert.equal(timers.delays().filter(ms => ms === MEMORY_POLL_MS).length, 0, 'back on the Desk: no memory poll');
   assert.equal(memoryReads().length, 4);
+  store.timers.clear();
+});
+
+// the Decisions tab's symbol box (memory screen plan Task 4): each keystroke puts the symbol in the slice, trimmed and as typed,
+// and reads the decisions again for it; a box emptied reads them all
+test("the Memory screen's symbol box puts the symbol in the slice and reads the decisions again for it", async () => {
+  const f = fakeWindow({ hash: '#/memory/decisions', storage: memoryStorage() });
+  const box = f.withId('mp-symbol', { tagName: 'INPUT', type: 'search', dataset: { action: 'memoryPageSymbol' } });
+  const h = host({ rows: [row('s1')] });
+  h.inventory['/data/memory/decisions'] = memoryDecisions({ items: memoryDecisionRows() });
+  h.inventory['/data/memory/decisions?symbol=NVDA'] = memoryDecisions({ items: memoryDecisionRows().filter(r => r.view.line.symbol === 'NVDA') });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers: new HeldTimers(() => true), now: () => 1_000_000 });
+  await h.ready();
+  await settle();
+  const decisionReads = () => h.reads.filter(p => p.startsWith('/data/memory/decisions'));
+  assert.deepEqual(decisionReads(), ['/data/memory/decisions']);
+  assert.match(f.html(), /<h2 class="mp-group-head">AMD<\/h2>/);
+  box.value = ' NVDA ';
+  f.fire('root', 'input', { target: box });
+  assert.equal(store.get().memoryPage.symbol, 'NVDA', 'trimmed, no case folded');
+  await settle();
+  assert.deepEqual(decisionReads(), ['/data/memory/decisions', '/data/memory/decisions?symbol=NVDA']);
+  assert.doesNotMatch(f.html(), /AMD/, 'the list follows the box');
+  assert.equal(box.value, ' NVDA ', 'a render keeps what was typed');
+  box.value = 'nvda';
+  f.fire('root', 'input', { target: box });
+  await settle();
+  assert.equal(decisionReads().at(-1), '/data/memory/decisions?symbol=nvda', 'sent as typed');
+  box.value = '';
+  f.fire('root', 'input', { target: box });
+  await settle();
+  assert.equal(store.get().memoryPage.symbol, '');
+  assert.equal(decisionReads().at(-1), '/data/memory/decisions', 'emptied: every decision');
+  store.timers.clear();
+});
+
+// the Lessons tab's keys clicked (memory screen plan Task 4): a changed card's See the change and an armed card's Cases each
+// flip their row in the slice and redraw the screen
+test("the Memory screen's keys: See the change shows and hides the change, Cases opens and closes a card's record", async () => {
+  const f = fakeWindow({ hash: '#/memory/lessons', storage: memoryStorage() });
+  const h = host({ rows: [row('s1')] });
+  h.inventory['/data/memory/lessons'] = memoryLessons({ lessons: [armedLesson(), changedLesson()] });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers: new HeldTimers(() => true), now: () => 1_000_000 });
+  await h.ready();
+  await settle();
+  assert.match(f.html(), />See the change<\/button>/);
+  assert.doesNotMatch(f.html(), /mp-diff/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryPageDiff', id: 'trim-into-strength' } });
+  assert.deepEqual(store.get().memoryPage.diff, { 'trim-into-strength': true });
+  assert.match(f.html(), /<div class="mp-diff">/);
+  assert.match(f.html(), />Hide the change<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryPageDiff', id: 'trim-into-strength' } });
+  assert.doesNotMatch(f.html(), /mp-diff/);
+  assert.doesNotMatch(f.html(), /mp-cases/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryPageToggle', id: 'no-chasing' } });
+  assert.deepEqual(store.get().memoryPage.open, { 'no-chasing': true });
+  assert.match(f.html(), /<div class="mp-cases">/);
+  assert.match(f.html(), />Hide cases<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryPageToggle', id: 'no-chasing' } });
+  assert.doesNotMatch(f.html(), /mp-cases/);
   store.timers.clear();
 });
 

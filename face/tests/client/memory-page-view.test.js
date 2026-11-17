@@ -1,9 +1,9 @@
 // The Memory screen's pure views (memory screen plan Task 3, host/memory-page-view.js): the lines of a card's armed copy and its
 // file now, each marked; one outcome side of a lesson's record by horizon, the median once there is one, else the cases; and a
-// card as one line of its codes.
+// card as one line of its codes; what followed a decision at each measured horizon, and a decision's marks (Task 4).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { textDiff, recordView, cardLine } from '../../client/js/host/memory-page-view.js';
+import { textDiff, recordView, cardLine, followedLine, decisionMarks } from '../../client/js/host/memory-page-view.js';
 
 test('textDiff: a line in one copy alone is marked for that copy, the rest same, each text in its own order', () => {
   assert.deepEqual(textDiff('a\nb\nc', 'a\nx\nc'), {
@@ -57,4 +57,30 @@ test('cardLine: a red-line dont for buy and add scoped to US and NVDA', () => {
 test('cardLine: no scope gives no markets and no symbols; a field not a string is left out', () => {
   assert.deepEqual(cardLine({ says: 'do', actions: ['hold', 3], strength: 'caveat' }), { strength: 'caveat', says: 'do', actions: ['hold'], markets: [], symbols: [] });
   assert.deepEqual(cardLine(undefined), { strength: '', says: '', actions: [], markets: [], symbols: [] });
+});
+
+test('followedLine: each measured horizon by k, its change signed to two places and against the benchmark when measured', () => {
+  assert.deepEqual(followedLine([
+    { k: 20, change_pct: -0.4, vs_benchmark_pct: null },
+    { k: 5, change_pct: 3.2, vs_benchmark_pct: 1.1 },
+    { k: 60, change_pct: null, vs_benchmark_pct: 2 },
+  ]), [{ k: 5, change: '+3.20%', against: '+1.10%' }, { k: 20, change: '-0.40%', against: null }]);
+  assert.deepEqual(followedLine([{ k: 1, change_pct: 0, vs_benchmark_pct: -2.5 }]), [{ k: 1, change: '0.00%', against: '-2.50%' }]);
+});
+
+test('followedLine: none measured, no figures, or a figure off its shape gives none', () => {
+  assert.deepEqual(followedLine([{ k: 5, change_pct: null, vs_benchmark_pct: null }]), []);
+  assert.deepEqual(followedLine([]), []);
+  assert.deepEqual(followedLine(undefined), []);
+  assert.deepEqual(followedLine([null, { k: '5', change_pct: 1, vs_benchmark_pct: null }, { k: 5, change_pct: Infinity }]), []);
+});
+
+test('decisionMarks: void, open, reviewed and backfilled, each that holds, in that order', () => {
+  assert.deepEqual(decisionMarks({ void: true, open: false, reviewed: false, line: {} }), ['void']);
+  assert.deepEqual(decisionMarks({ void: false, open: true, reviewed: false, line: {} }), ['open']);
+  assert.deepEqual(decisionMarks({ void: false, open: false, reviewed: true, line: {} }), ['reviewed']);
+  assert.deepEqual(decisionMarks({ void: false, open: false, reviewed: false, line: { backfilled: true } }), ['backfilled']);
+  assert.deepEqual(decisionMarks({ void: false, open: true, reviewed: true, line: { backfilled: true } }), ['open', 'reviewed', 'backfilled']);
+  assert.deepEqual(decisionMarks({ void: 'yes', open: 1, line: { backfilled: 'true' } }), []);
+  assert.deepEqual(decisionMarks(undefined), []);
 });

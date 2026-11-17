@@ -150,12 +150,13 @@ test("the reducers keep a key's id to the plain shape", () => {
   assert.notEqual(R.memoryPageToggle(st, { id: 'no-chasing' }), st);
 });
 
-test('the screen draws the lessons body for the Lessons tab, wrapped in mp-body; the other tabs keep their line', () => {
+test('the screen draws the lessons body for the Lessons tab, wrapped in mp-body; another tab draws its own', () => {
   const html = renderMemoryScreen(loaded(memoryLessons({ lessons: [armedLesson()] })), NOW);
   assert.match(html, /<div class="mp-body mp-lessons">/);
   assert.match(html, /no-chasing/);
   const health = renderMemoryScreen(R.memoryPageLoaded(R.nav(emptyState(), { screen: 'memory', tab: 'health' }), { read: 'health', data: { ok: true, connected: true }, at: NOW }), NOW);
-  assert.match(health, /<p class="mp-body">Health<\/p>/);
+  assert.match(health, /<div class="mp-body mp-health">/);
+  assert.doesNotMatch(health, /mp-lessons/);
 });
 
 test('the Lessons tab under ZH', () => {
