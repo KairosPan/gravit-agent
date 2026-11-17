@@ -1,17 +1,20 @@
 /** src/memory-acts.ts: the owner's acts on the memory, on a stub memory answering fixtures and a stub `exchange`
- * recording what it is given: `digestOf`; `prepare`, each act's show, its draft and its refusals; `perform`, its eight
- * steps in order - the body's shape, the envelope as this act's, fresh and not done, the memory connected, the
- * Account's yes, the envelope done, the content read again and its digest recomputed, then the memory's own act -
- * one at a time. */
+ * recording what it is given: `lineHash` and `digestOf`; `prepare`, each act's show, its draft and its refusals;
+ * `perform`, its nine steps in order - the body's shape, the envelope as this act's, fresh and not done, the memory
+ * connected, the content read and its digest recomputed, the Account's yes, the envelope done, the content read again
+ * and its digest recomputed, then the memory's own act - one at a time. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Card, DecisionLine, DecisionView, LessonView, Memory, ProposalLine } from "gravit-memory";
 import type { MemoryStanding } from "../src/memory.ts";
 import { SCREEN_TEXT_MAX } from "../src/memory-screen.ts";
 import type { UpstreamAnswer } from "../src/upstream-proxy.ts";
 import {
-  ACTS, ACT_DONE_KEPT, ACT_FRESH_MS, ACT_READ_MS, MEMORY_SERVICE, WORDED, createMemoryActs, digestOf,
+  ACTS, ACT_DONE_KEPT, ACT_FRESH_MS, ACT_READ_MS, MEMORY_SERVICE, WORDED, createMemoryActs, digestOf, lineHash,
   type ActAsk, type AttestDraft,
 } from "../src/memory-acts.ts";
 
@@ -27,6 +30,7 @@ const DONE = "this was done already";
 const NO_ANSWER = "the Account did not answer: nothing was done";
 const CHANGED = "it changed while it was shown: nothing was done";
 const LATE = "the memory did not answer in time";
+const TOO_LONG = "the card is too long to show whole here: use the terminal";
 
 const hex = (c: string): string => c.repeat(64);
 const card = (id: string): Card => ({ id, says: "dont", actions: ["buy"], strength: "caveat", words: `the words of ${id}` }) as Card;
@@ -126,10 +130,15 @@ async function prepared(acts: ReturnType<typeof actsWith>["acts"], ask: { act: s
   return { answer, body: { ...ask, envelope: envelopeOf(answer.draft!, nonce) } };
 }
 
-const refusal = (answer: unknown, status: number, error: string): void => {
+const refusal = (answer: unknown, status: number, error: string, why?: string): void => {
   assert.equal((answer as { ok: boolean }).ok, false, JSON.stringify(answer));
-  assert.equal((answer as { status: number }).status, status, JSON.stringify(answer));
-  assert.equal((answer as { error: string }).error, error);
+  assert.equal((answer as { status: number }).status, status, why ?? JSON.stringify(answer));
+  assert.equal((answer as { error: string }).error, error, why);
+};
+/** A refusal for content found changed: the sentence, a 409, and `changed: true`. */
+const changedRefusal = (answer: unknown): void => {
+  refusal(answer, 409, CHANGED);
+  assert.equal((answer as { changed?: unknown }).changed, true, JSON.stringify(answer));
 };
 
 test("the constants: the service, the seven acts, the worded three and the limits", () => {
@@ -156,6 +165,25 @@ test("digestOf: SHA-256 of the versioned line, content's keys sorted; one charac
   assert.equal(digestOf({ act: "arm", subject: "cut-losers" } as ActAsk, { file: hex("a") }), digestOf({ act: "arm", subject: "cut-losers", words: "" }, { file: hex("a") }));
 });
 
+test("lineHash: SHA-256 of the line as canonical JSON - equal whatever the keys' order, another for one character anywhere", () => {
+  const line = { v: 1, kind: "proposal", id: P_NEW, sum: hex("1"), card: { id: "x", words: "do not chase", actions: ["buy", "add"] }, evidence: ["d-1", "d-2"] };
+  const canonical = '{"card":{"actions":["buy","add"],"id":"x","words":"do not chase"},"evidence":["d-1","d-2"],"id":"' + P_NEW + '","kind":"proposal","sum":"' + hex("1") + '","v":1}';
+  assert.equal(lineHash(line), createHash("sha256").update(canonical).digest("hex"));
+  assert.match(lineHash(line), /^[0-9a-f]{64}$/);
+  const reordered = { evidence: ["d-1", "d-2"], card: { actions: ["buy", "add"], words: "do not chase", id: "x" }, sum: hex("1"), id: P_NEW, kind: "proposal", v: 1 };
+  assert.equal(lineHash(reordered), lineHash(line), "the keys' order does not count, at any depth");
+  const apart: Array<[string, unknown]> = [
+    ["a top-level field", { ...line, id: "p-20261110-0a1b2c3e" }],
+    ["a nested field", { ...line, card: { ...line.card, words: "do not chasE" } }],
+    ["an array's item", { ...line, card: { ...line.card, actions: ["buy", "adD"] } }],
+    ["an array's order", { ...line, evidence: ["d-2", "d-1"] }],
+    ["a key more", { ...line, extra: "" }],
+    ["a number for a string", { ...line, v: "1" }],
+  ];
+  for (const [what, other] of apart) assert.notEqual(lineHash(other), lineHash(line), what);
+  assert.equal(lineHash({ ...line, gone: undefined }), lineHash(line), "a key whose value is undefined is left out, as JSON leaves it");
+});
+
 test("prepare, each act: the show and a draft whose digest covers that act's content", async () => {
   const { acts } = actsWith();
   const draft = (act: string, subject: string, digest: string) => ({ type: "attest", service: "gravit-memory", act, subject, digest });
@@ -176,29 +204,38 @@ test("prepare, each act: the show and a draft whose digest covers that act's con
 
   for (const act of ["accept", "edit"] as const) {
     const answer = await acts.prepare({ act, subject: P_NEW });
-    assert.deepEqual(answer, { ok: true, show: { kind: "proposal", proposal: fx.proposals[0] }, draft: draft(act, P_NEW, digestOf({ act, subject: P_NEW, words: "" }, { proposal: hex("1"), file: "none" })) });
+    assert.deepEqual(answer, { ok: true, show: { kind: "proposal", proposal: fx.proposals[0] }, draft: draft(act, P_NEW, digestOf({ act, subject: P_NEW, words: "" }, { proposal: lineHash(fx.proposals[0]), file: "none" })) });
   }
   const change = await acts.prepare({ act: "accept", subject: "p-20261112-0a1b2c3f" });
   assert.equal(change.ok, true);
-  if (change.ok) assert.equal(change.draft!.digest, digestOf({ act: "accept", subject: "p-20261112-0a1b2c3f", words: "" }, { proposal: hex("3"), file: hex("d") }), "its lesson's file hash");
+  if (change.ok) assert.equal(change.draft!.digest, digestOf({ act: "accept", subject: "p-20261112-0a1b2c3f", words: "" }, { proposal: lineHash(fx.proposals[2]), file: hex("d") }), "its lesson's file hash");
 
   const reject = await acts.prepare({ act: "reject", subject: P_RETIRE, words: "not yet" });
-  assert.deepEqual(reject, { ok: true, show: { kind: "proposal", proposal: fx.proposals[1] }, draft: draft("reject", P_RETIRE, digestOf({ act: "reject", subject: P_RETIRE, words: "not yet" }, { proposal: hex("2") })) });
+  assert.deepEqual(reject, { ok: true, show: { kind: "proposal", proposal: fx.proposals[1] }, draft: draft("reject", P_RETIRE, digestOf({ act: "reject", subject: P_RETIRE, words: "not yet" }, { proposal: lineHash(fx.proposals[1]) })) });
 
   const voided = await acts.prepare({ act: "void", subject: D_OPEN, words: "a wrong entry" });
-  assert.deepEqual(voided, { ok: true, show: { kind: "decision", decision: fx.decisions[0].line }, draft: draft("void", D_OPEN, digestOf({ act: "void", subject: D_OPEN, words: "a wrong entry" }, { decision: hex("4") })) });
+  assert.deepEqual(voided, { ok: true, show: { kind: "decision", decision: fx.decisions[0].line }, draft: draft("void", D_OPEN, digestOf({ act: "void", subject: D_OPEN, words: "a wrong entry" }, { decision: lineHash(fx.decisions[0].line) })) });
 });
 
-test("prepare: a text past SCREEN_TEXT_MAX is shown cut, and the digest still covers the whole file's hash", async () => {
+test("prepare: a card whose text would be shown cut is not armed, discarded or retired here - 409 for the terminal; at SCREEN_TEXT_MAX it is shown whole", async () => {
+  const long = "x".repeat(SCREEN_TEXT_MAX + 1);
   const fx = fixtures();
-  fx.lessons[0] = lesson({ id: "cut-losers", state: "unarmed", file: copy("cut-losers", hex("a"), "x".repeat(SCREEN_TEXT_MAX + 10)) });
-  const { acts } = actsWith({ fx });
-  const answer = await acts.prepare({ act: "arm", subject: "cut-losers" });
-  assert.equal(answer.ok, true);
-  if (!answer.ok || answer.show.kind !== "card") return;
-  assert.equal(answer.show.text.length, SCREEN_TEXT_MAX);
-  assert.equal(answer.show.cut, true);
-  assert.equal(answer.draft!.digest, digestOf({ act: "arm", subject: "cut-losers", words: "" }, { file: hex("a") }));
+  fx.lessons[0] = lesson({ id: "cut-losers", state: "unarmed", file: copy("cut-losers", hex("a"), long) });
+  fx.lessons[1] = lesson({ id: "no-chasing", state: "armed", armed: copy("no-chasing", hex("b"), long), file: copy("no-chasing", hex("b"), long) });
+  fx.lessons[2] = lesson({ id: "late-entry", state: "changed", armed: copy("late-entry", hex("c"), long), file: copy("late-entry", hex("d")) });
+  const { acts, sent } = actsWith({ fx });
+  refusal(await acts.prepare({ act: "arm", subject: "cut-losers" }), 409, TOO_LONG);
+  refusal(await acts.prepare({ act: "retire", subject: "no-chasing", words: "why" }), 409, TOO_LONG);
+  refusal(await acts.prepare({ act: "retire", subject: "no-chasing" }), 409, TOO_LONG);
+  refusal(await acts.prepare({ act: "discard", subject: "late-entry" }), 409, TOO_LONG, "the armed copy's text cut is enough");
+  assert.equal(sent.length, 0);
+  fx.lessons[0] = lesson({ id: "cut-losers", state: "unarmed", file: copy("cut-losers", hex("a"), "x".repeat(SCREEN_TEXT_MAX)) });
+  const whole = await acts.prepare({ act: "arm", subject: "cut-losers" });
+  assert.equal(whole.ok, true);
+  if (whole.ok && whole.show.kind === "card") {
+    assert.equal(whole.show.text.length, SCREEN_TEXT_MAX);
+    assert.equal("cut" in whole.show, false);
+  }
 });
 
 test("prepare: a worded act with no words is the show and no draft; words of spaces, 501 characters, or words for arm are refused", async () => {
@@ -369,41 +406,114 @@ test("perform, step 5: no answer, a refusal or anything but a 200 with ok: nothi
   assert.equal(owner.length, 1);
 });
 
-test("perform, step 7: the content moved between prepare and perform: nothing done, and the envelope is done all the same", async () => {
-  const { acts, owner, fx } = actsWith();
+test("perform, step 5: the content moved before the Account is asked - nothing forwarded, nothing done, and the envelope not among those done", async () => {
+  const { acts, owner, fx, sent, logs } = actsWith();
   const { body } = await prepared(acts, { act: "arm", subject: "cut-losers" });
   fx.lessons[0] = lesson({ id: "cut-losers", state: "unarmed", file: copy("cut-losers", hex("7")) });
-  refusal(await acts.perform(body), 409, CHANGED);
+  changedRefusal(await acts.perform(body));
+  changedRefusal(await acts.perform(body));
+  assert.equal(sent.length, 0, "an act already stale spends no signature");
   assert.equal(owner.length, 0);
+  assert.deepEqual(logs, []);
+  fx.lessons[0] = lesson({ id: "cut-losers", state: "unarmed", file: copy("cut-losers", hex("a")) });
+  assert.equal((await acts.perform(body)).ok, true, "the file as signed again: done");
+});
+
+test("perform, step 8: the content moved while the Account answered - nothing done, the envelope done, and one line in the log", async () => {
+  const fx = fixtures();
+  const { acts, owner, logs } = actsWith({ fx, answer: () => { fx.lessons[0] = lesson({ id: "cut-losers", state: "unarmed", file: copy("cut-losers", hex("7")) }); return yes(); } });
+  const { body } = await prepared(acts, { act: "arm", subject: "cut-losers" });
+  changedRefusal(await acts.perform(body));
+  assert.equal(owner.length, 0);
+  assert.deepEqual(logs, [`memory: the owner's arm of cut-losers was attested and not done: ${CHANGED}`]);
   refusal(await acts.perform(body), 409, DONE);
 });
 
-test("perform, step 7: an act that may no longer be asked is refused as changed", async () => {
-  const { acts, owner, fx } = actsWith();
+test("perform: an act that may no longer be asked is refused as changed", async () => {
+  const { acts, owner, fx, sent } = actsWith();
   const { body } = await prepared(acts, { act: "void", subject: D_OPEN, words: "wrong" });
   fx.decisions[0] = decision(D_OPEN, hex("4"), true);
-  refusal(await acts.perform(body), 409, CHANGED);
+  changedRefusal(await acts.perform(body));
   const gone = await prepared(acts, { act: "reject", subject: P_NEW, words: "no" });
   fx.proposals.splice(0, 1);
-  refusal(await acts.perform(gone.body), 409, CHANGED);
+  changedRefusal(await acts.perform(gone.body));
+  assert.equal(owner.length, 0);
+  assert.equal(sent.length, 0);
+});
+
+test("perform: a proposal's card words changed with its sum left as it was - changed, no owner act", async () => {
+  for (const act of ["accept", "edit"] as const) {
+    const { acts, owner, fx, sent } = actsWith();
+    const { body } = await prepared(acts, { act, subject: P_NEW });
+    const shown = fx.proposals[0]!;
+    fx.proposals[0] = { ...shown, card: { ...shown.card!, words: "always buy, with all the leverage there is" } as Card };
+    assert.equal(fx.proposals[0].sum, shown.sum, "the line's own sum is the same");
+    changedRefusal(await acts.perform(body));
+    assert.equal(owner.length, 0, act);
+    assert.equal(sent.length, 0, act);
+  }
+  const { acts, owner, fx } = actsWith();
+  const { body } = await prepared(acts, { act: "reject", subject: P_RETIRE, words: "not yet" });
+  fx.proposals[1] = { ...fx.proposals[1]!, reason: "another reason" };
+  changedRefusal(await acts.perform(body));
   assert.equal(owner.length, 0);
 });
 
-test("perform: words are in the digest: a retire signed for one reason and posted with another is refused at step 7", async () => {
+test("perform: a decision's thesis changed with its sum left as it was - a void is refused as changed, no owner act", async () => {
+  const { acts, owner, fx } = actsWith();
+  const { body } = await prepared(acts, { act: "void", subject: D_OPEN, words: "a wrong entry" });
+  const shown = fx.decisions[0]!;
+  fx.decisions[0] = { ...shown, line: { ...shown.line, thesis: "another thesis the owner never read" } };
+  assert.equal(fx.decisions[0].line.sum, shown.line.sum);
+  changedRefusal(await acts.perform(body));
+  assert.equal(owner.length, 0);
+});
+
+test("perform: words are in the digest: a retire signed for one reason and posted with another is refused before the Account is asked", async () => {
   const { acts, owner, sent } = actsWith();
   const { body } = await prepared(acts, { act: "retire", subject: "no-chasing", words: "it never fired" });
-  refusal(await acts.perform({ ...body, words: "it fired too often" }), 409, CHANGED);
-  assert.equal(sent.length, 1, "the Account said yes to what was signed");
+  changedRefusal(await acts.perform({ ...body, words: "it fired too often" }));
+  assert.equal(sent.length, 0, "nothing is forwarded");
   assert.equal(owner.length, 0);
 });
 
-test("perform, step 8: the package's refusal is 409 with its words; an accept's lesson is passed on", async () => {
-  const { acts } = actsWith({ owner: { arm: async () => { throw coded("E_REFUSED", "the card changed while it was shown: nothing was armed."); } } });
+test("perform, step 9: any throw of the memory's own act is 409 in its words, changed, and logged; an accept's lesson is passed on", async () => {
+  const { acts, logs } = actsWith({ owner: { arm: async () => { throw coded("E_REFUSED", "the card changed while it was shown: nothing was armed."); } } });
   const { body } = await prepared(acts, { act: "arm", subject: "cut-losers" });
-  refusal(await acts.perform(body), 409, "the card changed while it was shown: nothing was armed.");
+  const r = await acts.perform(body);
+  refusal(r, 409, "the card changed while it was shown: nothing was armed.");
+  assert.equal((r as { changed?: unknown }).changed, true);
+  assert.deepEqual(logs, ["memory: the owner's arm of cut-losers was attested and not done: the card changed while it was shown: nothing was armed."]);
+  const odd = actsWith({ owner: { discard: async () => { throw new Error("EIO: the disk\nfailed"); } } });
+  const discarded = await prepared(odd.acts, { act: "discard", subject: "late-entry" });
+  refusal(await odd.acts.perform(discarded.body), 409, "EIO: the disk failed");
+  assert.deepEqual(odd.logs, ["memory: the owner's discard of late-entry was attested and not done: EIO: the disk failed"]);
   const other = actsWith({ owner: { accept: async () => ({ lesson: "the-lesson" }) } });
   const accepted = await prepared(other.acts, { act: "accept", subject: P_NEW });
   assert.deepEqual(await other.acts.perform(accepted.body), { ok: true, act: "accept", subject: P_NEW, lesson: "the-lesson" });
+});
+
+test("perform: a face that forgot those done (a restart) is given the same body - the Account's refusal passed on, no owner act", async () => {
+  const one = actsWith();
+  const { body } = await prepared(one.acts, { act: "arm", subject: "cut-losers" });
+  assert.equal((await one.acts.perform(body)).ok, true);
+  const used = { code: "E_ACCOUNT_NONCE", message: "this nonce was used before", detail: { nonce: NOW, verdict: "used" } };
+  const two = actsWith({ answer: () => ({ status: 409, body: JSON.stringify({ ok: false, refusal: used }) }) });
+  const again = await two.acts.perform(body);
+  refusal(again, 409, "this nonce was used before");
+  assert.deepEqual((again as { refusal: unknown }).refusal, used);
+  assert.equal(two.sent.length, 1);
+  assert.equal(two.owner.length, 0);
+  assert.deepEqual(two.logs, []);
+});
+
+test("perform: a first perform that throws, then a second that is done - the chain goes on", async () => {
+  let calls = 0;
+  const { acts, owner } = actsWith({ now: () => { calls += 1; if (calls === 1) throw new Error("the clock failed"); return NOW; } });
+  const { body } = await prepared(acts, { act: "arm", subject: "cut-losers" });
+  await assert.rejects(acts.perform(body), /the clock failed/);
+  assert.equal((await acts.perform(body)).ok, true);
+  assert.equal(owner.length, 1);
 });
 
 test("perform: two at once - the second starts after the first has answered", async () => {
@@ -427,19 +537,39 @@ test("perform: two at once - the second starts after the first has answered", as
 
 test("perform: past ACT_DONE_KEPT done, the oldest is forgotten - and an envelope that old is past its ten minutes anyway", async () => {
   let clock = NOW;
-  const { acts, sent, owner, fx } = actsWith({ now: () => clock });
+  const fx = fixtures();
+  const asSigned = fx.lessons[0]!;
+  /* The file moves while the Account answers, so step 8 refuses each envelope after the Account's yes: each is done
+     and nothing is armed. Before each perform the file is put back as signed. */
+  const { acts, sent, owner } = actsWith({ fx, now: () => clock, answer: () => { fx.lessons[0] = lesson({ id: "cut-losers", state: "unarmed", file: copy("cut-losers", hex("7")) }); return yes(); } });
   const { answer } = await prepared(acts, { act: "arm", subject: "cut-losers" });
   const bodyAt = (nonce: number) => ({ act: "arm", subject: "cut-losers", envelope: envelopeOf(answer.draft!, nonce) });
-  /* The file moves, so step 7 refuses each envelope after the Account's yes: each is done and nothing is armed. */
-  fx.lessons[0] = lesson({ id: "cut-losers", state: "unarmed", file: copy("cut-losers", hex("7")) });
+  const perform = (body: unknown) => { fx.lessons[0] = asSigned; return acts.perform(body); };
   const first = bodyAt(NOW);
-  refusal(await acts.perform(first), 409, CHANGED);
-  refusal(await acts.perform(first), 409, DONE);
-  for (let i = 1; i <= ACT_DONE_KEPT; i += 1) refusal(await acts.perform(bodyAt(NOW + i)), 409, CHANGED);
-  refusal(await acts.perform(first), 409, CHANGED);
+  changedRefusal(await perform(first));
+  refusal(await perform(first), 409, DONE);
+  for (let i = 1; i <= ACT_DONE_KEPT; i += 1) changedRefusal(await perform(bodyAt(NOW + i)));
+  changedRefusal(await perform(first));
   assert.equal(sent.length, ACT_DONE_KEPT + 2, "the oldest was forgotten, and forwarded again");
-  refusal(await acts.perform(bodyAt(NOW + ACT_DONE_KEPT)), 409, DONE);
+  refusal(await perform(bodyAt(NOW + ACT_DONE_KEPT)), 409, DONE);
   clock = NOW + ACT_FRESH_MS + 1;
-  refusal(await acts.perform(first), 409, TOO_OLD);
+  refusal(await perform(first), 409, TOO_OLD);
   assert.equal(owner.length, 0);
+});
+
+test("outside tests, src/memory-acts.ts is the only file under src that calls an owner act of the memory", () => {
+  const root = fileURLToPath(new URL("../src/", import.meta.url));
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (/\.(ts|mts|js|mjs)$/.test(name)) files.push(path);
+    }
+  };
+  walk(root);
+  assert.ok(files.length > 50, "the scan reads the sources");
+  const call = /\.owner\s*(?:\?\.|\.)\s*(?:arm|retire|discard|accept|edit|reject|void|reseal)\s*\(|\[\s*["'`]owner["'`]\s*\]/;
+  const callers = files.filter((path) => call.test(readFileSync(path, "utf8"))).map((path) => relative(root, path));
+  assert.deepEqual(callers, ["memory-acts.ts"]);
 });

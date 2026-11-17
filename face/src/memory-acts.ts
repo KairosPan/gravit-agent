@@ -4,22 +4,26 @@
  *
  * {@link MemoryActs.prepare} says what an act is about and what to sign: it reads the memory through the face's own
  * handle (src/memory.ts `MemoryStanding`), shows what the act would act on, and drafts the `attest` whose digest
- * ({@link digestOf}) binds the act, its subject, the hashes of the content read and the owner's words. It writes
- * nothing.
+ * ({@link digestOf}) binds the act, its subject, the hashes of the content read and the owner's words: a card's file
+ * and armed copy by the package's sha256 of their bytes, a proposal's or a decision's line by {@link lineHash} of the
+ * line as read - never a field the line carries about itself. A card whose text would be shown cut is not acted on
+ * here: its act is the terminal's. It writes nothing.
  *
  * {@link MemoryActs.perform} takes the signed envelope and, one at a time, in this order - each step that fails
  * answers and stops: the body's shape; the envelope as this act's `attest` for {@link MEMORY_SERVICE}; its nonce
- * within {@link ACT_FRESH_MS} of the face's clock and not among those done; the memory connected; the envelope
- * forwarded to the Account, its `action`, `nonce` and `signature` alone, and the Account's yes - a 200 whose `ok` is
- * true; the envelope among those done; the content read again and the digest recomputed with the body's words, equal
- * to the signed one; then the memory's own owner act. This is the one place in the face that calls `Memory.owner`.
- * The face holds no key and verifies no signature: the Account does. The envelopes done are kept in process, at most
- * {@link ACT_DONE_KEPT}, the oldest forgotten first; a restart forgets them, and the Account's ten minutes bound a
- * replay.
+ * within {@link ACT_FRESH_MS} of the face's clock and not among those done; the memory connected; the content read
+ * and the digest recomputed with the body's words, equal to the signed one (an act already stale spends no
+ * signature); the envelope forwarded to the Account, its `action`, `nonce` and `signature` alone, and the Account's
+ * yes - a 200 whose `ok` is true; the envelope among those done; the content read again and the digest recomputed,
+ * equal to the signed one; then the memory's own owner act. This is the one place in the face that calls
+ * `Memory.owner`. The face holds no key and verifies no signature: the Account does, and takes an `attest` once. The
+ * envelopes done are kept in process, at most {@link ACT_DONE_KEPT}, the oldest forgotten first: a first line that a
+ * restart forgets.
  *
  * A refusal is one of the face's fixed sentences, the package's words through `memoryFaultWords`, or the Account's
- * own refusal: nothing a caller sends is echoed beyond an id that fits its shape. The one log line names the act and
- * its subject.
+ * own refusal: nothing a caller sends is echoed beyond an id that fits its shape. A refusal for content found changed,
+ * or for the memory's own act refused at the last step, carries `changed: true`. One log line names the act and its
+ * subject when it is done, and one when it ends after the Account's yes without being done.
  * @module
  */
 import { createHash } from "node:crypto";
@@ -60,6 +64,7 @@ const TOO_OLD = "it was signed too long ago: prepare it again";
 const DONE_ALREADY = "this was done already";
 const NO_ANSWER = "the Account did not answer: nothing was done";
 const CHANGED = "it changed while it was shown: nothing was done";
+const TOO_LONG = "the card is too long to show whole here: use the terminal";
 const LATE_WORDS = "the memory did not answer in time";
 /** The Account's no when it gives no message of its own. */
 const ACCOUNT_REFUSED = "the Account refused it: nothing was done";
@@ -67,22 +72,43 @@ const ACCOUNT_REFUSED = "the Account refused it: nothing was done";
 /** What an act is asked about: the act, its subject, and the owner's words, trimmed - `""` for an act that takes
  *  none. */
 export interface ActAsk { act: Act; subject: string; words: string }
-/** What the act acts on, as the page shows it: a card's text (an arm's the file's; a discard's the file's and the
- *  armed copy's; a retire's the armed copy's), each at most `SCREEN_TEXT_MAX` characters, `cut` when one is cut; a
- *  proposal's line; a decision's line. */
+/** What the act acts on, as the page shows it: a card's text whole (an arm's the file's; a discard's the file's and the
+ *  armed copy's; a retire's the armed copy's), each at most `SCREEN_TEXT_MAX` characters; a proposal's line; a
+ *  decision's line. */
 export type ActShow =
-  | { kind: "card"; lesson: string; state: string; text: string; cut?: true; armedText?: string }
+  | { kind: "card"; lesson: string; state: string; text: string; armedText?: string }
   | { kind: "proposal"; proposal: ProposalLine }
   | { kind: "decision"; decision: DecisionLine };
 /** The `attest` the owner signs, its nonce the signer's. */
 export interface AttestDraft { type: "attest"; service: string; act: Act; subject: string; digest: string }
-export type Refused = { ok: false; status: 400 | 401 | 404 | 409 | 502 | 503 | 504; error: string; refusal?: unknown };
+/** A refusal: its status, its sentence, the Account's own refusal when it gave one, and `changed` when the content was
+ *  found changed or the memory's own act was refused at the last step - the page reads the memory again. */
+export type Refused = { ok: false; status: 400 | 401 | 404 | 409 | 502 | 503 | 504; error: string; refusal?: unknown; changed?: true };
 
 export interface MemoryActs {
   /** What the act is about and the attest to sign. For a worded act with no words yet: the content alone, `draft: null`. */
   prepare(body: unknown): Promise<{ ok: true; show: ActShow; draft: AttestDraft | null } | Refused>;
   /** The signed envelope to the Account; on its yes, the recheck and the memory's own act. One at a time. */
   perform(body: unknown): Promise<{ ok: true; act: Act; subject: string; sha256?: string; lesson?: string; path?: string } | Refused>;
+}
+
+/** A value as canonical JSON: an object's keys sorted at every depth (a key whose value is undefined left out, as
+ *  `JSON.stringify` leaves it), arrays in their order, every other value as `JSON.stringify` writes it. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item ?? null)).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record).filter((key) => record[key] !== undefined).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/** SHA-256, lower hex, of a line as read, as canonical JSON: every key the line holds, keys sorted at every depth,
+ *  arrays in their order. Equal lines hash alike whatever their keys' order; one character apart anywhere is another
+ *  hash. A line's own `sum` is one of its keys like any other, and is never trusted for the line. */
+export function lineHash(line: unknown): string {
+  return createHash("sha256").update(canonicalJson(line)).digest("hex");
 }
 
 /** SHA-256, lower hex, of `JSON.stringify({ v: 1, service, act, subject, content, words })`, `content`'s keys in sorted order. */
@@ -123,30 +149,17 @@ function askOf(body: unknown, needWords: boolean): ActAsk | Refused {
   return n < 1 || n > WORDS_MAX ? refused(400, SAY_WHY) : { act: known, subject, words: trimmed };
 }
 
-/** A text at most {@link SCREEN_TEXT_MAX} characters, whole code points kept, and whether it was cut. */
-function bounded(text: string): { text: string; cut: boolean } {
-  if (text.length <= SCREEN_TEXT_MAX) return { text, cut: false };
-  let out = text.slice(0, SCREEN_TEXT_MAX);
-  if (/[\uD800-\uDBFF]$/.test(out)) out = out.slice(0, -1);
-  return { text: out, cut: true };
-}
-
-/** A card's show: `text`, and `armedText` when given, each bounded. */
-function cardShow(view: LessonView, text: string, armedText?: string): ActShow {
-  const main = bounded(text);
-  const show: ActShow & { kind: "card" } = { kind: "card", lesson: view.id, state: view.state, text: main.text };
-  let cut = main.cut;
-  if (armedText !== undefined) {
-    const armed = bounded(armedText);
-    show.armedText = armed.text;
-    cut ||= armed.cut;
-  }
-  if (cut) show.cut = true;
-  return show;
-}
-
 /** What one act's read gives: the show and the content its digest covers, or why the act may not be asked. */
 type Read = { ok: true; show: ActShow; content: Record<string, string> } | Refused;
+
+/** A card's read: `text`, and `armedText` when given, shown whole - a text past {@link SCREEN_TEXT_MAX} characters is
+ *  not signed for with its tail unseen, and the act is refused for the terminal. */
+function cardRead(view: LessonView, content: Record<string, string>, text: string, armedText?: string): Read {
+  if (text.length > SCREEN_TEXT_MAX || (armedText !== undefined && armedText.length > SCREEN_TEXT_MAX)) return refused(409, TOO_LONG);
+  const show: ActShow & { kind: "card" } = { kind: "card", lesson: view.id, state: view.state, text };
+  if (armedText !== undefined) show.armedText = armedText;
+  return { ok: true, show, content };
+}
 
 /** A lesson by id; one the lessons do not hold is the package's own not-found, asked of `show`. */
 async function lessonOf(memory: Memory, id: string): Promise<LessonView> {
@@ -163,12 +176,12 @@ async function proposalOf(memory: Memory, id: string): Promise<ProposalLine> {
   return line;
 }
 
-/** An accept's or an edit's read: the proposal's line, and its sum with its lesson's file hash. */
+/** An accept's or an edit's read: the proposal's line, and the line's hash with its lesson's file hash. */
 async function proposalWithFile(memory: Memory, id: string, act: "accept" | "edit"): Promise<Read> {
   const line = await proposalOf(memory, id);
   if (act === "edit" && line.what === "retire") return refused(409, `proposal ${id} proposes a retirement: it is accepted or rejected, not edited.`);
   const file = (await memory.lessons()).lessons.find((v) => v.id === line.lesson)?.file?.sha256 ?? "none";
-  return { ok: true, show: { kind: "proposal", proposal: line }, content: { proposal: line.sum, file } };
+  return { ok: true, show: { kind: "proposal", proposal: line }, content: { proposal: lineHash(line), file } };
 }
 
 /** Each act's read, shared by `prepare` and `perform`'s recheck. */
@@ -182,34 +195,31 @@ const READS: Readonly<Record<Act, (memory: Memory, subject: string) => Promise<R
     if (file === undefined || file.card === undefined || file.fault !== undefined) {
       return refused(409, `lesson ${id} is ${view.state} and has no file that parses as a card: there is nothing to arm.`);
     }
-    return { ok: true, show: cardShow(view, file.text), content: { file: file.sha256 } };
+    return cardRead(view, { file: file.sha256 }, file.text);
   },
   discard: async (memory, id) => {
     const view = await lessonOf(memory, id);
     if (view.state !== "changed") return refused(409, `lesson ${id} is ${view.state}: only a changed card is discarded.`);
-    return {
-      ok: true, show: cardShow(view, view.file?.text ?? "", view.armed?.text ?? ""),
-      content: { armed: view.armed?.sha256 ?? "none", file: view.file?.sha256 ?? "none" },
-    };
+    return cardRead(view, { armed: view.armed?.sha256 ?? "none", file: view.file?.sha256 ?? "none" }, view.file?.text ?? "", view.armed?.text ?? "");
   },
   retire: async (memory, id) => {
     const view = await lessonOf(memory, id);
     if (view.state !== "armed" && view.state !== "changed" && view.state !== "broken") {
       return refused(409, `lesson ${id} is ${view.state}: only an armed, changed or broken card is retired.`);
     }
-    return { ok: true, show: cardShow(view, view.armed?.text ?? ""), content: { armed: view.armed?.sha256 ?? "none" } };
+    return cardRead(view, { armed: view.armed?.sha256 ?? "none" }, view.armed?.text ?? "");
   },
   accept: (memory, id) => proposalWithFile(memory, id, "accept"),
   edit: (memory, id) => proposalWithFile(memory, id, "edit"),
   reject: async (memory, id) => {
     const line = await proposalOf(memory, id);
-    return { ok: true, show: { kind: "proposal", proposal: line }, content: { proposal: line.sum } };
+    return { ok: true, show: { kind: "proposal", proposal: line }, content: { proposal: lineHash(line) } };
   },
   void: async (memory, id) => {
     const shown = await memory.show(id);
     if (!("decision" in shown)) throw notFound(`decision ${id} is not in the memory.`);
     if (shown.decision.void) return refused(409, `decision ${id} is void already: a void decision is not voided again.`);
-    return { ok: true, show: { kind: "decision", decision: shown.decision.line }, content: { decision: shown.decision.line.sum } };
+    return { ok: true, show: { kind: "decision", decision: shown.decision.line }, content: { decision: lineHash(shown.decision.line) } };
   },
 };
 
@@ -252,7 +262,7 @@ const parsed = (text: string): unknown => {
   }
 };
 
-/** The memory's own act, as step 8 calls it, and what its answer adds. */
+/** The memory's own act, as the last step calls it, and what its answer adds. */
 async function ownerAct(memory: Memory, ask: ActAsk, content: Record<string, string>): Promise<{ sha256?: string; lesson?: string; path?: string }> {
   const { act, subject, words } = ask;
   switch (act) {
@@ -300,6 +310,21 @@ export function createMemoryActs(deps: {
     done.add(key);
     while (done.size > ACT_DONE_KEPT) done.delete(done.values().next().value!);
   };
+
+  /** The act's content read again and its digest recomputed with the body's words: the content when it equals the
+   *  signed `digest`; a content gone or no longer askable is changed; a read fault its mapping; a late read 504. */
+  async function recheck(memory: Memory, ask: ActAsk, digest: string): Promise<{ ok: true; content: Record<string, string> } | Refused> {
+    const changed: Refused = { ...refused(409, CHANGED), changed: true };
+    let read: Read | typeof LATE;
+    try {
+      read = await within(() => READS[ask.act](memory, ask.subject));
+    } catch (error) {
+      return codeOf(error) === "E_NOT_FOUND" ? changed : faultOf(error);
+    }
+    if (read === LATE) return refused(504, LATE_WORDS);
+    if (!read.ok || digestOf(ask, read.content) !== digest) return changed;
+    return { ok: true, content: read.content };
+  }
 
   async function prepare(body: unknown): Promise<{ ok: true; show: ActShow; draft: AttestDraft | null } | Refused> {
     const ask = askOf(body, false);
@@ -351,7 +376,11 @@ export function createMemoryActs(deps: {
     if (standing === LATE) return refused(504, LATE_WORDS);
     if (standing.connected !== true) return refused(503, standing.say);
     const memory = standing.memory;
-    /* 5. The Account: its yes is a 200 whose body's `ok` is true. */
+    /* 5. The content read and the digest recomputed before the Account is asked: an act already stale spends no
+       signature, leaves no attested row and does not join those done. */
+    const before = await recheck(memory, ask, digest);
+    if (!before.ok) return before;
+    /* 6. The Account: its yes is a 200 whose body's `ok` is true. */
     let answer: UpstreamAnswer;
     try {
       answer = await deps.exchange({ action, nonce, signature: envelope.signature });
@@ -361,23 +390,21 @@ export function createMemoryActs(deps: {
     if ("unreachable" in answer) return refused(502, NO_ANSWER);
     const said = parsed(answer.body);
     if (answer.status !== 200 || !isRecord(said) || said.ok !== true) return accountRefusal(answer.status, said);
-    /* 6. Done: this envelope is not taken again. */
+    /* 7. Done: this envelope is not taken again. From here, an end that is not the act is logged. */
     remember(key);
-    /* 7. The content read again, the digest recomputed with the body's words. */
-    let again: Read | typeof LATE;
-    try {
-      again = await within(() => READS[ask.act](memory, ask.subject));
-    } catch (error) {
-      return codeOf(error) === "E_NOT_FOUND" ? refused(409, CHANGED) : faultOf(error);
-    }
-    if (again === LATE) return refused(504, LATE_WORDS);
-    if (!again.ok || digestOf(ask, again.content) !== digest) return refused(409, CHANGED);
-    /* 8. The memory's own act. */
+    const notDone = (r: Refused): Refused => {
+      deps.log(`memory: the owner's ${ask.act} of ${ask.subject} was attested and not done: ${r.error}`);
+      return r;
+    };
+    /* 8. The content read again, the digest recomputed, equal to the signed one. */
+    const again = await recheck(memory, ask, digest);
+    if (!again.ok) return notDone(again);
+    /* 9. The memory's own act: any throw is a 409 in its words, and the page reads the memory again. */
     let added: { sha256?: string; lesson?: string; path?: string };
     try {
       added = await ownerAct(memory, ask, again.content);
     } catch (error) {
-      return refused(409, memoryFaultWords(error));
+      return notDone({ ...refused(409, memoryFaultWords(error)), changed: true });
     }
     deps.log(`memory: the owner's ${ask.act} of ${ask.subject} is done`);
     return { ok: true, act: ask.act, subject: ask.subject, ...added };

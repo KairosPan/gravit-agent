@@ -7,7 +7,8 @@
  *   Account said yes to the signed envelope and the memory did the act.
  *
  * The route parses and bounds the body; the acts check its fields. A method's refusal is answered with its own status
- * and `{ok: false, error}`, with `refusal` when it carries the Account's. Before a method runs: the fence's refusal a
+ * and `{ok: false, error}`, with `refusal` when it carries the Account's and `changed: true` when the content was found
+ * changed or the memory's own act was refused at the last step. Before a method runs: the fence's refusal a
  * 403, a method other than POST a 405, a body not declared JSON a 415, one past its bound a 413, one that is no JSON
  * object a 400, no acts bound a 503. A method that throws is a 500 with a fixed word and one log line. No route echoes
  * anything the caller sent or anything thrown.
@@ -66,8 +67,8 @@ export function registerMemoryActsRoutes(
           return send(res, 500, { ok: false, error: FAILED });
         }
         if (answer.ok) return send(res, 200, answer);
-        const { status, error, refusal } = answer;
-        return send(res, status, refusal === undefined ? { ok: false, error } : { ok: false, error, refusal });
+        const { status, error, refusal, changed } = answer;
+        return send(res, status, { ok: false, error, ...(refusal === undefined ? {} : { refusal }), ...(changed === true ? { changed: true } : {}) });
       },
     });
   };

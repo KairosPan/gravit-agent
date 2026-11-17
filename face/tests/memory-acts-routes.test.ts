@@ -74,6 +74,9 @@ test("a method's refusal is answered with its own status and sentence, and the A
   const { call } = routes(stubActs({ perform: { ok: false, status: 401, error: "the Account refused it: nothing was done", refusal } }).acts);
   assert.deepEqual(await call(ACT, post({})),
     { status: 401, body: { ok: false, error: "the Account refused it: nothing was done", refusal } });
+  const changed = routes(stubActs({ perform: { ok: false, status: 409, error: "it changed while it was shown: nothing was done", changed: true } }).acts);
+  assert.deepEqual(await changed.call(ACT, post({})),
+    { status: 409, body: { ok: false, error: "it changed while it was shown: nothing was done", changed: true } }, "a refusal for content found changed carries changed: true");
 });
 
 test("a request the fence refuses is 403 and no method is called", async () => {
@@ -121,8 +124,7 @@ test("no acts bound is 503 on both routes", async () => {
   for (const path of [PREPARE, ACT]) {
     const answer = await call(path, post({ act: "arm", subject: "gap-fill" }));
     assert.equal(answer.status, 503);
-    assert.equal(answer.body.ok, false);
-    assert.equal(typeof answer.body.error, "string");
+    assert.deepEqual(answer.body, { ok: false, error: "the memory's acts are not ready" });
   }
 });
 

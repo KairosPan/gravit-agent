@@ -13,11 +13,13 @@
  *
  * Every act goes over the wire as the page sends it: the face's prepare, the Account's prepare through the face, the
  * device's signature, the face's act. In turn: an arm done, the card armed with the hash answered and two rows in the
- * Account's ledger; the same body again refused as done, one arm line in owner.jsonl; an envelope signed by a key the
- * Account does not know refused with its 401, the memory untouched; a card whose file is edited after its prepare
- * signed, said yes to by the Account and refused by the face as changed, the card not armed; a decision voided with
- * the owner's words; a proposal rejected with words; a signed attest for another service and a signed instruction of
- * another type each a 400, the Account's ledger without a new row; a post with no envelope a 400.
+ * Account's ledger; the same body again refused as done, one arm line in owner.jsonl, and the done arm's envelope
+ * posted straight to the Account's door again refused there as a used nonce; an envelope signed by a key the Account
+ * does not know refused with its 401, the memory untouched; a card whose file is edited after its prepare signed and
+ * refused by the face as changed before the Account is asked, no attest row at the Account, the card not armed; a
+ * decision voided with the owner's words; a proposal rejected with words; a signed attest for another service and a
+ * signed instruction of another type each a 400, no row of the Account's for either envelope; a post with no envelope
+ * a 400.
  *
  * Gated behind `FACE_SMOKE=1` and an installed `account/`. ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace`
  * sets `process.env.DSH_HOME`, so this is its own file; every home it makes is under the temporary directory.
@@ -201,6 +203,14 @@ test("the owner's acts against a real Account and a real memory: done on the Acc
     assert.deepEqual([again.status, again.body], [409, { ok: false, error: DONE }]);
     const ownerLines = readFileSync(join(memoryHome, "owner.jsonl"), "utf8").split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l) as Body);
     assert.equal(ownerLines.filter((l) => l.act === "arm" && l.lesson === ARMED).length, 1, json(ownerLines));
+    /* The done arm's envelope straight to the Account's door again: an attest is taken once there. */
+    const rowsBeforeReplay = (await ledgerRows(standin.home)).length;
+    const replay = await fetch(`${standin.url}/api/exchange`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(arm.body.envelope) });
+    const replayed = (await replay.json()) as Body;
+    assert.equal(replayed.ok, false, json(replayed));
+    assert.equal((replayed.refusal as Body | undefined)?.code, "E_ACCOUNT_NONCE", json(replayed));
+    const replayRows = (await ledgerRows(standin.home)).slice(rowsBeforeReplay);
+    assert.deepEqual(replayRows.filter((r) => r.kind === "action"), [], "no taken and no ok row for the repeat");
 
     /* 3. Signed by a key the Account does not know: its 401, the memory untouched. */
     const untouched = await filesOf(memoryHome);
@@ -220,7 +230,7 @@ test("the owner's acts against a real Account and a real memory: done on the Acc
     assert.deepEqual(await filesOf(memoryHome), untouched, "the memory is untouched");
     assert.equal((await stateOf(EDITED))?.state, "unarmed");
 
-    /* 4. A card edited after its prepare: the Account says yes, the face says it changed, the card is not armed. */
+    /* 4. A card edited after its prepare: the face says it changed before the Account is asked, the card is not armed. */
     const edit = await signedAct("arm", EDITED);
     const editedPath = join(memoryHome, "lessons", `${EDITED}.md`);
     const before = readFileSync(editedPath, "utf8");
@@ -229,9 +239,9 @@ test("the owner's acts against a real Account and a real memory: done on the Acc
     writeFileSync(editedPath, after);
     const rowsBeforeEdit = (await ledgerRows(standin.home)).length;
     const changed = await post("/data/memory/act", edit.body);
-    assert.deepEqual([changed.status, changed.body], [409, { ok: false, error: CHANGED }]);
+    assert.deepEqual([changed.status, changed.body], [409, { ok: false, error: CHANGED, changed: true }]);
     const editRows = (await ledgerRows(standin.home)).slice(rowsBeforeEdit).filter((r) => r.tool === "attest");
-    assert.deepEqual(editRows.map((r) => [r.outcome, r.reason ?? null]).at(-1), ["ok", `the owner attested arm ${EDITED} for ${SERVICE}`], "the Account said yes");
+    assert.deepEqual(editRows, [], "an act already stale spends no signature: no attest row at the Account");
     assert.equal((await stateOf(EDITED))?.state, "unarmed", "the edited card is not armed");
 
     /* 5. Void with the owner's words: void with that reason, by the owner. */
@@ -254,12 +264,15 @@ test("the owner's acts against a real Account and a real memory: done on the Acc
     /* 7. A signed attest for another service, a signed instruction of another type: 400 each, no row at the Account. */
     const otherService = await signed(await prepareAtAccount({ type: "attest", service: "another-service", act: "arm", subject: EDITED, digest: "0".repeat(64) }));
     const otherType = await signed(await prepareAtAccount({ type: "setPolicy", change: "mode", value: "guard" }));
-    const rowsBefore = (await ledgerRows(standin.home)).length;
+    const nonces = new Set([otherService.nonce, otherType.nonce]);
+    const accountHome = standin.home;
+    const rowsOfThem = async (): Promise<Body[]> => (await ledgerRows(accountHome)).filter((r) => nonces.has((r.envelope as Body | undefined)?.nonce as number));
+    assert.deepEqual(await rowsOfThem(), [], "the Account holds no row of either envelope yet");
     for (const envelope of [otherService, otherType]) {
       const answer = await post("/data/memory/act", { act: "arm", subject: EDITED, envelope });
       assert.deepEqual([answer.status, answer.body], [400, { ok: false, error: NOT_THIS }], json(envelope.action));
     }
-    assert.equal((await ledgerRows(standin.home)).length, rowsBefore, "the Account's ledger gained no row");
+    assert.deepEqual(await rowsOfThem(), [], "the Account's ledger holds no row of either envelope");
 
     /* 8. A plain post with no envelope: 400. */
     const bare = await post("/data/memory/act", { act: "arm", subject: EDITED });
