@@ -27,6 +27,17 @@ export type FactMarket = "US" | "CN";
 /** Facts by name, and for each the sentence that says where it came from. */
 export interface Facts { facts: Record<string, number | boolean | string>; sources: Record<string, string> }
 
+/** The facts the face computes itself, in the order the Health tab lists them, each with its definition. */
+export const FACE_FACTS: readonly { fact: string; definition: string }[] = Object.freeze([
+  { fact: "price", definition: "The last price, to two decimals, from the Market's quote." },
+  { fact: "change_1d_pct", definition: "The last price over the previous close, in percent, both from the Market's quote." },
+  { fact: "change_5d_pct", definition: "The last price over the close 5 full sessions before the last full one, in percent, from the Market's daily bars." },
+  { fact: "change_20d_pct", definition: "The last price over the close 20 full sessions before the last full one, in percent, from the Market's daily bars." },
+  { fact: "change_60d_pct", definition: "The last price over the close 60 full sessions before the last full one, in percent, from the Market's daily bars." },
+  { fact: "held", definition: "Whether the venue's account holds the symbol, from the Account's position on that venue." },
+  { fact: "unrealized_pct", definition: "A long's last price over its entry price, in percent, from the Market's quote and the Account's entry price; none for a short." },
+].map((entry) => Object.freeze(entry)));
+
 /** How long each of the two reads may take before the facts are given without it. */
 export const FACT_READ_MS = 2_000;
 

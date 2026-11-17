@@ -36,6 +36,8 @@ import { readBriefMemory } from "./memory-brief.ts";
 import { installMemoryClock, memoryClockEnabled, type MemoryClock } from "./memory-clock.ts";
 import { createMemoryGate, followAnswers, gateAccount, type GateNote, type MemoryGate } from "./memory-gate.ts";
 import { registerMemoryGateRoutes } from "./memory-gate-routes.ts";
+import { createMemoryScreen } from "./memory-screen.ts";
+import { registerMemoryScreenRoutes } from "./memory-screen-routes.ts";
 import { priceFacts } from "./memory-facts.ts";
 import { createLunhuiLessons } from "./memory-lunhui.ts";
 import { registerMemoryLunhuiRoute } from "./memory-lunhui-routes.ts";
@@ -322,6 +324,10 @@ memoryGate = gate;
 booted.bindOrderRecall(gate);
 stopFollowingAnswers = followAnswers(booted.ctx, gate);
 registerMemoryGateRoutes(booted.ctx.webServer, { gate: () => gate });
+/* The owner's memory screen (src/memory-screen.ts): four reads of the memory through the same opener, each bounded,
+ * none of them writing; a fault or a late read is the route's fixed refusal and one line here. */
+const memoryScreen = createMemoryScreen({ open: openMemory });
+registerMemoryScreenRoutes(booted.ctx.webServer, { screen: () => memoryScreen, log: (line) => { console.error(`${BIN}: ${line}`); } });
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here
