@@ -1278,9 +1278,10 @@ too, so a slow memory is asked once. Each request waits for the open and the one
 `SCREEN_READ_MS`, 5,000 ms; a read past it is left to finish. A parameter that does not fit, a
 repeated one or an unknown one is a 400, a method other than GET a 405, a `before` the memory does
 not know a 404 (`no such decision`), a read that faulted a 502 (`the memory could not be read`,
-with `why`, the package's own sentence in one line of at most 200 characters, when the fault
-carries the package's code: a home of a newer version, a `config.json` that does not parse), one
-past its bound a 504 (`the memory did not answer in time`), and anything else thrown a 500. The
+with `why`, the error's own sentence in one line of at most 200 characters, when the fault is an
+error that carries a code: a home of a newer version, a `config.json` that does not parse, a file
+error such as `EACCES`), one past its bound a 504 (`the memory did not answer in time`), and
+anything else thrown a 500. The
 502, the 504 and the 500 log one line each, and a path's line is logged again only when its words
 change or after a read of that path succeeded; a 400, a 404 and not connected log nothing. A memory
 not connected answers `connected: false` with the face's words: the row disabled, its standing's
@@ -1307,7 +1308,8 @@ or how many it refused, of how many asked; with no source, that `prices.url` in 
 control and format characters, the line and paragraph separators, written as their escapes; a tab
 left alone) and then escaped, drawn as the record's words, quoted or in a block, never as markup, a
 link, a class or a key; an id that does not fit its shape is drawn as text and carries no key. The
-screen acts on nothing: what the owner does is done at the terminal, in `face/` — every command on
+reads act on nothing: while the page does not sign for the Account (the owner's acts below), what
+the owner does is done at the terminal, in `face/` — every command on
 the screen is headed so — by the commands the face builds from ids that fit the package's shapes
 and from the home it stands on, as `npx --no gravit-memory <words> --home <home>` (the command line
 reads no `FACE_MEMORY_HOME`), `"…"` where the owner's own words go; since the screen serves a
@@ -1317,11 +1319,90 @@ shell: a home of letters, digits and `_./~-` alone is written bare, any other do
 quoting of `cmd.exe` or PowerShell are not handled. Accepting, editing, rejecting and discarding
 share one command, `gravit-memory review`, since the package answers them inside its review and has
 no command for each. The Lessons tab marks `industry` not computed: the face supplies it only when
-it asks about a Lunhui run's leaders. The screen writes nothing: no route of it changes the home,
-and it never makes one (`tests/memory-screen-smoke.test.ts`); `tests/memory-screen-draw.test.ts`
+it asks about a Lunhui run's leaders. The four reads write nothing: no read changes the home, and
+none makes one (`tests/memory-screen-smoke.test.ts`); `tests/memory-screen-draw.test.ts`
 draws the four tabs from a home the package made and filled. The Memory screen has no gravit box.
 
-**What this does not hold.** The owner has no door of their own inside the face: an owner's
+**The owner's acts on the page** (`src/memory-acts.ts`, `src/memory-acts-routes.ts`,
+`client/js/host/memory-acts.js`, `client/js/render/memory-act.js`). Seven acts are done from the
+Memory screen, each signed by this browser's owner device as an `attest` at the Account ("The owner
+device" below) and done by the face only on the Account's yes: **arm** a lesson that is neither
+armed nor refused and whose file parses as a card; **retire** an armed, changed or broken one;
+**discard** a changed one (its file goes back to the armed copy); **accept**, **edit** and
+**reject** a proposal that waits — edit not one that proposes a retirement —; **void** a decision
+that is not void. Retire, reject and void take the owner's words, 1 to 500 characters after
+trimming; the other four take none. The face asks the memory through its own handle, as
+`gravit-face`, and `Memory.owner` is called from one place, the end of `perform`. Two routes, each a
+POST behind the `/data` fence with a JSON object body of at most 8,192 bytes: `POST
+/data/memory/prepare {act, subject, words?}` answers `{ok: true, show, draft}` — what the act acts
+on (a card's text, a discard's armed copy and its file, each at most `SCREEN_TEXT_MAX` characters
+and marked `cut` when cut; a proposal's line; a decision's line) and the `attest` to sign, `{type:
+"attest", service: "gravit-memory", act, subject, digest}`, `draft: null` for a worded act asked
+with no words yet — and writes nothing; `POST /data/memory/act {act, subject, words?, envelope}`
+answers `{ok: true, act, subject}` with the hash armed (`sha256`) for an arm, the lesson for an
+accept, and the lesson and the file's path for an edit. The digest is SHA-256 in lower hex of
+`{v: 1, service, act, subject, content, words}` as JSON, `content`'s keys sorted and `words` `""`
+for an act that takes none; its `content` is, act by act: arm, the file's hash; retire, the armed
+copy's (`none` when there is none); discard, the armed copy's and the file's; accept and edit, the
+proposal's line's `sum` and its lesson's file hash (`none` with no file); reject, the proposal's
+`sum`; void, the decision line's `sum`. `perform` takes one act at a time, and each step that fails
+answers and stops: (1) the body — an act not of the seven or a subject off its act's shape (a lesson
+id, `p-<8 digits>-<8 hex>`, `d-<8 digits>-<8 hex>`) or no envelope is a 400 `not an act the memory's
+screen takes`, words for an act that takes none a 400 `this act takes no words`, a worded act's
+words missing or off their bound a 400 `say why in your own words: 1 to 500 characters`; (2) the
+envelope's `action` is an `attest` for `gravit-memory` whose act and subject are the body's, its
+digest 64 lower-case hex digits and its nonce the envelope's, else a 400 `the envelope is not an
+attest of this act` and nothing is forwarded; (3) its nonce within ten minutes of the face's clock,
+either side, else a 409 `it was signed too long ago: prepare it again`, and not among the envelopes
+done, else a 409 `this was done already`; (4) the memory connected, else a 503 with its standing's
+words, a 504 `the memory did not answer in time` past 5,000 ms; (5) the envelope's `action`,
+`nonce` and `signature` forwarded to the Account's `POST /api/exchange` in process, its yes a 200
+whose `ok` is true: no answer is a 502 `the Account did not answer: nothing was done`, a no is the
+Account's own sentence (one line of at most 200 characters) and its `refusal` under the Account's
+status — 400, 401, 404 or 409 passed on, a 5xx a 502, any other a 409 — or `the Account refused it:
+nothing was done` when it gives no message; (6) the envelope counted done; (7) the content read
+again and the digest recomputed with the body's words: a subject gone, a state the act is no longer
+asked in, or another digest is a 409 `it changed while it was shown: nothing was done`, a read past
+5,000 ms a 504 `the memory did not answer in time`; (8) the memory's own act, its refusal a 409 in
+its words, its success one log line, `memory: the owner's <act> of <subject> is done`. `prepare`
+checks the act, the subject and the words as step 1 does, a worded act's missing words answered
+with `draft: null`; there an act asked in a state that does not allow it is a 409 naming the
+state (`lesson <id> is <state>: only a card that is neither armed nor refused is armed.`,
+`lesson <id> is <state> and has no file that parses as a card: there is nothing to arm.`, `lesson <id> is <state>: only an armed, changed or broken card is
+retired.`, `lesson <id> is <state>: only a changed card is discarded.`, `proposal <id> proposes a
+retirement: it is accepted or rejected, not edited.`, `decision <id> is void already: a void decision
+is not voided again.`); a subject the memory does not hold a 404 in the package's words or the
+face's (`proposal <id> is not waiting in the memory: it is not there, or it is answered already.`
+for a proposal that does not wait); a fault of the package a 409 for its refusals, a 503 with no
+home and a 502 for anything else; the memory past 5,000 ms a 504. Before either route's method
+runs: the fence's refusal a 403, a method other than POST a 405, a body not declared JSON a 415, one
+past 8,192 bytes a 413, one that is no JSON object a 400, no acts bound a 503 `the memory's acts are
+not ready`; a method that throws a 500 `the act failed` with one log line. Why the face keeps its
+own ten minutes and its own once-only: the Account answers the same envelope again with its first
+yes, and its ledger, which any shell reads, holds every envelope it took; so the face does an
+envelope once, and only within ten minutes of its signing. The envelopes done are kept in the
+process, at most 500, the oldest forgotten first, and a restart forgets them; the Account keeps
+ten minutes of its own for an `attest`, on its own clock. An act can end signed and not done: when
+what the act acts on changed between What you sign and the Account's yes, the Account's ledger says
+the owner attested and the memory is untouched, and the page says `it changed while it was shown:
+nothing was done`. On the page, the keys of the acts — `Arm…`, `Retire…`, `Discard…`, `Accept…`,
+`Edit…`, `Reject…`, `Void…`, each where the row's state allows it — are drawn only while this page
+signs for the Account, and where a key is drawn that act's terminal command is not; a page whose
+standing the Account gave as anything else draws the commands and, under the head, the line `This
+browser does not sign for the account`, a link to Account › Portfolio; before the Account has
+answered, the commands and no line. A key opens a drawer over the screen: what the act acts on,
+made visible and escaped as the screen's other texts; for a worded act the box `Why, in your own
+words`, prepared again 300 ms after the last keystroke; then What you sign, each field the Account
+shows as `name: value`, before the go key, which is the act's verb and is on only while the
+preparation is ready. The words posted are the trimmed words the preparation was asked with. After
+a done act, and after a refusal that says it changed, the page reads the lessons, the waiting
+proposals and the decisions again; a signature the Account refuses as bad (its 401) has the page
+learn its standing again, so the keys give way to the commands when it no longer signs. An edit's
+Done names the file it wrote: `Edit the file, then arm it here`. Reseal stays at the terminal: no
+route and no key (`tests/memory-acts-smoke.test.ts` runs the acts against a real Account and a real
+memory).
+
+**What this does not hold.** The owner writes no decision of their own inside the face: an owner's
 decision said in conversation is registered by gravit, so it reads `by: gravit, whose: owner`. An
 instruction planted in text gravit reads — a page, a filing, a message — can still, through the
 tools, register calls in gravit's own name, amend gravit's own decisions within the package's rules,
@@ -1337,7 +1418,7 @@ registered freely). The fence narrows where and when the owner's name is written
 acts on once the operator speaks. Through the tools, steered text cannot arm, change or retire a
 lesson, answer a proposal, write as the owner at the owner's own door (the terminal's acts), touch
 the home's `config.json`, or move money. A forged line and a genuine one read the same; the remedy
-is the owner's `void` at the terminal.
+is the owner's `void`, at the terminal or on the Memory screen.
 
 At the order card: the gate's two routes are unsigned loopback routes behind the `/data` fence, as
 the card's own answer is, so a session's shell can record an override for its own card as it can
@@ -1407,6 +1488,37 @@ design, each a call for the operator to strike:
    `FACE_MEMORY_HOME`.
 7. The nav item is the last of the rail's group, with the `book` icon and no badge, since a badge
    would need the memory read on every screen.
+
+On the owner's acts: the two routes are unsigned loopback routes behind the `/data` fence, so a
+session's shell can ask a prepare, which writes nothing, and post an act; nothing is done without
+an envelope the Account verifies as signed by one of its owner's devices, and the face forwards
+only an `attest` for `gravit-memory` whose act and subject are the body's, so the route is no
+second door to the Account. A captured envelope is done once and only within ten minutes of its
+signing, but the once-only lives in the face's process: after a restart inside those ten minutes a
+replay can repeat an arm of the same bytes, while every other act is refused by the memory the
+second time. A program that admits a device of its own at the Account signs an `attest` as it would
+sign an order; the phone is told when a device is admitted. Where the build departs from its
+design, each a call for the operator to strike:
+
+1. An `attest` leaves two rows in the Account's ledger, the door's `taken` row, which holds the
+   envelope, and the outcome row with its sentence; its four fields are bounded before the first.
+2. The face keeps its own once-only and its own ten minutes, since the Account answers the same
+   envelope again with its first yes and its ledger, readable by any shell, holds every envelope.
+3. The acts open in a drawer of the Memory screen, not in the Account's sheet, which is wired to the
+   Account's paths and answers, draws What you sign as one-line fields, and has no place for a
+   card's text or a reason of several lines.
+4. The owner's words are taken for retire, reject and void alone: the package takes none for the
+   other four.
+5. "The bytes armed are the bytes shown" is the package's own guarantee for an arm (its `expect`);
+   for accept, edit and discard the guard is the face's recheck of the digest right before the act,
+   and a change in the milliseconds between that check and the package's write is not caught.
+6. An act can end signed and not done: when the content changed between What you sign and the
+   Account's yes, the Account's ledger says the owner attested, the memory is untouched, and the
+   page says so.
+7. Edit writes the proposed card as the lesson's file, unarmed, and answers where it is; the owner
+   edits the file in their editor and arms it with a second act.
+8. What is signed reads `Simulation` as its account chain, as every action does that is not one of
+   the seven live ones (a live order, cancel, change, close, leverage, move or earn).
 
 The fence is a rule on the tool call: what a session's shell can reach is the sandbox's to bound,
 not this rule's. Read in dsh 0.2.1-rc.5's code, not drilled: a worker pins no permission preset
@@ -2727,7 +2839,7 @@ reader, so the seat box and the Account screen share one upstream read within th
 | `connected/explore` on Trade (stage 2; with the market's) | the kind's picks (`tab=<kind>&limit=12`) at once and every 20 s while Trade is on screen in a visible tab; Trade's search (`q`, `limit=12`) once its box has been quiet for 300 ms |
 | `venues`, `paper/books` (stage 2) | on pressing Connect an account and Open a paper account — the sheet opens with what was read, else once the read lands |
 | `keyfile`, `connect/reach` (stage 2) | for an open Connect an account sheet: on opening, and after the sheet's 300 ms quiet when the key file or the connector it would ask about changed |
-| `pair`, `prepare`, `exchange` (stage 2) | `pair` on each load's first page (unless this browser signed out), when a page no longer lists this device after it signed or waited, on Pair and on Sign in; `prepare` when a sheet's form is complete and after 300 ms without a change, at a signature's ten minutes and on a press under its last 30 seconds, and on a ticket's moved market; `exchange` on the sheet's go key, a star, a Cancel |
+| `pair`, `prepare`, `exchange` (stage 2) | `pair` on each load's first page (unless this browser signed out), when a page no longer lists this device after it signed or waited, on Pair and on Sign in; `prepare` when a sheet's form is complete and after 300 ms without a change, at a signature's ten minutes and on a press under its last 30 seconds, and on a ticket's moved market, and for the Memory screen's act drawer when the face's prepare gives a draft; `exchange` on the sheet's go key, a star, a Cancel |
 | after an owner action | the Account's read, the holdings and the statement past the cache; the seat box too after Let in, a limit or Revoke |
 
 A stream event reads again what it names, past the cache: `order`, `fill`, `paper`, `balance` and
@@ -2921,6 +3033,25 @@ move`, `Sign and put in` / `Sign and take out`, `Make it`.
   browser wallet is signed by that wallet (**Send from wallet…**), never by the device key.
 - **The star** on an Account market (Markets) signs the Account's watch list.
 - **Let it sign**, **Remove** and **Sign out** (Settings › Devices); **Get a code** on the device line is the new browser's own request, not a signature.
+- **Arm…**, **Retire…**, **Discard…**, **Accept…**, **Edit…**, **Reject…** and **Void…** on the
+  Memory screen, each an `attest` ("The memory" › "The owner's acts on the page").
+
+**`attest`** is the Account's signed action for a service beside it: a device of the owner signs
+the sentence `the owner attested <act> <subject> for <service>`, and the service acts on the
+Account's yes. It signs five fields, `service`, `act`, `subject`, `digest` and `nonce`, on the
+`Simulation` chain, and its four text fields are bounded before the door writes anything and at
+`prepare`, each refused in its own sentence: `attest names a service of 2 to 40 lower-case letters,
+digits or dashes`; `attest names an act of 2 to 24 lower-case letters or dashes`; `attest names a
+subject of 1 to 80 letters, digits or . _ : -`; `attest carries a digest of 64 lower-case hex
+digits`. It is taken within ten minutes of its nonce, either side of the Account's clock, else
+refused `E_ACCOUNT_EXPIRED`. Taken, it leaves two rows in the ledger, the door's `taken` row and an
+`ok` row whose reason is the sentence, both holding the envelope, answers `{ok: true, kind:
+"account", summary}` with the sentence, and does nothing else: it moves no money, changes no
+setting, joins none of the money, steering, memory, paper or live sets, and a restart replays it as
+nothing. The unsigned door refuses it (`"attest" is signed: only a browser that signs for the
+account takes it`). The face reaches it only through the Memory screen's acts, which prepare it
+through `/data/account/prepare` and post the signed envelope to `/data/memory/act`, never to
+`/data/account/exchange`; the face forwards it in process.
 
 Not on the face, by the design (the two parts' spec §5.4): the Account's Superagent (the Desk and
 its Brains), Intents and Memory — their server code and seat tools stay in `../account/`. Nothing on
@@ -5566,11 +5697,11 @@ fresh one will not open the face runs without search. Node prints its `node:sqli
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 39 smoke files (53 real boots), isolated; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 40 smoke files (54 real boots), isolated; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 39 smoke files (53 real boots) listed below; `FACE_SMOKE=1` runs
-them too (5,258 tests in 336 files on 2026-11-17 with the Memory screen's final review's fixes: 5,182 pass and 76 skipped offline, the full `FACE_SMOKE=1` run not made, `memory-screen-smoke` 2 of 2; 5,166 tests on 2026-11-16 with the Memory screen: 5,090 pass and 76 skipped offline; 5,170 tests under `FACE_SMOKE=1`, 5,169 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 5,046 tests in 321 files on 2026-11-16 with lessons under an alert and on a Lunhui run: 4,972 pass and 74 skipped offline; 5,050 tests under `FACE_SMOKE=1`, 5,049 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 4,951 tests in 316 files on 2026-11-16 with the order card's final review's fixes: 4,877 pass and 74 skipped offline; 4,955 tests under `FACE_SMOKE=1`, 4,954 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 4,918 tests in 316 files on 2026-11-16 with the memory at the order card: 4,844 pass and 74 skipped offline; 4,922 tests under `FACE_SMOKE=1`, 4,921 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1) as before; 4,760 tests in 308 files on 2026-11-15 with the memory's owner-name fence armed inside the boot: 4,687 pass and 73 skipped offline; 4,764 tests under `FACE_SMOKE=1`, 4,763 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1), as it does with the fence not yet in the boot; 4,733 tests in 307 files on 2026-11-14 with the Desk, the routines and the memory together: 4,662 pass and 71 skipped offline; 4,653 tests in 302 files on 2026-11-14 with routines from Messages: 4,588 pass and 65 skipped offline; 4,618 tests in 299 files on 2026-11-14 with the routines' engine: 4,555 pass and 63 skipped offline; 4,544 tests in 292 files on 2026-11-14 with the memory connected and its final review's fixes: 4,476 pass and 68 skipped offline; 4,539 tests at its build, where `FACE_SMOKE=1` ran 4,543 tests, 4,543 pass; 4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+Offline, `npm test` skips the 40 smoke files (54 real boots) listed below; `FACE_SMOKE=1` runs
+them too (5,321 tests in 341 files on 2026-11-17 with the owner's acts on the Memory screen: 5,244 pass and 77 skipped offline; 5,325 tests under `FACE_SMOKE=1`, 5,324 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1), `memory-acts-smoke` 1 of 1; 5,258 tests in 336 files on 2026-11-17 with the Memory screen's final review's fixes: 5,182 pass and 76 skipped offline, the full `FACE_SMOKE=1` run not made, `memory-screen-smoke` 2 of 2; 5,166 tests on 2026-11-16 with the Memory screen: 5,090 pass and 76 skipped offline; 5,170 tests under `FACE_SMOKE=1`, 5,169 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 5,046 tests in 321 files on 2026-11-16 with lessons under an alert and on a Lunhui run: 4,972 pass and 74 skipped offline; 5,050 tests under `FACE_SMOKE=1`, 5,049 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 4,951 tests in 316 files on 2026-11-16 with the order card's final review's fixes: 4,877 pass and 74 skipped offline; 4,955 tests under `FACE_SMOKE=1`, 4,954 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 4,918 tests in 316 files on 2026-11-16 with the memory at the order card: 4,844 pass and 74 skipped offline; 4,922 tests under `FACE_SMOKE=1`, 4,921 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1) as before; 4,760 tests in 308 files on 2026-11-15 with the memory's owner-name fence armed inside the boot: 4,687 pass and 73 skipped offline; 4,764 tests under `FACE_SMOKE=1`, 4,763 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1), as it does with the fence not yet in the boot; 4,733 tests in 307 files on 2026-11-14 with the Desk, the routines and the memory together: 4,662 pass and 71 skipped offline; 4,653 tests in 302 files on 2026-11-14 with routines from Messages: 4,588 pass and 65 skipped offline; 4,618 tests in 299 files on 2026-11-14 with the routines' engine: 4,555 pass and 63 skipped offline; 4,544 tests in 292 files on 2026-11-14 with the memory connected and its final review's fixes: 4,476 pass and 68 skipped offline; 4,539 tests at its build, where `FACE_SMOKE=1` ran 4,543 tests, 4,543 pass; 4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -5632,6 +5763,7 @@ and `node --test` gives each file its own:
 | `memory-smoke.test.ts` | the memory row on four boots over one scratch harness home ("The memory"): over a home the package's `initHome` made under the temporary directory, the conversation (`gravit-router`) and a worker (`gravit`) each hold exactly the seven `mcp__memory__memory_*` tools, on the session and in the first request, and a desk session none; `memory_status` from the conversation answers the home's status, one `memory_record` of filler registers a decision whose `by` is `gravit`; on the same tree the boot's own owner-name fence, bound with whose turn it is set by the test, refuses a worker's and an out-of-turn conversation's `whose: owner` and a worker's void, ref, own-name review and correction of the owner's decision, and the real row registers the worker's own call, its ref and its void, the conversation's owner-name call in the operator's turn, its ref and its close, one stderr line per refusal; then, bound over the real conversation's handle as `main.ts` binds it, real turns on the stub: the operator's prompt has the conversation call `memory_recall` then `memory_record` with `whose: owner`, registered; a worker's brief turn and the conversation's turn on that worker's relayed report each record in the owner's name, both refused; the operator's next turn closes the decision, registered; the conversation and a worker carry `mcp:memory` and `gravit:memory`, a desk session no `gravit:memory`; then over a home nobody made the boot resolves, the seven tools are there and `memory_status` answers `Error: no memory here: run gravit-memory init`; with `FACE_MEMORY_DIR` at an empty directory the boot resolves, the row settles with no memory tool and the face's standing is `gravit-memory is not installed`; and with the row disabled by a line in the operator's patch file, no memory tool in the tree, the conversation (on its session and in its first request) or a gravit session, no `gravit:memory` in their prompts, and the face's standing `the mcp-memory row is disabled` |
 | `memory-gate-smoke.test.ts` | the order card asks the memory, on one real boot ("The memory" › "At the order card"): a scratch harness home with the seat's row disabled, the stand-in `mcp__drill__portfolio_live_order` (its body records its arguments and answers the seat's placed shape), a home made by the package's `initHome` holding one `red-line` lesson that says `dont` for `buy`, armed through `Memory.owner`, opened through the face's opener over the row the tree composed, and the gate bound as `main.ts` binds it over a stub Account (flat, `kind: "stock"`) and stub price facts; the card answered by an outermost `approval/request` listener that reads `GET /data/memory/gate?callId=` over the wire while the card is pending. A buy: the route shows the red line in the lesson's words; approved with no override, the tool's result is `Error: ` and the guard's refusal word for word, the body did not run, the memory holds no owner's decision, and the guard's refusal reached the gate through the root's tool results (`not registered: the red line was not overridden`, its log line among the gate's). A second buy of the symbol: the override, refused cross-site (403) and kept (200) over the wire, then approved: the body ran once and the memory holds one decision `by: gravit-face`, `whose: owner`, `buy`, with the approval's thesis, the override's words and `wrong_if`, the limit as its price and the gate's recall, and the card says `registered: buy`; the armed card's own record (the package's `show`) reads fired 1, followed 0, overridden 1 - the two buys of the symbol within the day one occasion. A buy of another symbol declined: a `pass` naming its recall, and the card's record fired 2, followed 1, overridden 1. A sell of a symbol no lesson covers, from flat: no lesson on the card, the one-click approval runs, `short` is written. An id never raised is a 404, a malformed one a 400 |
 | `memory-screen-smoke.test.ts` | the Memory screen's four reads, on two real boots ("The memory" › "The Memory screen"), each on a scratch harness home with the seat's row disabled, the screen built over the face's opener of the row the tree composed and its routes registered as `main.ts` registers them, each read over the wire with the face's cookie. The first over a home made by the package's `initHome` and filled through its API: a card armed through `Memory.owner`, a card taken to `lessons/` unarmed, a decision recorded as `gravit`, a proposal left waiting. `GET /data/memory/lessons` names both cards with their states, the armed one's record and its retire command with `--home`, no record for the unarmed one, and no reseal; `GET /data/memory/decisions` holds the decision, by `gravit`, found by its own symbol and with none for another; `GET /data/memory/review` holds the proposal, with the review command; `GET /data/memory/status` names the home and five sound chains; each of the four refuses a cross-site request (403); every file under the home is byte for byte what it was before the reads, and nothing is logged. The second over a home under the temporary directory never made: each read answers `connected: false`, `why: "no home"`, the face's words and the `init` command with `--home`, and the home is still not there afterwards |
+| `memory-acts-smoke.test.ts` | the owner's acts against a real Account and a real memory, on one real boot ("The memory" › "The owner's acts on the page"): the Account's own stand-in on a free port and its own temporary home, with one device paired through the face (`helpers/owner-node.ts`, the code the stand-in printed); a scratch harness home with the seat's row disabled, `FACE_ACCOUNT_URL` and `FACE_MARKET_URL` at the stand-in before the boot, the Account's proxy, the face's opener of the row the tree composed, the acts and their routes bound as `main.ts` binds them; a home made by the package's `initHome` holding two unarmed card files, a decision recorded as `gravit` and a proposal waiting. Each act over the wire as the page sends it — the face's prepare, the Account's prepare through the face, the device's signature, the face's act: an arm shows the card's text and is done with its hash, the card armed with that hash and the Account's ledger holding its `taken` row and its `ok` row `the owner attested arm <id> for gravit-memory`; the same body again `this was done already`, one arm line in `owner.jsonl`; an envelope signed by a key the Account does not know its 401 `E_ACCOUNT_BAD_SIGNATURE`, every file of the home as it was; a card whose file is edited after its prepare said yes to by the Account and refused `it changed while it was shown: nothing was done`, not armed; a decision voided with the owner's words, void with that reason by `owner`; a proposal rejected with words, no longer waiting; a signed `attest` for another service and a signed `setPolicy` each a 400 `the envelope is not an attest of this act`, the Account's ledger without a new row; a post with no envelope a 400 |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
 `observed:` line each (S4, S7), the measurements the bots spec's amendments were

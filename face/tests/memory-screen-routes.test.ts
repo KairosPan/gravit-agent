@@ -125,14 +125,14 @@ test("a fault whose cause carries the package's code serves why in one line of a
     assert.deepEqual(await call("/data/memory/lessons"), { status: 502, body: { ok: false, error: "the memory could not be read", why } });
   }
   assert.deepEqual(lines, [`memory screen: /data/memory/lessons - the memory could not be read: ${why}`], "logged once over three requests");
-  fail = new ScreenFault("fault", Object.assign(new Error("config.json is not valid JSON"), { code: "E_CONFIG" }));
+  fail = new ScreenFault("fault", Object.assign(new Error("config.json is not valid JSON"), { code: "E_INPUT" }));
   await call("/data/memory/lessons");
   await call("/data/memory/lessons");
   assert.equal(lines.length, 2, "logged again when its words change");
   assert.match(lines[1], /config\.json is not valid JSON$/);
   fail = undefined;
   assert.equal((await call("/data/memory/lessons")).status, 200);
-  fail = new ScreenFault("fault", Object.assign(new Error("config.json is not valid JSON"), { code: "E_CONFIG" }));
+  fail = new ScreenFault("fault", Object.assign(new Error("config.json is not valid JSON"), { code: "E_INPUT" }));
   await call("/data/memory/lessons");
   assert.equal(lines.length, 3, "logged again after a read of the path succeeded");
   fail = new ScreenFault("fault", Object.assign(new Error("x".repeat(400)), { code: "E_IO" }));

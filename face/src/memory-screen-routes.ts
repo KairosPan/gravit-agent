@@ -10,7 +10,8 @@
  * Not connected is an answer, `ok: true` with `connected: false`. A parameter that does not fit, a repeated one or an
  * unknown one is a 400; a method other than GET a 405; no screen bound a 503; a `before` the memory does not know (the
  * package's `E_NOT_FOUND`) a 404. A read that faulted is a 502, with `why` - the package's sentence in
- * `memoryFaultWords`' words, one line of at most 200 characters - when its cause carries the package's code; one past
+ * `memoryFaultWords`' words, one line of at most 200 characters - when its cause is an error that carries a code (a
+ * file error such as `EACCES` among them); one past
  * its bound a 504; anything else thrown a 500 with a fixed word. A 502, a 504 and a 500 each log one line, logged again
  * for a path only when its words change or after a read of that path succeeded. No route echoes anything the caller
  * sent.
@@ -37,7 +38,7 @@ const NOT_READY = "the memory screen is not ready";
 const NO_SUCH_DECISION = "no such decision";
 const DECISIONS_PATH = "/data/memory/decisions";
 
-/** The package's code a fault's cause carries (its `E_…`), when it carries a string one. */
+/** The code a fault's cause carries (the package's `E_…`, or a file error's), when it carries a string one. */
 function codeOf(cause: unknown): string | undefined {
   const code = typeof cause === "object" && cause !== null ? (cause as { code?: unknown }).code : undefined;
   return typeof code === "string" ? code : undefined;
