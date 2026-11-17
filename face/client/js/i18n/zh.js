@@ -2150,4 +2150,5 @@ export const ZH = Object.freeze({
   'gbox.page.strategy': '策略',
   'gbox.attach': '将此页面作为附件',
   'gbox.detach': '不将此页面作为附件',
+  'gbox.asked': '从 {where} 问的',
 });

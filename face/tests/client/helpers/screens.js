@@ -460,6 +460,9 @@ export function namedStates() {
     ['box-panel-waiting', boxWaitingState()],
     // the page chip (plan 2 of the box, Task 2): the panel open on Markets with × taken, the ghost key that puts the page back
     ['box-panel-detached', R.boxDetach(R.boxOpen(R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('bx')], channels: [], bots: [] }), { conversation: 'bx', tasks: [], at: NOW }), { screen: 'markets', id: null })))],
+    // the caption (plan 2 of the box, Task 3): Messages with a message sent from the box on a stock's page, its words under
+    // Asked from Markets · NVDA, the tag line not drawn
+    ['thread-asked-from', onConv(R.hostList(emptyState(), { conversations: [conv('af', { loaded: true, messages: [m('af1', { from: 'you', text: 'why is it down', data: { onScreen: { page: 'Markets', id: 'stock:NVDA', at: null } } })] })], channels: [], bots: [] }), 'af')],
   ];
 }
 

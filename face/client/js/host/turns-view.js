@@ -2,14 +2,16 @@
 // rail's ticks from the `turnOutline` projection, the turn the view is on, the figures from `sessionStats` with the
 // window's `tokenUsage`, the head's two pills, and the token, duration and clock formats Usage and a job read. Pure.
 import { t, tn } from '../i18n/words.js';
+import { parseTag } from './page-tag.js';
 
 // {show, ticks: [{turn, seq, loaded, prompt, response}]}: a tick is loaded when nothing is earlier than the window or its
-// turn starts inside it (paging back through its seq brings the whole turn)
+// turn starts inside it (paging back through its seq brings the whole turn); a prompt sent from the Gravit box is its words
+// without the page tag
 export function railView(conv) {
   const outline = Array.isArray(conv?.outline) ? conv.outline : [];
   const w = conv?.window;
   const ticks = outline.map(({ turn, seq, prompt, response }) => ({
-    turn, seq, loaded: !w || w.hasMore !== true || seq >= w.start, prompt, response,
+    turn, seq, loaded: !w || w.hasMore !== true || seq >= w.start, prompt: parseTag(prompt)?.rest ?? prompt, response,
   }));
   return { show: conv?.loaded === true && ticks.length >= 2, ticks };
 }

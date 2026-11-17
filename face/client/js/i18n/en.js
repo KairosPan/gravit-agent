@@ -2157,4 +2157,5 @@ export const EN = Object.freeze({
   'gbox.page.strategy': 'Strategy',
   'gbox.attach': 'Attach this page',
   'gbox.detach': 'Do not attach this page',
+  'gbox.asked': 'Asked from {where}',
 });

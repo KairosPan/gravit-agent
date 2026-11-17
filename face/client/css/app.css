@@ -422,6 +422,8 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
    64 px squares; an image not loaded yet an empty frame; a file (or an image the host cannot give back) its card */
 .you-body { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 66%; min-width: 0; }
 .you-body .bubble.you { max-width: 100%; }
+.you-from { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); font-size: calc(12px * var(--fs)); }
+.you-from svg { flex: none; }
 .you-files { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .you-image, .you-thumb { padding: 0; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-2); overflow: hidden; cursor: zoom-in; }
 .you-image img { display: block; max-width: 240px; max-height: 320px; height: auto; object-fit: contain; }

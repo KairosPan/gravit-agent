@@ -21,6 +21,7 @@ import { reportViews, reportTaskFailure } from '../host/analog.js';
 import { eventTablesHtml } from './event-table.js';
 import { routineCardOf } from '../host/desk-page-view.js';
 import { routineClosings } from '../host/kinds.js';
+import { tagWords } from '../host/page-tag.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -217,9 +218,12 @@ function youFiles(list, thumbs) {
 export const NETWORKS = { telegram: 'Telegram', slack: 'Slack', imessage: 'iMessage' }; // en-kept: the networks' own names
 const phoneChip = network => chip(Object.hasOwn(NETWORKS, network) ? t('thread.phone.on', { network: NETWORKS[network] }) : t('thread.phone'));
 
+// a message sent from the Gravit box (host/kinds.js onScreen) is the operator's bubble under Asked from <the page in words>
+const askedFrom = onScreen => `<span class="you-from">${icon('screen', 13)}${th('gbox.asked', { where: tagWords(onScreen) })}</span>`; // words-order: an icon before one key's words
+
 function youMessage(m, conv, state, page) {
   const list = Array.isArray(m.data?.attachments) ? m.data.attachments : [];
-  const tag = m.data?.source === 'telegram' ? phoneChip(m.data.network) : '';
+  const tag = m.data?.source === 'telegram' ? phoneChip(m.data.network) : m.data?.onScreen ? askedFrom(m.data.onScreen) : '';
   if (!list.length && !tag) return `<div class="msg you"><div class="bubble you">${youText(m.text, m, conv, page)}</div>${avatar('you', 28)}</div>`;
   const bubble = m.text ? `<div class="bubble you">${youText(m.text, m, conv, page)}</div>` : '';
   const files = list.length ? youFiles(list, state?.thumbs ?? {}) : '';
