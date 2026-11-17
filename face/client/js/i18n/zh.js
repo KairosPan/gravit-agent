@@ -2147,4 +2147,5 @@ export const ZH = Object.freeze({
   'gbox.moreWaiting': '消息中还有 {n} 项 ›',
   'gbox.stub.composed': '综合回答',
   'gbox.stub.events': '事件对标表',
+  'gbox.page.strategy': '策略',
 });

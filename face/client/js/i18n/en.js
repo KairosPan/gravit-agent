@@ -2154,4 +2154,5 @@ export const EN = Object.freeze({
   'gbox.moreWaiting': { one: '{n} more in Messages ›', other: '{n} more in Messages ›' },
   'gbox.stub.composed': 'Composed answer',
   'gbox.stub.events': 'Event table',
+  'gbox.page.strategy': 'Strategy',
 });
