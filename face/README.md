@@ -390,6 +390,29 @@ All three of its stages are built:
   line under the composer (not signed in, reconnecting, a host error, a command's word), and
   Settings (since plan 7 Language first, English · 中文, every word at once and kept in the browser; Cream · Black · System; since plan 6 the text and code sizes, the two
   font families and Keyboard shortcuts, below);
+- **the Gravit box** (since 2026-11-16; spec `docs/superpowers/specs/2026-11-16-gravit-box-design.md`):
+  Gravit's one conversation docked at the bottom right of every screen that shows no
+  conversation — Desk, Markets, Trade, Discover (a plugin's or a module's page too), Account and a
+  strategy's page; never Messages, a task's page or History, which already read a session, and not
+  while the conversation is unknown (`FACE_ROUTER=0`, or its first read not yet in). Closed it is
+  half a ball (56 px, its left half showing) at the window's right edge, 40 px above the bottom;
+  hover leans it out 8 px, Tab slides it fully into view, a click, Return or Space opens the panel
+  (400 px wide, up to 600 tall; a sheet on windows of 860 px and below). A badge on the ball counts
+  the cards that wait; a dot says Gravit is working or has something new. The panel is Messages' own
+  thread (compact: wide blocks such as a Lunhui answer or an event table are one line and Open in
+  Messages ›), the waiting lines of the rail drawn open at its top, and Messages' own composer —
+  one draft, one `#say`, the `/` and `@` menus included. An owner sheet or the identity sheet hides
+  the box; a drawer moves the open panel to its left and tucks the ball into its edge. Its state
+  is kept across reloads. **The page tag:** what the box sends starts with a line such as
+  `[on screen · Markets · stock:NVDA]`, built from the route and ids the store already knows
+  (`js/host/page-tag.js`), English in both languages, which `dsh/profile/router.md` tells Gravit to
+  read "this" and "it" against; the chip above the composer shows it, × leaves it off one message,
+  and a `/` line or a send of files alone goes untagged. In the thread the tag line is not drawn:
+  a caption over the operator's bubble, `Asked from Markets · NVDA`, is read from it. Hand to
+  Gravit, an ability's Ask keys and the Desk's **Edit with Gravit** open the box and fill its draft
+  without leaving the page; Option-Command-N (Ctrl+Alt+N off a Mac) opens it and focuses the
+  editor, and Esc from inside it closes its menu, edit or confirm first, then minimizes it, and
+  never closes a drawer or Trade's ticket;
 - **the side panel's search** (the dsh UI port's plan 2): a box under the panel's head, `Search
   conversations`, focused by Option-Command-K (Ctrl+Alt+K off a Mac; from another screen it goes to
   Messages first). Titles and channel names match at once; the words inside conversations come from
@@ -2880,7 +2903,7 @@ day's cap under its head (`{used} of {cap} tokens today`, or `Daily cap spent; r
 00:00 ET`): each a row with its when line, or `Paused`, and its switch; opened, its
 `Instruction`, `When to run`, its `Run history` — each run `Running`, `Succeeded` (its headline),
 `Failed`, `Missed` or `Skipped` with its note, a test run marked `Test` — and **Test** (`Running…`
-until the face's read holds no test of it), **Edit in Messages** (it puts `Edit your routine:
+until the face's read holds no test of it), **Edit with Gravit** (it opens the box and puts `Edit your routine:
 {name}` in Gravit's composer and sends nothing) and **Delete**, asked once more (`Deleting a
 routine can't be undone`). A store that cannot be read is one line and no rows; a refused act is
 one line under its row; `No routines yet.` is drawn only once a routines read has answered with
@@ -3018,7 +3041,7 @@ windows it is one routine and both cards settle on the next read; a proposal the
 holds — pruned after 30 days, or another home's — draws `Closed` from the call's own arguments, with
 no keys; before the face's first routines read has answered, the card draws no chip and no keys. A turn whose last call is an ok proposal draws no closing text in the browser: the card is
 the reply. The phone gets Gravit's closing text — a routine card is waiting on your page — and the
-card is answered in the browser, as every card is. **Edit in Messages** on the Desk screen puts
+card is answered in the browser, as every card is. **Edit with Gravit** on the Desk screen opens the box and puts
 `Edit your routine: {name}` in the composer; say what changes, Gravit reads `routine_list` and
 proposes again with `replaces`, the card reads `Change`, and its ✓ swaps the version in place; until
 then the old one runs.
@@ -3701,6 +3724,32 @@ folder deleted while the face runs is made again at the next turn's start.
 `FACE_DESK_MODEL` is (default `deepseek-official/deepseek-flash`). A conversation the face cannot
 open — an unreadable ledger, a recorded session that is not `workspace-write` — is one line at boot
 (`conversation: could not be installed (…)`), and the face starts without it.
+
+### The box drill (owed; the operator's)
+
+In the browser, on the installed face after a restart on this code (hard-reload the page first;
+`client/*` is served with no cache headers):
+
+1. **A market's page.** Open one (`#/markets/stock:NVDA`), open the box, ask "why is it down
+   today?" and read the answer. PASS: the page has not moved; the answer reads "it" as that
+   stock; the message in the box carries `Asked from Markets · NVDA` and no raw tag line.
+2. **Messages.** Ask the same on Messages. PASS: the same exchange, its bubble captioned `Asked
+   from …` the same way, and after a reload the caption is still there.
+3. **An order.** Ask Gravit for a paper order. PASS: the card waits at the top of the box, drawn
+   open; answering it settles the rail's line and the ball's badge, and Gravit's reply only says a
+   task started.
+4. **A drawer and a sheet.** Account › Statement: the open panel steps left of the drawer and the
+   ball tucks into the drawer's edge. Open an owner sheet (Trade's order step included): the box
+   is hidden until it closes, and then back as it was.
+5. **The Desk.** Half the ball shows at the right edge; hover leans it out and no more, a click
+   pops the box; Option-Command-N opens it with the caret in the editor; Esc minimizes it back
+   into the half ball with focus on it. **Edit with Gravit** on a routine opens the box with
+   `Edit your routine: {name}` in its draft and sends nothing.
+6. **A narrow window.** At 860 px and below the ball is the same half ball and the open box is a
+   sheet; a drawer hides the open sheet.
+
+Also check on step 1 that a `/` line sent from the box goes untagged and that × on the chip
+leaves the tag off the next message only. Record the date and the commit here when it passes.
 
 ### The conversation drill (owed; keyed)
 
@@ -7390,7 +7439,7 @@ hard-reload the page.
    PASS: one `Skipped` · `the desk was paused` line, the head bar `Paused` meanwhile, the skipped
    slot not run after the resume (resume inside its 5-minute grace to try it), and the next slot
    after the resume runs.
-8. **A change.** Press **Edit in Messages**, then say "make it 09:00". PASS: the composer held
+8. **A change.** Press **Edit with Gravit**, then say "make it 09:00". PASS: the composer held
    `Edit your routine: <name>` and nothing was sent until you sent it; the card reads `Change` with
    `Replaces the current version of <name>`; until ✓ the old version runs; after ✓ the chip reads
    `Added to Routines` with `Next run <day> at 09:00 ET`, the older card reads `Replaced`, and the
