@@ -21,7 +21,7 @@ export interface TelegramSecret {
   operatorHandle: string;
 }
 
-/** Slack's file: the app-level token (Socket Mode) and the bot token (the Web API), the app, the DM channel Gravit speaks in, the bot
+/** Slack's file: the app-level token (Socket Mode) and the bot token (the Web API), the app, the DM channel gravit speaks in, the bot
  * (`<team>:<bot user>`) and the one person it talks to (`<team>:<user>`) */
 export interface SlackSecret {
   appToken: string;
@@ -34,7 +34,7 @@ export interface SlackSecret {
   operatorHandle: string;
 }
 
-/** iMessage's file (through Photon): the project and its secret, the operator's number, Gravit's line, the Photon user, and the one
+/** iMessage's file (through Photon): the project and its secret, the operator's number, gravit's line, the Photon user, and the one
  * person it talks to */
 export interface ImessageSecret {
   projectId: string;

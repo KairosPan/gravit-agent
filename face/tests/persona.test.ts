@@ -21,7 +21,7 @@ const renderPersona = (text: string): string => renderPrompt({
 });
 
 test("validatePersonaTemplate accepts provider and model, refuses cwd and everything else the strict renderer would throw on", () => {
-  assert.equal(validatePersonaTemplate("You are Gravit on {{model}} via {{provider}}."), undefined);
+  assert.equal(validatePersonaTemplate("You are gravit on {{model}} via {{provider}}."), undefined);
   // `cwd` was a known variable until 0.2.1; the refusal names the ones that are left.
   const cwd = validatePersonaTemplate("Your directory is {{cwd}}.");
   assert.match(cwd ?? "", /unknown persona variable \{\{cwd\}\}/);
@@ -44,9 +44,9 @@ test("readPersona returns the trimmed file and throws with the path on a bad tem
   assert.throws(() => readPersona(bad), (err: Error) => err.message.includes(bad) && /nobody/.test(err.message));
 });
 
-test("the shipped persona.md is valid and names Gravit", () => {
+test("the shipped persona.md is valid and names gravit", () => {
   const text = readPersona(PERSONA_PATH);
-  assert.match(text, /You are Gravit/);
+  assert.match(text, /You are gravit/);
   assert.equal(validatePersonaTemplate(text), undefined);
   assert.equal(text.includes("{{cwd}}"), false, "the loop registers no cwd variable at 0.2.1 (D21): the working-directory context tells the model its directory");
   assert.equal(text.includes("through report"), false, "the 0.1.1 report tool left dsh at 0.2.0 (tool-subagent-report, b91e7ce366); the persona must not name it");
@@ -57,12 +57,12 @@ test("the shipped persona.md is valid and names Gravit", () => {
  * step of every session. Pinned against the installed strict renderer so an
  * upstream change to the variable grammar fails here, at the pin bump. */
 test("whatever validatePersonaTemplate accepts, dsh's strict renderer renders - and what dsh throws on, it refuses", () => {
-  assert.match(renderPersona(readPersona(PERSONA_PATH)), /^You are Gravit/, "the shipped persona renders with provider and model registered and no cwd");
+  assert.match(renderPersona(readPersona(PERSONA_PATH)), /^You are gravit/, "the shipped persona renders with provider and model registered and no cwd");
   assert.deepEqual([...PERSONA_VARIABLES], ["provider", "model"]);
   for (const variable of PERSONA_VARIABLES) {
     assert.doesNotThrow(() => renderPersona(`You run {{${variable}}}.`), variable);
   }
-  assert.equal(renderPersona("You are Gravit on {{model}} via {{provider}}."), "You are Gravit on deepseek-flash via deepseek-official.");
+  assert.equal(renderPersona("You are gravit on {{model}} via {{provider}}."), "You are gravit on deepseek-flash via deepseek-official.");
   for (const text of ["Hello {{date}}", "Hello {{cwd}}", "Hello {{ model }}", "Hello {{Model}}"]) {
     assert.notEqual(validatePersonaTemplate(text), undefined, `the face refuses ${text}`);
     assert.throws(() => renderPersona(text), `and dsh would have thrown on ${text}`);

@@ -2,7 +2,7 @@
  *
  * A channel is one directory given an identity by the host. The directory is
  * the truth of EXISTENCE — `readdir` decides what a channel is, so a channel
- * Gravit makes with a plain `mkdir` is a channel on the next listing and git
+ * gravit makes with a plain `mkdir` is a channel on the next listing and git
  * stays the ledger. The dsh workspace registry adds IDENTITY on top: a stable
  * UUID, a display title decoupled from the folder name, durable session
  * membership, and order. See docs/superpowers/specs/2026-09-03-channels-design.md.

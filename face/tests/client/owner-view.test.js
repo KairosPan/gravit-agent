@@ -47,7 +47,7 @@ test('devicesOf: the owners with this page marked, and the devices waiting', () 
 test('devicesOf: how and when each signer came in', () => {
   const page = fx('account');
   page.signers.owners = [
-    { id: 'device:a5048199a8081854', kind: 'device', label: 'Gravit face', via: 'first', addedAt: '2026-11-01T14:05:00.000Z' },
+    { id: 'device:a5048199a8081854', kind: 'device', label: 'gravit face', via: 'first', addedAt: '2026-11-01T14:05:00.000Z' },
     { id: 'device:0f0f0f0f0f0f0f0f', kind: 'device', label: 'Laptop', via: 'letIn', by: 'device:a5048199a8081854', addedAt: '2026-11-02T15:30:00.000Z' },
     { id: 'device:1234123412341234', kind: 'device', label: 'Phone', via: 'code', addedAt: '2026-11-09T21:10:00.000Z' },
     // a way the client does not know, a by that is not a string: nothing made up

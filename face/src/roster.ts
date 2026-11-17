@@ -1,5 +1,5 @@
 /** `$DSH_HOME/face/channels.json`: the one roster - which CLI agents and which
- * bots are available to Gravit, for the whole face (one-entry plan 4).
+ * bots are available to gravit, for the whole face (one-entry plan 4).
  *
  * On disk `{version: 2, agents, bots}`. A version-1 file (the per-channel
  * rosters, `{version: 1, channels: {<wsId>: {agents, bots}}}`) is turned into
@@ -17,7 +17,7 @@
  * were issued (the lock alone polls, so it does not keep order).
  *
  * What this is NOT: containment. dsh registers agent tools tree-wide with no
- * per-session scope, and Gravit has an unrestricted shell and unrestricted
+ * per-session scope, and gravit has an unrestricted shell and unrestricted
  * network. The roster is a menu that states intent; see spec §5.
  * @module
  */
@@ -44,7 +44,7 @@ const ROSTER_LOG_FILE = ["face", "roster.log"] as const;
 /** The v1 file's text, kept beside the roster when {@link ensureRoster} turns it into v2. */
 export const ROSTER_V1_BACKUP = "channels.v1.json";
 
-/** What is available to Gravit, for the whole face. */
+/** What is available to gravit, for the whole face. */
 export interface Roster {
   agents: string[];
   bots: string[];
@@ -193,7 +193,7 @@ export async function ensureRoster(
 }
 
 /**
- * The operator's switch: `id` is available to Gravit (`on`) or not. An added id goes last, a
+ * The operator's switch: `id` is available to gravit (`on`) or not. An added id goes last, a
  * removed one leaves the others in their order. Refuses a bot id outside {@link isBotId} or an empty
  * agent id (400) before the file is touched, and a corrupt or absent file (409, naming it) rather
  * than writing over it - {@link ensureRoster} at boot is the only writer that creates the file.

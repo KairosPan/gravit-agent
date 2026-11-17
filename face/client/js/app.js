@@ -44,6 +44,9 @@ import { itemById } from './host/discover-view.js';
 import { startTraces } from './host/traces.js';
 import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCursors, marketKey, stockCode } from './host/lunhui.js';
 import { ensureAnalog } from './host/analog.js';
+import { startMemoryGate } from './host/memory-gate.js';
+import { lessonsDue, ensureLunhuiLessons } from './host/memory-lunhui.js';
+import { needsAnswer } from './messages.js';
 import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn, venuesOf } from './host/account-view.js';
@@ -91,7 +94,7 @@ export const SEARCH_QUIET_MS = 300;
 // silence is the leave (a dragleave flickers between the page's own elements, and may never come)
 export const DROP_QUIET_MS = 300;
 
-// Gravit's words as the thread draws them: DOM-built markdown (wire/markdown.js returns {node, doc}), serialized for
+// gravit's words as the thread draws them: DOM-built markdown (wire/markdown.js returns {node, doc}), serialized for
 // the string renderers
 export const gravitMarkdown = text => renderMarkdown(text).node.outerHTML;
 
@@ -262,7 +265,7 @@ export function boot(win, host = {}) {
   const postJson = host.postJson ?? postJsonVia((path, init) => win.fetch(path, init));
   const schedule = (fn, ms) => timers.after(ms, fn);
   const cancelTimer = id => timers.cancel(id);
-  // Gravit's markdown is DOM-built (wire/markdown.js); a test hands in its own or none
+  // gravit's markdown is DOM-built (wire/markdown.js); a test hands in its own or none
   if (host.markdown !== undefined) setMarkdown(host.markdown);
   else if (typeof document !== 'undefined') setMarkdown(gravitMarkdown);
   // the Account's read is polled only while Account is on screen in a visible tab
@@ -473,6 +476,9 @@ export function boot(win, host = {}) {
   let outEpoch = -1; // the words' epoch the open job's pre was last written under
   const jobs = host.jobs ?? startJobs({ store, mux: live.mux, call, timers, onOutput: () => writeOutput() });
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), activate: id => live.activate(id) });
+  // the lessons a seat card draws, asked once per call id after a render; a red line's override, posted before its approval
+  const memoryGate = startMemoryGate({ store, getJson, postJson, now });
+  const overriding = new Set();
   // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
   // followed on the stream its line is on; the stars in this browser's storage
   const markets = startMarkets({ store, storage, getJson, win, now, stream, marketStream, schedule, cancelTimer, owner, afterAction });
@@ -489,13 +495,13 @@ export function boot(win, host = {}) {
   const channels = startChannels({ store, postJson, getJson, now });
   // the conversation's tasks: read at once, after each list refresh and on the poll
   const tasks = host.tasks ?? startTasks({ store, getJson, postJson, timers, now });
-  // Discover: the face's inventory, read on entering it; a page's own reads (the Gravit item, a skill) on opening it
+  // Discover: the face's inventory, read on entering it; a page's own reads (the gravit item, a skill) on opening it
   const discover = startDiscover({ store, getJson, postJson, call, now });
   // a Lunhui module's page: its latest artifact, through the overview of the run's channel the modules listing names
   const readListing = () => discover.read('modules').then(() => store.get().discover.shelves.modules.data);
   // and the Runs it sent: the listing read afresh when one ends, on the live layer's timers; mirrored in this browser
   const modules = startModules({ store, postJson, readListing, refreshListing: () => discover.read('modules', { fresh: true }), timers, storage, now });
-  // a module card's Run sheet: Run is one message to Gravit's conversation (one-entry plan 2), and the page goes to Messages,
+  // a module card's Run sheet: Run is one message to gravit's conversation (one-entry plan 2), and the page goes to Messages,
   // where it is; nothing is created, so nothing is promoted
   const runSheet = startRunSheet({ store, actions, readListing, now, go: route => { go(route); } });
   // the list's search: the box's words in the store at once, the face's index read once the box is quiet
@@ -519,12 +525,12 @@ export function boot(win, host = {}) {
   // the owner's keys act only for a page that signs (the renderers draw them for no other)
   const signs = () => store.get().owner.role === 'signs';
 
-  // the session the one composer writes to (one-entry plan 2): Gravit's conversation as /data/tasks last named it (a failed
+  // the session the one composer writes to (one-entry plan 2): gravit's conversation as /data/tasks last named it (a failed
   // re-read keeps it), on Messages with no old link waiting to land — listed or not yet (a fresh one); none while the tasks
   // load, or once it is off or unknown
   const writeTo = s => (s.route.screen === 'messages' && !s.route.id && !s.route.channel ? s.tasks?.conversation ?? null : null);
   // the composer's drafts (D8), in memory: the conversation's by its id, `empty` with none to write to (words put there by Hand
-  // to Gravit while the conversation is unknown); each its runs and its files (composer/files.js), the entry gone only when
+  // to gravit while the conversation is unknown); each its runs and its files (composer/files.js), the entry gone only when
   // both are empty
   const drafts = new Map();
   const draftKey = s => writeTo(s) ?? 'empty';
@@ -540,7 +546,7 @@ export function boot(win, host = {}) {
   const putDraft = (key, runs, files) => { if (runs.length || files.length) drafts.set(key, { runs, files }); else drafts.delete(key); };
   const setRuns = (runs, key = draftKey(store.get())) => putDraft(key, runs, filesOf(key));
   const setFiles = (files, key = draftKey(store.get())) => putDraft(key, runsOf(key), files);
-  // the `empty` draft taken over once, when the composer first has a conversation to write to: words Hand to Gravit put there
+  // the `empty` draft taken over once, when the composer first has a conversation to write to: words Hand to gravit put there
   // while /data/tasks loaded move under the conversation's key (unless it holds a draft already), its waiting files uploading
   let emptyAdopted = false;
   function adoptEmptyDraft(s) {
@@ -570,7 +576,7 @@ export function boot(win, host = {}) {
   // the conversations whose model refused an image (D19), until a reload: an image added there, or sent, draws the model
   // line at once and calls nothing
   const refusesImages = new Set();
-  // the model line for a conversation: in a bot's own conversation the bot's name stands for Gravit
+  // the model line for a conversation: in a bot's own conversation the bot's name stands for gravit
   const modelLineFor = id => {
     const s = store.get();
     const conv = s.conversations.find(c => c.id === id);
@@ -868,9 +874,14 @@ export function boot(win, host = {}) {
     tickClocks(false);
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
+    // a loaded view's run whose lessons were not asked yet, likewise: each run once, a failed read once more 5 s on, the view
+    // drawn without waiting on them
+    if (lessonsDue(store)) void ensureLunhuiLessons(store, getJson);
     // an event table's task or view not read yet, likewise; called on every render so it sees each screen entered (a task
     // read that failed is read once more there), reading nothing when nothing is wanted
     void ensureAnalog(store, getJson);
+    // a seat card's lessons not asked yet, likewise: each call id once (a scan skipped while nothing it reads moved)
+    void memoryGate.ensure();
     // the operator's images the thread drew still to read: each asked once (thumb keeps its own in-flight set), its answer
     // landing through the store (hostThumb), which draws it
     if (open) for (const thumb of thumbsNeeded(open, s.thumbs)) void attachments.thumb(thumb.sessionId, thumb.attachmentId);
@@ -1021,7 +1032,7 @@ export function boot(win, host = {}) {
     showAccount();
     // Account: its page on entering it — past the face's cache when it opens on Cards, whose cards are the page's — and each tab
     // what it draws on entering it: Portfolio the holdings, then the curve they lead to; Venues the seat box; Agents the
-    // Account's agents beside Gravit's seat; Cards the page past the cache
+    // Account's agents beside gravit's seat; Cards the page past the cache
     const tabIn = (route, tab) => route?.screen === 'account' && route.tab === tab;
     const entered = tab => tabIn(r, tab) && !tabIn(was, tab);
     if (r.screen === 'account' && was?.screen !== 'account') void account.load({ fresh: r.tab === 'cards' });
@@ -1307,7 +1318,7 @@ export function boot(win, host = {}) {
     void findConnectWallets();
   }
 
-  // the draft on screen to Gravit's conversation (one-entry plan 2), serialized against its channel (none: the conversation lives
+  // the draft on screen to gravit's conversation (one-entry plan 2), serialized against its channel (none: the conversation lives
   // outside every checkout), cleared as it goes; a failure puts the whole draft, chips and files and all, back under the key it
   // came from. Each refusal before the call keeps the draft as it stands. restaged: this send follows the re-upload of a
   // receipt the host dropped (D18)
@@ -1384,7 +1395,7 @@ export function boot(win, host = {}) {
     if (draftKey(store.get()) === key) await sendNow({ restaged: true });
     else store.dispatch('hostStatus', { line: said('status.reuploaded'), bad: true });
   }
-  // words put in the composer for the operator (a suggestion, Hand to Gravit): the draft on screen, after what it holds on
+  // words put in the composer for the operator (a suggestion, Hand to gravit): the draft on screen, after what it holds on
   // a new line, the caret after them
   function putWords(words) {
     const had = currentRuns();
@@ -1395,7 +1406,7 @@ export function boot(win, host = {}) {
     const say = doc.getElementById('say');
     if (say) { say.focus(); editor.place(say, lengthOf(runs)); }
   }
-  // one message to Gravit's conversation by the composer's own path (the composer, the stock drawer's Ask, a follow-up): what
+  // one message to gravit's conversation by the composer's own path (the composer, the stock drawer's Ask, a follow-up): what
   // actions.send answers, the conversation promoted to a follow when it prompted; the composer's words are never touched.
   // Nothing goes while there is none to write to (off Messages, the tasks loading, the conversation off)
   async function sendText(text, opts = {}) {
@@ -1405,7 +1416,7 @@ export function boot(win, host = {}) {
   }
 
   // a Lunhui follow-up (a composed answer's choice, the stock drawer's Ask): on Messages its words as they are; on a task's page
-  // the same words tagged with the task (followUpText), to Gravit's conversation — which passes them to the same worker — and
+  // the same words tagged with the task (followUpText), to gravit's conversation — which passes them to the same worker — and
   // the page goes to Messages to watch it; from anywhere else (a history page draws none) nothing
   function followUp(text) {
     const s = store.get();
@@ -1647,7 +1658,7 @@ export function boot(win, host = {}) {
     connectAgent: el => { void discover.connect(el.dataset.bin); },
     disconnectAgent: el => { void discover.disconnect(el.dataset.bin); },
     rescanAgents: () => { void discover.rescan(); },
-    // Available to Gravit: a bot's or a connected CLI agent's switch on the one roster (one-entry plan 4)
+    // Available to gravit: a bot's or a connected CLI agent's switch on the one roster (one-entry plan 4)
     toggleAvailable: el => { void discover.toggleAvailable(el.dataset.kind, el.dataset.id); },
     // a module's Run: its sheet, its fields (a box's words as typed, a pick as changed), Cancel, and Run itself
     runModule: el => { void runSheet.open(el.dataset.module); },
@@ -1680,7 +1691,7 @@ export function boot(win, host = {}) {
     lunhuiRetry: el => { store.dispatch('lunhuiRetry', el.dataset.key); },
     // a stock name in a composed answer opens the stock drawer on that answer's view
     lunhuiStock: el => { store.dispatch('lunhuiStockOpen', { key: el.dataset.key, code: el.dataset.code }); },
-    // the stock drawer's keys: Close; Ask Gravit about it (one message, the open stock's words); its page on Markets
+    // the stock drawer's keys: Close; Ask gravit about it (one message, the open stock's words); its page on Markets
     // a follow-up: a stock opens its drawer, anything else is one message through the composer's path
     lunhuiChoice: el => {
       if (el.dataset.code) store.dispatch('lunhuiStockOpen', { key: el.dataset.key, code: el.dataset.code });
@@ -1717,6 +1728,23 @@ export function boot(win, host = {}) {
       const batch = answersFrom(el.closest?.('[data-gate]') ?? root, m.data?.questions, m.id);
       if (!complete(batch)) { store.dispatch('hostStatus', { line: said('status.answerAll'), bad: true }); return; }
       void actions.answer(m.id, batch);
+    },
+    // a red-lined order card's form: the owner's reason is required; the override is posted first, and the card approved once
+    // the face kept it — a refusal approves nothing and says so. One post per card while it or the approval it leads to is
+    // in flight
+    overrideGate: el => {
+      const { conv: convId, msg, call: callId } = el.dataset;
+      const m = store.get().conversations.find(c => c.id === convId)?.messages.find(x => x.id === msg);
+      if (!m || !needsAnswer(m) || m.data?.callId !== callId || overriding.has(msg)) return;
+      const reason = String(doc.getElementById(`mg-${msg}-reason`)?.value ?? '').trim();
+      if (!reason) { store.dispatch('hostStatus', { line: said('thread.memory.reasonMissing'), bad: true }); return; }
+      const wrongIf = String(doc.getElementById(`mg-${msg}-wrongIf`)?.value ?? '');
+      overriding.add(msg);
+      void memoryGate.override(callId, reason, wrongIf).then(kept => {
+        if (kept) return actions.answer(msg, 'allowed-once');
+        store.dispatch('hostStatus', { line: said('thread.memory.overrideRefused'), bad: true });
+        return undefined;
+      }).finally(() => overriding.delete(msg));
     },
     // a line of the rail of tasks: opened or folded by the page (its summary toggled first), held by its task id; Stop and
     // Continue post once while one is in flight (host/tasks.js). A gate on a line is answered by answer and answerQuestion
@@ -1920,7 +1948,7 @@ export function boot(win, host = {}) {
     dkToggle: el => store.dispatch('deskToggle', { id: el.dataset.id }),
     dkRules: () => store.dispatch('deskRules'),
     // the Routines column: a row opened or folded, its switch, its Test, Delete asked once more and answered; Edit in Messages
-    // puts its words in Gravit's composer as an ability's ask key does, and sends nothing
+    // puts its words in gravit's composer as an ability's ask key does, and sends nothing
     dkRoutine: el => store.dispatch('deskRoutineOpen', { id: el.dataset.id }),
     dkSwitch: el => { void deskRoutines.switchOne(el.dataset.id, el.dataset.value === 'true'); },
     dkTest: el => { void deskRoutines.test(el.dataset.id); },
@@ -1955,7 +1983,7 @@ export function boot(win, host = {}) {
     removeAsked: el => markets.unwatch(el.dataset.id),
     openMarket: el => go({ screen: 'markets', id: el.dataset.id }),
     setRange: el => markets.range(el.dataset.id, el.dataset.value),
-    // Gravit's conversation with the market named in the composer: the operator says what to look for
+    // gravit's conversation with the market named in the composer: the operator says what to look for
     handToGravit: el => {
       const s = store.get();
       const asset = handWordsOf(s.markets, s.account, el.dataset.id, now());
@@ -1963,7 +1991,7 @@ export function boot(win, host = {}) {
       go({ screen: 'messages', id: null });
       putWords(asset.name && asset.name !== asset.symbol ? t('markets.lookAt.named', { symbol: asset.symbol, name: asset.name }) : t('markets.lookAt.symbol', { symbol: asset.symbol }));
     },
-    // an ability's ask key (spec 2026-11-13 §4.4): its words in Gravit's composer, as Hand to Gravit puts them; nothing is sent
+    // an ability's ask key (spec 2026-11-13 §4.4): its words in gravit's composer, as Hand to gravit puts them; nothing is sent
     askAbility: el => {
       const words = el.dataset.text;
       if (!words) return;

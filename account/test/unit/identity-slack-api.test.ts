@@ -214,9 +214,9 @@ describe("the Web API client", () => {
   it("the manifest is Socket Mode, a bot user, the DM tab writable, three bot scopes and message.im", () => {
     expect(SLACK_MANIFEST).toContain("\n  ");
     const m = JSON.parse(SLACK_MANIFEST) as Record<string, any>;
-    expect(m.display_information.name).toBe("Gravit");
+    expect(m.display_information.name).toBe("gravit");
     expect(m.features.app_home).toEqual({ home_tab_enabled: false, messages_tab_enabled: true, messages_tab_read_only_enabled: false });
-    expect(m.features.bot_user).toEqual({ display_name: "Gravit", always_online: true });
+    expect(m.features.bot_user).toEqual({ display_name: "gravit", always_online: true });
     expect(m.oauth_config.scopes.bot).toEqual(["chat:write", "im:history", "users:read"]);
     expect(m.settings).toEqual({ event_subscriptions: { bot_events: ["message.im"] }, interactivity: { is_enabled: false }, org_deploy_enabled: false, socket_mode_enabled: true, token_rotation_enabled: false });
   });

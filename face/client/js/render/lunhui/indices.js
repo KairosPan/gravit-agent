@@ -1,5 +1,5 @@
 // face/client/js/render/lunhui/indices.js — the indices block: one row per index in the view's order (its name, last, change
-// and the day's sparkline; a button that charts it), the picked index's day minute by minute with Gravit's focus band, the
+// and the day's sparkline; a button that charts it), the picked index's day minute by minute with gravit's focus band, the
 // minute slider under it, and the readout that answers the slider or the pointer. The slider and the pointer move the cursor
 // in place (host/lunhui.js applyCursor); neither touches the store.
 import { esc, attrs, cls } from '../../html.js';

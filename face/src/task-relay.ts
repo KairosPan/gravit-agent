@@ -1,6 +1,6 @@
 // face/src/task-relay.ts
 /** Relays (one entry, plan 1, task 5): what a task tells the conversation - a worker's report, a wait, a stall, a
- * failure ({@link RelayItem}, src/task-view.ts) - becomes one `[task · …]` user message in the conversation, Gravit's
+ * failure ({@link RelayItem}, src/task-view.ts) - becomes one `[task · …]` user message in the conversation, gravit's
  * router session, under the item's fixed id, sent with `followup` only when the conversation is idle and both its
  * inbox lists are empty, so a relay never splices into the operator's turn or overtakes a message they typed. Before
  * each send the conversation's log is flushed and read and its inbox scanned, and an id already there is dropped: a
@@ -33,7 +33,7 @@ export function fenceTaskData(text: string, nonce?: string): string {
  * lines after a relay's closing fence. */
 export const TABLE_LINE_RE = /^\[face · event table: (an-\d{8}-[0-9a-f]{8}(?:, an-\d{8}-[0-9a-f]{8})*)\] /;
 
-/** The face's line after a relay whose report names event views (`RelayItem.views`): it tells Gravit the face draws
+/** The face's line after a relay whose report names event views (`RelayItem.views`): it tells gravit the face draws
  * their table under the report - or, for a task from the phone, where no table is shown, to give the figures that
  * matter and point to the task's page. */
 export function tableLine(ids: readonly string[], phone = false): string {

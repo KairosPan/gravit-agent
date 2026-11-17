@@ -64,7 +64,7 @@ const KINDS = [
   m('rc1', { kind: 'receipt', text: 'Order accepted', data: {} }), m('rc2', { kind: 'refusal', text: 'no', data: { code: 'E1' } }),
   m('e9', { from: 'buffett', text: '买', data: { name: '巴菲特型' } }),
   m('e10', { from: 'system', text: 'runtime snapshot', data: { source: 'runtime' } }),
-  // Gravit's composed answers (Lunhui run view plan 2), their views loading, loaded, failed and loaded without breadth (lunhuiStates); the first folds e2
+  // gravit's composed answers (Lunhui run view plan 2), their views loading, loaded, failed and loaded without breadth (lunhuiStates); the first folds e2
   ...['loading', 'loaded', 'failed', 'bare'].map((run, i) => m(`p${i}`, { kind: 'composed', text: '弱势日', data: { callId: String(i), strategy: 'cn-market', run, summary: '弱势日', blocks: [{ kind: 'verdicts' }, { kind: 'breadth', title: '涨跌' }, { kind: 'indices', focus: { from: '14:00', to: '15:00' } }, { kind: 'sources' }, { kind: 'ladder' }, { kind: 'yesterday' }, { kind: 'signals' }], choices: [{ label: 'Next', stock: 'sh600001' }], modules: [] } })),
 ];
 // the composed answers' views by state (host/lunhui.js viewKey)
@@ -148,7 +148,7 @@ function accountStates() {
   ];
 }
 
-const seatedOf = read => R.seatLoaded(read, { data: { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T14:00:00Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'Gravit', status: 'admitted', address: '0xab12', limits: [] }, venues: [], cards: [] }, at: NOW });
+const seatedOf = read => R.seatLoaded(read, { data: { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T14:00:00Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'gravit', status: 'admitted', address: '0xab12', limits: [] }, venues: [], cards: [] }, at: NOW });
 
 // Account › Identity's read on a page that signs: Telegram connected and failing to poll, a stranger, quiet hours
 function identitySigning(base) {
@@ -173,7 +173,7 @@ function identityStates(base) {
 }
 
 function connectStates(signing) {
-  const pending = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' }, link: 'https://t.me/gravit_desk_bot', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'conflict' };
+  const pending = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'gravit' }, link: 'https://t.me/gravit_desk_bot', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'conflict' };
   const heard = { ...pending, state: 'heard', sender: { id: '555000123', name: 'Pan', handle: '@pan', masked: '…123', text: '/start' } };
   const open = R.identityConnectOpen(signing);
   return [
@@ -273,7 +273,7 @@ function strategyStates() {
 }
 
 // Discover: the shelves, a failed shelf, a query, a shelf's grid, every kind of page, its own line
-// the task Gravit started for a Run of Theme, as GET /data/tasks shows it
+// the task gravit started for a Run of Theme, as GET /data/tasks shows it
 const runTask = { id: 't-run', title: 'Theme · 10-19', origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 };
 
 export function discoverStates() {
@@ -285,7 +285,7 @@ export function discoverStates() {
   const unmounted = R.shelfLoaded(at({ screen: 'discover', id: null }), { shelf: 'modules', data: { ...modulesListing(), mounted: false }, at: 2 });
   return [
     unmounted, at({ screen: 'discover', id: 'research' }),
-    // a card whose Run was sent to Gravit (one-entry plan 2): before its task shows, Sent linking to Messages; once Gravit
+    // a card whose Run was sent to gravit (one-entry plan 2): before its task shows, Sent linking to Messages; once gravit
     // started the task of the Run's title, Running linking to the task
     R.moduleRunStarted(at({ screen: 'discover', id: 'research' }), { module: 'theme', title: 'Theme · 10-19', startedAt: NOW }),
     R.tasksLoaded(R.moduleRunStarted(at({ screen: 'discover', id: 'research' }), { module: 'theme', title: 'Theme · 10-19', startedAt: NOW }), { conversation: 'c-gravit', tasks: [runTask], at: NOW }),
@@ -304,7 +304,7 @@ export function discoverStates() {
 }
 
 // the abilities (spec 2026-11-13 §4.4), pinned by name after the other named states (discoverStates sits amid the indexed states,
-// so a state put there would move every name after it): the event analog's page with Gravit's conversation known and with
+// so a state put there would move every name after it): the event analog's page with gravit's conversation known and with
 // none, the read-through's page with its ability off, and the Abilities grid with it off beside the event analog
 function abilityStates() {
   const base = listings => {
@@ -368,7 +368,7 @@ export function everyState() {
     taskKindStates(base), R.openSettings(open), R.tasksOff(open, { at: NOW }),
     R.nav(R.hostList(emptyState(), { conversations: base.conversations, channels: base.channels }), { screen: 'messages', id: null }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
-    ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), // (where the pinned row stood: one-entry plan 2 Task 6) the side panel beside a strategy's page, Gravit's dot on
+    ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), // (where the pinned row stood: one-entry plan 2 Task 6) the side panel beside a strategy's page, gravit's dot on
     R.nav(R.hostList(open, { conversations: open.conversations.map(c => (c.id === 's1' ? { ...c, updatedAt: NOW + MIN } : c)) }), { screen: 'strategy', id: 'cn-market' }),
     R.traceLoaded(onConv(base, 'g'), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
     R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...strategyStates(), ...discoverStates(), ...tradeStates(),
@@ -403,7 +403,7 @@ export function everyState() {
     ...deskRailStates(base),
     // iMessage in Account › Identity (the iMessage plan), appended after the states above (after one entry's plan 3 since the merge)
     ...imessageStates(identitySigning(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' }))),
-    // plan 4 of one entry, Task 5: Available to Gravit on, off and unreadable, and a bot task's line on the rail
+    // plan 4 of one entry, Task 5: Available to gravit on, off and unreadable, and a bot task's line on the rail
     ...rosterStates(base),
     // sign-only-money Task 5: Identity on a page that does not sign — This is me refused on Slack's sheet 3, quiet hours' clocks open
     // with the account's refusal under them, Block's refusal in Not you
@@ -450,10 +450,62 @@ export function namedStates() {
     // the routine card in Messages (desk-page plan 3 Task 3): pending, with the turn's closing words left out; added, with its
     // first run; a change waiting, with the routine it replaces; a confirm refused for the limit
     ...routineCardStates(),
+    // the memory's lessons on an order card (memory order card Task 6): on a task's page, a caveat; a red line with its
+    // override form over a batch of two lines; an untold lesson beside a position not read; a memory not connected and a
+    // line's fault; an answered card with what was registered; and the rail's line pointing at the task
+    ...memoryGateStates(),
+    // the owner's lessons on a Lunhui run's leaders (memory alert and Lunhui Task 5): under the ladder, a leader's caveat and
+    // another's untold lesson; a run not checked; a memory not connected; and the drawer of a leader with a lesson
+    ...memoryLunhuiStates(),
   ];
 }
 
-// the routine card's states (desk-page plan 3 Task 3): Gravit's one conversation with an operator's ask, the words before the
+// a composed answer with a ladder on the sealed 10-27 run's view, and the face's answer for that run's lessons
+function memoryLunhuiStates() {
+  const run = VIEW_1027.run;
+  const answer = m('lp1', { kind: 'composed', text: '弱势日', data: { callId: 'lp', strategy: 'cn-market', run, summary: '弱势日', blocks: [{ kind: 'ladder' }], choices: [], modules: [] } });
+  const key = `cn-market/${run}/`;
+  const thread = R.lunhuiViewLoaded(onConv(R.hostList(emptyState(), { conversations: [conv('lm', { messages: [answer], loaded: true })], channels: [], bots: [] }), 'lm'), { key, view: VIEW_1027 });
+  const caveat = { id: 'L-1', strength: 'caveat', says: 'careful', words: 'Do not chase a third board after a weak open', fired: 3, followed: 2, overridden: 1 };
+  const leader = (code, boards, over = {}) => ({ code, boards, lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, ...over });
+  const checked = { state: 'checked', strategy: 'cn-market', run, askedAt: '2026-10-27T08:00:00Z', leaders: [
+    leader('600001', 5, { recall: 'R-1', lessons: [caveat], lessonsMore: 1 }), leader('600011', 4, { recall: 'R-2', untold: [{ id: 'L-3', needs: ['industry'] }] }), leader('600012', 4, { recall: 'R-3' })] };
+  const kept = lessons => R.memoryLunhuiLoaded(thread, { runKey: `cn-market/${run}`, lessons });
+  return [
+    ['lunhui-memory-ladder', kept(checked)],
+    ['lunhui-memory-not-checked', kept({ state: 'not checked', why: 'old', words: 'lessons were not checked for this run' })],
+    ['lunhui-memory-not-connected', kept({ state: 'not connected', words: 'no memory here' })],
+    ['lunhui-memory-drawer', R.lunhuiStockOpen(kept(checked), { key, code: '600001' })],
+  ];
+}
+
+// the order card's lessons (memory order card Task 6), each drawn on a task's page from the gate the face kept for its call,
+// and the rail's line of a card a lesson applies to
+function memoryGateStates() {
+  const card = (id, callId, over = {}) => m(id, { seq: 2, kind: 'card', text: 'Your call: buy 2 NVDA · limit 120 · paper-us', ...over, data: { eventId: id, sessionId: 'wm', toolName: 'mcp__account__portfolio_place_order', callId, venue: 'paper-us', line: 'Account seat - mcp__account__portfolio_place_order: side=buy qty=2 symbol=NVDA type=limit limit=120 venue=paper-us' } });
+  const lesson = (over = {}) => ({ id: 'L-1', strength: 'caveat', says: 'careful', words: 'Do not chase a gap up on the open', fired: 3, followed: 2, overridden: 1, ...over });
+  const red = lesson({ id: 'L-2', strength: 'red-line', says: 'dont', words: 'Never add to a position down more than 8%', fired: 2, followed: 2, overridden: 0 });
+  const line = (over = {}) => ({ order: 'buy 2 NVDA limit 120', considering: ['add'], positionRead: true, market: 'US', lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, ...over });
+  const gate = (callId, over = {}) => ({ callId, state: 'checked', lines: [line()], redLine: false, overridden: false, ...over });
+  const task = { id: 'wm', title: 'Buy a little NVDA', origin: 'web', state: 'waiting', group: 'you', steps: ['Read the tape'], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 2, waitingFor: { kind: 'approval', id: 'm1', tool: 'mcp__account__portfolio_place_order' } };
+  const page = (cards, gates) => {
+    const worker = conv('wm', { title: 'Buy a little NVDA', loaded: true, messages: [m('wm1', { text: 'Placing the order' }), ...cards] });
+    const s = R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('mg'), worker], channels: [], bots: [] }), { conversation: 'mg', tasks: [task], at: NOW }), { screen: 'task', id: 'wm' });
+    return gates.reduce((st, g) => R.memoryGateLoaded(st, { callId: g.callId, gate: g }), s);
+  };
+  const rail = R.nav(R.memoryGateLoaded(R.hostGate(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('mg'), conv('wm', { title: 'Buy a little NVDA' })], channels: [], bots: [] }), { conversation: 'mg', tasks: [task], at: NOW }),
+    { convId: 'wm', message: card('m1', 'm1') }), { callId: 'm1', gate: gate('m1', { lines: [line({ lessons: [lesson()] })] }) }), { screen: 'messages', id: null });
+  return [
+    ['task-memory-caveat', page([card('m1', 'm1')], [gate('m1', { lines: [line({ lessons: [lesson()], lessonsMore: 2 })] })])],
+    ['task-memory-red-line', page([card('m1', 'm1')], [gate('m1', { redLine: true, lines: [line({ leg: 0, lessons: [red] }), line({ leg: 1, order: 'sell 1 AMD limit 150', considering: ['trim'], lessons: [lesson()] })] })])],
+    ['task-memory-untold', page([card('m1', 'm1')], [gate('m1', { lines: [line({ positionRead: false, untold: [{ id: 'L-3', needs: ['change_5d_pct', 'market'] }], untoldMore: 1 })] })])],
+    ['task-memory-fault', page([card('m1', 'm1'), card('m2', 'm2', { seq: 3 })], [gate('m1', { state: 'not connected', words: 'no memory here', lines: [] }), gate('m2', { lines: [line({ fault: 'the memory did not answer in time' })] })])],
+    ['task-memory-registered', page([card('m1', 'm1', { answer: 'approved' })], [gate('m1', { redLine: true, overridden: true, lines: [line({ lessons: [red], registered: 'registered: add' })] })])],
+    ['messages-memory-rail', rail],
+  ];
+}
+
+// the routine card's states (desk-page plan 3 Task 3): gravit's one conversation with an operator's ask, the words before the
 // call, the card and the closing words the thread leaves out, under a routines read at the desk status' own clock
 function routineCardStates() {
   const P = 'p-0a1b2c3d';
@@ -538,7 +590,7 @@ function marketEventWindow() {
 function deviceStates(read) {
   const KID = 'a5048199a8081854';
   const page = { ...read.account.data, signers: { ...read.account.data.signers, owners: [
-    { id: `device:${KID}`, kind: 'device', label: 'Gravit face', via: 'first', addedAt: '2026-11-01T14:05:00.000Z' },
+    { id: `device:${KID}`, kind: 'device', label: 'gravit face', via: 'first', addedAt: '2026-11-01T14:05:00.000Z' },
     { id: 'device:0f0f0f0f0f0f0f0f', kind: 'device', label: 'Laptop', via: 'letIn', by: `device:${KID}`, addedAt: '2026-11-02T15:30:00.000Z' },
     { id: 'device:1234123412341234', kind: 'device', label: 'Phone', via: 'code', addedAt: '2026-11-09T21:10:00.000Z' },
   ], pendingDevices: [{ kid: 'fedcba9876543210', at: '2026-11-09T21:00:00.000Z' }] } };
@@ -555,7 +607,7 @@ function deviceStates(read) {
 function unsignedIdentityStates(base) {
   const read = identitySigning(base).identity.data;
   const page = R.ownerStanding(R.identityLoaded(base, read), { role: 'needs-code', kid: '' });
-  const pending = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'heard', sender: { id: 'T0FAKE001:U0OPER7QK', name: 'Pan', handle: '@pan', userId: 'U0OPER7QK', masked: '…7QK', text: 'hi' } };
+  const pending = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'heard', sender: { id: 'T0FAKE001:U0OPER7QK', name: 'Pan', handle: '@pan', userId: 'U0OPER7QK', masked: '…7QK', text: 'hi' } };
   return [
     R.identityConnectSet(R.identityConnectOpen(page, 'slack'), { step: 3, pending, error: 'This connection is gone: it expired or was closed. Start again.' }),
     R.identitySaid(R.identityQuietEdit(page, true), { at: 'quiet', words: 'Quiet hours start and end at different times' }),
@@ -564,7 +616,7 @@ function unsignedIdentityStates(base) {
 }
 
 // the one roster (one-entry plan 4 Task 5): a bot's page and a connected CLI agent's with the switch on, off, and the roster
-// file unreadable (the switches disabled under its line); then a bot task's rail line beside a Gravit task's
+// file unreadable (the switches disabled under its line); then a bot task's rail line beside a gravit task's
 function rosterStates(base) {
   let all = emptyState();
   for (const [shelf, v] of Object.entries(listings())) all = R.shelfLoaded(all, { shelf, data: v.data, at: 1 });
@@ -631,7 +683,7 @@ function historyStates(base) {
 }
 
 // the task source kind (one-entry plan 2 Task 5): a report relayed into the conversation (its title read, and one unread named
-// by the tasks slice), a worker's brief and a steer Gravit relayed, a recovery note, a stop
+// by the tasks slice), a worker's brief and a steer gravit relayed, a recovery note, a stop
 function taskKindStates(base) {
   const k = (id, form, text, data = {}) => m(id, { from: 'system', kind: 'task', text, data: { form, ...data } });
   const messages = [
@@ -756,7 +808,7 @@ function accountRead() {
 function slackStates(signing) {
   const read = { ...signing.identity.data, networks: [...signing.identity.data.networks, { network: 'slack', speaksAs: '@gravit', talksOnlyWith: '@pan', since: '2026-11-04T14:00:00.000Z', fingerprint: 'cd56ef78', state: 'connected', polling: true }], slackManifest: '{\n  "a": 1\n}' };
   const both = R.identityDetails(R.identityLoaded(signing, read), 'slack');
-  const pending = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'conflict' };
+  const pending = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'conflict' };
   const heard = { ...pending, state: 'heard', sender: { id: 'T0FAKE001:U0OPER7QK', name: 'Pan', handle: '@pan', userId: 'U0OPER7QK', masked: '…7QK', text: 'hi' } };
   const open = R.identityConnectOpen(both, 'slack');
   return [
@@ -942,7 +994,7 @@ export function pageHtml(st, { mac = true } = {}) {
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0)); };
 
 // lines a host writes into the store from its own source, drawn as the page would: a module card's Run that could not send,
-// or found Gravit's conversation not known (host/run-sheet.js); an Answer pressed with a question unanswered (app.js). The states come from running the host, so a
+// or found gravit's conversation not known (host/run-sheet.js); an Answer pressed with a question unanswered (app.js). The states come from running the host, so a
 // word moved there shows here
 export async function hostCorpus() {
   const entries = [];
@@ -983,6 +1035,37 @@ export async function hostCorpus() {
       store.timers.clear();
     }
   }
+  // a red-lined order card's override pressed with no reason, then refused by the face (memory order card Task 6, app.js)
+  {
+    const f = fakeWindow({ hash: '' });
+    let opts = null;
+    const mux = { stream: () => ({ cancel() {} }), answer: async () => {}, close() {} };
+    const rows = [{ sessionId: 's1', updatedAt: 5, agentAvailable: false, running: false, blank: false }];
+    const call = async endpoint => (endpoint === 'session/list' ? { items: rows } : endpoint === 'session/projections' ? { asOfSeq: 20, values: {} } : endpoint === 'session/page' ? { records: [] } : undefined);
+    const gate = { callId: 'c9', state: 'checked', redLine: true, overridden: false, lines: [{ order: 'buy $10 of BTC/USD', considering: ['open'], positionRead: true, lessons: [{ id: 'L-1', strength: 'red-line', says: 'dont', words: 'Never buy a gap', fired: 1, followed: 1, overridden: 0 }], lessonsMore: 0, untold: [], untoldMore: 0 }] };
+    const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }], ungrouped: [], archived: [], presets: {} }
+      : path === '/data/sessions-meta.json' ? { ok: true, archived: [], deleted: [] } : path === '/data/tasks' ? { ok: true, conversation: 's1', tasks: [] }
+        : path === '/data/memory/gate?callId=c9' ? { ok: true, gate } : { ok: true, bots: [] });
+    const postJson = async path => { if (path === '/data/memory/gate/override') throw Object.assign(new Error('this card is answered'), { status: 409 }); return { ok: true }; };
+    const store = boot(f.win, { editor: valueEditor, openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, now: () => NOW });
+    try {
+      await settle();
+      opts.onReady({});
+      await settle();
+      opts.onGate({ type: 'waterfall', event: 'approval/request', eventId: 'ev-9', agentId: 's1', request: { toolName: 'mcp__account__portfolio_live_order', callId: 'c9', reason: 'Account seat - mcp__account__portfolio_live_order: side=buy usd=10 symbol=BTC/USD venue=paper-1' } });
+      await settle();
+      const press = () => f.click({ tagName: 'BUTTON', dataset: { action: 'overrideGate', conv: 's1', msg: 'ev-9', call: 'c9' } });
+      press();
+      await settle();
+      entries.push(['host-app-override-no-reason', pageHtml(store.get())]);
+      f.withId('mg-ev-9-reason', { tagName: 'INPUT', type: 'text' }).value = 'I sized it small';
+      press();
+      await settle();
+      entries.push(['host-app-override-refused', pageHtml(store.get())]);
+    } finally {
+      store.timers.clear();
+    }
+  }
   return entries;
 }
 
@@ -999,7 +1082,7 @@ export function corpus() {
   return [...states, ...namedStates().map(([name, st]) => [name, pageHtml(st)]), ...composerPieces().map(([name, html]) => [`composer-${name}`, html])];
 }
 
-// the fields whose strings are words a screen draws as they come — the operator's, Gravit's, a bot's, a venue's or the
+// the fields whose strings are words a screen draws as they come — the operator's, gravit's, a bot's, a venue's or the
 // Account's prose, a name, a ticker, a path — and the only ones corpusStrings counts outside an upstream's content: a code
 // (a status, a screen, a phase, a run's state, an id) is never one, so a code word drawn as a word (failed, running,
 // messages) is the probe's to find. An ability's blurb, about, asks and limits are none of them, nor are its parts' names (its
@@ -1030,14 +1113,17 @@ const CONTENT_FIELDS = new Set([
   'watch',
 ]);
 // the parts of a state that are an upstream's content as a whole, drawn as they come, every string in them and its keys too
-// (a metric's name): a run's view and its artifacts (Lunhui's output), a strategy's files (Gravit's) and its paper positions
+// (a metric's name): a run's view and its artifacts (Lunhui's output), a strategy's files (gravit's) and its paper positions
 // (the venue its status.yaml names and the Account's rows or refusal), What you sign's lines
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); an event analog view and its
 // task as the face read them (the worker's and web pages' words); the desk's news as the face answered it (its ledgers' and
-// Gravit's words), and a routine's when line and instruction (the face's line, the operator's words), a routine card's too
-// (Gravit's call and the face's when line) and a proposal's the read holds; `*` is any one key
-const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
+// gravit's words), and a routine's when line and instruction (the face's line, the operator's words), a routine card's too
+// (gravit's call and the face's when line) and a proposal's the read holds; the gate the face kept for an order card's call
+// (the face's order words and sentences, the memory's lessons), and of a Lunhui run's leaders the memory's words: a lesson's
+// words, what an untold lesson needs, a leader's fault; `*` is any one key
+const CONTENT = [['memoryGate', '*', 'gate'], ['memoryLunhui', '*', 'lessons', 'leaders', 'lessons', 'words'], ['memoryLunhui', '*', 'lessons', 'leaders', 'untold', 'needs'],
+  ['memoryLunhui', '*', 'lessons', 'leaders', 'fault'],['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data'],
   ['deskPage', 'routines', 'data', 'routines', 'when'], ['deskPage', 'routines', 'data', 'routines', 'instruction'],
   ['conversations', 'messages', 'data', 'when'], ['conversations', 'messages', 'data', 'instruction'],

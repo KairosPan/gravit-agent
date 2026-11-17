@@ -4,7 +4,7 @@
  * which picks the recipient, the routing row (Cards waiting) and quiet hours.
  *
  * Text only: no button, no link, nothing that approves from the phone (D18, charter §8). A card is
- * answered in Gravit, in the browser, and nowhere else; the notice only says one is waiting. Every
+ * answered in gravit, in the browser, and nowhere else; the notice only says one is waiting. Every
  * URL is taken out (`<link>`) - a payee's included, since a link on the phone is something to tap -
  * and so is every line break, so a model-written field cannot pass itself off as a second line.
  *
@@ -12,6 +12,7 @@
  * scratch home never phones. The account's own Guard card for the same seat write phones too: two
  * cards per write is the accepted design.
  */
+import type { GateNote } from "./memory-gate.ts";
 import { describeOrder } from "./orders.ts";
 import type { PhoneClient } from "./phone.ts";
 
@@ -21,7 +22,7 @@ const BIN = "gravit-face";
  * (orders.ts), and this bounds a call with very many fields. */
 export const CARD_NOTICE_MAX = 600;
 
-const SUFFIX = " — waiting in Gravit";
+const SUFFIX = " — waiting in gravit";
 const PREFIX = "Your call · ";
 
 /* LINK SCRUB BEGIN - byte-identical in face/src/card-notice.ts and account/src/portfolio/identity/notices.ts
@@ -111,35 +112,49 @@ function orderLine(args: unknown): string | undefined {
  * after the last `__`), the card's own line without the server. No link, no line break.
  * @param name - the registered tool name (`exec.name`).
  * @param args - `exec.arguments`.
- * @returns `Your call · <what> — waiting in Gravit`, at most {@link CARD_NOTICE_MAX} characters.
+ * @param note - the memory's check of the call (src/memory-gate.ts), if any: `· 1 lesson applies`, `· N lessons
+ * apply` or `· a red line applies` before the suffix, counted inside the bound; no note, or no lesson, says nothing.
+ * @returns `Your call · <what> — waiting in gravit`, at most {@link CARD_NOTICE_MAX} characters.
  */
-export function cardNoticeText(name: string, args: unknown): string {
+export function cardNoticeText(name: string, args: unknown, note?: GateNote): string {
   const raw = name.slice(name.lastIndexOf("__") + (name.includes("__") ? 2 : 0));
   const what = (raw === "portfolio_live_order" ? orderLine(args) : undefined) ?? describeOrder(raw, args);
   let line = what.replace(/\s*[\r\n]+\s*/g, " ").trim();
   line = scrubLinks(line);
-  const room = CARD_NOTICE_MAX - PREFIX.length - SUFFIX.length;
+  const said = noteWords(note);
+  const room = CARD_NOTICE_MAX - PREFIX.length - said.length - SUFFIX.length;
   /* scrubbed again after the cut, which must neither leave nor make a link; the ellipsis is added after
    * (NFKC reads '…' as three dots), and a second scrub that lengthened the line is cut once more - a
    * prefix of a scrubbed line is still clean */
   if (line.length > room) line = `${scrubLinks(line.slice(0, room - 1)).slice(0, room - 1)}…`;
-  return `${PREFIX}${line}${SUFFIX}`;
+  return `${PREFIX}${line}${said}${SUFFIX}`;
+}
+
+/** What the memory's check adds before the suffix: that a red line applies, else how many lessons do, else nothing.
+ * Fixed words and a count, never a lesson's own words. */
+function noteWords(note: GateNote | undefined): string {
+  if (note?.redLine === true) return " · a red line applies";
+  const lessons = note?.lessons;
+  if (typeof lessons !== "number" || !Number.isSafeInteger(lessons) || lessons < 1) return "";
+  return lessons === 1 ? " · 1 lesson applies" : ` · ${lessons} lessons apply`;
 }
 
 /**
  * Send a card's notice, kind `card`, and never throw or wait: Gate 2's listener calls this and
  * goes on to ask. What the account answers is read from the body (src/phone.ts): sent or queued
  * says nothing; held, refused, or no answer is one line, and nothing is retried - the card itself
- * waits in Gravit either way.
+ * waits in gravit either way.
  * @param phone - the account's send, or undefined when there is none yet (one line).
  * @param name - the registered tool name.
  * @param args - its arguments.
+ * @param note - the memory's check of the call, if any ({@link cardNoticeText}).
  * @param log - where the one line goes.
  */
 export function announceCard(
   phone: Pick<PhoneClient, "send"> | undefined,
   name: string,
   args: unknown,
+  note?: GateNote,
   log: (line: string) => void = console.log,
 ): void {
   const notSent = (why: string): void => { log(`${BIN}: a card notice was not sent: ${why}`); };
@@ -148,7 +163,7 @@ export function announceCard(
     return;
   }
   try {
-    phone.send("card", cardNoticeText(name, args)).then(
+    phone.send("card", cardNoticeText(name, args, note)).then(
       (said) => { if ("held" in said) notSent(`the account held it (${said.held})`); },
       (err: unknown) => { notSent(err instanceof Error ? err.message : String(err)); },
     );

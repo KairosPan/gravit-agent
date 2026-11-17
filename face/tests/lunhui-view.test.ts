@@ -304,7 +304,7 @@ test("cited: a claim naming a stock, or citing its pool row's id", () => {
   assert.deepEqual(buildView(sealed, { modules: ["environment"] }).stocks["600001"].cited, []);
 });
 
-test("viewDigest: the lines Gravit composes from, within 2,048 bytes", () => {
+test("viewDigest: the lines gravit composes from, within 2,048 bytes", () => {
   const digest = viewDigest(buildView(syntheticSealedRun()));
   const all = lines(digest);
   assert.equal(all[0], "run 20261027T201627Z-6937d208 · session 2026-10-27 · through 15:00");

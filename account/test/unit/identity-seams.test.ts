@@ -82,7 +82,7 @@ describe("the seams for a second network", () => {
   });
 
   it("chatOffLine names the network", () => {
-    expect(chatOffLine("slack")).toBe("Chat with Gravit is off on Slack: Account › Identity turns it on.");
+    expect(chatOffLine("slack")).toBe("Chat with gravit is off on Slack: Account › Identity turns it on.");
     expect(chatOffLine("telegram")).toBe(CHAT_OFF);
   });
 
@@ -122,7 +122,7 @@ function scriptedSource(network: "imessage" | "slack" | "telegram", secrets: str
   const source: PendingSource = {
     network,
     secrets,
-    check: async () => ({ id: "T0FAKE001:U0BOT0001", username: "gravit", name: "Gravit", link: "https://slack.com/app_redirect?app=A0FAKEAPP01", workspace: "Fake Co" }),
+    check: async () => ({ id: "T0FAKE001:U0BOT0001", username: "gravit", name: "gravit", link: "https://slack.com/app_redirect?app=A0FAKEAPP01", workspace: "Fake Co" }),
     listen: (ctx) =>
       new Promise<void>((done) => {
         counts.listens += 1;
@@ -163,7 +163,7 @@ describe("the pending shell over a source", () => {
       const s = scriptedSource("slack", [app, bot]);
       const v = await pending.begin("slack", s.source, keyInput, keyHashOf(salt, keyInput), salt);
       if (isRefusal(v)) throw new Error(v.message);
-      expect(v).toMatchObject({ network: "slack", bot: { id: "T0FAKE001:U0BOT0001", username: "gravit", name: "Gravit", workspace: "Fake Co" }, link: "https://slack.com/app_redirect?app=A0FAKEAPP01", state: "waiting" });
+      expect(v).toMatchObject({ network: "slack", bot: { id: "T0FAKE001:U0BOT0001", username: "gravit", name: "gravit", workspace: "Fake Co" }, link: "https://slack.com/app_redirect?app=A0FAKEAPP01", state: "waiting" });
       expect(s.counts.listens).toBe(1);
       s.conflict(true);
       expect(pending.view(v.id)!.state).toBe("conflict");

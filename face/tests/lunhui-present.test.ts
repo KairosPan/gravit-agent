@@ -1,7 +1,7 @@
 /**
  * The composition check of `lunhui_present`, `plugins/lunhui/lib/present.mjs`: `checkPresent`
  * against the synthetic sealed 10-27 run's view and digest (`syntheticSealedRun()`), and
- * `unsupportedNumbers`, the digest number rule - a number Gravit writes in another form than the
+ * `unsupportedNumbers`, the digest number rule - a number gravit writes in another form than the
  * digest's ("4,774", "1.3%", "41%" for 0.41, full-width digits) is found, one the digest does not
  * hold is named. Then the row, `present-row.mjs`: `lunhui_present` over a run frozen from the
  * FRIDAY fixtures and sealed by a module context read, as tests/lunhui-rows.test.ts builds one.

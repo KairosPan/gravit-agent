@@ -1,4 +1,4 @@
-/** The Account seat: the project-owned MCP row that gives Gravit a seat at
+/** The Account seat: the project-owned MCP row that gives gravit a seat at
  * Linqi's Account (after linqizhe07/buyer-agent-demo), the service in the
  * repo's `account/`.
  *
@@ -17,7 +17,7 @@
  * - its key is the Account's, made on its first tool call under
  *   `$BUYER_HOME/seats/<slug>.json` (exclusive create, mode 0600), never read
  *   here; the seat's name is what the Account shows on the face's Account ›
- *   Agents, so the operator lets it in as Gravit and signs its limit under that
+ *   Agents, so the operator lets it in as gravit and signs its limit under that
  *   name;
  * - it registers its 34 real-account tools even when the service is not
  *   reachable (its startup GET of `/api/account` fails closed to "real"), so a
@@ -53,7 +53,7 @@ export const ACCOUNT_SEAT_ROW_ID = "mcp-account";
 export const ACCOUNT_SEAT_SERVER = "account";
 export const SEAT_TOOL_PREFIX = `mcp__${ACCOUNT_SEAT_SERVER}__`;
 /** The seat's name at the Account, as the face's Account › Agents shows it; its slug `gravit` names the key file there. */
-export const ACCOUNT_SEAT_NAME = "Gravit";
+export const ACCOUNT_SEAT_NAME = "gravit";
 /** The repo's `account/`, the Account service's install, resolved from this module's own location (as
  * `roles.ts` resolves `ROLES_ROOT`); `FACE_ACCOUNT_SEAT_DIR` overrides it ({@link seatDir}). */
 export const DEFAULT_SEAT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "account");

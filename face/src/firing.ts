@@ -561,7 +561,7 @@ export interface FiringDeps {
   on: SessionEventsOn;
   supervise?: typeof superviseDeskTurns;
   deliver(text: string, opts: DeliverOpts): Promise<DeliverResult>;
-  /** Note a text `deliver` did not refuse as a line in Gravit's one conversation (src/conversation.ts `note`, through
+  /** Note a text `deliver` did not refuse as a line in gravit's one conversation (src/conversation.ts `note`, through
    * src/desk.ts - a no-op until it is bound, and with `FACE_ROUTER=0`); none when absent. */
   note?: (line: DeskLine) => void;
   budget(): Promise<BudgetState>;

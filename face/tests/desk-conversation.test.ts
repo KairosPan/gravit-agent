@@ -2143,7 +2143,7 @@ test("a spent budget no longer refuses a phone post routed to the conversation (
   const h = await harness({ budget: async () => SPENT });
   const fallback = await post(h, "hi");
   assert.equal((fallback as { refused?: string }).refused, "budget");
-  /* routed: Gravit's one conversation, its home outside any repository and its ledger showing the day spent, opens it */
+  /* routed: gravit's one conversation, its home outside any repository and its ledger showing the day spent, opens it */
   const home = await mkdtemp(join(tmpdir(), "face-desk-conv-routed-"));
   t.after(() => rm(home, { recursive: true, force: true }));
   await appendEvent(home, { t: new Date(AT).toISOString(), kind: "budget-spent", date: "2026-10-20", used: 2_013_402, dailyTokens: 2_000_000 });

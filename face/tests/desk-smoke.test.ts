@@ -1,8 +1,8 @@
 // face/tests/desk-smoke.test.ts
 /** The desk on a REAL composed tree (docs/superpowers/plans/2026-10-20-desk-p1-bridge.md, Tasks 8, 8b and 8c):
  * the `gravit-desk` preset's roster, the parameters of its write and read tools - and str_replace_editor's
- * commands - that the desk guard was written against, its prompt - against a Gravit session's, the control -
- * Gate 2's refusal from a desk turn, the sandbox fence around `desk/journal/`, the guard leaving a Gravit
+ * commands - that the desk guard was written against, its prompt - against a gravit session's, the control -
+ * Gate 2's refusal from a desk turn, the sandbox fence around `desk/journal/`, the guard leaving a gravit
  * session's writes and reads alone, a desk grep spilled past its 250 matches and the desk reading its own spill
  * back, the guard's backstop holding a write's and a read's deny when a listener in front of it answers allow, the
  * phone's /stop cutting one turn while the texts queued behind it are answered in order, the guard refusing the
@@ -97,7 +97,7 @@ const ORDER_STAND_IN = "mcp__drill__portfolio_live_order";
 /** Gate 2's refusal for an order tool the calling scope cannot see (src/orders.ts `orderApprovalDecision`). */
 const HIDDEN_ORDER = `${ORDER_STAND_IN} is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run`;
 
-/** The research-cycle contract as the face mounts it on Gravit's preset - `dsh/profile/cycle.md`, trimmed, read
+/** The research-cycle contract as the face mounts it on gravit's preset - `dsh/profile/cycle.md`, trimmed, read
  *  by the face's own reader - and its heading, which the desk's prompt must not hold. */
 const CYCLE = readCycle(CYCLE_PATH);
 const CYCLE_HEADING = CYCLE.split("\n")[0];
@@ -121,13 +121,13 @@ const READ_PARAMETERS: Readonly<Record<DeskReadTool, readonly string[]>> = {
 };
 /** The write guard's refusal of a desk write of GRAVIT.md (src/desk-tools.ts `deskWriteDecision`). */
 const GUARD_DENIAL = "the desk never writes GRAVIT.md: it would steer every desk turn after it";
-/** A made-up key file in the fixture's repository: Gravit reads it, the desk may not. */
+/** A made-up key file in the fixture's repository: gravit reads it, the desk may not. */
 const ENV_FILE = ".env.smoke";
 const ENV_TEXT = "DESK_SMOKE_ONLY=made-up-value-4c9e\n";
 /** The read check's refusal of a desk read of it (src/desk-tools.ts `deskReadDecision`). */
 const READ_DENIAL = `the desk never reads ${ENV_FILE}: it can hold a key`;
 /** A made-up dot-config in the fixture's repository, as the operator's checkout holds `.mcp.json` - under a name of
- *  its own, which nothing loads: Gravit reads it, the desk may not. */
+ *  its own, which nothing loads: gravit reads it, the desk may not. */
 const DOT_CONFIG = ".mcp.smoke.json";
 const DOT_CONFIG_TEXT = "{\"mcpServers\": {\"made-up\": {\"env\": {\"MADE_UP_TOKEN\": \"made-up-dot-config-4e7a\"}}}}\n";
 /** The write and read checks' refusals of what git and the operator's coding agents obey (src/desk-tools.ts). */
@@ -140,8 +140,8 @@ const SPILL_LINE = "SPILL-PROBE-LINE";
 const SPILL_LINES = 300;
 /** Where dsh-tool-fs-search says a capped grep's complete result is. */
 const SPILL_NOTICE = /Full grep result stored at: (\S+)\. Use read/;
-/** What Gravit's control turn writes in `repo/notes/GRAVIT.md`, off the desk's instruction chain. */
-const GRAVIT_NOTE = "DESK-SMOKE-GRAVIT-NOTE-5c1e: a Gravit session's own notes";
+/** What gravit's control turn writes in `repo/notes/GRAVIT.md`, off the desk's instruction chain. */
+const GRAVIT_NOTE = "DESK-SMOKE-GRAVIT-NOTE-5c1e: a gravit session's own notes";
 /** The roles section's opening line, from plugins/gravit.js itself. */
 const ROLES_INTRO = rolesText([{ tool: "role_probe", summary: "probe" }]).split("\n")[0];
 /** What the model answers a message queued behind the turn the phone's /stop cut, before the message's own words. */
@@ -399,27 +399,27 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     const gravit = ctx.agents.get(SessionId(g.sessionId));
     assert.ok(gravit !== undefined);
     const gravitTools = names(tools.schemas(gravit));
-    assert.ok(gravitTools.includes(ORDER_STAND_IN) && gravitTools.includes(`mcp__${SERVER}__earnings`), "Gravit's view is the tree's");
-    for (const deskTool of ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"]) assert.equal(gravitTools.includes(deskTool), false, `Gravit's session has no ${deskTool}`);
+    assert.ok(gravitTools.includes(ORDER_STAND_IN) && gravitTools.includes(`mcp__${SERVER}__earnings`), "gravit's view is the tree's");
+    for (const deskTool of ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"]) assert.equal(gravitTools.includes(deskTool), false, `gravit's session has no ${deskTool}`);
 
-    /* 2. THE PROMPT the desk's first request carried: Gravit's persona, the date, the desk contract - and neither
-     * the cycle contract nor the roles section, which belong to Gravit's preset. The control is a turn on the
-     * Gravit session: its first request carries the cycle contract word for word, so the needle is the text the
+    /* 2. THE PROMPT the desk's first request carried: gravit's persona, the date, the desk contract - and neither
+     * the cycle contract nor the roles section, which belong to gravit's preset. The control is a turn on the
+     * gravit session: its first request carries the cycle contract word for word, so the needle is the text the
      * face mounts and the desk's lack of it is its preset's doing. (The turn also writes notes/GRAVIT.md, which
      * section 4 reads back.) */
     assert.equal(first.messages[0]?.role, "system");
     const system = textOf(first.messages[0]);
-    assert.ok(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), "the desk is told it is Gravit: the global persona prefix stays");
+    assert.ok(system.includes(readPersona(PERSONA_PATH).split("{{")[0]), "the desk is told it is gravit: the global persona prefix stays");
     assert.match(system, /\nToday is \d{4}-\d{2}-\d{2}, [A-Z][a-z]+ \(.+\)\.\n/, "the date section");
     assert.ok(system.includes("# The desk"), "the desk contract, gravit:desk");
     assert.equal(system.includes(CYCLE_HEADING), false, "no research-cycle contract on the desk");
     assert.equal(system.includes(ROLES_INTRO), false, "no roles section on the desk");
     gravit.followup(createUserMessage({ content: [{ type: "text", text: "GRAVIT_CONTROL" }], source: { kind: "user" } }));
-    await waitFor("the Gravit session's first request", () => (requests.get(g.sessionId)?.length ?? 0) > 0);
+    await waitFor("the gravit session's first request", () => (requests.get(g.sessionId)?.length ?? 0) > 0);
     await gravit.whenIdle();
     const gravitFirst = requests.get(g.sessionId)?.[0];
     assert.ok(gravitFirst !== undefined && gravitFirst.messages[0]?.role === "system");
-    assert.ok(textOf(gravitFirst.messages[0]).includes(CYCLE), "the control: Gravit's prompt carries the cycle contract, heading and all");
+    assert.ok(textOf(gravitFirst.messages[0]).includes(CYCLE), "the control: gravit's prompt carries the cycle contract, heading and all");
 
     /* 3. GATE 2 FROM A DESK TURN: the model names the order stand-in, which the desk cannot see; the gate denies
      * it in its own words before any card, and the stand-in's body never runs. */
@@ -444,15 +444,15 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     assert.equal(await readFile(join(JOURNAL, "probe.md"), "utf8"), "a journal note\n", "a write inside the journal lands");
     assert.equal((deskAgent.session.snapshotEvents() as unknown as Ev[]).some((e) => e.type === "approval/asked"), false,
       "no card was ever raised on the desk session: not for the order, not for the refused write");
-    /* And the write guard is the desk's alone: the Gravit session's write of a GRAVIT.md, in section 2's control
+    /* And the write guard is the desk's alone: the gravit session's write of a GRAVIT.md, in section 2's control
      * turn - in repo/notes/, off the desk's instruction chain - went through. */
-    assert.equal(await readFile(join(ROOT, "notes", "GRAVIT.md"), "utf8"), `${GRAVIT_NOTE}\n`, "Gravit's own write of a GRAVIT.md landed");
-    /* So is the read check: the Gravit session's read of a key file in its own tree, through the real waterfall,
+    assert.equal(await readFile(join(ROOT, "notes", "GRAVIT.md"), "utf8"), `${GRAVIT_NOTE}\n`, "gravit's own write of a GRAVIT.md landed");
+    /* So is the read check: the gravit session's read of a key file in its own tree, through the real waterfall,
      * goes through and hands back what the file holds. */
     const gravitRead = await tools.execute({
       callId: "gravit-env-read", name: "read", arguments: { file_path: ENV_FILE }, agent: gravit, signal: new AbortController().signal,
     });
-    assert.equal(gravitRead.isError, false, `Gravit's read of ${ENV_FILE} is not judged; saw ${JSON.stringify(gravitRead.content)}`);
+    assert.equal(gravitRead.isError, false, `gravit's read of ${ENV_FILE} is not judged; saw ${JSON.stringify(gravitRead.content)}`);
     assert.ok(JSON.stringify(gravitRead.content).includes(ENV_TEXT.trim()), "and it read the file");
 
     /* THE SPILL: a desk grep past its 250 inline matches is spilled by dsh, under the OS temp directory, into the desk
@@ -476,7 +476,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     /* THE DESK'S web_fetch through the real registry (spec 2026-11-07 §5.6): dsh's own tool in the desk agent's layer,
      * fetching through the http provider the policy leaves on - which refuses a loopback address before any socket
      * opens, so nothing leaves the machine - and the call that reached dispatch is a desk-fetch line, the URL as
-     * asked. Gravit's session has no such tool, and its call writes no line. */
+     * asked. gravit's session has no such tool, and its call writes no line. */
     const fetchProbe = "http://127.0.0.1:9/desk-fetch-probe";
     const fetched = await tools.execute({ callId: "fetch-probe", name: "web_fetch", arguments: { url: fetchProbe }, agent: deskAgent, signal: new AbortController().signal });
     assert.equal(fetched.isError, true, `the provider refuses a loopback address; saw ${JSON.stringify(fetched.content)}`);
@@ -484,7 +484,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     const fetchLines = (await readEvents(HOME)).events.filter((e) => e.kind === "desk-fetch");
     assert.deepEqual(fetchLines.map((e) => [e.sessionId, e.url]), [[deskId, fetchProbe]], "one desk-fetch line, the desk session's, the URL as asked");
     const gravitFetch = await tools.execute({ callId: "fetch-control", name: "web_fetch", arguments: { url: fetchProbe }, agent: gravit, signal: new AbortController().signal });
-    assert.equal(gravitFetch.isError, true, "Gravit's session has no web_fetch to call");
+    assert.equal(gravitFetch.isError, true, "gravit's session has no web_fetch to call");
     assert.equal((await readEvents(HOME)).events.filter((e) => e.kind === "desk-fetch").length, 1, "and its call writes no line");
 
     /* 5. THE WRITE GUARD'S BACKSTOP through the real waterfall: a tools/pre-execute listener registered after the
@@ -545,7 +545,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     /* 5c. WHAT GIT AND THE OPERATOR'S CODING AGENTS OBEY, through the real waterfall: the desk's write of a
      * desk/journal/.gitignore holding `!*` - which would un-ignore the journal for the next `git add -A` - and of a
      * desk/journal/CLAUDE.md, which Claude Code loads from that folder, are denied in the write check's words and
-     * nothing is written; its read of a dot-config in the repository is denied by name. The control: the Gravit
+     * nothing is written; its read of a dot-config in the repository is denied by name. The control: the gravit
      * session reads the same file. */
     {
       const signal = new AbortController().signal;
@@ -566,7 +566,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
       const viaUp = await tools.execute({ callId: "dot-read-up", name: "read", arguments: { file_path: `../../${DOT_CONFIG}` }, agent: deskAgent, signal });
       assert.equal(viaUp.content?.[0]?.text, `Error: ${DOT_READ_DENIAL}`, "and so is its read of it from the journal");
       const gravitDot = await tools.execute({ callId: "gravit-dot-read", name: "read", arguments: { file_path: DOT_CONFIG }, agent: gravit, signal });
-      assert.equal(gravitDot.isError, false, `the control: Gravit's read of ${DOT_CONFIG} is not judged; saw ${JSON.stringify(gravitDot.content)}`);
+      assert.equal(gravitDot.isError, false, `the control: gravit's read of ${DOT_CONFIG} is not judged; saw ${JSON.stringify(gravitDot.content)}`);
       assert.ok(JSON.stringify(gravitDot.content).includes("made-up-dot-config-4e7a"), "and it read the file");
     }
 

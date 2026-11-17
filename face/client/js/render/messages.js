@@ -1,5 +1,5 @@
 // face/client/js/render/messages.js — the Messages screen on the host's facts (spec 2026-10-19 §7 "Stage 1"; one-entry plan 2
-// Task 5): Gravit's one conversation (head, thread, composer, the status line) with the rail of tasks on its right, its empty
+// Task 5): gravit's one conversation (head, thread, composer, the status line) with the rail of tasks on its right, its empty
 // state, one line while it is off, unknown or loading, and Details.
 import { esc, attrs, cls } from '../html.js';
 import { t, th, sayOf, rawHtml } from '../i18n/words.js';
@@ -60,7 +60,7 @@ export function headRight(conv, state) {
   return jobsChip(conv, state) + working + `<button type="button"${attrs({ class: cls('btn-sm', state.detailsOpen && 'pressed'), 'data-action': 'toggleDetails', 'aria-expanded': state.detailsOpen ? 'true' : 'false' })}>${th('details.title')}${icon('chevRight', 14, 2.2)}</button>`; // words-order: Details' name and its chevron
 }
 
-// the conversation's head reads Gravit, whatever the session's own title (a title is derived from a first prompt): it is not
+// the conversation's head reads gravit, whatever the session's own title (a title is derived from a first prompt): it is not
 // renamed, forked or archived
 export function renderHead(conv, state) {
   return `<header class="head"><h1 class="head-title">${esc(HOST_NAME)}</h1>${headRight(conv, state)}</header>`;
@@ -184,7 +184,7 @@ function jobsSection(conv, state, now) {
   return `<section class="dsec" id="dsec-jobs"><div class="dsec-label">${th('jobs.title')}</div>${rows}${fold}</section>`;
 }
 
-// the conversation's Details: This task (Gravit, when it began, the agent) — nothing renames, forks, pins, archives or deletes
+// the conversation's Details: This task (gravit, when it began, the agent) — nothing renames, forks, pins, archives or deletes
 // the one conversation —, its background jobs, children, usage, and Stop while a turn runs. A task's page (`task`, one-entry
 // plan 2 Task 8) draws its worker's (`worker`, whether or not the tasks list it): the task's title, else its session's, and
 // no Stop of its own (the page's head stops the task)
@@ -212,7 +212,7 @@ export function earlierKey(conv) {
   return `<button${attrs({ class: 'btn-sm earlier-key', type: 'button', id: `earlier-${conv.id}`, 'data-action': 'earlier', 'data-conv': conv.id, 'aria-disabled': w.loading ? 'true' : null })}>${w.loading ? th('common.loading') : th('thread.earlier')}</button>`;
 }
 
-// Messages is Gravit's one conversation (one-entry plan 2): its head, then its column (the thread with the turn rail, the one
+// Messages is gravit's one conversation (one-entry plan 2): its head, then its column (the thread with the turn rail, the one
 // composer, the foot) beside the rail of tasks; its empty state while it is known but not listed; one line, no composer,
 // while there is none to write to
 export function renderMessagesScreen(state, now, composer = {}, page = {}) {

@@ -46,12 +46,12 @@ test('sheetOf: a market card — Where fixed, Latest run greyed with its reason,
   assert.equal(v.on.options[0].label, `Latest run · ${MARKET_RUN} · session 2026-10-28`);
   assert.equal(v.on.options[0].detail, 'frozen: index · limit-up');
   assert.equal(v.on.options[1].label, 'New run');
-  assert.equal(v.on.options[1].detail, 'Gravit freezes index · limit-up · boards, then the CN market analyst writes Theme alone; the other two market modules stay not run on that run until run from their cards');
+  assert.equal(v.on.options[1].detail, 'gravit freezes index · limit-up · boards, then the CN market analyst writes Theme alone; the other two market modules stay not run on that run until run from their cards');
   assert.equal(v.on.value, 'new');
   assert.equal(v.source, 'boards missing in the last run', 'the fixture run froze no boards');
   assert.equal(v.cites, null); assert.equal(v.stocks, null);
   assert.equal(v.note.value, '');
-  assert.equal(v.via, 'Gravit in cn-market → CN market analyst, theme alone');
+  assert.equal(v.via, 'gravit in cn-market → CN market analyst, theme alone');
   assert.equal(v.writes, 'theme.json · a task "Theme · 10-28"');
   assert.equal(v.canRun, true);
   assert.equal(v.blocker, null);
@@ -127,7 +127,7 @@ test('sheetOf: Leader — Where the strategies, Cites the two newest sealed mark
   assert.deepEqual(v.where.options.map(o => o.value), ['lunhui-s01-repair', 'lunhui-s02-rotation']);
   assert.equal(v.where.fixed, false);
   assert.deepEqual(v.on.options.map(o => [o.id, o.enabled, o.reason]), [['latest', false, 'leader already there'], ['new', true, null]]);
-  assert.equal(v.on.options[1].detail, 'Gravit freezes quotes for the stocks, which opens the run');
+  assert.equal(v.on.options[1].detail, 'gravit freezes quotes for the stocks, which opens the run');
   assert.equal(v.cites.readOnly, false);
   assert.deepEqual(v.cites.options.map(o => o.value), [MARKET_RUN]);
   assert.equal(v.cites.options[0].label, `${MARKET_RUN} · session 2026-10-28 · frozen: index · limit-up · theme not evaluable`);
@@ -136,9 +136,9 @@ test('sheetOf: Leader — Where the strategies, Cites the two newest sealed mark
   assert.equal(v.cites.options[0].warning, null, 'sentiment and theme are both there');
   assert.equal(v.stocks.value, '');
   assert.equal(v.stocks.error, null);
-  assert.match(v.stocks.hint, /^optional · 1–4 main-board codes, sh60… or sz00…; empty: Gravit picks/);
+  assert.match(v.stocks.hint, /^optional · 1–4 main-board codes, sh60… or sz00…; empty: gravit picks/);
   assert.equal(v.source, null);
-  assert.equal(v.via, 'Gravit in lunhui-s01-repair → CN stock analyst, leader alone');
+  assert.equal(v.via, 'gravit in lunhui-s01-repair → CN stock analyst, leader alone');
   assert.equal(v.canRun, true);
 });
 
@@ -214,7 +214,7 @@ test('sheetOf: Mode — Latest run only, its three reasons, the read-only cite',
   assert.deepEqual(w.on.options.map(o => [o.id, o.enabled, o.reason]), [['latest', true, null]]);
   assert.deepEqual(w.cites, { readOnly: true, options: [{ value: MARKET_RUN, label: `${MARKET_RUN} · the run's leader cites it`, warning: null }], value: MARKET_RUN, line: null });
   assert.equal(w.stocks, null);
-  assert.equal(w.via, 'Gravit in lunhui-s01-repair → CN stock analyst, mode alone');
+  assert.equal(w.via, 'gravit in lunhui-s01-repair → CN stock analyst, mode alone');
   assert.equal(w.canRun, true);
 
   const y = modulesListing();
@@ -240,7 +240,7 @@ test('sheetOf: Counterevidence — cn-market reviews line and names the modules 
   const market = sheetOf(l, { ...newSheet(l, 'counterevidence'), where: 'cn-market', run: MARKET_RUN }, fixed);
   assert.deepEqual(market.on.options.map(o => [o.id, o.enabled, o.reason]), [['latest', false, 'review already there']]);
   assert.equal(market.cites, null);
-  assert.equal(market.via, 'Gravit in cn-market → CN reviewer, counterevidence alone');
+  assert.equal(market.via, 'gravit in cn-market → CN reviewer, counterevidence alone');
 
   const x = modulesListing();
   delete runOf(x, 'cn-market').artifacts.counterevidence;
@@ -329,7 +329,7 @@ test('messageOf: Appendix B, slot by slot', () => {
   assert.equal(messageOf(l, { ...newSheet(l, 'mode'), on: null }), null, 'no On, no message');
 });
 
-test('askOf: the line asking Gravit for a task titled exactly as titleOf, then the message', () => {
+test('askOf: the line asking gravit for a task titled exactly as titleOf, then the message', () => {
   const sheet = { ...newSheet(l, 'theme'), on: 'new', note: '看量能' };
   const at = new Date(2026, 9, 29, 3, 0);
   assert.equal(askOf(l, sheet, at), `请为此开一个任务，标题恰为「${titleOf(l, sheet, at)}」：\n${messageOf(l, sheet)}`);

@@ -162,7 +162,7 @@ describe("the connected poller and the inbox, through the account", () => {
     expect(isRefusal(await own({ type: "disconnectNetwork", network: "telegram" } as NoNonce<OwnerAction>))).toBe(false);
     await srv.close();
     await bot.close();
-    bot = await fakeBotApi({ token: OTHER_BOT_TOKEN, me: { id: 778, username: "gravit_second_bot", first_name: "Gravit" } });
+    bot = await fakeBotApi({ token: OTHER_BOT_TOKEN, me: { id: 778, username: "gravit_second_bot", first_name: "gravit" } });
     await boot();
     await connect(OTHER_BOT_TOKEN);
     // the second bot's private chat is numbered afresh: 41 and 42 again
@@ -291,18 +291,18 @@ describe("the connected poller and the inbox, through the account", () => {
     expect(svc.identity!.view().strangers).toEqual([]);
   });
 
-  it("Chat with Gravit off for Telegram: the text is answered with the line and not stored", async () => {
+  it("Chat with gravit off for Telegram: the text is answered with the line and not stored", async () => {
     const r = await own({ type: "setRouting", routing: "chat=;alerts=telegram;brief=telegram;cards=telegram;fills=telegram", quietFrom: "", quietTo: "" } as NoNonce<OwnerAction>);
     expect(isRefusal(r)).toBe(false);
     bot.push(update(20, { text: "are you there" }));
     await until(() => offset() === "21");
-    expect(bot.sent.at(-1)?.text).toBe("Chat with Gravit is off on Telegram: Account › Identity turns it on.");
+    expect(bot.sent.at(-1)?.text).toBe("Chat with gravit is off on Telegram: Account › Identity turns it on.");
     expect(CHAT_OFF).toBe(bot.sent.at(-1)?.text);
     expect((await get(`/api/account/identity/inbox?after=0&wait=0`)).messages).toEqual([]);
     expect(existsSync(join(home, "identity", "inbox.json")) ? readFileSync(join(home, "identity", "inbox.json"), "utf8") : "").not.toContain("are you there");
   });
 
-  it("Chat with Gravit off for Telegram: the phone's five commands are still stored for the desk (D19), any other text is not", async () => {
+  it("Chat with gravit off for Telegram: the phone's five commands are still stored for the desk (D19), any other text is not", async () => {
     const r = await own({ type: "setRouting", routing: "chat=;alerts=telegram;brief=telegram;cards=telegram;fills=telegram", quietFrom: "", quietTo: "" } as NoNonce<OwnerAction>);
     expect(isRefusal(r)).toBe(false);
     bot.push(update(20, { text: "/pause 30m" }));
@@ -317,7 +317,7 @@ describe("the connected poller and the inbox, through the account", () => {
     expect(bot.sent.filter((s) => s.text === CHAT_OFF)).toHaveLength(3);
   });
 
-  it("Chat with Gravit on: a command and a text are both stored, as before", async () => {
+  it("Chat with gravit on: a command and a text are both stored, as before", async () => {
     bot.push(update(20, { text: "/pause" }));
     bot.push(update(21, { text: "hello there" }));
     await until(() => offset() === "22");

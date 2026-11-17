@@ -19,13 +19,13 @@
  * refused), and the operator's next turn closes the decision (registered). The second boots over a home nobody made: healthy, and the tool says "no memory here". The third points
  * `FACE_MEMORY_DIR` at an empty directory, an install that is not there: healthy, no memory tool, the face's own
  * standing "not installed". The fourth disables the row by a line in the operator's own patch file: no memory tool in
- * the tree, the conversation or a Gravit session, no `gravit:memory` in their prompts, the face's standing "disabled".
+ * the tree, the conversation or a gravit session, no `gravit:memory` in their prompts, the face's standing "disabled".
  * Each boot's environment (and the fourth's patch file) is set before it and put back after it, since the row reads it
  * at compose time.
  *
  * THE MEASURE. Asserted: a worker's and the conversation's prompts hold both sections, a desk session's holds no
  * `gravit:memory`. Recorded and not asserted - dsh has no switch for it: whether `mcp:memory` reaches a desk session's,
- * a bot's and a role child's prompt, and, with the row disabled, whether it reaches the conversation's and a Gravit
+ * a bot's and a role child's prompt, and, with the row disabled, whether it reaches the conversation's and a gravit
  * session's. Each is written to stderr as one `memory-smoke: measure:` line.
  *
  * WHERE IT RUNS. Every directory is a `mkdtemp` under the system's temporary directory - the harness home (shared by
@@ -84,7 +84,7 @@ const MCP_SECTION = "mcp:memory";
 /** The operator's prompt that has the conversation start a task, and the task's brief. */
 const START = "START_MEMORY_TASK";
 const BRIEF = "BRIEF_MEMORY: read the fixture strategy and report.";
-/** The prompt that has a plain Gravit session call the fixture role, and the role child's marker. */
+/** The prompt that has a plain gravit session call the fixture role, and the role child's marker. */
 const RUN_ROLE = "RUN_ROLE_PROBE";
 const ROLE_MARK = "ROLE_FIXTURE_MEMORY";
 /** A scratch bot whose allow is `read` and `grep`. */
@@ -199,7 +199,7 @@ let roles = "";
 let memoryHome = "";
 
 /** The first boot as this file holds it: the tree, the conversation and its tasks, the browser's session, a worker,
- * a desk agent, a bot session, a plain Gravit session, and what the role child's first request carried. */
+ * a desk agent, a bot session, a plain gravit session, and what the role child's first request carried. */
 interface Face {
   booted: BootedFace;
   conversation: ConversationHandle;
@@ -679,12 +679,12 @@ test("a row an operator's patch disabled: no memory tool, no gravit:memory, the 
     const sections = await sectionsOf(f.booted, conversation);
     assert.equal(sections.has(MEMORY_SECTION), false, `the conversation's prompt holds no ${MEMORY_SECTION}: ${[...sections.keys()].join(", ")}`);
 
-    /* a plain Gravit session: none either */
+    /* a plain gravit session: none either */
     const plain = await remote<{ sessionId: string }>(f.base, f.cookie, "session/create", { request: { cwd: root } });
     const plainAgent = f.booted.ctx.agents.get(SessionId(plain.sessionId))!;
-    assert.deepEqual(memoryNamesIn(toolsOf(f.booted).schemas(plainAgent).map((s) => s.name)), [], "a Gravit session holds none");
+    assert.deepEqual(memoryNamesIn(toolsOf(f.booted).schemas(plainAgent).map((s) => s.name)), [], "a gravit session holds none");
     const plainSections = await sectionsOf(f.booted, plainAgent);
-    assert.equal(plainSections.has(MEMORY_SECTION), false, `a Gravit session's prompt holds no ${MEMORY_SECTION}`);
+    assert.equal(plainSections.has(MEMORY_SECTION), false, `a gravit session's prompt holds no ${MEMORY_SECTION}`);
 
     /* the face's own standing over the row */
     assert.deepEqual(await memoryOpener(rowOf(f.booted))(), {
@@ -692,7 +692,7 @@ test("a row an operator's patch disabled: no memory tool, no gravit:memory, the 
     });
 
     /* recorded, not asserted: mcp:memory in a prompt with the row disabled */
-    console.error(`memory-smoke: measure: with the row disabled, ${MCP_SECTION} in the conversation's prompt: ${sections.has(MCP_SECTION)}; in a Gravit session's: ${plainSections.has(MCP_SECTION)}`);
+    console.error(`memory-smoke: measure: with the row disabled, ${MCP_SECTION} in the conversation's prompt: ${sections.has(MCP_SECTION)}; in a gravit session's: ${plainSections.has(MCP_SECTION)}`);
   } finally {
     await stopFace();
   }

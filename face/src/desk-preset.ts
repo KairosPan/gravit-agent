@@ -1,5 +1,5 @@
 // face/src/desk-preset.ts
-/** The desk's preset, `gravit-desk`: Gravit on the desk, informing from the phone and the clock and
+/** The desk's preset, `gravit-desk`: gravit on the desk, informing from the phone and the clock and
  * never ordering (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.3).
  *
  * The desk session joins a preset of its own, which the face declares from memory: no `bots/` directory
@@ -9,7 +9,7 @@
  *   date section and the scoped `gravit:desk` section, and neither the role list nor the cycle contract:
  *   a preset carries one contract or the other, and plugins/gravit.js refuses a row with both.
  * - `plugins/bot.js` in its MASK-ONLY mode, `{ maskOnly: true, allow: DESK_ALLOW }` with no persona. It
- *   registers no persona section, so the deployment's global persona prefix - Gravit's - stays; the desk
+ *   registers no persona section, so the deployment's global persona prefix - gravit's - stays; the desk
  *   sees {@link DESK_ALLOW} ∩ the tree, re-expanded after every tool change exactly as a bot's mask is.
  *
  * NO SHELL. The desk runs unattended on text it does not control (web results, filings, forwarded
@@ -33,7 +33,7 @@
  * annotation run.
  *
  * DECLARED AFTER BOOT, like the bots and the role presets (src/roles.ts `rolePresetDefinition`, D20/B1)
- * and unlike Gravit's default. `bootFace` calls {@link declareDeskPreset} right after `declareBots`, and
+ * and unlike gravit's default. `bootFace` calls {@link declareDeskPreset} right after `declareBots`, and
  * the role presets right after it, once the tree has settled: activation is EAGER (NEW
  * packages/preset/agent-preset-registry/src/index.ts:80-118) and a mount failure is final, so a static
  * overlay row would mount the mask before the MCP rows' tools exist. `bootFace` then refuses the boot, as
@@ -95,8 +95,8 @@ export { BOT_PLUGIN_URL };
 export function deskPresetDefinition(options: { desk: string }): PresetDefinition {
   return {
     id: DESK_PRESET,
-    name: "Gravit · desk",
-    description: "Gravit on the desk: informs from the phone and the clock, never orders",
+    name: "gravit · desk",
+    description: "gravit on the desk: informs from the phone and the clock, never orders",
     plugins: [
       { id: GRAVIT_ROW_ID, name: GRAVIT_PLUGIN_URL, config: { desk: options.desk } },
       { id: "desk-mask", name: BOT_PLUGIN_URL, config: { maskOnly: true, allow: [...DESK_ALLOW] } },

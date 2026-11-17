@@ -183,7 +183,7 @@ test('the drawer draws its header, pool line, minute line, tiles, citations and 
   assert.match(html, /<div class="lh-readout" id="read-s-600011" role="status" aria-live="polite">样本600011 · 15:00 · 22\.01 · \+10\.00% · at the limit-up<\/div>/);
   for (const t of ['Seal funds¥8000.00万', 'Limit price22.01', 'Turnover9.39%', 'Amount¥1.17亿']) assert.ok(text(html).includes(t), t);
   assert.ok(text(html).includes('No claim cites it; it is in the limit-up pool only.'));
-  assert.match(html, /data-action="lunhuiAsk"[^>]*>Ask Gravit about 样本600011<\/button>/);
+  assert.match(html, /data-action="lunhuiAsk"[^>]*>Ask gravit about 样本600011<\/button>/);
   assert.match(html, /data-action="lunhuiMarkets"[^>]*>Open in Markets<\/button>/);
   assert.equal(stockDrawerHtml({ lunhui: { views: {}, ui: {}, stock: null } }), '', 'no stock open, no drawer');
   assert.equal(stockDrawerHtml({}), '');
@@ -326,6 +326,30 @@ test("the drawer's cursor stands on the drawn chart's geometry, at every minute"
   assert.equal(Number(ydot[2]), Number(gy.Y(y.minutes.price[241]).toFixed(1)));
   const yview = ys.lunhui.views[KEY].view;
   for (const m of [0, 3, 120]) assert.equal(cursorPatch(yview, 'sh600100', m).y, Number(gy.Y(y.minutes.price[m]).toFixed(1)), `minute ${m}`);
+});
+
+// the owner's lessons on a leader (memory alert and Lunhui, Task 5): a section before the run's claims, its lines the ladder's
+test("a leader's drawer has a section of your lessons before the claims; any other drawer is as it was", () => {
+  const caveat = { id: 'L-1', strength: 'caveat', says: 'careful', words: 'Do not chase a gap up on\u202e <b>', fired: 3, followed: 2, overridden: 1 };
+  const leader = (code, over = {}) => ({ code, boards: 3, lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, ...over });
+  const lessons = { state: 'checked', strategy: 'cn-market', run: 'r1', askedAt: '2026-10-27T08:00:00Z', leaders: [leader('600100', { lessons: [caveat], lessonsMore: 2, untold: [{ id: 'L-3', needs: ['industry'] }] }), leader('600200')] };
+  const stocks = { 600100: facts(), 600200: facts({ code: '600200' }), 600300: facts({ code: '600300' }) };
+  const withEntry = (code, entry) => ({ ...stateOf(stocks, code), memoryLunhui: { 'cn-market/r1': entry } });
+  const html = stockDrawerHtml(withEntry('600100', { status: 'ready', lessons }));
+  const at = html.indexOf('<div class="dsec-label">Your lessons</div>');
+  assert.ok(at > 0, 'the section');
+  assert.ok(at < html.indexOf('In this run'), 'before the claims');
+  const section = text(html.slice(at, html.indexOf('In this run')));
+  assert.match(section, /Your lesson/);
+  assert.ok(section.includes('“Do not chase a gap up on\\u202e <b>”'), section);
+  assert.match(section, /fired 3 · followed 2 · overridden 1/);
+  assert.match(section, /and 2 more/);
+  assert.match(section, /Could not be checked: needs industry/);
+  assert.doesNotMatch(html, /\u202e|<b>/u);
+  for (const [code, entry] of [['600300', { status: 'ready', lessons }], ['600200', { status: 'ready', lessons }], ['600100', { status: 'loading' }],
+    ['600100', { status: 'ready', lessons: { state: 'not connected', words: 'no memory here' } }]]) {
+    assert.equal(stockDrawerHtml(withEntry(code, entry)), stockDrawerHtml(stateOf(stocks, code)), `${code} ${entry.status}`);
+  }
 });
 
 test("a stock's line and where it closed against the limit are in the table's order", async () => {

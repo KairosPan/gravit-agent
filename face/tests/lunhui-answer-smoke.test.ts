@@ -1,4 +1,4 @@
-/** Gravit's composed answer drawn end to end on a real boot (run view plan 3, Task 6): a sealed
+/** gravit's composed answer drawn end to end on a real boot (run view plan 3, Task 6): a sealed
  * market run on disk, read by the booted `lunhui-runs` row, served by the view route over HTTP
  * with the signed-in cookie, then drawn by the client's own modules - an ok `lunhui_present` call
  * and result lifted through `host/kinds.js`, the fetched view landed with `lunhuiViewLoaded`, the
@@ -61,7 +61,7 @@ const KINDS: [string, string][] = [
 ];
 const MODULES = ["environment", "sentiment", "theme", "counterevidence"];
 
-test("lunhui answer smoke: a sealed run's view over the real route, drawn as Gravit's composed answer with links, follow-ups and the stock drawer", {
+test("lunhui answer smoke: a sealed run's view over the real route, drawn as gravit's composed answer with links, follow-ups and the stock drawer", {
   skip: gated && "set FACE_SMOKE=1", timeout: 90_000,
 }, async () => {
   const home = mkdtempSync(join(tmpdir(), "face-lunhui-answer-"));
@@ -83,7 +83,7 @@ test("lunhui answer smoke: a sealed run's view over the real route, drawn as Gra
     const base = `http://127.0.0.1:${ctx.webServer.port}`;
     const cookie = await signIn(ctx, base);
 
-    // 1. Gravit's call and its ok result, lifted as the live layer lifts them
+    // 1. gravit's call and its ok result, lifted as the live layer lifts them
     const args = {
       strategy: sealed.strategy, run: sealed.run, summary: "弱势日，上海九百五连板仍在。",
       blocks: KINDS.map(([kind]) => ({ kind, title: `${kind} 标题` })),

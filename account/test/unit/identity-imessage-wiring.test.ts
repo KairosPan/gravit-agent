@@ -104,7 +104,7 @@ describe("iMessage connected through the signed door", () => {
 
   it("connectNetwork for iMessage writes imessage.json and starts listening after the hello", async () => {
     const r = await connect();
-    expect(r).toMatchObject({ ok: true, kind: "account", summary: `iMessage connected: Gravit speaks as ${line} and talks only with ${phone} · project secret ${keyHash.slice(0, 8)}` });
+    expect(r).toMatchObject({ ok: true, kind: "account", summary: `iMessage connected: gravit speaks as ${line} and talks only with ${phone} · project secret ${keyHash.slice(0, 8)}` });
     expect(readNetworkSecret(home, "imessage")).toMatchObject({ projectId: "prj_1", projectSecret: secret, phone, line, userId: "usr_1", operatorId: phone, operatorHandle: phone });
     await until(() => fake.openStreams() === 1);
     expect(fake.lastSince()).toBe(41);
@@ -180,7 +180,7 @@ describe("iMessage connected through the signed door", () => {
     expect(isRefusal(r)).toBe(false);
     expect(fake.sent).toHaveLength(1);
     expect(fake.sent[0]).toMatchObject({ to: phone, clientMessageId: expect.stringMatching(/^[0-9a-f]{16}:0$/) });
-    expect(fake.sent[0]!.text).toMatch(/^Gravit's iMessage was disconnected from the account at \d{1,2}:\d\d ET\. Not you\? Connect it again under Account › Identity\.$/);
+    expect(fake.sent[0]!.text).toMatch(/^gravit's iMessage was disconnected from the account at \d{1,2}:\d\d ET\. Not you\? Connect it again under Account › Identity\.$/);
     expect(fileThen).toEqual([true]);
     expect(existsSync(secretFile)).toBe(false);
   });

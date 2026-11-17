@@ -1,5 +1,5 @@
 // face/src/conversation.ts
-/** The conversation: Gravit's one router session, the operator's one entry (docs/superpowers/specs/
+/** The conversation: gravit's one router session, the operator's one entry (docs/superpowers/specs/
  * 2026-11-08-one-entry-router-design.md §5.2, §5.10).
  *
  * WHERE IT LIVES. A runtime-root session of the `gravit-router` preset (src/router-preset.ts) whose cwd is
@@ -48,7 +48,7 @@
  * conversation's `deliver`, the pause's choke point (src/desk-conversation.ts), absent with the desk off, when nothing
  * is sent: a turn that logged a phone text - whatever message named it, a parked browser steer claimed first included -
  * sends its reply (src/desk-conversation.ts `replyOf`: the answer, the cut line, the
- * refusal; its failure line saying Gravit, not the desk) as `chat` to the network the last such text came through; a task report's turn sends it to the network of the
+ * refusal; its failure line saying gravit, not the desk) as `chat` to the network the last such text came through; a task report's turn sends it to the network of the
  * phone that asked for the task (its brief's `origin`, src/task-view.ts `briefOrigin`); every other turn - the
  * browser's, a web task's report - sends nothing. Deliveries go in turn order. Still no `desk-turn` is written.
  *
@@ -111,19 +111,21 @@ export { INJECTED_KINDS };
 /** What the desk sent the phone, as a line in the conversation ({@link ConversationHandle.note}): a standing order's
  * firing - its order's id, the firing's key and its date - or an alert - its id (the pass's, for several), its symbol
  * or symbols, and, for an annotation's reply, its pass; `label`, the third part of the line's head (an alert's rule,
- * `annotation`, ...). `text` is what the phone was sent. A `routine` line is a routine run's report, which goes to the
+ * `annotation`, ...); `lessons`, for the owner's lessons the memory gave on that alert (src/memory-alert.ts), its own
+ * line beside the alert's. `text` is what the phone was sent. A `routine` line is a routine run's report, which goes to the
  * Desk page, never the phone (src/routine-run.ts): its routine's id and name, the run's key and New York date, and
  * `text` its headline, a blank line and its body. */
 export type DeskLine =
   | { kind: "schedule"; order: string; firing: string; date: string; text: string }
-  | { kind: "alert"; alert: string; symbol: string; pass?: string; label?: string; text: string }
+  | { kind: "alert"; alert: string; symbol: string; pass?: string; label?: string; lessons?: true; text: string }
   | { kind: "routine"; routine: string; name: string; key: string; date: string; text: string };
 
 /** The longest text a {@link DeskLine} carries into the conversation; past it, cut with an ellipsis. */
 export const NOTE_TEXT_MAX = 4_000;
 
 /** A {@link DeskLine} as the message the conversation is injected: its fixed id - `note-schedule:<firing key>`,
- * `note-annotation:<pass>` for an annotation's reply, `note-routine:<run key>` for a routine's, else
+ * `note-annotation:<pass>` for an annotation's reply, `note-routine:<run key>` for a routine's,
+ * `note-lessons:<alert id>` for an alert's lessons (its head's label `lessons` unless one is given), else
  * `note-alert:<alert id>` - its source (the client's shapes: `schedule` with `order`, `firing`, `date`; `alert` with
  * `alert`, `symbol` and the `pass` when there is one; `routine` with `routine`, `key`, `date`), and its text: the desk's
  * bracketed head - `[schedule · <order> · <date>]`, `[alert · <symbol> · <label>]`, `[routine · <name> · <date>]`, every `]` and line
@@ -150,10 +152,11 @@ export function noteMessage(line: DeskLine, nonce?: string): { id: string; sourc
   }
   if (line.kind === "alert") {
     if (!ok(line.alert) || !ok(line.symbol)) return undefined;
-    const pass = ok(line.pass) ? line.pass : undefined;
-    const label = ok(line.label) ? line.label : pass === undefined ? "alert" : "annotation";
+    const lessons = line.lessons === true;
+    const pass = !lessons && ok(line.pass) ? line.pass : undefined;
+    const label = ok(line.label) ? line.label : lessons ? "lessons" : pass === undefined ? "alert" : "annotation";
     return {
-      id: pass === undefined ? `note-alert:${line.alert}` : `note-annotation:${pass}`,
+      id: lessons ? `note-lessons:${line.alert}` : pass === undefined ? `note-alert:${line.alert}` : `note-annotation:${pass}`,
       source: { kind: "alert", alert: line.alert, symbol: line.symbol, ...(pass === undefined ? {} : { pass }) },
       text: `[alert · ${part(line.symbol)} · ${part(label)}]\n${body}`,
     };
@@ -257,7 +260,7 @@ const CONVERSATION_LINES: ReplyLines = {
     : conversationFenceRefusalLine(path)),
   cutOffLine,
   formatDuration,
-  notAnsweredLine: (error) => `Gravit could not answer: ${error}; nothing was done - send it again later`,
+  notAnsweredLine: (error) => `gravit could not answer: ${error}; nothing was done - send it again later`,
 };
 
 /** The conversation's composition, the desk's three steps (src/desk-session.ts `deskSetup`): the model selection, the

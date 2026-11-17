@@ -86,7 +86,7 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
     const page = await realFetch(`${base}/`, { headers: { cookie } });
     assert.equal(page.status, 200);
     const body = await page.text();
-    assert.match(body, /<title>Gravit<\/title>/);
+    assert.match(body, /<title>gravit<\/title>/);
     assert.match(body, /src="\/client\/js\/app\.js"/);
     for (const [path, type] of [["/client/js/host/live.js", "text/javascript"], ["/client/js/wire/api.js", "text/javascript"], ["/client/js/host/markets.js", "text/javascript"], ["/client/js/host/explore-join.js", "text/javascript"], ["/client/js/wire/market-stream.js", "text/javascript"], ["/client/js/host/modules-view.js", "text/javascript"], ["/client/js/host/modules.js", "text/javascript"], ["/client/js/render/modules.js", "text/javascript"], ["/client/js/host/run-sheet-view.js", "text/javascript"], ["/client/js/host/run-sheet.js", "text/javascript"], ["/client/js/render/run-sheet.js", "text/javascript"], ["/client/js/host/identity.js", "text/javascript"], ["/client/js/host/sheet-identity.js", "text/javascript"], ["/client/js/render/identity.js", "text/javascript"], ["/client/css/app.css", "text/css"]] as const) {
       const res = await realFetch(base + path);
@@ -183,7 +183,7 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
       shown.dispatch("nav", { screen: "account", tab: "identity" });
       shown.dispatch("identityLoaded", identity);
       const html = renderAccountScreen(shown.get(), Date.now());
-      for (const card of ["Gravit", "What reaches you where", "Not you"]) assert.match(html, new RegExp(`<section class="cardbox" aria-label="${card}">`), card);
+      for (const card of ["gravit", "What reaches you where", "Not you"]) assert.match(html, new RegExp(`<section class="cardbox" aria-label="${card}">`), card);
       assert.match(html, /Telegram/);
       assert.match(html, /Not connected/, "a fresh stand-in has no connection");
       assert.match(html, /data-network="slack"/);
@@ -203,7 +203,7 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
       assert.match(row, /Speaks as @gravit/);
       // Disconnect… asks first (sign-only-money: Identity without a signature, its own sheet), no signed action drawn on the row
       assert.match(row, /data-action="askIdentityDisconnect" data-network="slack"/);
-      assert.match(drawn, /<input type="checkbox" aria-label="Chat with Gravit on Slack" checked data-action="identityTick" data-row="chat" data-network="slack">/);
+      assert.match(drawn, /<input type="checkbox" aria-label="Chat with gravit on Slack" checked data-action="identityTick" data-row="chat" data-network="slack">/);
       signed.dispatch("identityConnectOpen", "slack");
       const sheet = renderConnectDrawer(signed.get());
       assert.match(sheet, /Connect Slack · 1 of 3 · App tokens/);

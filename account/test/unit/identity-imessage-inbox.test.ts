@@ -187,7 +187,7 @@ describe("the iMessage connector", () => {
     expect(strangers.list()).toEqual([]);
   });
 
-  it("a group, and Gravit's own message, are dropped; the cursor still moves", async () => {
+  it("a group, and gravit's own message, are dropped; the cursor still moves", async () => {
     await fake.push(msg({ sequence: 20, from: PHONE, chatGuid: "iMessage;+;chat123", text: "in a group" }));
     await fake.push(msg({ sequence: 21, from: PHONE, fromMe: true, text: "mine" }));
     await fake.push({ type: "other", sequence: 22 });
@@ -203,7 +203,7 @@ describe("the iMessage connector", () => {
     expect(inbox.after(0)).toEqual([]);
   });
 
-  it("with Chat with Gravit off, the operator is answered the chat-off line, and a phone command still goes through", async () => {
+  it("with Chat with gravit off, the operator is answered the chat-off line, and a phone command still goes through", async () => {
     chat = false;
     await fake.push(msg({ from: PHONE, text: "hello" }));
     expect(replies).toEqual([chatOffLine("imessage")]);

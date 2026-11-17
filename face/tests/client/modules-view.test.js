@@ -192,7 +192,7 @@ test('runsOf: at most 24 rows, newest first by run id', () => {
   assert.deepEqual(runsOf(null, 'environment'), []);
 });
 
-// a Run asks Gravit for a task under its title (one-entry plan 2): a task as GET /data/tasks shows it
+// a Run asks gravit for a task under its title (one-entry plan 2): a task as GET /data/tasks shows it
 const taskView = (id, title, group, startedAt) => ({ id, title, origin: 'web', state: group === 'done' ? 'done' : 'running', group, steps: [], startedAt, lastEventAt: startedAt, lastSeq: 1 });
 
 test('the chip follows the task with the Run\'s title', () => {

@@ -32,7 +32,7 @@ test('monitoring: the head, News and Routines with their words', () => {
   assert.match(html, /data-action="deskPause"/, 'the Pause key');
   assert.match(html, /class="dk-cols"/);
   assert.match(html, /href="#\/discover"/);
-  assert.match(html, /Routines are created in <a href="#\/messages">Messages<\/a>: tell Gravit what you want done and when, and it replies with a card\. Confirm the card and the routine appears here\./);
+  assert.match(html, /Routines are created in <a href="#\/messages">Messages<\/a>: tell gravit what you want done and when, and it replies with a card\. Confirm the card and the routine appears here\./);
   assert.doesNotMatch(html, /Reports/, 'Reports draws nothing while there is none');
 });
 

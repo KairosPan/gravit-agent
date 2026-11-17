@@ -90,7 +90,7 @@ export const metaText = file => t('composer.fileMeta', { ext: extOf(file.name), 
 
 export const limitsLine = limits => t('composer.limit.line', { n: limits.maxImagesPerMessage, mb: mb(limits.maxImageBytes) });
 
-/** Above the box when the conversation's model takes no images; a bot's name stands for Gravit in its own conversation. */
+/** Above the box when the conversation's model takes no images; a bot's name stands for gravit in its own conversation. */
 export const modelRefusalLine = (name = HOST_NAME) => said('composer.noImages', { name });
 
 const CHUNK = 0x8000;

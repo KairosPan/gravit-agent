@@ -55,9 +55,9 @@ export interface UpstreamSettings { url: string; doFetch: typeof fetch; now: () 
 export type UpstreamAnswer = { status: number; body: string } | { unreachable: string };
 
 /** One read in-process, through the same cache and flights its face path is served from: `query` is one
- * {@link rebuildQueryOf} would pass on. A disabled row answers `{ unreachable: "disabled" }` and asks nothing. No
- * stale answer is re-served here: a failure is the failure. */
-export type UpstreamRouteRead = (query: string) => Promise<UpstreamAnswer>;
+ * {@link rebuildQueryOf} would pass on; `fresh` skips the TTL as the route's `?fresh=1` does. A disabled row answers
+ * `{ unreachable: "disabled" }` and asks nothing. No stale answer is re-served here: a failure is the failure. */
+export type UpstreamRouteRead = (query: string, fresh?: boolean) => Promise<UpstreamAnswer>;
 
 /** Most queries kept per read; the least recently used leaves first. */
 export const UPSTREAM_CACHE_KEYS = 64;
@@ -259,7 +259,7 @@ export function mountReads(
   for (const r of reads) {
     const cache = own.get(r.face) ?? upstreamReads(r, s);
     all.push(cache);
-    read.set(r.face, (query) => cache.read(query, false));
+    read.set(r.face, (query, fresh = false) => cache.read(query, fresh));
     webServer.register({ kind: "exact", path: r.face, handler: readHandler(r, cache, s) });
   }
   return { read, clear: () => { for (const cache of all) cache.clear(); } };

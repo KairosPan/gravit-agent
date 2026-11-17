@@ -157,7 +157,7 @@ test("task_start passes bot through", async () => {
   assert.deepEqual(out, { task: "w3", title: "Debate", bot: "drill-bull" });
   const schema = start.parameters as { properties: Record<string, unknown> };
   assert.deepEqual(schema.properties.bot, { type: "string", minLength: 1, maxLength: 64 });
-  assert.ok(start.description.includes("`bot` names a bot available to Gravit: the worker is that bot, in its home folder. Not with `strategy`."), start.description);
+  assert.ok(start.description.includes("`bot` names a bot available to gravit: the worker is that bot, in its home folder. Not with `strategy`."), start.description);
   for (const bad of ["", "x".repeat(65), 7]) {
     await assert.rejects(Promise.resolve().then(() => start.execute({ title: "t", brief: "b", bot: bad }, exec)), /the bot is a string of 1 to 64 characters/);
   }

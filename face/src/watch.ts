@@ -38,7 +38,9 @@
  * drains: it waits for the lane to be idle, then posts the whole buffer as one to the annotation lane (src/annotator.ts,
  * spec §16 H1), so passes that come while a turn runs are folded into one post and one `annotation` record; a batch
  * the hour's cap held gets no post. The lane's run comes back as one `annotated` record ({@link WatchHandle.noteAnnotated});
- * a send that dispose cuts off is recorded `{ undelivered: "the face shut down" }`, never delivered. A failed poll - rejected, or every quote
+ * a send that dispose cuts off is recorded `{ undelivered: "the face shut down" }`, never delivered. A price alert the
+ * phone got is asked after for the owner's lessons ({@link WatchDeps.lessons}), beside the send chain, its block a reply
+ * on it - no send and no post waits for that ask. A failed poll - rejected, or every quote
  * `unavailable` - judges nothing and says so once per session date per market; a watched symbol unpriced on its
  * first {@link UNPRICED_POLLS} polls of a session date says so once (ruling 16).
  *
@@ -84,6 +86,7 @@ import { HttpError } from "./http.ts";
 import { nyInstant, sessionBefore, sessionFor, xnysPrevious, xnysWindow, type DayAnswer, type DeskCalendars, type MarketSession } from "./market-clock.ts";
 import type { NewsAnswer } from "./market-news.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
+import type { AlertLessonsAnswer } from "./memory-alert.ts";
 import { READ_THROUGH_NEVER, type ReadThroughAsk, type ReadThroughEvent, type ReadThroughLane } from "./readthrough-lane.ts";
 import { idOf, type Market } from "./symbols.ts";
 import {
@@ -160,7 +163,7 @@ export interface WatchDeps {
   calendars: DeskCalendars;
   clock: DeskClock;
   deliver: DeskConversation["deliver"];
-  /** Note an alert or a batch `deliver` did not refuse as a line in Gravit's one conversation (src/conversation.ts
+  /** Note an alert or a batch `deliver` did not refuse as a line in gravit's one conversation (src/conversation.ts
    * `note`, through src/desk.ts); none when absent - and never a late replay or the lost line. */
   note?: (line: DeskLine) => void;
   post: Annotator["post"];
@@ -169,6 +172,9 @@ export interface WatchDeps {
   news?: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>;
   idle?: () => Promise<void>;
   readThrough?: Pick<ReadThroughLane, "ready" | "given">;
+  /** The owner's lessons on a price alert the phone got (src/memory-alert.ts `createAlertLessons`), asked beside the
+   * send chain once its delivery is recorded - never for a filing, a batch or a late replay; none, nothing asked. */
+  lessons?: (hit: AlertHit) => Promise<AlertLessonsAnswer | undefined>;
   pid?: number;
   alive?: (pid: number) => boolean;
   tickMs?: number;
@@ -326,8 +332,10 @@ const isWatchRecord = (x: unknown): x is WatchRecord => isAlertRecord(x) || isAn
  * unless watching; `noteAnnotated` appends an annotation run's record to `alerts.jsonl` and keeps it in memory with
  * the rest; `contextFor` what a phone reply to the message `messageId` answers (spec §16 H1b): from the records of the
  * last {@link MEMORY_MS}, an alert's message gives that alert's text, as sent with no note, and the annotation of its
- * pass when there is one; an annotation's message gives its pass's alerts and the annotation - at most
- * {@link CONTEXT_MAX} characters, and `undefined` for a message the watch did not send; `dispose` stops it and
+ * pass when there is one, then its lessons note (`lessons:` and the note) when one was made for it; a lessons block's
+ * message gives its alert's text, as sent, and the note; an annotation's message gives its pass's alerts and the
+ * annotation - at most {@link CONTEXT_MAX} characters, and `undefined` for a message the watch did not send. The
+ * lessons are kept in memory alone, not in `alerts.jsonl`, and a restart forgets them. `dispose` stops it and
  * releases the lease. */
 export interface WatchHandle {
   tick(): Promise<void>;
@@ -534,6 +542,11 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   const saidOn = new Map<string, number>();
   const failed = new Set<string>();
   let lastEt: string | undefined;
+
+  /* ---- the lessons a reply carries, in memory alone and lost at a restart: each note made by its alert's id, and
+   * each message id a block went out as against its alert's id and that note ---- */
+  const lessonsNotes = new Map<string, { text: string; at: number }>();
+  const lessonsSent = new Map<string, { alert: string; text: string; at: number }>();
 
   /* ---- the chains: sends in order, posts on their own, and every pass and poll in flight ---- */
   let sendChain: Promise<void> = Promise.resolve();
@@ -1053,7 +1066,10 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         records.push(d);
         deliveries.set(rec.id, d);
         alerts.append(d);
-        if (!("undelivered" in result)) delivered.push({ rec, result });
+        if (!("undelivered" in result)) {
+          delivered.push({ rec, result });
+          if (rec.trigger.type !== "filing") askLessons(rec, result);
+        }
       }
       if (stopped) return;
       /* posted: an annotated alert that gets a why turn or has a plan to check - the hits whose note was not "none" */
@@ -1064,6 +1080,66 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       const replyTo = "sent" in first.result ? first.result.sent[0] : undefined;
       queuePost({ pass, hits: posted.map((d) => d.rec), replyTo, urgent: posted.some((d) => d.rec.urgent === true) });
     });
+  }
+
+  /** Ask the owner's lessons on a price alert the phone got (`deps.lessons`), beside the send chain and never on it nor
+   * among the flights dispose waits for, so no send, no post and no shutdown waits for the memory: its block goes on
+   * the send chain as the alert's reply (with the alert's kind; with no reply when the outlet queued the alert), and
+   * the conversation is told only once that send was not refused, or once a block of the same `phoneKey` went - a
+   * note with no block is told at once. One block a `phoneKey` an ET day (`lessons-phone:<phoneKey>` among the dated
+   * memories; `key` stands in for an answer that gives none), marked only by a block that was not refused; one note a
+   * `key` an ET day (`lessons:<key>`), marked when it is told. Nothing is sent or told once dispose has begun; a throw
+   * anywhere is one `watch lessons` line. */
+  function askLessons(rec: AlertHit, result: DeliverResult): void {
+    const lessons = deps.lessons;
+    if (lessons === undefined) return;
+    /* tracked by nothing: dispose never waits for an ask, whose answer it would drop anyway */
+    void (async () => {
+      try {
+        const replyTo = "sent" in result ? result.sent[0] : undefined;
+        const kind = rec.urgent === true ? URGENT : ALERT;
+        const answer = await lessons(rec);
+        if (stopped || answer === undefined) return;
+        const noteSaid = `lessons:${answer.key}`;
+        const phoneSaid = `lessons-phone:${answer.phoneKey ?? answer.key}`;
+        const tell = (): void => {
+          if (answer.note === undefined || saidOn.has(noteSaid)) return;
+          saidOn.set(noteSaid, clock.now());
+          lessonsNotes.set(rec.id, { text: answer.note, at: clock.now() });
+          noteLine({ kind: "alert", alert: rec.id, symbol: rec.symbol, lessons: true, text: answer.note });
+        };
+        const phone = answer.phone;
+        if (phone === undefined || saidOn.has(phoneSaid)) {
+          tell();
+          return;
+        }
+        onSendChain(async () => {
+          if (stopped) return;
+          if (saidOn.has(phoneSaid)) {
+            tell();
+            return;
+          }
+          let sent: DeliverResult;
+          try {
+            sent = await deps.deliver(phone, replyTo === undefined ? kind : { ...kind, replyTo });
+          } catch (err) {
+            fail("lessons", err);
+            return;
+          }
+          if ("undelivered" in sent || stopped) return;
+          saidOn.set(phoneSaid, clock.now());
+          if ("sent" in sent && answer.note !== undefined) {
+            for (const id of sent.sent) {
+              const messageId = messageIdOf(id);
+              if (messageId !== undefined) lessonsSent.set(messageId, { alert: rec.id, text: answer.note, at: clock.now() });
+            }
+          }
+          tell();
+        });
+      } catch (err) {
+        fail("lessons", err);
+      }
+    })();
   }
 
   /** A pass's posted alerts waiting for the annotation lane (why-it-moved task 10), and whether a drain runs. */
@@ -1522,6 +1598,8 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     if (today === lastEt) return;
     lastEt = today;
     for (const [key, t] of saidOn) if (at - t > MEMORY_MS) saidOn.delete(key);
+    for (const [id, n] of lessonsNotes) if (at - n.at > MEMORY_MS) lessonsNotes.delete(id);
+    for (const [id, s] of lessonsSent) if (at - s.at > MEMORY_MS) lessonsSent.delete(id);
     records = records.filter((r) => at - Date.parse(r.t) <= MEMORY_MS);
     for (const [id, d] of deliveries) if (at - Date.parse(d.t) > MEMORY_MS) deliveries.delete(id);
   }
@@ -1812,14 +1890,26 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         return undefined;
       }
     };
+    /** The lessons note made for alert `id`, while the watch keeps it. */
+    const lessonsOf = (id: string): string[] => {
+      const note = lessonsNotes.get(id);
+      return note === undefined || at - note.at > MEMORY_MS ? [] : [`lessons:\n${note.text}`];
+    };
     let parts: string[] | undefined;
+    const block = lessonsSent.get(messageId);
+    if (block !== undefined && at - block.at <= MEMORY_MS) {
+      /* a reply to a lessons block: its alert as sent, then the note */
+      const hit = hitOf(block.alert);
+      const text = hit === undefined ? undefined : textOf(hit);
+      return cutAt([...(text === undefined ? [] : [text]), `lessons:\n${block.text}`].join("\n\n"), CONTEXT_MAX);
+    }
     for (const r of live) {
       if (r.kind === "delivered" && typeof r.delivery === "object" && r.delivery !== null && sentIt((r.delivery as { sent?: unknown }).sent)) {
         const hit = hitOf(r.id);
         const text = hit === undefined ? undefined : textOf(hit);
         if (hit === undefined || text === undefined) continue;
         const post = live.find((p): p is AlertAnnotation => p.kind === "annotation" && Array.isArray(p.alerts) && p.alerts.includes(hit.id));
-        parts = [text, ...noteOf(post === undefined ? undefined : annotatedOf(post.pass))];
+        parts = [text, ...noteOf(post === undefined ? undefined : annotatedOf(post.pass)), ...lessonsOf(hit.id)];
         break;
       }
       if (r.kind === "annotated" && sentIt(r.sent)) {

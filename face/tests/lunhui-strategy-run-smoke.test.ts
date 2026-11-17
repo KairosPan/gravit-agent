@@ -1,5 +1,5 @@
 /** An S01 registered on Friday and graded on Monday on a real boot, the reviewer in both channels (modules spec
- * §5.10, A5, A6, A12, A22, A27, §5.11). Each day Gravit, played by the stub, follows the run protocol: the cn-market
+ * §5.10, A5, A6, A12, A22, A27, §5.11). Each day gravit, played by the stub, follows the run protocol: the cn-market
  * run - the index, limit-up and boards freezes, role_cn_market_analyst submitting three artifacts, role_cn_reviewer
  * without market_run, lunhui_read_run - then the strategy channel for lunhui-s01-repair: lunhui_read_run on cn-market
  * without a run (the listing) to find the day's market run, the same with that run, the quotes of two equities its
@@ -10,7 +10,7 @@
  * counterevidence item addressed, the parameters used); Monday's grades it (`expectation_review.previous_run`
  * Friday's run). Pinned: every artifact of both days' four runs accepted and passing its contract again against a
  * digest rebuilt from the sealed runs as the read built it; the card at most 2,048 bytes; the runs card's latest run
- * Monday's, with its review line; Gravit's prompt carrying the run protocol with its strategy channel.
+ * Monday's, with its review line; gravit's prompt carrying the run protocol with its strategy channel.
  *
  * The boot is the market smoke's: a temp DSH_HOME, port 0, the seat off, the stub the default model,
  * `lunhui-runs` over a temp strategies root holding copies of the shipped cn-market and lunhui-s01-repair, the
@@ -73,7 +73,7 @@ const CONTRACTS: Record<string, any> = { environment: environmentContract, senti
 /** A market run's four artifacts and a strategy run's three, as each lands. */
 const MARKET_ARTIFACTS = [...MARKET_MODULES, "counterevidence"];
 const STRATEGY_ARTIFACTS = ["leader", "counterevidence", "mode"];
-/** The equities Gravit chooses from BK0715's members, which the fixture copy makes hold them. */
+/** The equities gravit chooses from BK0715's members, which the fixture copy makes hold them. */
 const SYMBOLS = ["sh600519", "sz000333"];
 /** The run protocol (`dsh/profile/lunhui-run.md`, the `lunhui:run` section), read from the file: its first line and its strategy channel. */
 const PROTOCOL = readProtocol(LUNHUI_RUN_PATH);
@@ -374,7 +374,7 @@ test("strategy run smoke: an S01 registered on Friday and graded on Monday - eac
         const context = JSON.parse(results[step - 1]) as Context;
         return { kind: "tool", name: `lunhui_submit_${module}`, args: { strategy: "cn-market", run, analysis: JSON.stringify(MARKET_BUILD[module](context)) } };
       }
-      /* Gravit: the protocol's market channel, then its strategy channel, one tool per request. */
+      /* gravit: the protocol's market channel, then its strategy channel, one tool per request. */
       const trigger = lastHuman(request);
       if (results.length === 0) return trigger && textOf(trigger) === "RUN_S01" ? { kind: "tool", name: "lunhui_freeze_index", args: { strategy: "cn-market" } } : { kind: "text", text: "PARENT_DONE" };
       const frozen = runFrom(results[0]);
@@ -427,7 +427,7 @@ test("strategy run smoke: an S01 registered on Friday and graded on Monday - eac
       return artifact;
     }
 
-    /** One day: the clock at `at`, a new Gravit session prompted, every tool result of both channels checked; the runs and artifacts it wrote. */
+    /** One day: the clock at `at`, a new gravit session prompted, every tool result of both channels checked; the runs and artifacts it wrote. */
     async function day(label: string, at: number, session: string) {
       globalThis.Date = shiftedDate(at);
       // Signed in under the day's clock: the connection refuses a cookie whose issuedAt is after "now", and
@@ -437,15 +437,15 @@ test("strategy run smoke: an S01 registered on Friday and graded on Monday - eac
       const gravit = ctx.agents.get(SessionId(sessionId))!;
       await remote(base, cookie, "session/prompt", { request: { requestId: `strategy-run-${crypto.randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: "RUN_S01" }] } });
       const gravitRequests = () => requested.get(sessionId) ?? [];
-      await waitFor(`${label}: Gravit's last request`, () => gravitRequests().some((r) => toolTexts(r).length >= 13));
+      await waitFor(`${label}: gravit's last request`, () => gravitRequests().some((r) => toolTexts(r).length >= 13));
       await gravit.whenIdle();
 
-      /* Gravit's side: the protocol, with its strategy channel, in its prompt; every tool result a success. */
+      /* gravit's side: the protocol, with its strategy channel, in its prompt; every tool result a success. */
       const prompt = textOf(gravitRequests()[0].messages[0]);
       assert.ok(STRATEGY_CHANNEL !== null && STRATEGY_CHANNEL.includes("role_cn_stock_analyst") && STRATEGY_CHANNEL.includes("role_cn_reviewer"), "the run protocol has a strategy channel naming the stock analyst and the reviewer");
-      assert.ok(prompt.includes(RUN_HEADING) && prompt.includes(STRATEGY_CHANNEL), `${label}: Gravit's prompt carried the lunhui:run protocol with its strategy channel`);
+      assert.ok(prompt.includes(RUN_HEADING) && prompt.includes(STRATEGY_CHANNEL), `${label}: gravit's prompt carried the lunhui:run protocol with its strategy channel`);
       const results = toolTexts(gravitRequests().at(-1)!);
-      assert.equal(results.length, 13, `${label}: thirteen tool results came back to Gravit: ${results.map((t) => t.slice(0, 120)).join(" | ")}`);
+      assert.equal(results.length, 13, `${label}: thirteen tool results came back to gravit: ${results.map((t) => t.slice(0, 120)).join(" | ")}`);
       for (const text of results) assert.doesNotMatch(text, /^Error:/, `${label}: no tool call failed: ${text.slice(0, 300)}`);
       const market = runFrom(results[0]);
       assert.deepEqual(results.slice(0, 3).map((t) => [JSON.parse(t).run, JSON.parse(t).session]), [[market, session], [market, session], [market, session]], `${label}: the three market freezes landed in one run of ${session}`);

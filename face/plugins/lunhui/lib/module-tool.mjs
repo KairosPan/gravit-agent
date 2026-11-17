@@ -199,7 +199,7 @@ export function defineModule({ module, channel, contract, runs }) {
   const submit = defineTool({
     name: `lunhui_submit_${module}`,
     description:
-      `提交 ${module} 模块在一个运行上的工件，经校验后存入该运行。只由委派的角色子代理调用，Gravit 的根会话或分叉会被拒绝（NOT_A_ROLE）；` +
+      `提交 ${module} 模块在一个运行上的工件，经校验后存入该运行。只由委派的角色子代理调用，gravit 的根会话或分叉会被拒绝（NOT_A_ROLE）；` +
       `提交前须在本进程读取本模块上下文（READ_FIRST）；每个模块每个运行只接受一个工件，已接受后再提交即 ALREADY_SUBMITTED。` +
       `被拒绝（INVALID_ANALYSIS）时按“修复：”逐项修正后重交。${CHANNEL_TEXT[channel]}${submitMarketText}${budget}` +
       "参数是名称与编号，不是路径；返回 accepted、module 与 run。",

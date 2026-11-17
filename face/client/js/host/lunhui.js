@@ -1,4 +1,4 @@
-// face/client/js/host/lunhui.js — the run views Gravit's composed answers draw from (plan 2 of the Lunhui run view, task 4):
+// face/client/js/host/lunhui.js — the run views gravit's composed answers draw from (plan 2 of the Lunhui run view, task 4):
 // a composed message names its run and the view modules it reads; the open conversation's answers ask the face's view
 // route (GET /data/lunhui/view) once per key, and the answer lands in the lunhui slice — loaded, or failed with its words,
 // which the answer draws under its summary with a Retry. Pure but for the read it is handed.

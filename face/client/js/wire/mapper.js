@@ -314,7 +314,7 @@ function bubble(role, message, base, interrupted) {
       ...(summary === undefined ? {} : { summary }),
     };
   }
-  // only the operator's own words carry their attachments: never Gravit's, a room's, a desk line's or a context row's
+  // only the operator's own words carry their attachments: never gravit's, a room's, a desk line's or a context row's
   const attachments = role === "operator" && !isInjectedSource(kind) && kind !== "schedule" && kind !== "alert"
     ? blocksAttachments(isObject(message) ? message.content : undefined) : [];
   if (text === "" && thinking === "" && attachments.length === 0) return ignore();

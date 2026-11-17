@@ -1,4 +1,4 @@
-/** market:mcp (src/mcp.ts): the market's own stdio MCP server, Gravit's keyless reads — spawned as the face's mcp-market row would spawn
+/** market:mcp (src/mcp.ts): the market's own stdio MCP server, gravit's keyless reads — spawned as the face's mcp-market row would spawn
  * it, over an in-process market holding a fake public source, a fake China and the fake AKShare sidecar. */
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";

@@ -17,7 +17,7 @@ const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.
 // spec 2026-10-20 §6.3: the Account seat's standing (/data/seat.json) in the words the Venues box draws
 const seatView = (over = {}) => ({
   ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T18:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, cardMinutes: 30,
-  seat: { name: 'Gravit', status: 'admitted', address: '0xab12', validUntil: new Date(2026, 10, 19).getTime(), limits: [{ scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 100, reservedUsd: 50, leftUsd: 850, validUntil: 1, expired: false }] },
+  seat: { name: 'gravit', status: 'admitted', address: '0xab12', validUntil: new Date(2026, 10, 19).getTime(), limits: [{ scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 100, reservedUsd: 50, leftUsd: 850, validUntil: 1, expired: false }] },
   venues: [{ id: 'paper-1', name: 'Paper account · paper', paper: true, usd: 10000 }, { id: 'okx', name: 'OKX', paper: false, usd: 0, stale: true, notServed: 'OKX does not serve this location' }],
   cards: [{ id: 'card-7', usd: 56 }, { id: 'card-9', usd: 12 }], others: 1, ...over,
 });
@@ -28,21 +28,21 @@ test('seatWords: nothing read, not reachable, and every standing in its words', 
   assert.equal(off.service, '127.0.0.1:4820 · not reachable'); assert.equal(off.seat, ''); assert.equal(off.mode, ''); assert.equal(off.url, 'http://127.0.0.1:4820');
   const on = seatWords(seatView());
   assert.equal(on.service, '127.0.0.1:4820 · reachable'); assert.equal(on.mode, 'Guard'); assert.equal(on.writes, 'Trading on · $100 a move');
-  assert.equal(on.seat, 'Gravit · admitted until Nov 19');
+  assert.equal(on.seat, 'gravit · admitted until Nov 19');
   assert.deepEqual(on.limits, ['trade · paper-1 · $100 an order · $850 of $1,000 left']);
   assert.deepEqual(on.venues, [{ id: 'paper-1', name: 'Paper account · paper', paper: true, usd: '$10,000', note: '' }, { id: 'okx', name: 'OKX', paper: false, usd: '$0', note: 'OKX does not serve this location' }]);
   assert.equal(on.cards, '2 cards waiting'); assert.equal(on.url, 'http://127.0.0.1:4820');
-  const standing = status => seatWords(seatView({ seat: { name: 'Gravit', status, limits: [] } })).seat;
-  assert.equal(standing('knocking'), 'Gravit · knocking — let it in under Account › Agents');
-  assert.equal(standing('absent'), 'Gravit · not on the account');
-  assert.equal(standing('expired'), 'Gravit · expired');
-  assert.equal(standing('revoked'), 'Gravit · revoked');
-  assert.equal(standing('unknown'), 'Gravit · on the account · standing unknown');
+  const standing = status => seatWords(seatView({ seat: { name: 'gravit', status, limits: [] } })).seat;
+  assert.equal(standing('knocking'), 'gravit · knocking — let it in under Account › Agents');
+  assert.equal(standing('absent'), 'gravit · not on the account');
+  assert.equal(standing('expired'), 'gravit · expired');
+  assert.equal(standing('revoked'), 'gravit · revoked');
+  assert.equal(standing('unknown'), 'gravit · on the account · standing unknown');
   assert.equal(seatWords(seatView({ cards: [{ id: 'c', usd: 1 }] })).cards, '1 card waiting');
   assert.equal(seatWords(seatView({ cards: [] })).cards, '');
   assert.equal(seatWords(seatView({ mode: 'open' })).mode, 'Beast');
   assert.equal(seatWords(seatView({ writes: { on: false, capUsd: null } })).writes, 'Read-only');
-  const lim = l => seatWords(seatView({ seat: { name: 'Gravit', status: 'admitted', limits: [l] } })).limits[0];
+  const lim = l => seatWords(seatView({ seat: { name: 'gravit', status: 'admitted', limits: [l] } })).limits[0];
   assert.equal(lim({ scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 0, reservedUsd: 0, leftUsd: 1000, validUntil: 1, expired: true }), 'trade · paper-1 · $100 an order · $1,000 of $1,000 left · expired');
   assert.equal(lim({ scope: 'trade', allow: ['paper-1', 'ex'], perOrderUsd: 100, budgetUsd: null, spentUsd: 0, reservedUsd: 0, leftUsd: null, validUntil: null, expired: false }), 'trade · paper-1, ex · $100 an order');
   assert.deepEqual(seatWords(seatView({ venues: [{ id: 'v', name: '', paper: false, usd: null, stale: true }] })).venues, [{ id: 'v', name: 'v', paper: false, usd: '', note: 'stale' }]);
@@ -166,7 +166,7 @@ test('openOrdersOf: only open, partial and pending; who is You or the agent name
   assert.equal(open[2].type, 'stop'); assert.equal(open[2].limitPrice, null, 'a stop carries no limit price');
   assert.deepEqual([open[2].kind, open[2].stopPrice, open[2].base], ['spot', 137.83, 'SOL'], "a stop's own price, the market's kind and base");
   const hand = openOrdersOf({ ...page,
-    keys: [...page.keys, { address: '0xAB12', name: 'Gravit', status: 'ok' }, { address: '0xc0de', name: '', status: 'ok' }],
+    keys: [...page.keys, { address: '0xAB12', name: 'gravit', status: 'ok' }, { address: '0xc0de', name: '', status: 'ok' }],
     orders: [
       { id: 'p1', status: 'partial', authority: 'agent', agent: '0xab12', venue: 'paper-1', qty: 2, filledQty: '0.5', paper: true },
       { id: 'p2', status: 'open', authority: 'agent', agent: '0xdead', agentName: 'Claude Code' },
@@ -178,7 +178,7 @@ test('openOrdersOf: only open, partial and pending; who is You or the agent name
   // the key at the order's address in any case names it; no key, or a nameless one, is An agent (an order's own agentName is not taken)
   assert.deepEqual(hand.map(o => [o.kind, o.stopPrice, o.base]).slice(0, 2), [['', null, ''], ['', null, '']], 'absent ones blank or null');
   assert.deepEqual(hand.map(o => [o.id, o.who, o.paper, o.filledQty]), [
-    ['p1', 'Agent · Gravit', true, 0.5], ['p2', 'An agent', false, null], ['p3', 'An agent', false, null], ['p4', 'You', false, null], ['p5', 'An agent', false, null],
+    ['p1', 'Agent · gravit', true, 0.5], ['p2', 'An agent', false, null], ['p3', 'An agent', false, null], ['p4', 'You', false, null], ['p5', 'An agent', false, null],
   ]);
 });
 
@@ -284,10 +284,10 @@ test('venuesOf: health from lastOkAt/lastFailAt; does words; the paper flag; det
   assert.ok(!JSON.stringify(hand).includes('SECRET'), 'no key value travels');
 });
 
-test('agentsOf: Gravit first from the seat view, then the Account agents with their limit words', () => {
+test('agentsOf: gravit first from the seat view, then the Account agents with their limit words', () => {
   const agents = fx('agents');
-  // Gravit's row: the seat view's standing and limits; the counts are the Account's for the seat's agent — null while its agents are not read
-  const gravit = (cards, orders) => ({ gravit: true, name: 'Gravit', address: '0xab12', standing: 'Gravit · admitted until Nov 19', seatStatus: 'admitted', request: null,
+  // gravit's row: the seat view's standing and limits; the counts are the Account's for the seat's agent — null while its agents are not read
+  const gravit = (cards, orders) => ({ gravit: true, name: 'gravit', address: '0xab12', standing: 'gravit · admitted until Nov 19', seatStatus: 'admitted', request: null,
     limits: [{ id: '', scope: 'trade', allow: ['paper-1'], expired: false, words: 'trade · paper-1 · $100 an order · $850 of $1,000 left' }], cards, orders });
   const claude = { gravit: false, name: 'Claude Code', address: '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6', status: 'ok', validUntil: '2026-11-21T07:35:46.778Z', limits: [
     { id: 'spend-0001', scope: 'trade', allow: ['ex', 'predict', 'wallet'], expired: false, words: 'trade · ex, predict, wallet · $150 an order · $380.01 of $600 left' },
@@ -297,23 +297,23 @@ test('agentsOf: Gravit first from the seat view, then the Account agents with th
   assert.deepEqual(agentsOf(agents, seatView()), [gravit(0, 0), claude], 'the stand-in lists no agent at the seat address');
 
   // the Account's own row for the seat is the agent at the seat view's address, in any case: left out, its cards and its open orders
-  // counted on Gravit's row; while the seat view carries an address, a name alone hides nothing
-  const seatAgent = { address: '0xAB12', name: 'Gravit', status: 'ok', limits: [], cards: [{ id: 'card-7' }, { id: 'card-9' }],
+  // counted on gravit's row; while the seat view carries an address, a name alone hides nothing
+  const seatAgent = { address: '0xAB12', name: 'gravit', status: 'ok', limits: [], cards: [{ id: 'card-7' }, { id: 'card-9' }],
     orders: ['open', 'filled', 'partial', 'canceled', 'pending'].map((status, i) => ({ id: `g${i}`, status })) };
   const more = { ...agents, agents: [...agents.agents, seatAgent,
     { address: '0x01d', name: ' gravit ', status: 'expired', limits: [], cards: [], orders: [{ id: 'old', status: 'open' }] },
     { address: '0x9a5', name: 'Gravitas', status: 'ok', validUntil: '2026-11-01T00:00:00.000Z', limits: [{ scope: 'trade', allow: ['ex'], perPaymentUsd: 100, budgetUsd: 1000, leftUsd: 1000, expired: true }], cards: [], orders: [] },
   ] };
   const listed = agentsOf(more, seatView());
-  assert.deepEqual(listed.map(a => [a.name, a.gravit, a.cards, a.orders]), [['Gravit', true, 2, 3], ['Claude Code', false, 1, 1], [' gravit ', false, 0, 1], ['Gravitas', false, 0, 0]]);
+  assert.deepEqual(listed.map(a => [a.name, a.gravit, a.cards, a.orders]), [['gravit', true, 2, 3], ['Claude Code', false, 1, 1], [' gravit ', false, 0, 1], ['Gravitas', false, 0, 0]]);
   assert.deepEqual(listed[3].limits, [{ id: '', scope: 'trade', allow: ['ex'], expired: true, words: 'trade · ex · $100 an order · $1,000 of $1,000 left · expired' }]);
   // with no address on the seat view (knocking: no key yet), the seat's agents are found by name, in any case, and all counted
-  const knocking = agentsOf(more, seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } }));
-  assert.deepEqual(knocking.map(a => [a.name, a.gravit, a.cards, a.orders]), [['Gravit', true, 2, 4], ['Claude Code', false, 1, 1], ['Gravitas', false, 0, 0]]);
-  assert.equal(knocking[0].standing, 'Gravit · knocking — let it in under Account › Agents');
+  const knocking = agentsOf(more, seatView({ seat: { name: 'gravit', status: 'knocking', limits: [] } }));
+  assert.deepEqual(knocking.map(a => [a.name, a.gravit, a.cards, a.orders]), [['gravit', true, 2, 4], ['Claude Code', false, 1, 1], ['Gravitas', false, 0, 0]]);
+  assert.equal(knocking[0].standing, 'gravit · knocking — let it in under Account › Agents');
   // the seat's name is the seat view's
-  const scout = agentsOf({ ...agents, agents: [{ name: 'SCOUT', status: 'ok' }, { name: 'Gravit', status: 'ok' }] }, seatView({ seat: { name: 'Scout', status: 'admitted', limits: [] } }));
-  assert.deepEqual(scout.map(a => [a.name, a.gravit, a.standing ?? a.status]), [['Scout', true, 'Scout · admitted'], ['Gravit', false, 'ok']]);
+  const scout = agentsOf({ ...agents, agents: [{ name: 'SCOUT', status: 'ok' }, { name: 'gravit', status: 'ok' }] }, seatView({ seat: { name: 'Scout', status: 'admitted', limits: [] } }));
+  assert.deepEqual(scout.map(a => [a.name, a.gravit, a.standing ?? a.status]), [['Scout', true, 'Scout · admitted'], ['gravit', false, 'ok']]);
 
   // a limit: an amount that is not there is no clause, never $0; a scope or an allowed id that is not a string is no word
   const probe = agentsOf({ ok: true, agents: [{ name: 'Probe', status: 'ok', limits: [
@@ -324,18 +324,18 @@ test('agentsOf: Gravit first from the seat view, then the Account agents with th
   assert.deepEqual(probe[0].limits.map(l => l.words), ['trade · ex · $100 an order', 'trade · ex · $100 an order · $250.5 of $1,000 left', 'ex, wallet · $10 an order · $20 of $20 left']);
   assert.deepEqual(probe[0].limits[2], { id: '', scope: '', allow: ['ex', 'wallet'], expired: false, words: 'ex, wallet · $10 an order · $20 of $20 left' }, 'a scope or an id that is not a string is blank');
   const seatLimit = { scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 0, reservedUsd: 0, leftUsd: null, validUntil: null, expired: false };
-  assert.deepEqual(agentsOf({ ok: true, agents: [] }, seatView({ seat: { name: 'Gravit', status: 'admitted', address: '0xab12', limits: [seatLimit] } }))[0].limits.map(l => l.words),
+  assert.deepEqual(agentsOf({ ok: true, agents: [] }, seatView({ seat: { name: 'gravit', status: 'admitted', address: '0xab12', limits: [seatLimit] } }))[0].limits.map(l => l.words),
     ['trade · paper-1 · $100 an order'], 'the seat box words its limits the same way');
 
-  // no seat view to stand on: the Account's list is the whole answer; no agents read: Gravit's row alone, its counts unknown
+  // no seat view to stand on: the Account's list is the whole answer; no agents read: gravit's row alone, its counts unknown
   const unreachable = { ok: true, url: 'http://127.0.0.1:4820', reachable: false, error: 'ECONNREFUSED' };
-  assert.deepEqual(agentsOf(more, unreachable).map(a => [a.name, a.gravit]), [['Claude Code', false], ['Gravit', false], [' gravit ', false], ['Gravitas', false]]);
+  assert.deepEqual(agentsOf(more, unreachable).map(a => [a.name, a.gravit]), [['Claude Code', false], ['gravit', false], [' gravit ', false], ['Gravitas', false]]);
   assert.deepEqual(agentsOf(agents, null), [claude]);
   assert.deepEqual(agentsOf({ ok: true }, seatView()), [gravit(null, null)]);
   assert.deepEqual(agentsOf({ ok: false, error: 'no' }, null), []);
 });
 
-// plan 4b Task 5: the agent wallets, and Gravit's row while its seat knocks
+// plan 4b Task 5: the agent wallets, and gravit's row while its seat knocks
 test("walletsOf names each wallet's venue as the Account does", () => {
   const page = fx('account');
   assert.deepEqual(walletsOf(page), [{ id: 'sub-0002', name: 'Claude Code', agent: '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6', agentName: 'Claude Code',
@@ -351,9 +351,9 @@ test("walletsOf names each wallet's venue as the Account does", () => {
   assert.deepEqual(walletsOf({ ok: true, subAccounts: page.subAccounts }), []);
 });
 
-test("Gravit's row carries the knocking request's address", () => {
+test("gravit's row carries the knocking request's address", () => {
   const page = { ...fx('account'), requests: [{ address: '0xFEED', name: 'Someone', at: '2026-10-22T07:30:00.000Z' }, { address: '0xab34', name: 'gravit', at: '' }] };
-  const knockingAt = address => seatView({ seat: { name: 'Gravit', status: 'knocking', ...(address ? { address } : {}), limits: [] } });
+  const knockingAt = address => seatView({ seat: { name: 'gravit', status: 'knocking', ...(address ? { address } : {}), limits: [] } });
   const pick = r => [r.address, r.request];
   // the seat view's address and exactly one request there, in any case: bound, whatever name the request gives
   const [row] = agentsOf(fx('agents'), knockingAt('0xfeed'), page);
@@ -361,7 +361,7 @@ test("Gravit's row carries the knocking request's address", () => {
   // no address on the seat view: a request named as the seat is not bound, and the row has no address of its own
   assert.deepEqual(pick(agentsOf(fx('agents'), knockingAt(), page)[0]), ['', null]);
   // two requests named "gravit", no address: not bound
-  const twins = { ...page, requests: [{ address: '0x01', name: 'gravit', at: '' }, { address: '0x02', name: 'Gravit', at: '' }] };
+  const twins = { ...page, requests: [{ address: '0x01', name: 'gravit', at: '' }, { address: '0x02', name: 'gravit', at: '' }] };
   assert.deepEqual(pick(agentsOf(fx('agents'), knockingAt(), twins)[0]), ['', null]);
   // two requests at the seat's address: not bound; none there, or no page read: not bound
   const doubled = { ...page, requests: [{ address: '0xfeed', name: 'a', at: '' }, { address: '0xFEED', name: 'b', at: '' }] };
@@ -369,7 +369,7 @@ test("Gravit's row carries the knocking request's address", () => {
   assert.equal(agentsOf(fx('agents'), knockingAt('0x99'), page)[0].request, null);
   assert.equal(agentsOf(fx('agents'), knockingAt('0xfeed'))[0].request, null);
   // admitted: the seat view's address, no request bound
-  const admitted = agentsOf(fx('agents'), seatView(), { ...page, requests: [{ address: '0xab12', name: 'Gravit', at: '' }] })[0];
+  const admitted = agentsOf(fx('agents'), seatView(), { ...page, requests: [{ address: '0xab12', name: 'gravit', at: '' }] })[0];
   assert.deepEqual([admitted.seatStatus, ...pick(admitted)], ['admitted', '0xab12', null]);
 });
 
@@ -406,13 +406,13 @@ test('cardsOf, asksOf, requestsOf: grouped by agent; shown verbatim', () => {
   assert.deepEqual(grantOf(asksOf(page)[0], page), grantOf(page.asks[0], page), 'the row grants as the page\'s own ask does');
   assert.deepEqual(asksOf({ ...page, asks: [{ id: 'ask-9', kind: 'limit', agent: 5, venue: null, usd: 1000 }] })[0], { id: 'ask-9', agent: '', agentName: '', kind: 'limit', venue: '', usd: '', text: '', expiresAt: '' });
   assert.deepEqual(requestsOf(page), []);
-  assert.deepEqual(requestsOf({ ...page, requests: [{ address: '0xab12', name: 'Gravit', at: '2026-10-22T07:00:00.000Z' }] }), [{ address: '0xab12', name: 'Gravit', at: '2026-10-22T07:00:00.000Z' }]);
+  assert.deepEqual(requestsOf({ ...page, requests: [{ address: '0xab12', name: 'gravit', at: '2026-10-22T07:00:00.000Z' }] }), [{ address: '0xab12', name: 'gravit', at: '2026-10-22T07:00:00.000Z' }]);
 });
 
 test("the keys' fields: an agent's address, each limit's id, scope and allow beside its words, a card's hash, an ask's grant seed", () => {
   const agents = fx('agents'), page = fx('account');
   const [gravit, claude] = agentsOf(agents, seatView());
-  // Gravit's row stands on the seat view's address; the Account's agents on their own
+  // gravit's row stands on the seat view's address; the Account's agents on their own
   assert.equal(gravit.address, '0xab12');
   assert.equal(claude.address, agents.agents[0].address);
   assert.deepEqual(claude.limits.map(({ id, scope, allow }) => ({ id, scope, allow })), agents.agents[0].limits.map(({ id, scope, allow }) => ({ id, scope, allow })));
@@ -585,8 +585,8 @@ test('Portfolio marks prices old while the market is down', () => {
 
 test("a limit's venues are listed under the table's separator", async () => {
   const { withTable } = await import('../../client/js/i18n/words.js');
-  const lim = seatWords(seatView({ seat: { name: 'Gravit', status: 'admitted', limits: [{ scope: 'trade', allow: ['paper-1', 'ex'], perOrderUsd: 100, expired: false }] } })).limits;
-  assert.deepEqual(withTable({ 'common.list.sep': '、' }, () => seatWords(seatView({ seat: { name: 'Gravit', status: 'admitted', limits: [{ scope: 'trade', allow: ['paper-1', 'ex'], perOrderUsd: 100, expired: false }] } })).limits),
+  const lim = seatWords(seatView({ seat: { name: 'gravit', status: 'admitted', limits: [{ scope: 'trade', allow: ['paper-1', 'ex'], perOrderUsd: 100, expired: false }] } })).limits;
+  assert.deepEqual(withTable({ 'common.list.sep': '、' }, () => seatWords(seatView({ seat: { name: 'gravit', status: 'admitted', limits: [{ scope: 'trade', allow: ['paper-1', 'ex'], perOrderUsd: 100, expired: false }] } })).limits),
     ['trade · paper-1、ex · $100 an order']);
   assert.deepEqual(lim, ['trade · paper-1, ex · $100 an order']);
 });

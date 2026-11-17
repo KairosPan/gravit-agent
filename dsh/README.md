@@ -5,12 +5,12 @@ STRATEGY runs on DeepSeek Harness (dsh). This directory is the repo's half of th
 | Path | What |
 |---|---|
 | `profile/cordis.yml` | profile TEMPLATE — the operator's half: the skill roots, the model, and the INTENDED approval list (see step 4); it names the rows the face composes itself |
-| `profile/persona.md`, `profile/cycle.md` | Gravit's two prompt texts, read by the face at compose time (dsh itself reads nothing here): the persona, set as the `system-prompt` row's `personaPrefix`, and the research-cycle contract, mounted as the `gravit:cycle` section of Gravit's prompt (a bot's and a role child's carry none). `cycle.md` is at most 3,300 bytes (`CYCLE_MAX_BYTES`); after an edit, `cd face && npm run render:roles` regenerates the mirror that embeds it (`face/README.md` "The profile") |
-| `profile/lunhui-run.md` | the A-share research runs' order (in `cn-market`: freeze, delegate to `cn-market-analyst`, read the run back; in a strategy channel: read the day's market run, freeze the candidates' quotes, delegate the leader and then the mode to `cn-stock-analyst`, read the run back), read by the face at compose time (`face/src/protocols.ts`) and mounted as the `lunhui:run` section of Gravit's prompt only while the Lunhui rows are mounted (a bot's and a role child's carry none); Chinese, at most 3,000 bytes (`PROTOCOL_MAX_BYTES`), no `{{`; after an edit, `cd face && npm run render:roles` regenerates the mirror that embeds it (`face/README.md` "Lunhui analysis") |
+| `profile/persona.md`, `profile/cycle.md` | gravit's two prompt texts, read by the face at compose time (dsh itself reads nothing here): the persona, set as the `system-prompt` row's `personaPrefix`, and the research-cycle contract, mounted as the `gravit:cycle` section of gravit's prompt (a bot's and a role child's carry none). `cycle.md` is at most 3,300 bytes (`CYCLE_MAX_BYTES`); after an edit, `cd face && npm run render:roles` regenerates the mirror that embeds it (`face/README.md` "The profile") |
+| `profile/lunhui-run.md` | the A-share research runs' order (in `cn-market`: freeze, delegate to `cn-market-analyst`, read the run back; in a strategy channel: read the day's market run, freeze the candidates' quotes, delegate the leader and then the mode to `cn-stock-analyst`, read the run back), read by the face at compose time (`face/src/protocols.ts`) and mounted as the `lunhui:run` section of gravit's prompt only while the Lunhui rows are mounted (a bot's and a role child's carry none); Chinese, at most 3,000 bytes (`PROTOCOL_MAX_BYTES`), no `{{`; after an edit, `cd face && npm run render:roles` regenerates the mirror that embeds it (`face/README.md` "Lunhui analysis") |
 | `profile/memory.md` | what only this host knows of the memory's tools (how the Market spells a symbol, whose call to register before an order, the facts the face computes, the Account's own notes being another store), read by the face at compose time (`face/src/protocols.ts`) and mounted as the `gravit:memory` section of the conversation's and the workers' prompts only while `mcp__memory__memory_recall` is callable (a desk's, a bot's and a role child's carry none); the memory's own instructions are its server's `mcp:memory` section, not this file; at most 1,000 bytes (`MEMORY_MAX_BYTES`), no `{{`; after an edit, `cd face && npm run render:roles` regenerates the mirror that embeds it (`face/README.md` "The memory") |
 | `skills/mechanics/` | neutral mechanics, always apply: `account-seat-guide`, `analog-guide` (what `analog_events` answers, how to research an event through the source reader, how to report the result) |
 | `skills/style-gravit/` | the operator's own style: `doctrine`, `signals`, `lessons` — converted from the retired `seeds_v2/` JSON packs |
-| `../roles/` (the repo root's, not this directory's) | the role library the face renders into Gravit's preset (`face/src/roles.ts`, `DEVELOPMENT.md` §3.8); `_template` is the copy source and five roles ship: `cn-market-analyst`, `cn-reviewer` and `cn-stock-analyst`, the Lunhui modules' three, `pdf-page-reader` and `source-reader`; each `role.yml` names an MCP tool as `mcp__<serverName>__<raw>`, spelling the server name the installed profile mounts |
+| `../roles/` (the repo root's, not this directory's) | the role library the face renders into gravit's preset (`face/src/roles.ts`, `DEVELOPMENT.md` §3.8); `_template` is the copy source and five roles ship: `cn-market-analyst`, `cn-reviewer` and `cn-stock-analyst`, the Lunhui modules' three, `pdf-page-reader` and `source-reader`; each `role.yml` names an MCP tool as `mcp__<serverName>__<raw>`, spelling the server name the installed profile mounts |
 
 Mechanics vs style is the load-bearing split. Mechanics are how the tools and the venues
 work — findings never overrule them. Style is the operator's preference: follow it by
@@ -46,7 +46,7 @@ rows of their own. The memory's home is the operator's to make, outside the repo
    `<profile>/cordis.yml` on every boot (`face/README.md`). Translate
    `dsh/profile/cordis.yml` into rows: the skill roots become one `skill-filesystem` config
    patch (`customSkillDirs` = the two group roots, with every `<ABSOLUTE PATH TO THIS REPO>`
-   filled in; the repo copy keeps the placeholders), and Gravit's default model is one row —
+   filled in; the repo copy keeps the placeholders), and gravit's default model is one row —
    the face reads no `settings.yaml`, so without it the face runs dsh-base's
    `deepseek-official/deepseek-flash`, and nothing in the running face saves a model choice back:
    ```yaml
@@ -102,7 +102,7 @@ actually bound, for the next install or the next pin bump:
   at 0.2.1-rc.5, where the row is still configless)
   and the default-model row (`agent-default-model`, step 2). 0.1.1 took the model from
   `$DSH_HOME/settings.yaml`; the face at 0.2.0 reads no settings file (it provides no
-  `profileContext`), so the row is the only place Gravit's model is set. A home that still
+  `profileContext`), so the row is the only place gravit's model is set. A home that still
   carries the Alpaca MCP row from before 2026-10-24 points at a server that no longer exists —
   its `python -m` command names the Python package the tree removed — so remove the row. Should
   any server still register `place_order` or `cancel_order`, the face refuses to boot until that

@@ -147,7 +147,7 @@ test('trackRuns: stale records — no task after 60 s once the tasks answered, a
   assert.deepEqual(t.runs(), {}, 'the tasks answered without it: cleared');
   assert.equal(t.refreshed.count, 1);
   assert.equal(t.held.length, 0, 'a missing task re-reads once, no backstop');
-  // a missing task under a minute old stays: Gravit has not started it yet
+  // a missing task under a minute old stays: gravit has not started it yet
   t.store.dispatch('moduleRunStarted', { module: 'leader', title: 'Leader · 10-28', startedAt: T0 - 5_000 });
   assert.deepEqual(Object.keys(t.runs()), ['leader']);
   // any record older than 60 minutes goes, running or not, without a re-read

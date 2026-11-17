@@ -150,7 +150,7 @@ test("a member session the operator deleted is not a permanent brick: the next r
   assert.equal(newer.agentsCreated.length, 0);
 });
 
-test("a pre-0.2 member session dsh refuses to open fails THAT member's turn with the legacy reason; the round still ends and wakes Gravit", async () => {
+test("a pre-0.2 member session dsh refuses to open fails THAT member's turn with the legacy reason; the round still ends and wakes gravit", async () => {
   /* dsh 0.2's v2→v3 edge refuses `kind:'room'` messages in a 0.1.1 log
    * (NEW packages/session/session-format-v2-to-v3/src/payload.ts:81, 110-114). */
   const tree = makeFakeTree();
@@ -165,7 +165,7 @@ test("a pre-0.2 member session dsh refuses to open fails THAT member's turn with
   await tree.clock.advance(100);
   assert.equal(tree.agentsCreated.filter((c) => (c as { meta: { agentPreset: string } }).meta.agentPreset === "buffett").length, 0, "no silent fresh member: the voice's memory is not forked");
   const end = gravit.inbox.nextTurn[0];
-  assert.ok(end !== undefined, "the round ended and woke Gravit");
+  assert.ok(end !== undefined, "the round ended and woke gravit");
   const turns = (end.source as unknown as { turns: { bot: string; state: string; reason?: string }[] }).turns;
   const buffett = turns.find((t) => t.bot === "buffett")!;
   assert.equal(buffett.state, "failed");
@@ -223,7 +223,7 @@ test("one driven turn: the member gets the attributed delta with the rules, its 
   assert.equal(result.record.turn, 1);
   const prompt = member.agent.session.snapshotEvents().find((e) => e.type === "user/message")!.data as { content: { text: string }[]; source: Record<string, unknown> };
   assert.match(prompt.content[0].text, /操作员: SanDisk 值得买吗/);
-  assert.match(prompt.content[0].text, /Gravit asks this batch: state a view/);
+  assert.match(prompt.content[0].text, /gravit asks this batch: state a view/);
   assert.match(prompt.content[0].text, /exactly \(pass\)/);
   assert.deepEqual(prompt.source, { kind: "room", form: "delta", room: "session-room", bot: "buffett", messageIds: ["u1"], trigger: "dispatch", brief: "state a view" });
   // the cursor: a second turn with nothing new says so
@@ -280,7 +280,7 @@ test("deadlines: the base timeout extends while the member runs or has a gate pe
   }
 });
 
-test("post: an answer is appended to the room log at once while no Gravit turn is open, and held until turn/end otherwise", async () => {
+test("post: an answer is appended to the room log at once while no gravit turn is open, and held until turn/end otherwise", async () => {
   const tree = makeFakeTree();
   const gravit = tree.newRoom("session-room", CHANNEL.dir);
   const engine = engineOn(tree);
@@ -288,7 +288,7 @@ test("post: an answer is appended to the room log at once while no Gravit turn i
   const msg = (id: string) => ({ id, role: "user" as const, content: [{ type: "text", text: "v" }], source: { kind: "room", form: "answer", bot: "buffett", name: "巴菲特型", sessionId: "s", turn: 1, round: 1 } });
   engine.post(room, msg("a1"));
   assert.deepEqual(sources(gravit.session.snapshotEvents()).map((s) => s.form), ["answer"], "quiet room: appended now");
-  gravit.wake(); // Gravit opens a turn
+  gravit.wake(); // gravit opens a turn
   engine.post(room, msg("a2"));
   assert.equal(sources(gravit.session.snapshotEvents()).length, 1, "a turn is open: held");
   gravit.sleep();
@@ -355,7 +355,7 @@ test("a session with no snapshotEvents() fails CLOSED with a reason: never quiet
 const answers = (events: readonly EventLike[]) => sources(events).filter((s) => s.kind === "room" && s.form === "answer").map((s) => s.bot);
 const roundEnds = (events: readonly EventLike[]) => sources(events).filter((s) => s.kind === "room" && s.form === "round-end");
 
-test("a parallel round: every member gets the same delta and sees no peer this round; answers land in the room log; Gravit is woken once with who spoke and who passed", async () => {
+test("a parallel round: every member gets the same delta and sees no peer this round; answers land in the room log; gravit is woken once with who spoke and who passed", async () => {
   const tree = makeFakeTree();
   const gravit = tree.newRoom("session-room", CHANNEL.dir);
   gravit.session.append("user/message", { id: "u1", role: "user", content: [{ type: "text", text: "开会" }], source: { kind: "user" } }, { surfaceOp: "append" });
@@ -455,7 +455,7 @@ test("a serial round: a peer @ in the first answer never gives an already-dispat
   assert.match(end.content[0].text ?? "", /Answered: 巴菲特型, 投机型\./);
 });
 
-test("a peer @ queues one continuation after the dispatched turns, bounded, and Gravit is woken after it", async () => {
+test("a peer @ queues one continuation after the dispatched turns, bounded, and gravit is woken after it", async () => {
   const tree = makeFakeTree();
   const gravit = tree.newRoom("session-room", CHANNEL.dir);
   let macroTurns = 0;
@@ -472,10 +472,10 @@ test("a peer @ queues one continuation after the dispatched turns, bounded, and 
   assert.ok(gravit.session.snapshotEvents().filter((e) => (e.data as { source?: { form?: string } })?.source?.form === "answer").length === 3, "all three answers precede the wake");
 });
 
-test("a round that runs while Gravit is mid-turn: the answers are held, and they are all in the log before the one wake", async () => {
+test("a round that runs while gravit is mid-turn: the answers are held, and they are all in the log before the one wake", async () => {
   const tree = makeFakeTree();
   const gravit = tree.newRoom("session-room", CHANNEL.dir);
-  gravit.wake(); // Gravit is mid-turn: the room log is not quiet
+  gravit.wake(); // gravit is mid-turn: the room log is not quiet
   tree.script("buffett", () => ({ kind: "answer", text: "买", afterMs: 10 }));
   tree.script("speculator", () => ({ kind: "answer", text: "卖", afterMs: 5 }));
   const engine = engineOn(tree);
@@ -596,7 +596,7 @@ test("say: an @ is the operator's message, appended to the room, not a prompt; t
   const first = await engine.say("session-room", "@buffett @speculator 你们怎么看");
   assert.deepEqual(first.addressed, ["buffett", "speculator"]);
   assert.deepEqual(sources(gravit.session.snapshotEvents()).at(-1), { kind: "user", mention: ["buffett", "speculator"] }, "in the room log as the operator's, with whom it addressed");
-  assert.equal(gravit.inbox.nextTurn.length, 0, "Gravit is not prompted");
+  assert.equal(gravit.inbox.nextTurn.length, 0, "gravit is not prompted");
   const second = await engine.say("session-room", "@buffett 补一句");
   assert.deepEqual(second.addressed, ["buffett"]);
   await tree.clock.advance(100);
@@ -687,7 +687,7 @@ test("describe reports the roster, the runtime members and the caps left", async
 const ROOM_ID = "session-2f0f4e2c-9d61-4c0e-8b7a-3f8a1c2d4e5f";
 const NO_FOLDER_ID = "session-11111111-2222-4333-8444-555555555555";
 
-test("the dispatch tool: global, Gravit-only, roster-checked; validates, starts the round and names who was not called", async () => {
+test("the dispatch tool: global, gravit-only, roster-checked; validates, starts the round and names who was not called", async () => {
   const tree = makeFakeTree();
   const home = await rosterHome(["buffett", "speculator"]);
   const gravit = tree.newRoom("session-room", CHANNEL.dir);
@@ -711,13 +711,13 @@ test("the dispatch tool: global, Gravit-only, roster-checked; validates, starts 
 
   await assert.rejects(tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, exec(undefined)), /needs a session/);
   const bot = { id: "session-bot", status: "idle", session: { id: "session-bot", header: { cwd: CHANNEL.dir, agentPreset: "buffett" }, snapshotEvents: () => [], seq: 0 } };
-  await assert.rejects(tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, exec(bot)), /Gravit's tool/);
-  /* dsh 0.2: a blank Gravit session re-selected to a bot keeps `gravit` in its
+  await assert.rejects(tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, exec(bot)), /gravit's tool/);
+  /* dsh 0.2: a blank gravit session re-selected to a bot keeps `gravit` in its
    * frozen header; the `agentPreset` projection is what it RUNS
    * (NEW packages/preset/agent-preset-registry/src/session.ts:1-15). */
   const reselected = tree.newRoom("session-reselected", CHANNEL.dir);
   tree.emit(reselected.session, { type: "agent-preset/selected", seq: reselected.session.seq, data: { agentPreset: "buffett" } });
-  await assert.rejects(tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, exec(reselected)), /Gravit's tool/, "the running preset refuses even under a gravit header");
+  await assert.rejects(tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, exec(reselected)), /gravit's tool/, "the running preset refuses even under a gravit header");
   await assert.rejects(tool.execute({ to: ["macro"], mode: "parallel", brief: "q", reason: "r" }, exec(gravit)), /macro is not on the roster.*buffett, speculator.*turns bots on in Discover/);
 
   const value = await tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "first" }, exec(gravit)) as { text: string; round: number; notCalled: string[] };
@@ -753,7 +753,7 @@ test("the dispatch lock admits the pre-rename host id, alone or beside the new o
   assert.equal((await tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "mixed" }, exec(mixed)) as { round: number }).round, 1);
   const voice = tree.newRoom("session-voice", CHANNEL.dir, "kairos");
   tree.emit(voice.session, { type: "agent-preset/selected", seq: voice.session.seq, data: { agentPreset: "buffett" } });
-  await assert.rejects(tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, exec(voice)), /Gravit's tool/);
+  await assert.rejects(tool.execute({ to: ["buffett"], mode: "parallel", brief: "q", reason: "r" }, exec(voice)), /gravit's tool/);
   await tree.clock.advance(100);
   engine.dispose();
   assert.equal(tree.registeredTools.length, 0, "dispose unregisters the tool");
@@ -850,7 +850,7 @@ test("dispatch to a bot switched off is refused with the bots available; a membe
   );
   await tree.clock.advance(200);
   assert.deepEqual(answers(gravit.session.snapshotEvents()), ["buffett"], "the member's turn finished and its answer landed");
-  assert.equal(gravit.inbox.nextTurn.length, 1, "the round ended and woke Gravit once");
+  assert.equal(gravit.inbox.nextTurn.length, 1, "the round ended and woke gravit once");
   engine.dispose();
 });
 
@@ -872,7 +872,7 @@ test("a corrupt roster refuses dispatch naming channels.json, and the file is le
   }
 });
 
-test("a debate member is refused ask_user_question, create_goal and update_goal; a bot task worker and Gravit are not; it holds after a restart", async () => {
+test("a debate member is refused ask_user_question, create_goal and update_goal; a bot task worker and gravit are not; it holds after a restart", async () => {
   const tree = makeFakeTree();
   const home = await rosterHome(["buffett", "speculator"]);
   tree.newRoom("session-conv", "/conversation", "gravit-router");
@@ -892,7 +892,7 @@ test("a debate member is refused ask_user_question, create_goal and update_goal;
     assert.equal(refused.kind, "deny", name);
     assert.match((refused as { reason: string }).reason, /in prose/, "the refusal tells the member to address the operator in its answer");
     assert.deepEqual(await decide(name, worker), { kind: "allow" }, `a bot task worker keeps ${name}`);
-    assert.deepEqual(await decide(name, room), { kind: "allow" }, `Gravit keeps ${name}`);
+    assert.deepEqual(await decide(name, room), { kind: "allow" }, `gravit keeps ${name}`);
   }
   assert.deepEqual(await decide("read", member.agent), { kind: "allow" }, "the member's other tools pass");
   engine.dispose();

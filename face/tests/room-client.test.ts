@@ -44,19 +44,19 @@ test("isMemberSession: a member's own transcript is not a room - the delta's pro
 
 const roster = [{ id: "buffett", name: "巴菲特型" }, { id: "speculator", name: "投机型" }, { id: "cracked", name: "cracked", broken: "not a list" }];
 
-test("stripChips: Gravit first; roster members read the projection's coarse state, the pulses' fine state while called, a pending gate over both; a rostered-but-unmounted bot is shown broken; a member no longer rostered is left", () => {
+test("stripChips: gravit first; roster members read the projection's coarse state, the pulses' fine state while called, a pending gate over both; a rostered-but-unmounted bot is shown broken; a member no longer rostered is left", () => {
   const projection = { kind: "room", organizing: true, members: { buffett: { sessionId: "m1", state: "called" }, speculator: { sessionId: "m2", state: "passed" }, ghost: { sessionId: "m3", state: "answered", name: "Ghost" } } };
-  const chips = stripChips({ roster, projection, members: { ghost: { sessionId: "m3", name: "Ghost" } }, gates: new Set(["m2"]), fine: new Map([["m1", "writing"]]), running: false, gravitName: "Gravit" });
+  const chips = stripChips({ roster, projection, members: { ghost: { sessionId: "m3", name: "Ghost" } }, gates: new Set(["m2"]), fine: new Map([["m1", "writing"]]), running: false, gravitName: "gravit" });
   assert.deepEqual(chips.map((c) => `${c.id}:${c.state}`), ["gravit:organizing", "buffett:writing", "speculator:waiting", "cracked:idle", "ghost:left"]);
   assert.equal(chips[0].gravit, true);
   assert.equal(chips[3].broken, "not a list");
   assert.equal(chips[1].sessionId, "m1");
 });
 
-test("stripChips: before any dispatch the strip is the roster at idle, and Gravit follows the running flag", () => {
-  const chips = stripChips({ roster, projection: { kind: "none" }, members: {}, gates: new Set(), fine: new Map(), running: true, gravitName: "Gravit" });
+test("stripChips: before any dispatch the strip is the roster at idle, and gravit follows the running flag", () => {
+  const chips = stripChips({ roster, projection: { kind: "none" }, members: {}, gates: new Set(), fine: new Map(), running: true, gravitName: "gravit" });
   assert.deepEqual(chips.map((c) => c.state), ["organizing", "idle", "idle", "idle"]);
-  assert.deepEqual(stripChips({ roster: [], projection: undefined, members: {}, gates: new Set(), fine: new Map(), running: false, gravitName: "Gravit" }).map((c) => c.id), ["gravit"]);
+  assert.deepEqual(stripChips({ roster: [], projection: undefined, members: {}, gates: new Set(), fine: new Map(), running: false, gravitName: "gravit" }).map((c) => c.id), ["gravit"]);
 });
 
 test("roundEndLine reads the outcome and each state group; capped and superseded say so", () => {
@@ -74,9 +74,9 @@ test("roundEndLine's names are joined by the table's separator", () => {
 test("gateSpeaker names the member's bot for a member's gate, else the fallback", () => {
   const memberRows = [{ sessionId: "m1", agentPreset: "buffett" }];
   const bots = [{ id: "buffett", name: "巴菲特型" }];
-  assert.equal(gateSpeaker("m1", memberRows, bots, "Gravit"), "巴菲特型");
-  assert.equal(gateSpeaker("m9", memberRows, bots, "Gravit"), "Gravit");
-  assert.equal(gateSpeaker("m1", memberRows, [], "Gravit"), "buffett", "no roster name: the id, never the host");
+  assert.equal(gateSpeaker("m1", memberRows, bots, "gravit"), "巴菲特型");
+  assert.equal(gateSpeaker("m9", memberRows, bots, "gravit"), "gravit");
+  assert.equal(gateSpeaker("m1", memberRows, [], "gravit"), "buffett", "no roster name: the id, never the host");
 });
 
 const account = {

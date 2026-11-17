@@ -1,11 +1,11 @@
 /** CONNECT IMESSAGE, SHEETS 1 TO 3 (through Photon's hosted relay): iMessage's side of a pending connection (pending.ts PendingSource).
  *
  *   Sheet 1's check: the project looked up with its secret (checkProject; a project Photon gives dedicated lines is refused — the shared
- *     pool only), then the operator's number found among the project's users or registered (addUser), which names the pool number Gravit
+ *     pool only), then the operator's number found among the project's users or registered (addUser), which names the pool number gravit
  *     will speak from. A registration whose line Photon refused to write to (the line kept in <home>/identity/imessage.refused) is removed
  *     and registered again, so Photon gives a fresh number. Every refusal is in IDENTITY_WORDS' fixed words; nothing Photon says is repeated.
  *   Sheet 2's listening: the project's one event stream, live from now. Only a 1:1 iMessage text from the number typed on sheet 1 is heard;
- *     Gravit's own messages, a group's, another service's (SMS, RCS: one log line a minute) and anything not text are skipped, and any
+ *     gravit's own messages, a group's, another service's (SMS, RCS: one log line a minute) and anything not text are skipped, and any
  *     other sender — the operator's own email handle among them — is reported to the shell as a stranger.
  *
  * The project secret is held here in memory only, for the pending connection's life; it is in no line said (the shell redacts `secrets`,
@@ -120,7 +120,7 @@ export class ImessagePendingSource implements PendingSource {
       const now = this.o.clock.now();
       if (now - this.otherSaidAt >= OTHER_SERVICE_LOG_MS) {
         this.otherSaidAt = now;
-        ctx.log(`identity: an ${m.service === "SMS" || m.service === "RCS" ? m.service : "other"} message reached Gravit's iMessage line; only an iMessage counts, so it is skipped`);
+        ctx.log(`identity: an ${m.service === "SMS" || m.service === "RCS" ? m.service : "other"} message reached gravit's iMessage line; only an iMessage counts, so it is skipped`);
       }
       return false;
     }

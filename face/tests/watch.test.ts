@@ -23,6 +23,7 @@ import { bjDate } from "../src/et.ts";
 import { HttpError } from "../src/http.ts";
 import { deskCalendars, type DeskCalendars, type MarketCalendar, type MarketSession } from "../src/market-clock.ts";
 import type { MarketQuote, MarketQuoteIdentity, MarketQuotePayload, MarketQuoteSource } from "../src/market-quotes.ts";
+import type { AlertLessonsAnswer } from "../src/memory-alert.ts";
 import type { Market } from "../src/symbols.ts";
 import type { AlertHit } from "../src/watch-eval.ts";
 import {
@@ -111,6 +112,7 @@ interface HarnessOpts {
   deliver?: (text: string, n: number) => DeliverResult | Promise<DeliverResult>;
   post?: (input: { text: string; source: unknown; message: unknown; replyTo?: string; urgent?: boolean; readThrough?: { asks: ReadThroughAsk[]; later: ReadThroughEvent[] } }) => PostResult | Promise<PostResult>;
   readThrough?: Pick<ReadThroughLane, "ready" | "given">;
+  lessons?: (hit: AlertHit) => Promise<AlertLessonsAnswer | undefined>;
   budget?: BudgetState;
   news?: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>;
   idle?: () => Promise<void>;
@@ -161,6 +163,7 @@ async function harness(o: HarnessOpts): Promise<Harness> {
     ...(o.news === undefined ? {} : { news: o.news }),
     ...(o.idle === undefined ? {} : { idle: o.idle }),
     ...(o.readThrough === undefined ? {} : { readThrough: o.readThrough }),
+    ...(o.lessons === undefined ? {} : { lessons: o.lessons }),
     pid: o.pid ?? 4242,
     alive: o.alive ?? ((p) => p === (o.pid ?? 4242)),
     log: (line) => { logs.push(line); },
@@ -2072,4 +2075,373 @@ test("a fold of an A-share alert and a US move is one why post: the A share's he
   assert.ok(text.endsWith(WHY_INSTRUCTIONS));
   assert.ok(sec.urls.every((u) => !u.includes("600519")), "an A share is never asked of SEC");
   await h.watch.dispose();
+});
+
+/* ---------- the lessons: the memory asked after a price alert is sent (memory plan 2b, task 3) ---------- */
+
+const HELD_NVDA = "- symbol: NVDA\n  qty: 100\n  avg_cost: 120.5\n";
+const nvdaRule = (id: string, pct: number, extra = ""): string => `- id: ${id}\n  kind: move_pct\n  symbols: [NVDA]\n  move_pct: ${pct}\n${extra}`;
+const BLOCK = "Your own lessons on NVDA, not advice:\n· red line (don't): \"no adds into a gap down\" · fired 1 · followed 1 · overridden 0";
+const NOTE = "Your own lessons on NVDA, not advice:\n· red line (don't): \"no adds into a gap down\"\nrecall r-1";
+const ANSWER: AlertLessonsAnswer = { phone: BLOCK, note: NOTE, key: "NVDA:2026-11-30:no-adds|" };
+
+/** A recording `lessons`: each hit it was asked, what the watch had sent and recorded by then, and `answer`'s reply. */
+function lessonsFake(answer: (hit: AlertHit, n: number) => Promise<AlertLessonsAnswer | undefined>): {
+  fn: (hit: AlertHit) => Promise<AlertLessonsAnswer | undefined>; calls: { hit: AlertHit; sentBefore: number; outcome: string | undefined }[]; watch?: WatchHandle; sent?: Harness["sent"];
+} {
+  const fake = {
+    calls: [] as { hit: AlertHit; sentBefore: number; outcome: string | undefined }[],
+    watch: undefined as WatchHandle | undefined,
+    sent: undefined as Harness["sent"] | undefined,
+    fn: (hit: AlertHit) => {
+      fake.calls.push({ hit, sentBefore: fake.sent?.length ?? -1, outcome: fake.watch?.status().recent.find((r) => r.id === hit.id)?.outcome });
+      return answer(hit, fake.calls.length - 1);
+    },
+  };
+  return fake;
+}
+
+/** A harness at 15:20:45Z holding NVDA, its rules `rules`, NVDA's first print 165 against a 175 close (-5.7%). */
+async function moveHarness(rules: string, o: Omit<Partial<HarnessOpts>, "lessons"> & { lessons: ReturnType<typeof lessonsFake> }): Promise<Harness> {
+  const fake = o.lessons;
+  const h = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/holdings.yml": HELD_NVDA, "desk/rules.yml": rules }, ...o, lessons: fake.fn });
+  fake.watch = h.watch;
+  fake.sent = h.sent;
+  h.source.tables.us.set("NVDA", us(165, "2026-11-30T15:20:44Z", 175));
+  return h;
+}
+const telegram7 = (_text: string, n: number): DeliverResult => ({ sent: [n === 0 ? "telegram:7" : `telegram:${100 + n}`] });
+const lessonLines = (h: Harness): string[] => h.logs.filter((l) => l.startsWith("gravit-face: desk: watch lessons:"));
+
+test("a held name's move alert: lessons is asked after its delivery, its block goes as a reply under it, then the conversation is told", async () => {
+  const fake = lessonsFake(async () => ANSWER);
+  const h = await moveHarness(nvdaRule("nvda-move", 4), { lessons: fake, deliver: telegram7 });
+  await h.wall.advance(0);
+  await until("the block", () => h.sent.length === 2);
+  await until("the lessons note", () => h.notes.length === 2);
+  assert.equal(fake.calls.length, 1);
+  const [call] = fake.calls;
+  const alert = (await h.alertRecords()).find((r) => r.kind === "alert");
+  assert.equal(call.hit.id, alert?.id);
+  assert.deepEqual([call.hit.symbol, call.hit.decision, call.hit.trigger.type], ["NVDA", "send", "move"]);
+  assert.deepEqual([call.sentBefore, call.outcome], [1, "sent"], "asked once the alert was sent and its delivery recorded");
+  assert.deepEqual(h.sent[1], { text: BLOCK, opts: { kind: "alert", replyTo: "telegram:7" } });
+  assert.deepEqual(h.notes[1], { kind: "alert", alert: alert?.id, symbol: "NVDA", lessons: true, text: NOTE });
+  await until("the post", () => h.posts.length === 1);
+  assert.equal(h.posts[0].replyTo, "telegram:7", "the annotation post still replies to the alert");
+  await h.watch.dispose();
+  assert.deepEqual(lessonLines(h), []);
+});
+
+test("an urgent rule's block goes urgent; an alert the outlet queued gets its block with no reply", async () => {
+  const urgent = lessonsFake(async () => ANSWER);
+  const u = await moveHarness(nvdaRule("nvda-move", 4, "  urgent: true\n"), { lessons: urgent, deliver: telegram7 });
+  await u.wall.advance(0);
+  await until("the block", () => u.sent.length === 2);
+  assert.deepEqual(u.sent[1].opts, { kind: "urgent", replyTo: "telegram:7" });
+  await until("the note", () => u.notes.length === 2);
+  await u.watch.dispose();
+
+  const queued = lessonsFake(async () => ANSWER);
+  const q = await moveHarness(nvdaRule("nvda-move", 4), { lessons: queued, deliver: () => ({ queued: true }) });
+  await q.wall.advance(0);
+  await until("the block", () => q.sent.length === 2);
+  assert.deepEqual(q.sent[1], { text: BLOCK, opts: { kind: "alert" } });
+  await until("the note", () => q.notes.length === 2);
+  assert.equal(q.notes[1].kind === "alert" && q.notes[1].lessons, true, "a queued block is not refused: noted");
+  await q.watch.dispose();
+});
+
+test("a note with no block is noted and nothing more is sent; an answer of nothing sends and notes nothing", async () => {
+  const noteOnly = lessonsFake(async () => ({ note: NOTE, key: ANSWER.key }));
+  const h = await moveHarness(nvdaRule("nvda-move", 4), { lessons: noteOnly, deliver: telegram7 });
+  await h.wall.advance(0);
+  await until("the lessons note", () => h.notes.length === 2);
+  await h.watch.dispose();
+  assert.equal(h.sent.length, 1);
+  assert.deepEqual(h.notes[1], { kind: "alert", alert: noteOnly.calls[0].hit.id, symbol: "NVDA", lessons: true, text: NOTE });
+
+  const nothing = lessonsFake(async () => undefined);
+  const n = await moveHarness(nvdaRule("nvda-move", 4), { lessons: nothing, deliver: telegram7 });
+  await n.wall.advance(0);
+  await until("the ask", () => nothing.calls.length === 1);
+  await until("the post", () => n.posts.length === 1);
+  await n.watch.dispose();
+  assert.equal(n.sent.length, 1);
+  assert.equal(n.notes.length, 1, "the alert's own note alone");
+});
+
+test("one block per key a day: a refused block is not marked and the next hit sends again; one that went is neither sent nor noted again", async () => {
+  /* two rules on NVDA fire in one pass: two alerts, two asks, one key */
+  const rules = nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5);
+  const refusedFirst = lessonsFake(async () => ANSWER);
+  const r = await moveHarness(rules, { lessons: refusedFirst, deliver: (_t, n) => (n === 2 ? { undelivered: "paused" } : { sent: [`telegram:${100 + n}`] }) });
+  await r.wall.advance(0);
+  await until("both blocks", () => r.sent.length === 4);
+  await r.watch.dispose();
+  assert.equal(refusedFirst.calls.length, 2);
+  assert.deepEqual(r.sent.slice(2).map((s) => s.text), [BLOCK, BLOCK], "the refused block, then the second hit's");
+  assert.deepEqual(r.sent[3].opts, { kind: "alert", replyTo: "telegram:101" }, "under the second alert");
+  const rNotes = r.notes.filter((x) => x.kind === "alert" && x.lessons === true);
+  assert.deepEqual(rNotes.map((x) => x.kind === "alert" && x.alert), [refusedFirst.calls[1].hit.id], "noted once, for the block that went");
+
+  const sentFirst = lessonsFake(async () => ANSWER);
+  const s = await moveHarness(rules, { lessons: sentFirst, deliver: (_t, n) => ({ sent: [`telegram:${100 + n}`] }) });
+  await s.wall.advance(0);
+  await until("both asks", () => sentFirst.calls.length === 2);
+  await until("the block", () => s.sent.length === 3);
+  await s.watch.dispose();
+  assert.equal(s.sent.length, 3, "the second hit's block is not sent");
+  assert.equal(s.notes.filter((x) => x.kind === "alert" && x.lessons === true).length, 1, "nor noted");
+});
+
+test("lessons is not asked for a held, refused, capped, filed, batched or replayed alert", async () => {
+  const off = lessonsFake(async () => ANSWER);
+  const o = await moveHarness(nvdaRule("nvda-move", 4), { lessons: off });
+  await writeOff(o.home, { by: "terminal" }, () => o.wall.now());
+  await o.wall.advance(0);
+  await until("the record", async () => (await o.alertRecords()).some((x) => x.kind === "alert"));
+  await o.watch.dispose();
+  assert.equal((await o.alertRecords()).find((x) => x.kind === "alert")?.suppressed, "off");
+  assert.equal(off.calls.length, 0, "OFF");
+
+  const muted = lessonsFake(async () => ANSWER);
+  const m = await moveHarness(nvdaRule("nvda-move", 4), { lessons: muted });
+  await writeMute(m.home, { by: "telegram", until: Date.parse("2026-11-30T16:00:00Z") }, () => m.wall.now());
+  await m.wall.advance(0);
+  await until("the record", async () => (await m.alertRecords()).some((x) => x.kind === "alert"));
+  await m.watch.dispose();
+  assert.equal((await m.alertRecords()).find((x) => x.kind === "alert")?.suppressed, "muted");
+  assert.equal(muted.calls.length, 0, "MUTE");
+
+  const refused = lessonsFake(async () => ANSWER);
+  const u = await moveHarness(nvdaRule("nvda-move", 4), { lessons: refused, deliver: () => ({ undelivered: "paused" }) });
+  await u.wall.advance(0);
+  await until("the delivery record", async () => (await u.alertRecords()).some((x) => x.kind === "delivered"));
+  await u.watch.dispose();
+  assert.equal(refused.calls.length, 0, "an undelivered alert");
+
+  /* eight levels at once: six sent and asked, two capped; the cap's batch at 10:00 asks nothing */
+  const names = Array.from({ length: 8 }, (_, i) => `C${i}`);
+  const capped = lessonsFake(async () => undefined);
+  const c = await harness({ start: "2026-11-30T14:30:05Z", files: { "desk/levels.yml": names.map((x) => level(x, "stop", 100, "cross_down")).join("") }, lessons: capped.fn });
+  for (const x of names) c.source.tables.us.set(x, us(90, "2026-11-30T14:30:01Z"));
+  await c.wall.advance(0);
+  await until("six alerts", () => c.sent.length === 6);
+  await until("six asks", () => capped.calls.length === 6);
+  c.wall.set("2026-11-30T14:59:58Z");
+  await c.wall.advance(5_000);
+  await until("the batch", () => c.sent.length === 7);
+  await c.watch.dispose();
+  assert.deepEqual(capped.calls.map((x) => x.hit.symbol), names.slice(0, 6), "the capped two and the batch asked nothing");
+
+  const replayed = lessonsFake(async () => ANSWER);
+  const late = await overLedger([orphan("a-late", "2026-11-30T15:16:45.000Z")], { lessons: replayed.fn });
+  await late.wall.advance(0);
+  await until("the replay's record", async () => (await deliveredOf(late, "a-late")).length === 1);
+  await late.watch.dispose();
+  assert.equal(replayed.calls.length, 0, "a late replay");
+
+  const filed = lessonsFake(async () => ANSWER);
+  const sec = fakeSec();
+  sec.filings.push({ accession: "0001045810-26-000001", accepted: "2026-11-20T16:05:00.000Z" });
+  const f = await harness({
+    start: "2026-11-30T14:00:00Z", files: { "desk/holdings.yml": HELD_NVDA, "desk/rules.yml": "- id: filing\n  kind: filing\n  symbols: holdings\n  forms: [8-K]\n" },
+    edgar: { fetch: sec.fetch, userAgent: "ops@example.com" }, lessons: filed.fn,
+  });
+  await f.wall.advance(0);
+  await until("the seed", async () => {
+    try {
+      return (await readFile(join(deskDir(f.home), FILINGS_FILE), "utf8")).includes("seeded");
+    } catch {
+      return false;
+    }
+  });
+  await until("the poll's end", () => f.watch.status().filings.seeded === 1 || f.watch.status().filings.lastPollAt !== undefined);
+  sec.filings.unshift({ accession: "0001045810-26-000002", accepted: "2026-11-30T10:05:12.000Z" });
+  await f.wall.advance(300_000);
+  await until("the filing alert", () => f.sent.length === 1, 10_000);
+  await until("its delivery record", async () => (await f.alertRecords()).some((x) => x.kind === "delivered"));
+  await f.watch.dispose();
+  assert.equal(filed.calls.length, 0, "a filing");
+});
+
+test("lessons that reject or throw cost one line each, and the pass's post goes as without them", async () => {
+  const rejects = lessonsFake(async () => { throw new Error("the memory fell over"); });
+  const r = await moveHarness(nvdaRule("nvda-move", 4), { lessons: rejects, deliver: telegram7 });
+  await r.wall.advance(0);
+  await until("the post", () => r.posts.length === 1);
+  await until("the line", () => lessonLines(r).length === 1);
+  await r.watch.dispose();
+  assert.deepEqual(lessonLines(r), ["gravit-face: desk: watch lessons: the memory fell over"]);
+  assert.equal(r.posts[0].replyTo, "telegram:7");
+  assert.equal(r.sent.length, 1);
+  assert.equal(r.notes.length, 1);
+
+  const throws = lessonsFake(() => { throw new Error("thrown at once"); });
+  const t = await moveHarness(nvdaRule("nvda-move", 4), { lessons: throws, deliver: telegram7 });
+  await t.wall.advance(0);
+  await until("the post", () => t.posts.length === 1);
+  await until("the line", () => lessonLines(t).length === 1);
+  await t.watch.dispose();
+  assert.deepEqual(lessonLines(t), ["gravit-face: desk: watch lessons: thrown at once"]);
+  assert.equal(t.sent.length, 1);
+});
+
+test("lessons that never settle hold no alert, no post and no dispose", async () => {
+  const hangs = lessonsFake(() => new Promise<AlertLessonsAnswer | undefined>(() => {}));
+  const h = await moveHarness(nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5), { lessons: hangs, deliver: telegram7 });
+  await h.wall.advance(0);
+  await until("both alerts", () => h.sent.length === 2);
+  await until("the post", () => h.posts.length === 1);
+  assert.equal(hangs.calls.length, 2, "the second alert went while the first ask hung");
+  assert.equal(h.posts[0].source && (h.posts[0].source as { count?: number }).count, 2, "one post over both");
+  const started = Date.now();
+  const keep = setInterval(() => {}, 100); // the bound's own timer is unref'd: hold the loop open while it runs
+  await h.watch.dispose();
+  clearInterval(keep);
+  const took = Date.now() - started;
+  assert.ok(took < 1_000, `dispose took ${took} ms: it waited on the ask`);
+  assert.equal(h.watch.status().state, "stopped");
+});
+
+test("with an ask in flight at dispose, the send chain and the ledger still settle before the lease is released", async () => {
+  let release!: (r: DeliverResult) => void;
+  const hangs = lessonsFake(() => new Promise<AlertLessonsAnswer | undefined>(() => {}));
+  /* the first alert is sent and its ask hangs; the second alert's send is held until dispose has begun */
+  const h = await moveHarness(nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5), {
+    lessons: hangs,
+    deliver: (_text, n) => (n === 1 ? new Promise<DeliverResult>((done) => { release = done; }) : { sent: [`telegram:${100 + n}`] }),
+  });
+  await h.wall.advance(0);
+  await until("the first ask and the held send", () => hangs.calls.length === 1 && h.sent.length === 2);
+  const started = Date.now();
+  const keep = setInterval(() => {}, 100); // the bound's own timer is unref'd: hold the loop open while it runs
+  const disposed = h.watch.dispose();
+  release({ sent: ["telegram:101"] });
+  await disposed;
+  clearInterval(keep);
+  const took = Date.now() - started;
+  assert.ok(took < 1_000, `dispose took ${took} ms: it waited on the ask`);
+  const records = await h.alertRecords();
+  const delivered = records.filter((r) => r.kind === "delivered").map((r) => r.delivery);
+  assert.deepEqual(delivered, [{ sent: ["telegram:100"] }, { sent: ["telegram:101"] }], "the held send settled and its record was written before dispose resolved");
+  await assert.rejects(readFile(join(deskDir(h.home), WATCH_LEASE_FILE)), "the lease is released");
+  assert.equal(h.watch.status().state, "stopped");
+});
+
+test("lessons that answer after dispose began send and note nothing", async () => {
+  let answer!: (a: AlertLessonsAnswer) => void;
+  const slow = lessonsFake(() => new Promise<AlertLessonsAnswer | undefined>((done) => { answer = done; }));
+  const h = await moveHarness(nvdaRule("nvda-move", 4), { lessons: slow, deliver: telegram7 });
+  await h.wall.advance(0);
+  await until("the ask", () => slow.calls.length === 1);
+  const disposed = h.watch.dispose();
+  answer(ANSWER);
+  await disposed;
+  await new Promise((done) => setTimeout(done, 20));
+  assert.equal(h.sent.length, 1);
+  assert.equal(h.notes.length, 1, "the alert's own note alone");
+});
+
+test("one block a phoneKey a day: a later alert with the same lessons but other untold ones sends no block and is still noted", async () => {
+  const rules = nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5);
+  const first: AlertLessonsAnswer = { phone: BLOCK, phoneKey: "NVDA:2026-11-30:no-adds", note: NOTE, key: "NVDA:2026-11-30:no-adds|" };
+  const second: AlertLessonsAnswer = { ...first, note: `${NOTE}\ncould not be checked on NVDA: x-need needs market`, key: "NVDA:2026-11-30:no-adds|x-need" };
+  const fake = lessonsFake(async (_hit, n) => (n === 0 ? first : second));
+  const h = await moveHarness(rules, { lessons: fake, deliver: (_t, n) => ({ sent: [`telegram:${100 + n}`] }) });
+  await h.wall.advance(0);
+  await until("both asks", () => fake.calls.length === 2);
+  await until("both notes", () => h.notes.filter((x) => x.kind === "alert" && x.lessons === true).length === 2);
+  await until("the post", () => h.posts.length === 1);
+  await h.watch.dispose();
+  assert.deepEqual(h.sent.map((s) => s.text).filter((t) => t === BLOCK), [BLOCK], "the block went once");
+  const notes = h.notes.filter((x) => x.kind === "alert" && x.lessons === true).map((x) => x.kind === "alert" && x.text);
+  assert.deepEqual(notes, [first.note, second.note]);
+});
+
+test("a block whose own deliver throws: one watch lessons line, nothing noted, not marked, and the pass goes on", async () => {
+  const rules = nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5);
+  const fake = lessonsFake(async () => ANSWER);
+  const h = await moveHarness(rules, {
+    lessons: fake,
+    deliver: (_t, n) => { if (n === 2) throw new Error("the outlet broke"); return { sent: [`telegram:${100 + n}`] }; },
+  });
+  await h.wall.advance(0);
+  await until("both blocks tried", () => h.sent.length === 4);
+  await until("the post", () => h.posts.length === 1);
+  await until("the second note", () => h.notes.filter((x) => x.kind === "alert" && x.lessons === true).length === 1);
+  await h.watch.dispose();
+  assert.deepEqual(lessonLines(h), ["gravit-face: desk: watch lessons: the outlet broke"]);
+  assert.deepEqual(h.sent.slice(2).map((s) => s.text), [BLOCK, BLOCK], "not marked: the second alert's block went");
+  const noted = h.notes.filter((x) => x.kind === "alert" && x.lessons === true).map((x) => x.kind === "alert" && x.alert);
+  assert.deepEqual(noted, [fake.calls[1].hit.id], "the thrown block noted nothing");
+});
+
+test("a throw while the ask begins costs one line and none of the pass's other sends", async () => {
+  const rules = nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5);
+  const fake = lessonsFake(async () => undefined);
+  /* the first send's answer throws the second time it is asked whether it was sent - the ask's own asking, the
+   * delivery record's being the first */
+  let asked = 0;
+  const odd = new Proxy({ sent: ["telegram:100"] }, {
+    has: (target, key) => { if (key === "sent" && ++asked === 2) throw new Error("odd answer"); return key in target; },
+  });
+  const h = await moveHarness(rules, { lessons: fake, deliver: (_t, n) => (n === 0 ? (odd as DeliverResult) : { sent: [`telegram:${100 + n}`] }) });
+  await h.wall.advance(0);
+  await until("both alerts", () => h.sent.length === 2);
+  await until("the post", () => h.posts.length === 1);
+  await until("the line", () => lessonLines(h).length === 1);
+  await h.watch.dispose();
+  assert.deepEqual(lessonLines(h), ["gravit-face: desk: watch lessons: odd answer"]);
+  assert.equal(h.sent.length, 2, "the second alert still went");
+});
+
+/* ---------- a reply's context with lessons (memory plan 2b, the final wave) ---------- */
+
+/** A harness whose NVDA move alert went as telegram:7 and its lessons block as telegram:101, the note made. */
+async function lessonsSentHarness(answer: () => Promise<AlertLessonsAnswer | undefined> = async () => ANSWER): Promise<{ h: Harness; hit: AlertHit }> {
+  const fake = lessonsFake(answer);
+  const h = await moveHarness(nvdaRule("nvda-move", 4), { lessons: fake, deliver: telegram7 });
+  await h.wall.advance(0);
+  await until("the ask", () => fake.calls.length === 1);
+  await until("the post", () => h.posts.length === 1);
+  const hit = (await h.alertRecords()).find((r) => r.kind === "alert") as unknown as AlertHit;
+  return { h, hit };
+}
+
+test("a reply to the lessons block carries the alert's text as sent, then the lessons note", async () => {
+  const { h, hit } = await lessonsSentHarness();
+  await until("the lessons note", () => h.notes.length === 2);
+  assert.equal(h.sent[1].text, BLOCK);
+  assert.equal(h.watch.contextFor("telegram:101"), `${alertText(hit, h.wall.now(), "none")}\n\nlessons:\n${NOTE}`);
+  await h.watch.dispose();
+});
+
+test("a reply to the alert's own message carries its lessons note after its annotation, or after its text with none", async () => {
+  const { h, hit } = await lessonsSentHarness();
+  await until("the lessons note", () => h.notes.length === 2);
+  const text = alertText(hit, h.wall.now(), "none");
+  assert.equal(h.watch.contextFor("telegram:7"), `${text}\n\nlessons:\n${NOTE}`, "no annotation yet");
+  await until("the annotation record", async () => (await h.alertRecords()).some((r) => r.kind === "annotation"));
+  h.watch.noteAnnotated({ t: new Date(h.wall.now()).toISOString(), kind: "annotated", pass: hit.pass, sessionId: "s", outcome: "ended", sent: ["telegram:900"], text: "It fell on guidance." });
+  assert.equal(h.watch.contextFor("telegram:7"), `${text}\n\nannotation:\nIt fell on guidance.\n\nlessons:\n${NOTE}`);
+  await h.watch.dispose();
+});
+
+test("an alert with no lessons note: a reply to it carries what it did before", async () => {
+  const { h, hit } = await lessonsSentHarness(async () => undefined);
+  assert.equal(h.watch.contextFor("telegram:7"), alertText(hit, h.wall.now(), "none"));
+  assert.equal(h.watch.contextFor("telegram:101"), undefined, "no block went");
+  await h.watch.dispose();
+});
+
+test("past the watch's memory the block's id answers nothing", async () => {
+  const { h } = await lessonsSentHarness();
+  await until("the lessons note", () => h.notes.length === 2);
+  assert.ok(h.watch.contextFor("telegram:101") !== undefined);
+  await h.watch.dispose();
+  (h.wall as unknown as { t: number }).t += 48 * 3_600_000 + 1;
+  assert.equal(h.watch.contextFor("telegram:101"), undefined);
+  assert.equal(h.watch.contextFor("telegram:7"), undefined);
 });

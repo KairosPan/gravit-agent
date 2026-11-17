@@ -1,4 +1,4 @@
-/** A STAND-IN ACCOUNT: the real Account server and doors, over stand-in venues — the face smokes' stand-in, and the one to drive Gravit's
+/** A STAND-IN ACCOUNT: the real Account server and doors, over stand-in venues — the face smokes' stand-in, and the one to drive gravit's
  * face against (FACE_ACCOUNT_URL=the account url it prints) with NO network and NO real money. The Account serves no page of its own: its
  * owner's screens are the face's. Beside it runs a market of its own (plan A2): the market's real server (market/src) over the stand-in's
  * public sources and hub, on a second ephemeral port, printed as its market url (FACE_MARKET_URL=that url).
@@ -679,7 +679,7 @@ if (isMain) {
       "STAND-IN ACCOUNT · no network, no real money: every venue, price and fill on it is made up (test/standin)",
       `  account       ${s.url}  — no page: start the face with FACE_ACCOUNT_URL=${s.url}`,
       `  market        ${s.marketUrl}  — start the face with FACE_MARKET_URL=${s.marketUrl}`,
-      `  pairing code  ${s.code}  — type it on Gravit's face (Account): your browser becomes an owner beside the stand-in's seed key`,
+      `  pairing code  ${s.code}  — type it on gravit's face (Account): your browser becomes an owner beside the stand-in's seed key`,
       `  home          ${s.home}  (fresh, kept after you stop; its ledger is ${s.svc.ledgerPath()})`,
       `  trading       on, at most $${capUsd} an order or a movement`,
       `  agent wallet  ${v.agent.wallet} holds a real key made in this home, so its address is a real one: send it nothing real`,

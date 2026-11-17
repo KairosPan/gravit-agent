@@ -85,7 +85,7 @@ function picker(state, now) {
 
 // ── Under way ──
 
-// the cards waiting on the owner (the page's cards — Gravit's seat writes among them), each in the Cards tab's words with
+// the cards waiting on the owner (the page's cards — gravit's seat writes among them), each in the Cards tab's words with
 // Review → to Cards, where it is answered: rows only, no key signs here (spec 2026-10-22 §6.4); none, nothing
 function cardsWaiting(page, now) {
   const rows = cardsOf(page).flatMap(g => g.cards).map(c => `<tr><td>${esc([c.reason, cardFactsOf(c, now)].filter(Boolean).join(' · '))}</td>` +

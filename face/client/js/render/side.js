@@ -1,4 +1,4 @@
-// face/client/js/render/side.js — the second level beside Messages (one-entry plan 2 Task 6): the search box, a Gravit row
+// face/client/js/render/side.js — the second level beside Messages (one-entry plan 2 Task 6): the search box, a gravit row
 // (the one conversation), a History row (every other session, host/rail-view.js historyOf) and the strategies, each a row
 // to its page with its status word as status.yaml gives it. It stands beside Messages, a task, History and a strategy's
 // page; on a narrow window it folds behind its disclosure.

@@ -9,7 +9,7 @@
  * DeskConversation.start} - because what it does for a turn does not depend on who opened it: a turn the
  * operator opens in the browser gets the same deadline, fence check and ledger record as a phone turn.
  *
- * THE FALLBACK (one-entry plan 3). With Gravit's one conversation bound (src/desk.ts `bindRouter`), the phone's texts go
+ * THE FALLBACK (one-entry plan 3). With gravit's one conversation bound (src/desk.ts `bindRouter`), the phone's texts go
  * there - pause, fence and key, but no budget (src/conversation.ts) - and this conversation is never started: it stays
  * only the outlet and the pause's choke point ({@link DeskConversation.deliver}). The desk session answers the phone
  * only with `FACE_ROUTER=0` or a conversation that could not be installed, and only there does the budget below still

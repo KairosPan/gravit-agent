@@ -1,4 +1,4 @@
-// Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): six shelves
+// Discover as the inventory of what gravit runs (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): six shelves
 // from the face's listings, a grid per shelf, a page per item — and no shop.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,7 +31,7 @@ test("the shelves draw from the host's listings, with See all and Create a bot",
   }
   assert.match(h, /href="#\/plugin\/mcp%3Aalpaca-kit"/);
   assert.match(h, /pcard-name">alpaca-kit<[\s\S]*?pcard-blurb">2 tools</);
-  assert.match(h, /pcard-name">Buffett Type</); assert.match(h, /pcard-name">Gravit</); assert.match(h, /pcard-name">rules</);
+  assert.match(h, /pcard-name">Buffett Type</); assert.match(h, /pcard-name">gravit</); assert.match(h, /pcard-name">rules</);
   assert.match(h, /data-action="rescanAgents"/);
 });
 
@@ -89,7 +89,7 @@ test('an agent page: version, sign-in, Connect for a candidate and Disconnect fo
   assert.match(page('agent:gone'), />Sign-in<[\s\S]*?>Unknown</);
 });
 
-test('the Gravit page: model, host and keys, a failed card alone', () => {
+test('the gravit page: model, host and keys, a failed card alone', () => {
   const at = loaded({ screen: 'plugin', id: 'agent:gravit' });
   assert.match(renderPlugin(at), /Loading…/);
   const h = renderPlugin(R.gravitLoaded(at, { host: { cwd: '/r', home: '/h', attachedSessions: 2, version: '0.2.0-rc.2' }, model: false, keys: { DEEPSEEK_API_KEY: { configured: true } } }));
@@ -242,7 +242,7 @@ test("a card's kind is drawn in the table's capitals, never a table word upper-c
 });
 
 // the abilities (spec 2026-11-13 §4.4): the first shelf's cards, and an ability's page with its ask keys, which write to
-// Gravit's conversation only when the page knows it
+// gravit's conversation only when the page knows it
 const conversing = (s, conversation = 'c-gravit') => R.tasksLoaded(s, { conversation, tasks: [], at: 1 });
 // the listings with the ability at index i changed by `over`
 const withAbility = (i, over) => {
@@ -267,21 +267,21 @@ test("Discover's front draws the Abilities shelf first, a card per ability; one 
   assert.match(renderDiscover(loadedFrom(withAbility(0, { state: 'off' }), { screen: 'discover', id: 'abilities' })), /<a class="pcard in-grid dim" href="#\/plugin\/ability%3Aevent-analogs">/, 'its grid');
 });
 
-test("the event analog's page: State, About, Ask Gravit with its hint, What it does not tell you, Made of", () => {
+test("the event analog's page: State, About, Ask gravit with its hint, What it does not tell you, Made of", () => {
   const h = renderPlugin(conversing(abilityAt('ability:event-analogs')));
   assert.match(h, /<h1 class="plug-name">Event analogs<\/h1><div class="dim">Ability<\/div>/);
   assert.match(h, /<span class="kv-k">State<\/span><span class="kv-v">On<\/span>/);
-  const at = ['About', 'Ask Gravit', 'What it does not tell you', 'Made of'].map(label => labelAt(h, label));
+  const at = ['About', 'Ask gravit', 'What it does not tell you', 'Made of'].map(label => labelAt(h, label));
   assert.ok(at.every(i => i > 0), `every section drawn: ${at}`);
   assert.deepEqual([...at].sort((a, b) => a - b), at, 'in that order');
   assert.ok(h.indexOf('<span class="kv-k">State</span>') < at[0], 'State first');
-  assert.match(h, /<div class="dsec-line">Give Gravit a stock and what just happened to it\.[^<]*<\/div><div class="dsec-line">The answer is a table/, 'About: a line per paragraph');
+  assert.match(h, /<div class="dsec-line">Give gravit a stock and what just happened to it\.[^<]*<\/div><div class="dsec-line">The answer is a table/, 'About: a line per paragraph');
   const keys = askKeys(h);
   assert.equal(keys.length, 3);
   assert.ok(keys.every(k => !/disabled/.test(k)), 'none disabled');
   assert.match(keys[0], /^<button type="button" class="btn-sm ask-key" data-action="askAbility" data-text="NVDA&#39;s board opened an investigation into its CEO\. What did stocks do after events like this\?">$/);
   assert.match(h, /data-action="askAbility"[^>]*>NVDA&#39;s board opened an investigation into its CEO\. What did stocks do after events like this\?<\/button>/);
-  assert.match(h, /<div class="dsec-line dim">Puts the question in Gravit&#39;s box\. Nothing is sent until you send it\.<\/div>/);
+  assert.match(h, /<div class="dsec-line dim">Puts the question in gravit&#39;s box\. Nothing is sent until you send it\.<\/div>/);
   assert.doesNotMatch(h, /conversation is not available/);
   assert.match(h, /<div class="dsec-line">Historical statistics, not a forecast and not a basis for a trade<\/div>/);
   const made = h.slice(at[3]);
@@ -298,7 +298,7 @@ test('the ask keys are disabled without a conversation, saying so; with the abil
     const h = renderPlugin(s);
     assert.equal(askKeys(h).length, 3);
     assert.ok(askKeys(h).every(k => / disabled>$/.test(k)), 'every key disabled');
-    assert.match(h, new RegExp(`<div class="dsec-line dim">Gravit${apos}s conversation is not available</div>`));
+    assert.match(h, new RegExp(`<div class="dsec-line dim">gravit${apos}s conversation is not available</div>`));
     assert.doesNotMatch(h, /Nothing is sent until you send it/);
   }
   const off = renderPlugin(conversing(abilityAt('ability:event-analogs', withAbility(0, { state: 'off' }))));
@@ -311,7 +311,7 @@ test('the ask keys are disabled without a conversation, saying so; with the abil
 
 test("an ability's page draws no section it has nothing for, and says what is not there", () => {
   const bare = renderPlugin(conversing(abilityAt('ability:event-analogs', withAbility(0, { asks: [], limits: [], about: '' }))));
-  for (const label of ['Ask Gravit', 'What it does not tell you', 'About']) assert.equal(labelAt(bare, label), -1, label);
+  for (const label of ['Ask gravit', 'What it does not tell you', 'About']) assert.equal(labelAt(bare, label), -1, label);
   assert.equal(askKeys(bare).length, 0);
   assert.doesNotMatch(bare, /Nothing is sent until you send it/);
   assert.ok(labelAt(bare, 'Made of') > 0);
@@ -382,7 +382,7 @@ test("an ability's listed strings are escaped, and its page never names a tool's
 test("an ability's page in Chinese reads the overlay and the Chinese table", () => {
   withTable(ZH, () => {
     const h = renderPlugin(R.setLang(conversing(abilityAt('ability:event-analogs')), 'zh'));
-    for (const w of ['事件对标', '问 Gravit', '它说明不了什么', '组成', '简介']) assert.ok(h.includes(w), w);
+    for (const w of ['事件对标', '问 gravit', '它说明不了什么', '组成', '简介']) assert.ok(h.includes(w), w);
     assert.match(h, /data-text="NVDA 董事会对 CEO 启动调查/);
     assert.match(renderDiscover(R.setLang(loaded(), 'zh')), /pcard-name">对手推演</);
   });
@@ -394,22 +394,22 @@ test('an unknown ability: Loading… while the abilities shelf is idle, Not foun
   assert.match(page('ability:event-analogs'), /plug-name">Event analogs</, 'an ability is no skill page');
 });
 
-// the one roster (one-entry plan 4 Task 5): the Available to Gravit switch on a bot's and a connected CLI agent's page
+// the one roster (one-entry plan 4 Task 5): the Available to gravit switch on a bot's and a connected CLI agent's page
 const rostered = (route, roster = { ok: true, agents: ['codex'], bots: ['buffett'] }) => R.rosterLoaded(loaded(route), roster);
 const switchOf = h => h.match(/<button[^>]*class="switch"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? '';
 
-test('the bot card draws the Available to Gravit switch, pressed when the bot is on the roster', () => {
+test('the bot card draws the Available to gravit switch, pressed when the bot is on the roster', () => {
   const on = switchOf(renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' })));
   assert.match(on, /<button type="button" class="switch" role="switch" aria-checked="true" data-action="toggleAvailable" data-kind="bot" data-id="buffett">/);
-  assert.match(on, /Available to Gravit/);
+  assert.match(on, /Available to gravit/);
   assert.doesNotMatch(on, /disabled/);
   const off = switchOf(renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' }, { ok: true, agents: [], bots: [] })));
   assert.match(off, /aria-checked="false" data-action="toggleAvailable" data-kind="bot" data-id="buffett"/);
   assert.match(renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' })), /data-action="editBot"/, 'Edit stays beside it');
-  withTable(ZH, () => assert.match(switchOf(renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' }))), /Gravit 可用/));
+  withTable(ZH, () => assert.match(switchOf(renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' }))), /gravit 可用/));
 });
 
-test('a connected CLI agent draws the switch too; Gravit and a candidate not connected draw none', () => {
+test('a connected CLI agent draws the switch too; gravit and a candidate not connected draw none', () => {
   const codex = renderPlugin(rostered({ screen: 'plugin', id: 'agent:codex' }));
   assert.match(switchOf(codex), /class="switch" role="switch" aria-checked="true" data-action="toggleAvailable" data-kind="agent" data-id="codex"/);
   assert.match(codex, /data-action="disconnectAgent"/);

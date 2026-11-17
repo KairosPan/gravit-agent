@@ -15,14 +15,14 @@ const CONTENT = {
   'i18n/langs.js': "a language's own name",
   'host/modules-view.js': "the Lunhui modules' Chinese names and sub-titles",
   'host/runs-view.js': "the iFinD provider's name in a run's row",
-  'host/run-sheet-view.js': "the Chinese request a Run sends Gravit",
+  'host/run-sheet-view.js': "the Chinese request a Run sends gravit",
   'wire/room.js': "the room's two notices (D36)",
   'wire/market-model.js': "the markets' Chinese labels",
   'render/discover.js': "the modules' Chinese sub-titles, in its comments",
   'render/markets.js': 'the A-share units (D36)',
   'render/lunhui/block.js': "the yuan tiers of Lunhui's amounts",
   'render/lunhui/sources.js': "the iFinD provider's name",
-  'render/lunhui/stock.js': "the stock drawer's Chinese follow-up to Gravit",
+  'render/lunhui/stock.js': "the stock drawer's Chinese follow-up to gravit",
 };
 
 test('no client source holds Chinese but the content files §3.3 names', () => {

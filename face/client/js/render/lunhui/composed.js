@@ -1,4 +1,4 @@
-// face/client/js/render/lunhui/composed.js — Gravit's composed answer (plan 2 of the Lunhui run view): the summary as Gravit
+// face/client/js/render/lunhui/composed.js — gravit's composed answer (plan 2 of the Lunhui run view): the summary as gravit
 // wrote it, through the markdown renderer, then the blocks in the call's order, each drawn by the face from the run's view
 // model — never from model markup. While the view is on its way a block is a skeleton line; a view that could not be read
 // is one line with a Retry under the summary, never a blank.
@@ -7,7 +7,8 @@
 // the call gave it (its headline is block.title, escaped, the drawer's own), `ui` this answer's picks
 // (state.lunhui.ui[id]), `id` the answer's page id (composedId) for element ids and data-id, `key` the answer's view key
 // (viewOf(m).key) for its stock links. A kind with no drawer yet draws its title alone. Pool names in the summary and in each
-// headline are stock links (block.js linkNames), and nowhere else.
+// headline are stock links (block.js linkNames), and nowhere else. Under a ladder block, the owner's lessons on the run's
+// leaders once the face answered them (`lessons`, host/memory-lunhui.js lessonsFor; lessons.js); none, nothing more.
 import { esc, attrs } from '../../html.js';
 import { linkNames } from './block.js';
 import { markdownHtml } from '../markdown.js';
@@ -20,6 +21,7 @@ import { yesterdayHtml } from './yesterday.js';
 import { signalsHtml } from './signals.js';
 import { sourcesHtml } from './sources.js';
 import { footerHtml } from './footer.js';
+import { ladderLessonsHtml } from './lessons.js';
 import { t, th } from '../../i18n/words.js';
 
 // kind → drawer
@@ -70,7 +72,13 @@ function choicesHtml(d, key, asks = true) {
   return `<div class="lh-choices">${btns.join('')}</div>`;
 }
 
-export function composedHtml(m, entry, ui, conv, channels, { asks = true } = {}) {
+// the owner's lessons under a ladder block (lessons.js), when the face answered them; one that cannot be drawn costs only itself
+function lessonsUnder(block, view, lessons, key) {
+  if (block.kind !== 'ladder' || lessons == null) return '';
+  try { return ladderLessonsHtml(view, lessons, key); } catch { return ''; }
+}
+
+export function composedHtml(m, entry, ui, conv, channels, { asks = true, lessons = null } = {}) {
   const d = m.data ?? {};
   const blocks = Array.isArray(d.blocks) ? d.blocks.filter(b => b && typeof b.kind === 'string') : [];
   const loaded = entry?.status === 'loaded' && entry.view && typeof entry.view === 'object';
@@ -82,6 +90,6 @@ export function composedHtml(m, entry, ui, conv, channels, { asks = true } = {})
       `<button type="button" class="btn-sm" data-action="lunhuiRetry" data-key="${esc(key)}">${th('lunhui.retry')}</button></div>${choicesHtml(d, key, asks)}</div>`;
   }
   const id = composedId(m, conv);
-  const body = blocks.map(b => `<section class="lh-block">${loaded ? drawn(b, entry.view, ui, id, key) : skeleton(b)}</section>`).join('');
+  const body = blocks.map(b => `<section class="lh-block">${loaded ? drawn(b, entry.view, ui, id, key) + lessonsUnder(b, entry.view, lessons, key) : skeleton(b)}</section>`).join('');
   return `<div class="lh-answer">${summary}${body}${choicesHtml(d, key, asks)}${loaded ? footer(entry.view, channels) : ''}</div>`;
 }

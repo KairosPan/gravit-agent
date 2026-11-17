@@ -31,7 +31,7 @@ export interface FakeBotApi {
 
 export async function fakeBotApi(o: { token?: string; me?: FakeBotApi["me"] } = {}): Promise<FakeBotApi> {
   const token = o.token ?? FAKE_BOT_TOKEN;
-  const me = o.me ?? { id: 777, username: "gravit_desk_bot", first_name: "Gravit" };
+  const me = o.me ?? { id: 777, username: "gravit_desk_bot", first_name: "gravit" };
   const updates: Array<{ update_id: number } & Record<string, unknown>> = [];
   const waiting = new Set<() => void>();
   const overrides = new Map<string, { status: number; body: object }>();
@@ -291,7 +291,7 @@ export async function fakeSlack(o: FakeSlackOptions = {}): Promise<FakeSlack> {
         if (form.bot !== bot.botId) return reply(res, 200, { ok: false, error: "bot_not_found" });
         return reply(res, 200, { ok: true, bot: { id: bot.botId, deleted: false, name: bot.name, app_id: bot.appId, user_id: bot.userId } });
       case "users.info": {
-        if (form.user === bot.userId) return reply(res, 200, { ok: true, user: { id: bot.userId, team_id: team.id, name: bot.name, real_name: "Gravit", is_bot: true, profile: { display_name: "Gravit", real_name: "Gravit" } } });
+        if (form.user === bot.userId) return reply(res, 200, { ok: true, user: { id: bot.userId, team_id: team.id, name: bot.name, real_name: "gravit", is_bot: true, profile: { display_name: "gravit", real_name: "gravit" } } });
         const u = users.get(form.user ?? "");
         if (!u) return reply(res, 200, { ok: false, error: "user_not_found" });
         return reply(res, 200, { ok: true, user: { id: form.user, team_id: u.teamId ?? team.id, name: u.name, real_name: u.realName, deleted: u.deleted === true, is_bot: u.isBot === true, is_restricted: u.restricted === true, is_ultra_restricted: u.ultraRestricted === true, profile: { display_name: u.displayName, real_name: u.realName } } });

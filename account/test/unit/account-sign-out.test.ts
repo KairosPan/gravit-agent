@@ -1,6 +1,6 @@
 /** SIGNING OUT (account/sign.ts signOut): a browser's last signature. The door takes it only from the device it names and only at once; the
  * device leaves the account's signers; the last one gone leaves no owner's browser, and a new pairing code replaces the one the server
- * started with, said where the first one was and typed on Gravit's face; a restart replays it. The browser that signs is the face's
+ * started with, said where the first one was and typed on gravit's face; a restart replays it. The browser that signs is the face's
  * (face/client/js/host/owner.js, tested in face/tests/). Nothing leaves the process. */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -104,8 +104,8 @@ describe("signing out: a browser's last signature, taken at the door", () => {
     expect(next).toMatch(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/);
     expect(next).not.toBe(CODE);
     expect(out.lines.join("\n")).toContain("signed out: no browser signs for the account now");
-    // typed on Gravit's face, the owner's screens now that the Account serves no page
-    expect(out.lines.join("\n")).toContain(`pairing code: ${next} — the next browser becomes the owner only with this code, typed on Gravit's face (Account) (the code before it no longer works)`);
+    // typed on gravit's face, the owner's screens now that the Account serves no page
+    expect(out.lines.join("\n")).toContain(`pairing code: ${next} — the next browser becomes the owner only with this code, typed on gravit's face (Account) (the code before it no longer works)`);
     // a browser now asks for the code — the one signed out too, were its key still here
     expect(x.engine.pairDevice(a.jwk)).toMatchObject({ role: "needs-code" });
     expect(x.engine.pairDevice(c.jwk)).toMatchObject({ role: "needs-code" });

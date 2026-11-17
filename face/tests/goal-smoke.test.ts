@@ -2,7 +2,7 @@
  * DEVELOPMENT.md R30): dsh-base's `goal`, `goal-round-driver`, `tool-goal` and `command-goal`
  * rows, driven the way the face drives them - prompts over the browser's wire, the face's Stop as
  * `session/cancel`, a slash line as `commands/execute` - with a stub model. The contract tells
- * Gravit only what these packages let it do, and any dsh pin can move them, so each fact it
+ * gravit only what these packages let it do, and any dsh pin can move them, so each fact it
  * relies on is pinned here:
  * - create_goal in a human turn returns the goal's id and revision 1, active and armed;
  * - each round arrives at idle as a user message whose source is `goal`, its text `<goal_round>`,

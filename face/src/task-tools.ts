@@ -88,7 +88,7 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean, t
     description:
       "Start a task: a worker session that does the brief on its own and reports back to you. Only in a turn the operator's message opened. " +
       "`strategy` names a strategy directory the worker works in; leave it out for the workspace root. " +
-      "`bot` names a bot available to Gravit: the worker is that bot, in its home folder. Not with `strategy`.",
+      "`bot` names a bot available to gravit: the worker is that bot, in its home folder. Not with `strategy`.",
     parameters: {
       type: "object",
       properties: {

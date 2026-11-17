@@ -67,7 +67,7 @@ export function routineToolDefinitions(ops: RoutineOps, deps: RoutineToolDeps): 
       "Propose a routine: work the operator wants on a clock. Only in a turn the operator's message opened. " +
       "It adds nothing: the operator sees a card with the name, when it runs and the instruction, and confirms it in the browser. " +
       "`schedule` is New York time: `days` is trading, daily or weekdays; give either `times` or `every` with its `from` and `to` (told no end, use 16:00). " +
-      "`instruction` is what a fresh Gravit does on each run, alone: it can price symbols, read headlines, the market's list and bars, search and open web pages, and read the repository; it cannot see the account or place an order. " +
+      "`instruction` is what a fresh gravit does on each run, alone: it can price symbols, read headlines, the market's list and bars, search and open web pages, and read the repository; it cannot see the account or place an order. " +
       "`note` is one line the operator should know. `replaces` is the id of the routine this changes.",
     parameters: {
       type: "object",

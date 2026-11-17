@@ -1,5 +1,5 @@
 // face/tests/conversation.test.ts
-/** The conversation (src/conversation.ts): Gravit's one router session, on `gravit-router`, in its own folder under
+/** The conversation (src/conversation.ts): gravit's one router session, on `gravit-router`, in its own folder under
  * the harness home, found again through the desk's ledger and supervised like the desk (spec 2026-11-08 §5.2, §5.10).
  * Offline: a fake root context, a fake bus, node's mocked timers for the deadline.
  *
@@ -13,7 +13,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ANSWER_WAIT_MS, CONVERSATION_DEADLINE_MS, HELD_MAX, INJECTED_KINDS, conversationFenceRefusalLine, OPERATOR_SOURCES, conversationDir, conversationFence, ensureConversation, installConversation,
+  ANSWER_WAIT_MS, CONVERSATION_DEADLINE_MS, HELD_MAX, INJECTED_KINDS, conversationFenceRefusalLine, OPERATOR_SOURCES, conversationDir, conversationFence, ensureConversation, installConversation, noteMessage,
   type ConversationCtxLike, type ConversationDeps,
 } from "../src/conversation.ts";
 import { appendEvent, clearOff, readEvents, writeOff, type DeskEvent } from "../src/desk.ts";
@@ -1069,7 +1069,7 @@ test("a phone text logged in a turn a browser steer named still answers the phon
   assert.deepEqual(handle.turnOrigin(), { kind: "web" });
 });
 
-test("a failed phone turn tells the phone Gravit could not answer, never the desk", async (t) => {
+test("a failed phone turn tells the phone gravit could not answer, never the desk", async (t) => {
   const home = await scratch("deliver-failed");
   const tree = new FakeConversationTree();
   const sent: Delivered[] = [];
@@ -1079,7 +1079,7 @@ test("a failed phone turn tells the phone Gravit could not answer, never the des
   tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "error", error: { message: "boom" } } });
   await until(() => sent.length === 1, "the delivery");
   assert.equal(sent[0]!.opts.network, "telegram");
-  assert.match(sent[0]!.text, /^Gravit could not answer: /);
+  assert.match(sent[0]!.text, /^gravit could not answer: /);
   assert.doesNotMatch(sent[0]!.text, /desk/);
 });
 
@@ -1533,4 +1533,21 @@ test("with no conversation held a line is not noted, and the note opens none", a
   await settle();
   assert.equal(tree.created.length, 0, "no conversation opened for a line");
   assert.equal(handle.current(), undefined);
+});
+
+test("an alert's lessons line has its own id and head; an alert line without it keeps today's", () => {
+  const lessons = noteMessage({ kind: "alert", alert: "al-7", symbol: "NVDA", lessons: true, text: "the block" }, "N");
+  assert.equal(lessons?.id, "note-lessons:al-7");
+  assert.deepEqual(lessons?.source, { kind: "alert", alert: "al-7", symbol: "NVDA" });
+  assert.ok(lessons?.text.startsWith("[alert · NVDA · lessons]\n"), lessons?.text);
+  const labelled = noteMessage({ kind: "alert", alert: "al-7", symbol: "NVDA", label: "memory", lessons: true, text: "the block" }, "N");
+  assert.equal(labelled?.id, "note-lessons:al-7");
+  assert.ok(labelled?.text.startsWith("[alert · NVDA · memory]\n"), "a label given is the head's");
+  const plain = noteMessage({ kind: "alert", alert: "al-7", symbol: "NVDA", label: "stop", text: "the alert" }, "N");
+  assert.equal(plain?.id, "note-alert:al-7");
+  assert.deepEqual(plain?.source, { kind: "alert", alert: "al-7", symbol: "NVDA" });
+  assert.ok(plain?.text.startsWith("[alert · NVDA · stop]\n"), plain?.text);
+  const bare = noteMessage({ kind: "alert", alert: "al-7", symbol: "NVDA", text: "the alert" }, "N");
+  assert.equal(bare?.id, "note-alert:al-7");
+  assert.ok(bare?.text.startsWith("[alert · NVDA · alert]\n"), bare?.text);
 });

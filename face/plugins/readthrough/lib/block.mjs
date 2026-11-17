@@ -103,7 +103,7 @@ export function renderBlock({ direction: d, tape, shut, forTask, now }) {
     return (forTask ? [line, event, sources] : [line]).join("\n");
   }
   const lines = [
-    `${LABELS.head} · Gravit 的推断，不是下单 · 确定度 ${CERTAINTY[d.certainty]}`,
+    `${LABELS.head} · gravit 的推断，不是下单 · 确定度 ${CERTAINTY[d.certainty]}`,
     ...(forTask ? [event] : []),
     `· ${LABELS.logic}：${d.logic}`,
     `· ${LABELS.direction}：${d.peers.map((p) => `做多 ${p.symbol}（${p.reason}）`).join("；")}`,

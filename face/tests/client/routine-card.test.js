@@ -171,6 +171,27 @@ test("Review Focus 5: the turn's closing words after an ok proposal are not draw
   assert.match(renderThread(conv(next), emptyState(), 1000), /Which time\?/);
 });
 
+// the routines drill, 2026-11-15: the one conversation runs on the `gravit-router` preset, so the live layer names that
+// preset as the speaker of gravit's words (host/live.js speakerOf) while the tool rows and the card stay `gravit`'s
+test("the closing words are not drawn in the one conversation, whose speaker is its preset and not `gravit`", () => {
+  const said = (id, seq, text) => ({ ...words(id, seq, text), from: 'gravit-router' });
+  const ok = [you('e1', 1), said('e2', 2, 'Drafting it now.'), row('c1', 3), card({ seq: 3 }), said('e4', 4, 'Card is waiting in the browser.')];
+  assert.deepEqual([...routineClosings(ok)], ['e4']);
+  const router = { ...conv(ok), kind: 'bot', preset: 'gravit-router', members: ['gravit-router'] };
+  const html = renderThread(router, stateWith(read(proposal())), 1000);
+  assert.match(html, /Drafting it now\./);
+  assert.match(html, /New routine/);
+  assert.doesNotMatch(html, /Card is waiting/);
+  /* the words mapped from a real frame carry that speaker */
+  const frame = { type: 'session/event', sessionId: 's1', event: { type: 'assistant/message', seq: 42, time: 3, data: { turn: 4, step: 2, message: { id: 'm-42', role: 'assistant', content: [{ type: 'text', text: 'Confirm it there.' }] } } } };
+  const [closing] = toMessages(mapFrame(frame), new Map(), 1000, 'gravit-router');
+  assert.equal(closing.from, 'gravit-router');
+  assert.deepEqual([...routineClosings([you('e1', 1), row('c1', 40), ...lifted('c1', ARGS, RESULT).filter(m => m.kind === 'routine'), closing])], [closing.id]);
+  /* the operator's words and a system line still end the closing */
+  const next = [...ok, { id: 'e5', seq: 5, at: 1000, from: 'system', kind: 'desk', text: 'x', data: { line: 'routine' } }, said('e6', 6, 'Later words.')];
+  assert.deepEqual([...routineClosings(next)], ['e4']);
+});
+
 // the two answers, through the routines poll
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 8; i++) await tick(); };

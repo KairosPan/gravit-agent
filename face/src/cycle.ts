@@ -1,19 +1,19 @@
-/** Gravit's research-cycle contract - `dsh/profile/cycle.md`, the one file that tells Gravit how
+/** gravit's research-cycle contract - `dsh/profile/cycle.md`, the one file that tells gravit how
  * to run a cycle: one batched question, then a goal-driven loop of rounds - the Account's reads
- * and a forward paper trade - to a verdict (spec §6; account-graft §12). {@link readCycle} reads it where `composeFace` renders Gravit's default preset
+ * and a forward paper trade - to a verdict (spec §6; account-graft §12). {@link readCycle} reads it where `composeFace` renders gravit's default preset
  * (src/boot.ts) and hands the text to `gravitRows` (src/roles.ts) as the `gravit` row's `cycle`
  * key, which `plugins/gravit.js` turns into the `gravit:cycle` section of every prompt a ROOT or
- * FORK session that can call `create_goal` assembles: Gravit's, and a `subagent_fork` child's. A
+ * FORK session that can call `create_goal` assembles: gravit's, and a `subagent_fork` child's. A
  * role child, or any other delegated child, is told nothing.
  *
  * Unlike the persona (src/persona.ts), the text is NOT a template. The section registers with
  * `interpolate: false`, so a `{{...}}` group in it is literal prose, not an unknown variable that
  * would fail every step of every session; the reader therefore checks the size and nothing else.
  *
- * The text rides in every request Gravit makes, so it is capped at {@link CYCLE_MAX_BYTES} bytes,
+ * The text rides in every request gravit makes, so it is capped at {@link CYCLE_MAX_BYTES} bytes,
  * the prompt budget of spec §7. A missing file, an unreadable one, an empty one and an oversized
  * one are refused where the file is read, each with its absolute path first (src/roles.ts refuses
- * a role file the same way), so a boot names the file at fault instead of shipping a Gravit with
+ * a role file the same way), so a boot names the file at fault instead of shipping a gravit with
  * no contract or a heavier prompt than was budgeted.
  *
  * The desk's contract, `dsh/profile/desk.md` - the `gravit:desk` section (plugins/gravit.js) - is

@@ -1,7 +1,7 @@
-/** Attributes the tool-schema block of a Gravit request to its tools (design spec section 7;
+/** Attributes the tool-schema block of a gravit request to its tools (design spec section 7;
  * DEVELOPMENT.md section 4.3, R31): boots the face's own composition on a COPY of a harness home,
  * with the MCP rows as the home mounts them (the face's Account seat row, and any of
- * the operator's), opens one Gravit session and one desk session (cwd `desk/journal/`, preset
+ * the operator's), opens one gravit session and one desk session (cwd `desk/journal/`, preset
  * `gravit-desk`, with the desk's two tools installed as main.ts installs them, over stubs) and
  * prints the `tools` each one's model request carries. Run it on a copy of the home:
  *
@@ -10,7 +10,7 @@
  *     cd face && DSH_HOME="$SCRATCH/dsh-sizes" npx tsx scripts/schema-sizes.ts | awk '/^#/; /^group/,/^total/'
  *     rm -rf "$SCRATCH/dsh-sizes"
  *
- * Tab-separated, one table per session, Gravit's first: a `#` line (tool count, preset, the desk's
+ * Tab-separated, one table per session, gravit's first: a `#` line (tool count, preset, the desk's
  * cwd, home); a `tool` header; one `<tool> <bytes of JSON.stringify(schema)> <bytes/4> <chars/4>`
  * line per tool, largest first; then a `group` header, one line per prefix group
  * (`mcp__account__`, `lunhui_`, `agent_`, `role_`, `desk_`, then the host's own tools) and the

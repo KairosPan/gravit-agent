@@ -12,14 +12,18 @@ describe("account:owners", () => {
     expect(r.lines.at(-1)).toBe(SENTENCE.ownerless);
   });
 
-  it("an owner device labelled Gravit face is face-signs, and says a label is a hint", () => {
-    const r = ownerStanding(signers([{ id: "0xabc", kind: "device", label: "Gravit face" }]));
+  it("an owner device labelled gravit face is face-signs, and says a label is a hint", () => {
+    const r = ownerStanding(signers([{ id: "0xabc", kind: "device", label: "gravit face" }]));
     expect(r.verdict).toBe("face-signs");
     expect(r.lines.join("\n")).toContain("A label is a hint, not a proof");
   });
 
+  it("a device paired as Gravit face before the rename still counts as the face", () => {
+    expect(ownerStanding(signers([{ id: "0xabc", kind: "device", label: "Gravit face" }])).verdict).toBe("face-signs");
+  });
+
   it("owners without the face's device stop, naming the remedies left since the page retired, in order, --fresh last", () => {
-    const r = ownerStanding(signers([{ id: "0x1", kind: "device", label: "Account page" }, { id: "0x2", kind: "wallet", label: "Gravit face" }]));
+    const r = ownerStanding(signers([{ id: "0x1", kind: "device", label: "Account page" }, { id: "0x2", kind: "wallet", label: "gravit face" }]));
     expect(r.verdict).toBe("stop");
     const text = r.lines.join("\n");
     expect(text).not.toContain("the page's Settings");
@@ -43,8 +47,8 @@ describe("account:owners", () => {
   });
 
   it("the lines list each owner as kind · label and the devices waiting, and no id", () => {
-    const r = ownerStanding(signers([{ id: "0xSECRETID", kind: "device", label: "Gravit face" }], [{ kid: "kid-secret", at: "t" }]));
-    expect(r.lines[0]).toBe("device · Gravit face");
+    const r = ownerStanding(signers([{ id: "0xSECRETID", kind: "device", label: "gravit face" }], [{ kid: "kid-secret", at: "t" }]));
+    expect(r.lines[0]).toBe("device · gravit face");
     expect(r.lines[1]).toBe("devices waiting: 1");
     const text = r.lines.join("\n");
     expect(text).not.toContain("0xSECRETID");
