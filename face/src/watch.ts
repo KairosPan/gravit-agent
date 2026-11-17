@@ -332,8 +332,10 @@ const isWatchRecord = (x: unknown): x is WatchRecord => isAlertRecord(x) || isAn
  * unless watching; `noteAnnotated` appends an annotation run's record to `alerts.jsonl` and keeps it in memory with
  * the rest; `contextFor` what a phone reply to the message `messageId` answers (spec §16 H1b): from the records of the
  * last {@link MEMORY_MS}, an alert's message gives that alert's text, as sent with no note, and the annotation of its
- * pass when there is one; an annotation's message gives its pass's alerts and the annotation - at most
- * {@link CONTEXT_MAX} characters, and `undefined` for a message the watch did not send; `dispose` stops it and
+ * pass when there is one, then its lessons note (`lessons:` and the note) when one was made for it; a lessons block's
+ * message gives its alert's text, as sent, and the note; an annotation's message gives its pass's alerts and the
+ * annotation - at most {@link CONTEXT_MAX} characters, and `undefined` for a message the watch did not send. The
+ * lessons are kept in memory alone, not in `alerts.jsonl`, and a restart forgets them. `dispose` stops it and
  * releases the lease. */
 export interface WatchHandle {
   tick(): Promise<void>;
@@ -540,6 +542,11 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   const saidOn = new Map<string, number>();
   const failed = new Set<string>();
   let lastEt: string | undefined;
+
+  /* ---- the lessons a reply carries, in memory alone and lost at a restart: each note made by its alert's id, and
+   * each message id a block went out as against its alert's id and that note ---- */
+  const lessonsNotes = new Map<string, { text: string; at: number }>();
+  const lessonsSent = new Map<string, { alert: string; text: string; at: number }>();
 
   /* ---- the chains: sends in order, posts on their own, and every pass and poll in flight ---- */
   let sendChain: Promise<void> = Promise.resolve();
@@ -1096,7 +1103,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         if (saidOn.has(said)) return;
         const tell = (): void => {
           saidOn.set(said, clock.now());
-          if (answer.note !== undefined) noteLine({ kind: "alert", alert: rec.id, symbol: rec.symbol, lessons: true, text: answer.note });
+          if (answer.note === undefined) return;
+          lessonsNotes.set(rec.id, { text: answer.note, at: clock.now() });
+          noteLine({ kind: "alert", alert: rec.id, symbol: rec.symbol, lessons: true, text: answer.note });
         };
         const phone = answer.phone;
         if (phone === undefined) {
@@ -1112,7 +1121,14 @@ export function installWatch(deps: WatchDeps): WatchHandle {
             fail("lessons", err);
             return;
           }
-          if (!("undelivered" in sent) && !stopped) tell();
+          if ("undelivered" in sent || stopped) return;
+          if ("sent" in sent && answer.note !== undefined) {
+            for (const id of sent.sent) {
+              const messageId = messageIdOf(id);
+              if (messageId !== undefined) lessonsSent.set(messageId, { alert: rec.id, text: answer.note, at: clock.now() });
+            }
+          }
+          tell();
         });
       } catch (err) {
         fail("lessons", err);
@@ -1576,6 +1592,8 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     if (today === lastEt) return;
     lastEt = today;
     for (const [key, t] of saidOn) if (at - t > MEMORY_MS) saidOn.delete(key);
+    for (const [id, n] of lessonsNotes) if (at - n.at > MEMORY_MS) lessonsNotes.delete(id);
+    for (const [id, s] of lessonsSent) if (at - s.at > MEMORY_MS) lessonsSent.delete(id);
     records = records.filter((r) => at - Date.parse(r.t) <= MEMORY_MS);
     for (const [id, d] of deliveries) if (at - Date.parse(d.t) > MEMORY_MS) deliveries.delete(id);
   }
@@ -1866,14 +1884,26 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         return undefined;
       }
     };
+    /** The lessons note made for alert `id`, while the watch keeps it. */
+    const lessonsOf = (id: string): string[] => {
+      const note = lessonsNotes.get(id);
+      return note === undefined || at - note.at > MEMORY_MS ? [] : [`lessons:\n${note.text}`];
+    };
     let parts: string[] | undefined;
+    const block = lessonsSent.get(messageId);
+    if (block !== undefined && at - block.at <= MEMORY_MS) {
+      /* a reply to a lessons block: its alert as sent, then the note */
+      const hit = hitOf(block.alert);
+      const text = hit === undefined ? undefined : textOf(hit);
+      return cutAt([...(text === undefined ? [] : [text]), `lessons:\n${block.text}`].join("\n\n"), CONTEXT_MAX);
+    }
     for (const r of live) {
       if (r.kind === "delivered" && typeof r.delivery === "object" && r.delivery !== null && sentIt((r.delivery as { sent?: unknown }).sent)) {
         const hit = hitOf(r.id);
         const text = hit === undefined ? undefined : textOf(hit);
         if (hit === undefined || text === undefined) continue;
         const post = live.find((p): p is AlertAnnotation => p.kind === "annotation" && Array.isArray(p.alerts) && p.alerts.includes(hit.id));
-        parts = [text, ...noteOf(post === undefined ? undefined : annotatedOf(post.pass))];
+        parts = [text, ...noteOf(post === undefined ? undefined : annotatedOf(post.pass)), ...lessonsOf(hit.id)];
         break;
       }
       if (r.kind === "annotated" && sentIt(r.sent)) {

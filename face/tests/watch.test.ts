@@ -2343,3 +2343,52 @@ test("lessons that answer after dispose began send and note nothing", async () =
   assert.equal(h.sent.length, 1);
   assert.equal(h.notes.length, 1, "the alert's own note alone");
 });
+
+/* ---------- a reply's context with lessons (memory plan 2b, the final wave) ---------- */
+
+/** A harness whose NVDA move alert went as telegram:7 and its lessons block as telegram:101, the note made. */
+async function lessonsSentHarness(answer: () => Promise<AlertLessonsAnswer | undefined> = async () => ANSWER): Promise<{ h: Harness; hit: AlertHit }> {
+  const fake = lessonsFake(answer);
+  const h = await moveHarness(nvdaRule("nvda-move", 4), { lessons: fake, deliver: telegram7 });
+  await h.wall.advance(0);
+  await until("the ask", () => fake.calls.length === 1);
+  await until("the post", () => h.posts.length === 1);
+  const hit = (await h.alertRecords()).find((r) => r.kind === "alert") as unknown as AlertHit;
+  return { h, hit };
+}
+
+test("a reply to the lessons block carries the alert's text as sent, then the lessons note", async () => {
+  const { h, hit } = await lessonsSentHarness();
+  await until("the lessons note", () => h.notes.length === 2);
+  assert.equal(h.sent[1].text, BLOCK);
+  assert.equal(h.watch.contextFor("telegram:101"), `${alertText(hit, h.wall.now(), "none")}\n\nlessons:\n${NOTE}`);
+  await h.watch.dispose();
+});
+
+test("a reply to the alert's own message carries its lessons note after its annotation, or after its text with none", async () => {
+  const { h, hit } = await lessonsSentHarness();
+  await until("the lessons note", () => h.notes.length === 2);
+  const text = alertText(hit, h.wall.now(), "none");
+  assert.equal(h.watch.contextFor("telegram:7"), `${text}\n\nlessons:\n${NOTE}`, "no annotation yet");
+  await until("the annotation record", async () => (await h.alertRecords()).some((r) => r.kind === "annotation"));
+  h.watch.noteAnnotated({ t: new Date(h.wall.now()).toISOString(), kind: "annotated", pass: hit.pass, sessionId: "s", outcome: "ended", sent: ["telegram:900"], text: "It fell on guidance." });
+  assert.equal(h.watch.contextFor("telegram:7"), `${text}\n\nannotation:\nIt fell on guidance.\n\nlessons:\n${NOTE}`);
+  await h.watch.dispose();
+});
+
+test("an alert with no lessons note: a reply to it carries what it did before", async () => {
+  const { h, hit } = await lessonsSentHarness(async () => undefined);
+  assert.equal(h.watch.contextFor("telegram:7"), alertText(hit, h.wall.now(), "none"));
+  assert.equal(h.watch.contextFor("telegram:101"), undefined, "no block went");
+  await h.watch.dispose();
+});
+
+test("past the watch's memory the block's id answers nothing", async () => {
+  const { h } = await lessonsSentHarness();
+  await until("the lessons note", () => h.notes.length === 2);
+  assert.ok(h.watch.contextFor("telegram:101") !== undefined);
+  await h.watch.dispose();
+  (h.wall as unknown as { t: number }).t += 48 * 3_600_000 + 1;
+  assert.equal(h.watch.contextFor("telegram:101"), undefined);
+  assert.equal(h.watch.contextFor("telegram:7"), undefined);
+});
