@@ -19,6 +19,7 @@ import { askedOf } from '../../../client/js/host/sheet.js';
 import { renderStrategyScreen } from '../../../client/js/render/strategy.js';
 import { renderDiscover, renderPlugin } from '../../../client/js/render/discover.js';
 import { renderDeskScreen } from '../../../client/js/render/desk-page.js';
+import { renderMemoryScreen } from '../../../client/js/render/memory-page.js';
 import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
 import { newSheet } from '../../../client/js/host/run-sheet-view.js';
@@ -34,6 +35,7 @@ import { EVENT_VIEW, EVENT_VIEW_ID, EVENT_VIEW_WITH_B } from './event-view.js';
 import { stockDrawerHtml } from '../../../client/js/render/lunhui/stock.js';
 import { deskStatus, DESK_NOW } from './desk-status.js';
 import { deskNews, deskPageStatus, deskRoutines, deskNewsWithReports } from './desk-news.js';
+import { memoryLessons, memoryNotConnected, memoryWaiting, memoryProposals } from './memory-page.js';
 import { editorHtml, dropOverlay, lightboxHtml } from '../../../client/js/composer/view.js';
 import { DEFAULT_LIMITS } from '../../../client/js/composer/files.js';
 import { slashItems, atItems } from '../../../client/js/composer/menus.js';
@@ -457,6 +459,23 @@ export function namedStates() {
     // the owner's lessons on a Lunhui run's leaders (memory alert and Lunhui Task 5): under the ladder, a leader's caveat and
     // another's untold lesson; a run not checked; a memory not connected; and the drawer of a leader with a lesson
     ...memoryLunhuiStates(),
+    // the Memory screen's frame (memory screen plan Task 2): before its reads answer; a memory not connected, its words and
+    // the command that makes the home; a read that failed with nothing kept; one that failed over what it kept, with two
+    // proposals waiting
+    ...memoryPageStates(),
+  ];
+}
+
+// the Memory screen on Lessons, its reads answered at NOW
+function memoryPageStates() {
+  const on = R.nav(emptyState(), { screen: 'memory', tab: 'lessons' });
+  const loaded = (st, read, data) => R.memoryPageLoaded(st, { read, data, at: NOW });
+  const kept = loaded(loaded(on, 'lessons', memoryLessons()), 'waiting', memoryWaiting({ proposals: memoryProposals() }));
+  return [
+    ['memory-page', on],
+    ['memory-page-not-connected', loaded(loaded(on, 'lessons', memoryNotConnected()), 'waiting', memoryNotConnected())],
+    ['memory-page-unavailable', R.memoryPageFailed(on, { read: 'lessons', at: NOW, message: 'the memory could not be read' })],
+    ['memory-page-kept', R.memoryPageFailed(kept, { read: 'lessons', at: NOW, message: 'the memory did not answer in time' })],
   ];
 }
 
@@ -979,7 +998,7 @@ function composerBuild() {
 }
 export const composerPieces = () => composerBuild().pieces;
 export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'desk' ? renderDeskScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
-  : st.route.screen === 'trade' ? renderTradeScreen(st, now)
+  : st.route.screen === 'memory' ? renderMemoryScreen(st, now) : st.route.screen === 'trade' ? renderTradeScreen(st, now)
   : st.route.screen === 'strategy' ? renderStrategyScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
   : st.route.screen === 'history' ? renderHistoryScreen(st, now)
   : st.route.screen === 'task' ? renderTaskScreen(st, now)
@@ -1121,13 +1140,15 @@ const CONTENT_FIELDS = new Set([
 // Gravit's words), and a routine's when line and instruction (the face's line, the operator's words), a routine card's too
 // (Gravit's call and the face's when line) and a proposal's the read holds; the gate the face kept for an order card's call
 // (the face's order words and sentences, the memory's lessons), and of a Lunhui run's leaders the memory's words: a lesson's
-// words, what an untold lesson needs, a leader's fault; `*` is any one key
+// words, what an untold lesson needs, a leader's fault; and of a Memory screen's read not connected the face's words and the
+// command that makes the home; `*` is any one key
 const CONTENT = [['memoryGate', '*', 'gate'], ['memoryLunhui', '*', 'lessons', 'leaders', 'lessons', 'words'], ['memoryLunhui', '*', 'lessons', 'leaders', 'untold', 'needs'],
   ['memoryLunhui', '*', 'lessons', 'leaders', 'fault'],['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data'],
   ['deskPage', 'routines', 'data', 'routines', 'when'], ['deskPage', 'routines', 'data', 'routines', 'instruction'],
   ['conversations', 'messages', 'data', 'when'], ['conversations', 'messages', 'data', 'instruction'],
-  ['deskPage', 'routines', 'data', 'proposals', 'when'], ['deskPage', 'routines', 'data', 'proposals', 'instruction'], ['deskPage', 'routines', 'data', 'proposals', 'replacesName']];
+  ['deskPage', 'routines', 'data', 'proposals', 'when'], ['deskPage', 'routines', 'data', 'proposals', 'instruction'], ['deskPage', 'routines', 'data', 'proposals', 'replacesName'],
+  ['memoryPage', '*', 'data', 'say'], ['memoryPage', '*', 'data', 'command']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 // the strings a content field holds that are an ability's declared parts, its tools' and skills' names in the abilities listing
 // (an array adds nothing to a path): drawn each whole, they pass as runs (abilityRuns below) and lend no known word

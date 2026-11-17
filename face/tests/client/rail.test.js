@@ -8,6 +8,7 @@ import { renderSide } from '../../client/js/render/side.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
+import { icon } from '../../client/js/icons.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;
@@ -39,7 +40,7 @@ test('Trade is in the first level between Markets and Discover, current on the T
   const base = listed([conv('a')]);
   const h = renderNav(base);
   const keys = [...h.matchAll(/class="nav-item[^"]*"(?: aria-current="page")? href="([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(keys.slice(1), ['#/desk', '#/markets', '#/trade', '#/discover'], 'Messages, then Desk, Markets, Trade, Discover');
+  assert.deepEqual(keys.slice(1), ['#/desk', '#/markets', '#/trade', '#/discover', '#/memory'], 'Messages, then Desk, Markets, Trade, Discover, Memory');
   assert.match(h, /<a class="nav-item" href="#\/trade"><svg[^>]*>.*?<\/svg><span class="nav-label">Trade<\/span><\/a>/);
   for (const id of [null, 'coin:BTC']) {
     const on = renderNav(R.nav(base, { screen: 'trade', id }));
@@ -60,6 +61,21 @@ test('Desk follows Messages, links #/desk and is current on the Desk screen alon
   assert.equal(count(h, /aria-current="page"/g), 1);
   assert.equal(renderSide(on, NOW), '', 'no side panel beside the Desk');
   assert.match(renderNav({ ...base, railCollapsed: true }), /title="Desk"/);
+});
+
+test('Memory closes the group, links #/memory with the book icon and no badge, and is current on the Memory screen alone; no side panel beside it', () => {
+  const base = listed([conv('a')]);
+  assert.match(renderNav(base), new RegExp(`<a class="nav-item" href="#/memory">${icon('book', 22, 2).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<span class="nav-label">Memory</span></a>\\s*</div>`));
+  for (const tab of ['lessons', 'waiting']) {
+    const on = R.nav(base, { screen: 'memory', tab });
+    const h = renderNav(on);
+    assert.match(h, /<a class="nav-item current" aria-current="page" href="#\/memory">/, tab);
+    assert.equal(count(h, /aria-current="page"/g), 1);
+    assert.doesNotMatch(h, /nav-badge/);
+    assert.equal(renderSide(on, NOW), '', 'no side panel beside Memory');
+  }
+  for (const screen of ['desk', 'markets', 'discover']) assert.doesNotMatch(renderNav(R.nav(base, { screen, id: null })), /current" aria-current="page" href="#\/memory"/, screen);
+  assert.match(renderNav({ ...base, railCollapsed: true }), /href="#\/memory" title="Memory"/);
 });
 
 test('the Messages badge counts the tasks waiting on you: a worker whose gate came, a failed one; never a session that is no task', () => {

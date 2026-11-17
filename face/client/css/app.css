@@ -817,6 +817,14 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .dk-run .chip { padding: 1px 8px; }
 .dk-ask { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px; background: var(--down-fill); color: var(--down); font-size: calc(13px * var(--fs)); }
 .dk-spent { margin: 0; font-size: calc(13px * var(--fs)); font-weight: 600; color: var(--warn-text); }
+/* the Memory screen (#/memory/<tab>): the tabs under the head, then the open tab's read */
+.main.mp { overflow-y: auto; }
+.mp-tabs { padding: 16px 30px 0; }
+.mp-page { box-sizing: border-box; width: 100%; max-width: 1240px; padding: 18px 30px 40px; display: flex; flex-direction: column; gap: 12px; }
+.mp-dim { margin: 0; font-size: calc(13px * var(--fs)); color: var(--dim); }
+.mp-body { margin: 0; font-size: calc(14px * var(--fs)); color: var(--text); }
+.mp-say { margin: 0; font-size: calc(14px * var(--fs)); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mp-command { display: block; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface); font: calc(12px * var(--fm))/1.5 var(--font-mono); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
 @media (max-width: 900px) {
   .dk-cols { grid-template-columns: minmax(0, 1fr); }
   .dk-body { padding: 18px 16px 32px; }

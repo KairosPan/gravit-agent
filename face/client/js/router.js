@@ -1,5 +1,5 @@
 // face/client/js/router.js — hash routes: #/messages · #/task/<id> · #/history[/<id>] · #/strategy/<name> · #/desk · #/markets[/<id>] ·
-// #/trade[/<id>] · #/account/<tab> · #/discover[/<shelf>] · #/plugin/<id> · #/module/<name>. A market id is the Account's key
+// #/trade[/<id>] · #/account/<tab> · #/memory/<tab> · #/discover[/<shelf>] · #/plugin/<id> · #/module/<name>. A market id is the Account's key
 // (coin:BTC, event:predict:…) or the face's (us:AAPL, crypto:BTC/USD, cn:600519): everything after #/markets/, so a coin keeps
 // its slash, written back raw; Trade's market to open (an Account key), a plugin's id, a module's name, a task's or a history
 // session's id and a strategy's name read the same way. Two old forms still parse, for settle to place (app.js): #/messages/<id>
@@ -7,6 +7,8 @@
 // (spec 2026-11-12 §4.3) is #/markets/stock:<SYM>?at=<YYYY-MM-DD>&view=<view id>&case=<case id>: the id is what comes before
 // the `?`, and the query its `event` when the id is a stock's and `at` a real day — any other market's query is dropped.
 const TABS = ['portfolio', 'money', 'venues', 'agents', 'cards', 'rules', 'identity'];
+/** The Memory screen's tabs, in the order drawn; the first is the one an address with no tab, or an unknown one, opens. */
+export const MEMORY_TABS = Object.freeze(['lessons', 'decisions', 'waiting', 'health']);
 
 function restOf(path) {
   const at = path.indexOf('/');
@@ -52,6 +54,7 @@ export function parseHash(hash) {
     case 'strategy': return { screen: 'strategy', id: restOf(path) };
     case 'channel': { const ws = restOf(path); return ws ? { screen: 'messages', id: null, channel: ws } : { screen: 'messages', id: null }; }
     case 'account': return { screen: 'account', tab: TABS.includes(a) ? a : 'portfolio' };
+    case 'memory': return { screen: 'memory', tab: MEMORY_TABS.includes(a) ? a : MEMORY_TABS[0] };
     case 'markets': return marketsOf(path);
     case 'trade': return { screen: 'trade', id: restOf(path) };
     case 'messages': return { screen: 'messages', id: a ?? null };
@@ -61,6 +64,7 @@ export function parseHash(hash) {
 
 export function toHash(route) {
   if (route.screen === 'account') return `#/account/${route.tab ?? 'portfolio'}`;
+  if (route.screen === 'memory') return `#/memory/${MEMORY_TABS.includes(route.tab) ? route.tab : MEMORY_TABS[0]}`;
   // an old channel link waiting for the channels keeps its hash
   if (route.screen === 'messages' && route.channel) return `#/channel/${route.channel}`;
   return route.id ? `#/${route.screen}/${route.id}${eventQuery(route)}` : `#/${route.screen}`;

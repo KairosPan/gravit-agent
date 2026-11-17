@@ -44,6 +44,13 @@ test('parseHash and toHash round-trip; Messages and Markets route, every other s
   assert.deepEqual(parseHash('#/desk'), { screen: 'desk', id: null });
   assert.equal(toHash(parseHash('#/desk')), '#/desk');
   assert.deepEqual(routeOf('#/desk'), { screen: 'desk', id: null });
+  // the Memory screen (memory screen plan Task 2): its tab in the hash, as the Account keeps its own; Lessons the default
+  assert.deepEqual(routeOf('#/memory'), { screen: 'memory', tab: 'lessons' });
+  assert.deepEqual(routeOf('#/memory/lessons'), { screen: 'memory', tab: 'lessons' });
+  assert.deepEqual(parseHash('#/memory/waiting'), { screen: 'memory', tab: 'waiting' });
+  for (const tab of ['lessons', 'decisions', 'waiting', 'health']) assert.equal(toHash(parseHash(`#/memory/${tab}`)), `#/memory/${tab}`);
+  assert.deepEqual(parseHash('#/memory/cards'), { screen: 'memory', tab: 'lessons' }, 'an unknown tab is Lessons');
+  assert.equal(toHash({ screen: 'memory' }), '#/memory/lessons');
   // a task, history (the list or one session) and a strategy page take everything after the screen, decoded, as a market does
   for (const h of ['#/task/session-1', '#/history', '#/history/session-1', '#/strategy/cn-market']) assert.equal(toHash(parseHash(h)), h);
   assert.deepEqual(routeOf('#/task/session-1'), { screen: 'task', id: 'session-1' });

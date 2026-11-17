@@ -28,6 +28,7 @@ import { startMarkets } from './host/markets.js';
 import { startDesk } from './host/desk.js';
 import { startDeskNews } from './host/desk-news.js';
 import { startDeskRoutines } from './host/desk-routines.js';
+import { startMemoryPage } from './host/memory-page.js';
 import { startAccount } from './host/account.js';
 import { startSeat } from './host/seat.js';
 import { startChannels } from './host/channels.js';
@@ -36,6 +37,7 @@ import { renderStrategyScreen } from './render/strategy.js';
 import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
 import { renderDeskScreen } from './render/desk-page.js';
+import { renderMemoryScreen } from './render/memory-page.js';
 import { startModules } from './host/modules.js';
 import { renderModule } from './render/modules.js';
 import { startRunSheet } from './host/run-sheet.js';
@@ -179,9 +181,9 @@ export function makeStore(storage, now = Date.now()) {
   return createStore({ initial: initialState(storage, now), reducers, storage, key: PREFS_KEY, accept: () => false, persist: prefsOf });
 }
 
-// Messages (with a task's page, history and a strategy's page), the Desk, Markets, Trade, Discover (with an item's page) and Account are
-// served; every other screen the router knows folds to Messages
-const SCREENS = new Set(['messages', 'task', 'history', 'strategy', 'desk', 'markets', 'trade', 'discover', 'plugin', 'module', 'account']);
+// Messages (with a task's page, history and a strategy's page), the Desk, Markets, Trade, Discover (with an item's page), Memory and
+// Account are served; every other screen the router knows folds to Messages
+const SCREENS = new Set(['messages', 'task', 'history', 'strategy', 'desk', 'markets', 'trade', 'discover', 'plugin', 'module', 'memory', 'account']);
 export const routeOf = hash => { const r = parseHash(hash); return SCREENS.has(r.screen) ? r : { screen: 'messages', id: null }; };
 // route by the address bar; a normalised route says which hash the bar should show instead. An old link lands where nav's
 // landing puts it (reducers/messages.js landingOf): a session on the conversation, its task or history, a channel on its strategy
@@ -489,6 +491,8 @@ export function boot(win, host = {}) {
   const deskNews = startDeskNews({ store, getJson, schedule, cancelTimer, now });
   // the Desk page's routines: read while the Desk shows; a switch, a Test and a Delete, each read again after it answers
   const deskRoutines = startDeskRoutines({ store, getJson, postJson, schedule, cancelTimer, now });
+  // the Memory screen's reads: its open tab's and what waits, read while it shows
+  const memoryPage = startMemoryPage({ store, getJson, schedule, cancelTimer, now });
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
@@ -510,13 +514,15 @@ export function boot(win, host = {}) {
   // a room member's trace, read without activating the member's session
   const traces = startTraces({ store, call, loadMemberTrace, now });
   // the quotes run only while Markets is on screen in a visible tab, the desk's status while Markets or the Desk is, the Desk's
-  // news while the Desk is, the routines while the Desk or Messages (its routine cards) is; Trade's picks only while Trade is
+  // news while the Desk is, the routines while the Desk or Messages (its routine cards) is, the memory's reads while Memory is,
+  // on its open tab; Trade's picks only while Trade is
   const showMarkets = () => {
-    const screen = store.get().route.screen;
+    const { screen, tab } = store.get().route;
     markets.show(screen === 'markets' && !doc.hidden);
     desk.show((screen === 'markets' || screen === 'desk') && !doc.hidden);
     deskNews.show(screen === 'desk' && !doc.hidden);
     deskRoutines.show((screen === 'desk' || screen === 'messages') && !doc.hidden);
+    memoryPage.show(screen === 'memory' && !doc.hidden, tab);
   };
   // Embedded browsers may report hidden before their first visibility event. Opening Markets or choosing a source still
   // needs one answer; only the recurring polls depend on visibility.
@@ -688,7 +694,7 @@ export function boot(win, host = {}) {
     if (threadSig !== last.thread) { revealed.clear(); rail = freshRail(); }
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'desk' ? renderDeskScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
-      : s.route.screen === 'trade' ? renderTradeScreen(s, now())
+      : s.route.screen === 'memory' ? renderMemoryScreen(s, now()) : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'strategy' ? renderStrategyScreen(s, now(), { open: tasksOpen }) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'history' ? renderHistoryScreen(s, now(), { revealed, anchor: anchorSeq, rail })
       : s.route.screen === 'task' ? renderTaskScreen(s, now(), { revealed, anchor: anchorSeq, rail })

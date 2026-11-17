@@ -24,7 +24,8 @@ function navItem(href, name, label, current, mini, badge = 0) {
     `<span class="nav-label">${esc(label)}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</a>`;
 }
 
-// the first level: Messages (its badge counts the tasks waiting on you, host/rail-view.js), Desk, Markets, Trade, Discover, Account with its
+// the first level: Messages (its badge counts the tasks waiting on you, host/rail-view.js), Desk, Markets, Trade, Discover, Memory (no
+// badge: one would need the memory read on every screen), Account with its
 // leading figure once the Account's read has answered — the paper book's, named so, when it leads — and its badge counting
 // the cards waiting for you on the Account, and the collapse key; it collapses to a strip of icons
 function worthLine(state) {
@@ -48,6 +49,7 @@ export function renderNav(state) {
     ${navItem('#/markets', 'markets', t('nav.markets'), screen === 'markets', mini)}
     ${navItem('#/trade', 'trade', t('nav.trade'), screen === 'trade', mini)}
     ${navItem('#/discover', 'compass', t('nav.discover'), screen === 'discover' || screen === 'plugin' || screen === 'module', mini)}
+    ${navItem('#/memory', 'book', t('nav.memory'), screen === 'memory', mini)}
   </div>
   <div class="rail-foot">
     <div class="rail-lines"><button type="button" class="line-key" data-action="openSettings" aria-label="${th('nav.settings')}" title="${th('nav.settings')}">${icon('bars', 20, 2)}<span class="rail-setting-label">${th('nav.settings')}</span></button></div>

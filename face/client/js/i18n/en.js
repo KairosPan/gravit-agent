@@ -48,6 +48,7 @@ export const EN = Object.freeze({
   'nav.markets': 'Markets',
   'nav.trade': 'Trade',
   'nav.discover': 'Discover',
+  'nav.memory': 'Memory',
   'nav.settings': 'Settings',
   'nav.account': 'Account',
   'nav.worthPaper': '{worth} · Paper',
@@ -2165,4 +2166,13 @@ export const EN = Object.freeze({
   'lunhui.memory.noPool': 'Lessons were not checked: the run froze no limit-up pool',
   'lunhui.memory.unreadable': 'The lessons kept for this run could not be read',
   'lunhui.memory.notConnected': 'The memory is not connected',
+  // the Memory screen (memory screen plan Task 2)
+  'memory.page.title': 'Memory',
+  'memory.page.lessons': 'Lessons',
+  'memory.page.decisions': 'Decisions',
+  'memory.page.waiting': 'Waiting',
+  'memory.page.waitingCount': 'Waiting · {n}',
+  'memory.page.health': 'Health',
+  'memory.page.unavailable': 'Unavailable',
+  'memory.page.notRead': 'not an answer from the memory',
 });

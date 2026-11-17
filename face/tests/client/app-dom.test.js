@@ -3,6 +3,7 @@ import { TASKS_POLL_MS } from '../../client/js/host/tasks.js';
 import { DESK_POLL_MS } from '../../client/js/host/desk-view.js';
 import { DESK_NEWS_POLL_MS } from '../../client/js/host/desk-news.js';
 import { DESK_ROUTINES_POLL_MS } from '../../client/js/host/desk-routines.js';
+import { MEMORY_POLL_MS } from '../../client/js/host/memory-page.js';
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -855,6 +856,44 @@ test('the Desk reads its news, its routines and the desk status; Markets keeps t
   await settle();
   assert.equal(held(DESK_POLL_MS), 0, 'on Messages neither the status');
   assert.equal(held(DESK_NEWS_POLL_MS), onDesk - 1, 'nor the news; the routines poll there, for the routine cards (plan 3 Task 3)');
+});
+
+// the Memory screen (memory screen plan Task 2): its open tab's read and the waiting read while it shows in a visible tab, and
+// neither on another screen or with the tab hidden
+test('the Memory screen reads its open tab and what waits while it shows; another screen and a hidden tab read neither', async () => {
+  const f = fakeWindow({ hash: '#/desk', storage: memoryStorage() });
+  const h = host({ rows: [row('s1')] });
+  const timers = new HeldTimers(ms => ms === MEMORY_POLL_MS || ms >= 5_000);
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers, now: () => 1_000_000 });
+  await h.ready();
+  const memoryReads = () => h.reads.filter(p => p.startsWith('/data/memory/'));
+  assert.deepEqual(memoryReads(), [], 'nothing read on another screen');
+  assert.equal(timers.delays().filter(ms => ms === MEMORY_POLL_MS).length, 0);
+  f.win.location.hash = '#/memory';
+  f.fire('win', 'hashchange');
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'memory', tab: 'lessons' });
+  assert.equal(f.win.location.hash, '#/memory/lessons', 'the bar shows the tab');
+  assert.deepEqual(memoryReads().sort(), ['/data/memory/lessons', '/data/memory/review']);
+  assert.equal(timers.delays().filter(ms => ms === MEMORY_POLL_MS).length, 1, 'one poll');
+  assert.match(f.html(), /<h1 class="head-title">Memory<\/h1>/);
+  f.doc.hidden = true;
+  f.fire('doc', 'visibilitychange');
+  assert.equal(timers.delays().filter(ms => ms === MEMORY_POLL_MS).length, 0, 'hidden: the poll stops');
+  f.win.location.hash = '#/memory/health';
+  f.fire('win', 'hashchange');
+  await settle();
+  assert.equal(memoryReads().length, 2, 'another tab while hidden reads nothing');
+  f.doc.hidden = false;
+  f.fire('doc', 'visibilitychange');
+  await settle();
+  assert.deepEqual(memoryReads().slice(2).sort(), ['/data/memory/review', '/data/memory/status'], 'visible again: the open tab');
+  f.win.location.hash = '#/desk';
+  f.fire('win', 'hashchange');
+  await settle();
+  assert.equal(timers.delays().filter(ms => ms === MEMORY_POLL_MS).length, 0, 'back on the Desk: no memory poll');
+  assert.equal(memoryReads().length, 4);
+  store.timers.clear();
 });
 
 // the routine card (desk-page plan 3 Task 3): an ok routine_propose drawn as the card alone, the turn's closing words left out;
