@@ -62,6 +62,15 @@ test('a failed read with data kept: one dim line with its words above the body a
   assert.match(html, /<\/main>$/);
 });
 
+test("a failure's words from the memory are made visible and escaped, kept data or none", () => {
+  const message = 'the <i>memory</i>\u202e did not answer';
+  for (const st of [R.memoryPageFailed(loaded(on(), 'lessons', memoryLessons()), { read: 'lessons', at: NOW, message }), R.memoryPageFailed(on(), { read: 'lessons', at: NOW, message })]) {
+    const html = draw(st);
+    assert.match(html, /<p class="mp-dim">the &lt;i&gt;memory&lt;\/i&gt;\\u202e did not answer<\/p>/);
+    assert.doesNotMatch(html, /\u202e/, 'the raw mark is nowhere');
+  }
+});
+
 test('the frame under ZH', () => {
   const html = withTable(ZH, () => draw(loaded(on('waiting'), 'waiting', memoryWaiting({ proposals: memoryProposals() }))));
   for (const word of ['记忆', '教训', '决策', '待处理 · 2', '健康']) assert.ok(html.includes(word), word);

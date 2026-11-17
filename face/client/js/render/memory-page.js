@@ -38,7 +38,7 @@ const tabBody = tab => `<p class="mp-body">${esc(tabWord(tab))}</p>`;
 
 function body(read, tab) {
   const failed = read.status === 'error' || read.message != null;
-  const line = read.message != null ? dim(sayOf(read.message)) : '';
+  const line = read.message != null ? dim(visible(sayOf(read.message))) : '';
   if (read.data == null) return failed ? `${line}${dim(t('memory.page.unavailable'))}` : dim(t('common.loading'));
   if (read.data.connected === false) return `${line}${notConnected(read.data)}`;
   return `${line}${tabBody(tab)}`;
