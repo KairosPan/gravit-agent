@@ -2148,4 +2148,6 @@ export const ZH = Object.freeze({
   'gbox.stub.composed': '综合回答',
   'gbox.stub.events': '事件对标表',
   'gbox.page.strategy': '策略',
+  'gbox.attach': '将此页面作为附件',
+  'gbox.detach': '不将此页面作为附件',
 });

@@ -18,6 +18,7 @@ export const ICONS = {
   send: '<path d="M12 19V5M5 12l7-7 7 7"></path>',
   check: '<path d="M5 12l5 5 9-10"></path>',
   x: '<path d="M6 6l12 12M18 6L6 18"></path>',
+  screen: '<rect x="3" y="4" width="18" height="13" rx="2"></rect><path d="M8 21h8M12 17v4"></path>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path>',
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"></path><path d="M9 12l2 2 4-4"></path>',
   bars: '<path d="M5 20V10M12 20V4M19 20v-7"></path>',

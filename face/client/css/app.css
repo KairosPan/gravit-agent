@@ -1388,6 +1388,15 @@ button.tk-at:hover { border-color: var(--dim); }
 .gbox-body .bubble { font-size: calc(13px * var(--fs)); overflow-wrap: anywhere; }
 .gbox-body .md-tablewrap { max-width: 100%; overflow-x: auto; }
 .gbox-body img { max-width: 100%; height: auto; }
+.gbox-chips { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 12px 0; border-top: 1px solid var(--border); background: var(--surface); }
+.gbox-chips + .composer { border-top: 0; padding-top: 6px; }
+.gbox-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; height: 26px; padding: 0 4px 0 9px; border: 1px solid var(--card-border); border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent-ink); font-size: calc(12px * var(--fs)); font-weight: 600; }
+.gbox-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gbox-chip > svg, .gbox-attach > svg { flex: none; }
+.gbox-chip-x { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--radius-pill); background: transparent; color: inherit; }
+.gbox-chip-x:hover { background: var(--hover); color: var(--text); }
+.gbox-attach { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px dashed var(--card-border); border-radius: var(--radius-pill); background: transparent; color: var(--dim); font-size: calc(12px * var(--fs)); font-weight: 600; }
+.gbox-attach:hover { background: var(--hover); color: var(--text); }
 .gbox-panel .composer { flex: none; padding: 10px 12px 12px; border-top: 1px solid var(--border); background: var(--surface); }
 .gbox-panel .composer-box { padding: 6px; box-shadow: none; }
 .gbox-panel .composer-menu { left: 12px; width: calc(100% - 24px); }

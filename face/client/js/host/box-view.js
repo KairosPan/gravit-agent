@@ -2,6 +2,10 @@
 // what it steps aside for, and the ball's marks. Pure.
 import { waitingCount } from './rail-view.js';
 import { unreadOf } from './sessions.js';
+import { toHash } from '../router.js';
+
+/** The page chip is on: × did not take this page off (reducers/box.js boxDetach); any other page brings it back. */
+export const boxAttached = state => state.boxDetached !== toHash(state.route);
 
 /** An owner sheet (Trade's order step included) or the identity connect sheet is over the page: the box stays under it. */
 export const boxCovered = state => Boolean(state.sheet) || Boolean(state.identity?.connect);

@@ -77,7 +77,8 @@ import { startSearch } from './host/search.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
 import { onScreenId, boxOpenHere, boxShown } from './host/sessions.js';
-import { boxCovered, boxAside } from './host/box-view.js';
+import { boxCovered, boxAside, boxAttached } from './host/box-view.js';
+import { pageTagOf } from './host/page-tag.js';
 import { renderBox } from './render/box.js';
 import { createAccountStream } from './wire/account-stream.js';
 import { createMarketStream } from './wire/market-stream.js';
@@ -1340,13 +1341,18 @@ export function boot(win, host = {}) {
     if (held) { refuse(held === 'uploading' ? said('status.uploading') : said('status.notUploaded')); if (waiting.length) render(); return; }
     if (isConvKey(key) && refusesImages.has(key) && hasImage(files)) { notes.set(key, modelLineFor(key)); render(); return; }
     const workspaceId = currentConversation(s)?.channel?.workspaceId ?? null;
-    const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
+    let text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
     // a / line with files: a command the kept rows know takes them only when its input says so (D12); a name the rows do
     // not know is the host's to judge
     if (files.length && text.startsWith('/')) {
       const name = text.slice(1).split(/\s/)[0];
       const row = (composerReads.keptCommands(currentConversation(s)) ?? []).find(r => r.name === name);
       if (row && row.input?.attachments !== true) { refuse(said('status.takesNoFiles', { name })); return; }
+    }
+    // from the box with its chip on, the first line names the page (spec §6.7); a / line and a send of files alone go as they are
+    if (boxOpenHere(s) && boxAttached(s) && text !== '' && !text.startsWith('/')) {
+      const tag = pageTagOf(s);
+      if (tag !== null) text = `${tag}\n${text}`;
     }
     // words and files added under the key while the send was on its way are kept, after the sent ones (A7)
     const back = () => {
@@ -1656,6 +1662,8 @@ export function boot(win, host = {}) {
     // the Gravit box: the half ball opens it, Minimize folds it back
     boxOpen: () => openBox(),
     boxClose: () => closeBox(),
+    boxDetach: () => { store.dispatch('boxDetach'); render(); },
+    boxAttach: () => { store.dispatch('boxAttach'); render(); },
     // a channel's page: Retry reads it again
     channelRetry: el => { void channels.overview(el.dataset.id); },
     // Discover: a shelf read again, the CLI agents' three writes

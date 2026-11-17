@@ -8,7 +8,8 @@ import { icon } from '../icons.js';
 import { chordLabel, shortcut } from '../keys.js';
 import { HOST_NAME } from '../wire/speaker.js';
 import { boxShown, boxOpenHere } from '../host/sessions.js';
-import { boxCovered, boxAside, ballMarks } from '../host/box-view.js';
+import { boxCovered, boxAside, ballMarks, boxAttached } from '../host/box-view.js';
+import { pageTagOf, parseTag, tagWords } from '../host/page-tag.js';
 import { renderComposer, renderStatus } from './messages.js';
 import { renderThread } from './thread.js';
 import { waitingLineHtml } from './tasks.js';
@@ -51,6 +52,17 @@ function waiting(state, now) {
   return `<h3 class="gbox-waiting-head">${th('tasks.group.you')}</h3>${lines.slice(0, WAITING_MAX).map(l => waitingLineHtml(l, state)).join('')}${more}`;
 }
 
+// the page chip over the composer (spec §6.7): the page the next message names, in the operator's words, with × to leave it
+// off; once ×'d, a ghost key puts it back; nothing where the page has no tag
+function chips(state) {
+  const tag = pageTagOf(state);
+  if (tag === null) return '';
+  if (!boxAttached(state)) return `<div class="gbox-chips"><button type="button" class="gbox-attach" data-action="boxAttach">${icon('screen', 14)}<span>${th('gbox.attach')}</span></button></div>`;
+  const off = th('gbox.detach');
+  return `<div class="gbox-chips"><span class="gbox-chip">${icon('screen', 14)}<span>${esc(tagWords(parseTag(`${tag}\n`).tag))}</span>` +
+    `<button type="button" class="gbox-chip-x" data-action="boxDetach" aria-label="${off}" title="${off}">${icon('x', 12, 2.2)}</button></span></div>`;
+}
+
 function panel(state, now, composer, page) {
   const conv = (state.conversations ?? []).find(c => c.id === state.tasks.conversation);
   const working = conv?.running ? `<span class="status up"><span class="status-dot"></span>${th('thread.working')}</span>` : '';
@@ -61,7 +73,7 @@ function panel(state, now, composer, page) {
     `<button type="button" class="gbox-key" data-action="boxClose" aria-label="${minimize}" title="${minimize}">${icon('chevDown', 18, 2.2)}</button></header>`;
   const say = renderComposer({ menu: composer?.menu ?? null, files: composer?.files ?? [], note: composer?.note ?? '' });
   return `<section${attrs({ class: 'gbox-panel', role: 'dialog', 'aria-modal': 'false', 'aria-label': HOST_NAME })}>${head}<div class="gbox-waiting">${waiting(state, now)}</div>` +
-    `<div class="gbox-body">${body(state, now, page)}</div>${say}${renderStatus(state.status)}</section>`;
+    `<div class="gbox-body">${body(state, now, page)}</div>${chips(state)}${say}${renderStatus(state.status)}</section>`;
 }
 
 /** The box on this screen: '' where it does not stand or a sheet covers it; the panel while open, else the ball. `composer`

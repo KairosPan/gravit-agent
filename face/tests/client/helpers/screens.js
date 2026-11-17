@@ -458,6 +458,8 @@ export function namedStates() {
     // the Gravit box (plan 1 of the box, Task 4): the panel open on the Desk with four tasks waiting on you (three lines and the
     // count) and, in the compact thread, a composed answer and an event table each one line to Messages
     ['box-panel-waiting', boxWaitingState()],
+    // the page chip (plan 2 of the box, Task 2): the panel open on Markets with × taken, the ghost key that puts the page back
+    ['box-panel-detached', R.boxDetach(R.boxOpen(R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('bx')], channels: [], bots: [] }), { conversation: 'bx', tasks: [], at: NOW }), { screen: 'markets', id: null })))],
   ];
 }
 

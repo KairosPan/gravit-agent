@@ -2155,4 +2155,6 @@ export const EN = Object.freeze({
   'gbox.stub.composed': 'Composed answer',
   'gbox.stub.events': 'Event table',
   'gbox.page.strategy': 'Strategy',
+  'gbox.attach': 'Attach this page',
+  'gbox.detach': 'Do not attach this page',
 });

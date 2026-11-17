@@ -6,6 +6,7 @@ import { renderBox } from '../../client/js/render/box.js';
 import { renderThread } from '../../client/js/render/thread.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
+import { boxAttached } from '../../client/js/host/box-view.js';
 
 const NOW = new Date(2026, 10, 16, 10, 0).getTime();
 const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, updatedAt: 0, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
@@ -140,4 +141,27 @@ test('a task waiting on you whose card is not loaded yet: the rail\'s words and 
   const h = renderBox(R.boxOpen(s), NOW);
   assert.match(h, /<div class="gbox-line" data-task="t9">[\s\S]*<div class="task-gate-there">To answer it, open View the full process <a href="#\/task\/t9">View the full process ›<\/a><\/div><\/div>/);
   assert.doesNotMatch(h, /class="task-gate"/);
+});
+
+// ---- the page chip (plan 2 of the box, Task 2): the page in the operator's words over the composer, × drops it
+test('the chip names the page, and × drops it', () => {
+  const st = R.boxOpen(at('markets', 'stock:NVDA'));
+  assert.match(renderBox(st, NOW), /class="gbox-chip">[\s\S]*Markets · NVDA[\s\S]*data-action="boxDetach"/);
+  assert.match(renderBox(R.boxDetach(st), NOW), /class="gbox-attach" data-action="boxAttach">[\s\S]*Attach this page/);
+});
+
+test('the chip row stands between the thread and the composer', () => {
+  const h = renderBox(R.boxOpen(at('desk')), NOW);
+  assert.ok(h.indexOf('class="gbox-body"') < h.indexOf('class="gbox-chips"'));
+  assert.ok(h.indexOf('class="gbox-chips"') < h.indexOf('id="say"'));
+  assert.match(h, /class="gbox-chip-x" data-action="boxDetach" aria-label="Do not attach this page" title="Do not attach this page"/);
+});
+
+test('detached on one page, the chip is back on the next', () => {
+  const st = R.boxDetach(R.boxOpen(at('desk')));
+  assert.equal(boxAttached(st), false);
+  const there = R.nav(st, { screen: 'discover', id: null });
+  assert.equal(boxAttached(there), true);
+  assert.match(renderBox(there, NOW), /class="gbox-chip">[\s\S]*Discover/);
+  assert.equal(boxAttached(R.boxAttach(st)), true);
 });

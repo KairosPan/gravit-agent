@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { boot as bootApp, Timers, DROP_QUIET_MS, PREFS_KEY } from '../../client/js/app.js';
 import { rowsOf, pairsOf } from '../../client/js/host/market-view.js';
+import { boxAttached } from '../../client/js/host/box-view.js';
 import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
 import { startComposerReads } from '../../client/js/host/composer.js';
@@ -8192,7 +8193,7 @@ const boxPrompts = h => h.calls.filter(c => c[0] === 'session/prompt').map(c => 
 const boxRig = (hash, over = {}) => {
   const f = fakeWindow({ hash, ...(over.storage ? { storage: over.storage } : {}) });
   if (over.mac) f.win.navigator = { platform: 'MacIntel' };
-  const h = host({ rows: [row('conv', { updatedAt: 30, agentAvailable: true }), ...(over.rows ?? [])], conversation: 'conv', tasks: over.tasks ?? [] });
+  const h = host({ rows: [row('conv', { updatedAt: 30, agentAvailable: true }), ...(over.rows ?? [])], conversation: 'conv', tasks: over.tasks ?? [], channels: over.channels ?? [] });
   const store = started(f, h);
   return { f, h, store };
 };
@@ -8218,7 +8219,7 @@ test('the box sends to the conversation', async () => {
   await h.ready(); await settle();
   openBox(f); await settle();
   typeSay(f, 'why is it down'); send(f); await settle();
-  assert.deepEqual(boxPrompts(h).map(r => [r.sessionId, r.content[0].text]), [['conv', 'why is it down']]);
+  assert.deepEqual(boxPrompts(h).map(r => [r.sessionId, r.content[0].text]), [['conv', '[on screen · Markets]\nwhy is it down']]);
 });
 
 test('a draft typed in the box is there on Messages', async () => {
@@ -8299,7 +8300,7 @@ test('a send right after opening reaches the conversation', async () => {
   await h.ready(); await settle();
   openBox(f);
   typeSay(f, 'quick'); send(f); await settle();
-  assert.deepEqual(boxPrompts(h).map(r => [r.sessionId, r.content[0].text]), [['conv', 'quick']]);
+  assert.deepEqual(boxPrompts(h).map(r => [r.sessionId, r.content[0].text]), [['conv', '[on screen · Desk]\nquick']]);
 });
 
 test('open, close, open reads once', async () => {
@@ -8418,4 +8419,60 @@ test('a hand-off under a sheet fills the draft for later', async () => {
   store.dispatch('identityConnectClose'); await settle();
   assert.match(f.html(), /class="gbox-panel"/);
   assert.equal(say.value, 'Edit your routine: Idea screening');
+});
+
+// ---- the page tag (plan 2 of the box, Task 2): what the box sends opens with the page, unless × took it off
+test('a message from the box carries the page', async () => {
+  const { f, h } = boxRig('#/desk', { channels: [{ workspaceId: 'wb', name: 'beta', title: 'Beta', isRoot: false, sessionIds: [] }] });
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  typeSay(f, 'why'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, '[on screen · Desk]\nwhy');
+  await goTo(f, '#/strategy/beta');
+  typeSay(f, 'how is it doing'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, '[on screen · Strategy · beta]\nhow is it doing');
+});
+
+test('× leaves it off the next message, and the next page brings it back', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'boxDetach' } }); await settle();
+  assert.match(f.html(), /class="gbox-attach"/);
+  typeSay(f, 'plain'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, 'plain');
+  await goTo(f, '#/markets');
+  assert.equal(boxAttached(store.get()), true);
+  assert.match(f.html(), /class="gbox-chip"/);
+  typeSay(f, 'and here'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, '[on screen · Markets]\nand here');
+});
+
+test('Attach this page puts the tag back', async () => {
+  const { f, h } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'boxDetach' } }); await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'boxAttach' } }); await settle();
+  assert.match(f.html(), /class="gbox-chip"/);
+  typeSay(f, 'back on'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, '[on screen · Desk]\nback on');
+});
+
+test('a / line goes out untagged', async () => {
+  const { f, h } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  typeSay(f, '/compact'); send(f); await settle();
+  assert.ok(h.calls.length > 0);
+  assert.ok(h.calls.every(([, a]) => !JSON.stringify(a ?? {}).includes('[on screen')));
+});
+
+test('Messages never tags', async () => {
+  const { f, h } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  await goTo(f, '#/messages');
+  typeSay(f, 'hello'); send(f); await settle();
+  assert.equal(boxPrompts(h).at(-1).content[0].text, 'hello');
 });
