@@ -63,6 +63,7 @@ import { achArrival, etDate, whenLabel } from "./calendar.ts";
 import { doorOf, plan, type Door, type Leg, type Rail, type Route, type RouteRequest, type VenueView, whyWatchOnly } from "./doors.ts";
 import { heldUsd, inFlightUsd, launch, newPayment, settleDue, type Advance, type Authority, type Money, type Payment, type PaymentKind } from "./payments.ts";
 import { actionHash, BRAIN_KEY_TTL_MS, PAPER_TTL_MS, PAPER_TYPES, SIGN_OUT_TTL_MS, isAgentAction, isDeviceSig, isJwk, isOwnerAction, kidOf, malformed, MEMORY_TYPES, micro, MONEY_TTL_MS, MONEY_TYPES, NonceBook, ownEnvelope, ownerTypedData, shownFields, signerOf, type Action, type AgentAction, type AnySig, type Envelope, type Hex, type Jwk, type OwnerAction, type SendAsset } from "./sign.ts";
+import { ATTEST_TTL_MS, attestProblem, attestSentence } from "./attest.ts";
 import { deskBrainKeyProblem, fingerprintOf, setBrainKeyProblem } from "./brain-keys.ts";
 import { identitySignedProblem, isIdentityAction, type IdentityAction } from "../identity/identity.ts";
 import { UNSIGNED_SIGNER, unsignedProblem, VENUE_ID_SHAPE, VENUE_ID_WORDS } from "./unsigned.ts";
@@ -688,8 +689,9 @@ export class AccountEngine {
     // own words (account/brain-keys.ts): refused HERE, before the instruction is taken — the "taken" row below writes the signed fields to
     // the ledger, which is hash-chained and cannot be cleaned afterwards, and the handler that would refuse it runs only after that row.
     // Fixed words, which never repeat the value; nothing is spent
-    // and a bot token pasted into any signed field of the four identity types, for the same reason (identity/identity.ts)
-    const keyed = action.type === "setBrainKey" ? setBrainKeyProblem(action) : action.type === "setDesk" ? deskBrainKeyProblem(action.change, action.value) : isIdentityAction(action) ? identitySignedProblem(action) : null;
+    // and a bot token pasted into any signed field of the four identity types, for the same reason (identity/identity.ts); and an attest's
+    // four fields off their bounds (account/attest.ts), so that no long text enters the chain
+    const keyed = action.type === "setBrainKey" ? setBrainKeyProblem(action) : action.type === "setDesk" ? deskBrainKeyProblem(action.change, action.value) : isIdentityAction(action) ? identitySignedProblem(action) : action.type === "attest" ? (attestProblem(action) ?? null) : null;
     if (keyed) return this.refused(no("E_ACCOUNT_BAD_ACTION", { message: keyed }), envelope);
     const now = this.nowMs();
     const signer = await signerOf(action, envelope.signature, deviceKeys(this.state));
@@ -755,6 +757,8 @@ export class AccountEngine {
     if (action.type === "setBrainKey" && Math.abs(now - action.nonce) > BRAIN_KEY_TTL_MS) return this.refused(no("E_ACCOUNT_EXPIRED", { message: now > action.nonce ? `signed ${Math.round((now - action.nonce) / 60_000)} min ago: a brain's key is set within ${BRAIN_KEY_TTL_MS / 60_000} minutes of signing it — sign again` : `dated ${Math.round((action.nonce - now) / 60_000)} min ahead: a brain's key is set within ${BRAIN_KEY_TTL_MS / 60_000} minutes of its date`, detail: { signedAt: new Date(action.nonce).toISOString() } }), envelope, signer);
     // a network connected is signed and sent at once (identity/identity.ts): its pending connection lasts as long
     if (action.type === "connectNetwork" && Math.abs(now - action.nonce) > BRAIN_KEY_TTL_MS) return this.refused(no("E_ACCOUNT_EXPIRED", { message: now > action.nonce ? `signed ${Math.round((now - action.nonce) / 60_000)} min ago: a network is connected within ${BRAIN_KEY_TTL_MS / 60_000} minutes of signing it — start again` : `dated ${Math.round((action.nonce - now) / 60_000)} min ahead: a network is connected within ${BRAIN_KEY_TTL_MS / 60_000} minutes of its date`, detail: { signedAt: new Date(action.nonce).toISOString() } }), envelope, signer);
+    // an attest is signed and sent at once (account/attest.ts): an envelope kept for later vouches for nothing
+    if (action.type === "attest" && Math.abs(now - action.nonce) > ATTEST_TTL_MS) return this.refused(no("E_ACCOUNT_EXPIRED", { message: now > action.nonce ? `signed ${Math.round((now - action.nonce) / 60_000)} min ago: an attest is taken within ${ATTEST_TTL_MS / 60_000} minutes of signing it — sign again` : `dated ${Math.round((action.nonce - now) / 60_000)} min ahead: an attest is taken within ${ATTEST_TTL_MS / 60_000} minutes of its date`, detail: { signedAt: new Date(action.nonce).toISOString() } }), envelope, signer);
     for (const who of signers) this.nonces.use(who, action.nonce);
     // taken, on the record before anything runs: a later run of the account reads this row and does not take the same instruction again,
     // whatever became of it (a money instruction is good for ten minutes, and a restart can come inside them)
@@ -936,6 +940,12 @@ export class AccountEngine {
         if (isRefusal(r)) return r;
         this.host.log({ kind: "action", venue: "*", tool: action.type, signer, outcome: "ok", reason: r.kind === "account" ? r.summary : action.type });
         return r;
+      }
+      case "attest": {
+        // the account vouching that its owner's device signed the sentence (account/attest.ts): its two rows are all it does
+        const summary = attestSentence(action);
+        this.host.log({ kind: "action", venue: "*", tool: action.type, signer, envelope, outcome: "ok", reason: summary });
+        return { ok: true, kind: "account", summary };
       }
       case "resetPaper":
       case "topUpPaper": {
@@ -1740,6 +1750,11 @@ export class AccountEngine {
       // signed — refused here as the door would refuse them, in fixed words, before the dialog shows anything to sign
       if (isIdentityAction(action)) {
         const problem = malformed(action) ?? identitySignedProblem(action) ?? (this.host.identityProblem ? this.host.identityProblem(action) : "this account keeps no identity: it is the account layer's");
+        if (problem) return no("E_ACCOUNT_BAD_ACTION", { message: problem });
+      }
+      // an attest's four fields off their bounds: refused in fixed words before the dialog shows them, as the door would refuse them
+      if (action.type === "attest") {
+        const problem = malformed(action) ?? attestProblem(action);
         if (problem) return no("E_ACCOUNT_BAD_ACTION", { message: problem });
       }
       // the desk's brain named with an API key in it (a key pasted into the hiring form's model field), a brain that is not one object, or a

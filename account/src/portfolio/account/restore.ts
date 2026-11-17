@@ -182,6 +182,8 @@ const namedIn = (signers: string): string[] => {
 
 /** a standing instruction the owner signs, which the restore applies again */
 const STANDING = new Set(["approveAgent", "approveSpend", "setDestination", "convertToMultiSigUser", "signOut", "createSubAccount", "setWatch", "setIntent"]);
+/** a signed instruction whose only effect is its ledger rows: the restore applies nothing for it */
+const LEDGER_ONLY = new Set(["attest"]);
 const num = (id: unknown, prefix: string): number => {
   const m = typeof id === "string" ? new RegExp(`^${prefix}-(\\d+)$`).exec(id) : null;
   return m ? Number(m[1]) : 0;
@@ -315,6 +317,8 @@ export async function rebuild(rows: readonly LedgerRow[], base: AccountState, op
         skipped.push(`signOut of ${row.ts}: it names another device than the one that signed it`);
         continue;
       }
+      // an attest changed nothing but the ledger when it was taken (account/attest.ts): its rows are its record, and it is replayed as nothing
+      if (LEDGER_ONLY.has(action.type)) continue;
       if (STANDING.has(action.type)) {
         // a change of signers names devices by id: the ones that had asked to sign are taken as waiting, with the keys their rows recorded
         let from = s;

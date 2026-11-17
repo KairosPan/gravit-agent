@@ -181,7 +181,11 @@ export type OwnerAction =
   /** what reaches the owner where (kinds.ts: the routing string) and quiet hours on New York's clock, "HH:MM" each — both "" is off */
   | { type: "setRouting"; routing: string; quietFrom: string; quietTo: string; nonce: number }
   /** a stranger of Not you blocked: `sender` their reference (store.ts senderRef), `masked` their id as the tab shows it */
-  | { type: "blockSender"; network: string; sender: string; masked: string; nonce: number };
+  | { type: "blockSender"; network: string; sender: string; masked: string; nonce: number }
+  /** ATTEST (account/attest.ts): the owner's device signs a sentence for a service beside the account — `service` names it, `act` what the
+   * owner does there, `subject` what it is done to, `digest` the hex SHA-256 the service made of what was shown — and the account keeps its
+   * rows and changes nothing else. Its fields are bounded before it is taken, and it is taken within ATTEST_TTL_MS of signing */
+  | { type: "attest"; service: string; act: string; subject: string; digest: string; nonce: number };
 
 export type AgentAction =
   | { type: "agentSendAsset"; destination: string; sourceDex: string; destinationDex: string; token: string; amount: string; fromSubAccount: string; maxFee: string; nonce: number }
@@ -231,7 +235,7 @@ export type AgentAction =
 
 export type Action = OwnerAction | AgentAction;
 
-export const OWNER_TYPES = ["sendAsset", "swap", "approveAgent", "approveBuilderFee", "approveSpend", "createSubAccount", "userSetAbstraction", "convertToMultiSigUser", "setDestination", "approveCard", "setPolicy", "connectVenue", "disconnectVenue", "liveMove", "liveOrder", "liveCancel", "liveAmend", "liveClose", "liveLeverage", "setWatch", "setIntent", "liveEarn", "answerAsk", "setMemory", "forgetMemory", "setMemoryRules", "setDesk", "setBrainKey", "resetPaper", "topUpPaper", "signOut", "connectNetwork", "disconnectNetwork", "setRouting", "blockSender"] as const;
+export const OWNER_TYPES = ["sendAsset", "swap", "approveAgent", "approveBuilderFee", "approveSpend", "createSubAccount", "userSetAbstraction", "convertToMultiSigUser", "setDestination", "approveCard", "setPolicy", "connectVenue", "disconnectVenue", "liveMove", "liveOrder", "liveCancel", "liveAmend", "liveClose", "liveLeverage", "setWatch", "setIntent", "liveEarn", "answerAsk", "setMemory", "forgetMemory", "setMemoryRules", "setDesk", "setBrainKey", "resetPaper", "topUpPaper", "signOut", "connectNetwork", "disconnectNetwork", "setRouting", "blockSender", "attest"] as const;
 export const AGENT_TYPES = ["agentSendAsset", "agentSwap", "agentPay", "agentExecute", "agentOrder", "agentLiveMove", "agentLiveOrder", "agentLiveCancel", "agentLiveAmend", "agentLiveClose", "agentLiveLeverage", "agentReport", "agentAsk", "agentLiveEarn", "agentRemember", "agentForget", "agentDeskSay"] as const;
 /** an instruction that moves money — or, like a leverage change, changes what a position risks — is good for minutes after it is signed,
  * not for the two days of the nonce window */
@@ -346,6 +350,7 @@ const OWNER_FIELDS: Record<OwnerAction["type"], { primary: string; fields: Field
   disconnectNetwork: { primary: "AccountIdentity:Disconnect", fields: [{ name: "network", type: "string" }, NONCE] },
   setRouting: { primary: "AccountIdentity:Routing", fields: [{ name: "routing", type: "string" }, { name: "quietFrom", type: "string" }, { name: "quietTo", type: "string" }, NONCE] },
   blockSender: { primary: "AccountIdentity:Block", fields: [{ name: "network", type: "string" }, { name: "sender", type: "string" }, { name: "masked", type: "string" }, NONCE] },
+  attest: { primary: "AccountAttest:Sign", fields: [{ name: "service", type: "string" }, { name: "act", type: "string" }, { name: "subject", type: "string" }, { name: "digest", type: "string" }, NONCE] },
 };
 /** a spending approval that answers an intent names it: one more signed field, before the nonce */
 const INTENT_FIELD: Field = { name: "intent", type: "string" };
