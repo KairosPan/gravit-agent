@@ -1,4 +1,4 @@
-/** The Account serves no page (plan 5 of the Account's two parts): its owner's screens are Gravit's face. Every request outside /api/ that
+/** The Account serves no page (plan 5 of the Account's two parts): its owner's screens are gravit's face. Every request outside /api/ that
  * passes the fence is 404 with one sentence naming the face, with the account layer or without it (--classic keeps its API, loses its
  * page), and every answer is no-store. A real server on port 0 over a scratch home; nothing leaves the process. */
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -41,7 +41,7 @@ const noPage = async (base: string, path: string) => {
 
 describe("the Account serves no page", () => {
   it("names the face in one sentence", () => {
-    expect(NO_PAGE).toBe("The Account serves no page: its owner's screens are Gravit's face (Markets, Trade, Account). This address answers its API under /api/.");
+    expect(NO_PAGE).toBe("The Account serves no page: its owner's screens are gravit's face (Markets, Trade, Account). This address answers its API under /api/.");
   });
 
   it("GET / answers 404 with NO_PAGE as JSON", async () => {

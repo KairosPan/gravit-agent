@@ -1,4 +1,4 @@
-// The side panel beside Messages and its pages (one-entry plan 2 Task 6): the search box, a Gravit row, a History row and the
+// The side panel beside Messages and its pages (one-entry plan 2 Task 6): the search box, a gravit row, a History row and the
 // strategies; while a query stands, its results in place of the rows, each opening the task's page, history or Messages.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,12 +29,12 @@ const searched = (s, q, answer) => {
   return t;
 };
 
-test('the panel holds Gravit, History and one row per strategy, root left out', () => {
+test('the panel holds gravit, History and one row per strategy, root left out', () => {
   const s = listed([conv('c', { lastSeen: NOW }), conv('t1'), conv('h1', { updatedAt: NOW - 9 * MIN }), conv('h2', { updatedAt: NOW - MIN })], { conversation: 'c', tasks: [task('t1')] });
   const h = renderSide(s, NOW);
   const hrefs = [...h.matchAll(/<a class="row[^"]*"(?: aria-current="page")? href="([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(hrefs, ['#/messages', '#/history', '#/strategy/cn-market', '#/strategy/momentum'], 'Gravit, History, the strategies by name');
-  assert.match(h, /href="#\/messages"><span class="dot"><\/span><span class="row-body"><span class="row-top"><span class="row-title">Gravit<\/span><\/span><\/span><\/a>/);
+  assert.deepEqual(hrefs, ['#/messages', '#/history', '#/strategy/cn-market', '#/strategy/momentum'], 'gravit, History, the strategies by name');
+  assert.match(h, /href="#\/messages"><span class="dot"><\/span><span class="row-body"><span class="row-top"><span class="row-title">gravit<\/span><\/span><\/span><\/a>/);
   assert.match(h, /href="#\/history"><span class="row-body"><span class="row-top"><span class="row-title">History<\/span><span class="row-note">2<\/span>/, 'its count: neither the conversation nor a task');
   assert.match(h, /<div class="grp-head"><span class="grp-name">Strategies<\/span><\/div>/);
   assert.match(h, /href="#\/strategy\/cn-market"><span class="row-body"><span class="row-top"><span class="row-title">CN market<\/span><span class="row-note">researching<\/span>/, "its title, its status word");
@@ -42,7 +42,7 @@ test('the panel holds Gravit, History and one row per strategy, root left out', 
   assert.doesNotMatch(h, /pin-key|grp-key|row-preview|data-action="open"/, 'no pins, folds, previews or row actions');
   assert.deepEqual(historyOf(s).map(c => c.id), ['h2', 'h1'], 'newest first');
   assert.deepEqual(strategiesOf(s).map(c => c.name), ['cn-market', 'momentum']);
-  // the conversation moved after the operator last looked: Gravit's dot is on
+  // the conversation moved after the operator last looked: gravit's dot is on
   const unread = R.hostList(s, { conversations: [conv('c', { updatedAt: NOW + MIN, lastSeen: NOW })] });
   assert.match(renderSide(unread, NOW), /href="#\/messages"><span class="dot on">/);
   // a workspace whose directory is gone (the old folder's, after the repository's rename) is no strategy: the listing keeps

@@ -163,7 +163,7 @@ export interface WatchDeps {
   calendars: DeskCalendars;
   clock: DeskClock;
   deliver: DeskConversation["deliver"];
-  /** Note an alert or a batch `deliver` did not refuse as a line in Gravit's one conversation (src/conversation.ts
+  /** Note an alert or a batch `deliver` did not refuse as a line in gravit's one conversation (src/conversation.ts
    * `note`, through src/desk.ts); none when absent - and never a late replay or the lost line. */
   note?: (line: DeskLine) => void;
   post: Annotator["post"];

@@ -9,7 +9,7 @@
  *     `../../face/plugins/bot.js` - which is why this file's bots root is
  *     mkdtemp'd inside the repository, so the rebase lands on the real file.
  * S2: `tools.restrict({allow})` from a preset row masks every agent joined to
- *     the preset - a bot session sees exactly allow ∩ tree, Gravit sees all.
+ *     the preset - a bot session sees exactly allow ∩ tree, gravit sees all.
  *     The mask FOLLOWS the tree: presets activate when declared (NEW
  *     packages/preset/agent-preset-registry/src/index.ts:80-118), and
  *     plugins/bot.js re-expands on `tools/change`, so a tool registered after
@@ -17,7 +17,7 @@
  * S3: `gravit` is rendered from `roles/` (src/roles.ts) and `dsh/profile/cycle.md`
  *     (src/cycle.ts): the face's gravit plugin (the date section, the role
  *     summaries, the research-cycle contract, the run protocol) and one
- *     `plugins/role.mjs` row per role, none of which masks a tool. Gravit's
+ *     `plugins/role.mjs` row per role, none of which masks a tool. gravit's
  *     sessions join it: their tool set is the host's global view plus the
  *     `role_*` tools (here `role_cn_market_analyst`, `role_cn_reviewer`,
  *     `role_cn_stock_analyst`, `role_pdf_page_reader` and `role_source_reader`, the five roles `roles/` ships), their prompt carries the date, the cycle contract and the run
@@ -80,7 +80,7 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
      * did; `shipped` below is left exactly as `createBot` writes it, relative.
      * The face rebases both to `file:` URLs, and both are pinned. */
     await createBot(bots, { id: "probe", name: "Probe", soul: "You are Probe, a test voice." });
-    /* `role_probe` names a role tool: one would live in Gravit's preset layer, not the global set a mask is matched
+    /* `role_probe` names a role tool: one would live in gravit's preset layer, not the global set a mask is matched
      * against, so allow ∩ tree drops it like `no_such_tool` and S2's expectation below does not move. Naming
      * it is what lets "a bot never sees a role tool" fail if a mask ever admitted one. `create_goal` is a
      * global tool, so the mask admits it and the bot CAN call it: the bot's missing cycle contract below is
@@ -92,7 +92,7 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
     /* The Gate-2 bot: its mask ADMITS both stand-ins. That is the point -
      * the guard must refuse the marked one anyway, so the refusal cannot be
      * credited to the mask, and the listener must ask for the order one,
-     * which the bot can see, as it would for Gravit. */
+     * which the bot can see, as it would for gravit. */
     await createBot(bots, { id: "trader", name: "Trader", soul: "You are Trader, a masked-in order probe." });
     await writeFile(join(bots, "trader", "agent.cordis.yml"),
       renderComposition({ soul: "You are Trader, a masked-in order probe.", allow: ["bash", STAND_IN], plugin: PLUGIN_ABS }));
@@ -146,7 +146,7 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
         renderPrompt(await ctx.systemPrompt.assemble(assembleContextFor(agent)));
       const names = (schemas: { name: string }[]) => schemas.map((s) => s.name).sort();
 
-      /* S3 - Gravit: a session naming no preset joins `gravit` and keeps the host's tools, plus the role library's.
+      /* S3 - gravit: a session naming no preset joins `gravit` and keeps the host's tools, plus the role library's.
        * This boot reads the repository's own roles/, which ships the two analysts, the reviewer, the PDF page reader and the source reader
        * since the three alpaca-kit roles retired, so the library adds their five role tools and nothing else: no retired
        * `role_*` tool (role_screener above all) comes back. The role tools' own path is roles-smoke's. */
@@ -156,17 +156,17 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
       assert.equal(gravit.session.header.agentPreset, "gravit");
       assert.deepEqual(readRoles(ROLES_ROOT).map((role) => role.tool), ["role_cn_market_analyst", "role_cn_reviewer", "role_cn_stock_analyst", "role_pdf_page_reader", "role_source_reader"], "the repository ships five roles");
       assert.deepEqual(names(tools.schemas(gravit)), [...names(tools.schemas()), ...readRoles(ROLES_ROOT).map((role) => role.tool)].sort(),
-        "Gravit's tools are the host's plus the role library (spec §5.1)");
-      assert.ok(names(tools.schemas(gravit)).includes("bash") && names(tools.schemas(gravit)).includes("read"), "Gravit keeps the host's tools");
+        "gravit's tools are the host's plus the role library (spec §5.1)");
+      assert.ok(names(tools.schemas(gravit)).includes("bash") && names(tools.schemas(gravit)).includes("read"), "gravit keeps the host's tools");
       assert.deepEqual(names(tools.schemas(gravit)).filter((name) => name.startsWith("role_")), ["role_cn_market_analyst", "role_cn_reviewer", "role_cn_stock_analyst", "role_pdf_page_reader", "role_source_reader"], "and its five role tools: no role_screener");
       /* Compared up to the persona's first `{{` - the whole text since the persona
        * stopped naming the cwd (D21) - so a template variable added back later is
        * still cut where renderPrompt would substitute it. The prefix is read from
        * the FILE, so rewriting the persona moves this assertion. */
-      assert.ok((await promptOf(gravit)).includes(readPersona(PERSONA_PATH).split("{{")[0]), "D11 closed: Gravit is told who it is");
-      assert.match(await promptOf(gravit), /\nToday is \d{4}-\d{2}-\d{2}, [A-Z][a-z]+ \(.+\)\.\n/, "the date section is in Gravit's prompt (plan 1)");
-      assert.ok((await promptOf(gravit)).includes(CYCLE_HEADING), "the cycle contract is in Gravit's prompt (plan 3): `gravit:cycle` is registered in Gravit's preset layer and reads create_goal, which Gravit can call");
-      assert.ok((await promptOf(gravit)).includes(RUN_HEADING), "the run protocol is in Gravit's prompt: `lunhui:run` is registered in Gravit's preset layer and reads lunhui_read_run, which the Lunhui rows registered");
+      assert.ok((await promptOf(gravit)).includes(readPersona(PERSONA_PATH).split("{{")[0]), "D11 closed: gravit is told who it is");
+      assert.match(await promptOf(gravit), /\nToday is \d{4}-\d{2}-\d{2}, [A-Z][a-z]+ \(.+\)\.\n/, "the date section is in gravit's prompt (plan 1)");
+      assert.ok((await promptOf(gravit)).includes(CYCLE_HEADING), "the cycle contract is in gravit's prompt (plan 3): `gravit:cycle` is registered in gravit's preset layer and reads create_goal, which gravit can call");
+      assert.ok((await promptOf(gravit)).includes(RUN_HEADING), "the run protocol is in gravit's prompt: `lunhui:run` is registered in gravit's preset layer and reads lunhui_read_run, which the Lunhui rows registered");
 
       /* S1 + S2 - a bot: the session controller mounts the preset; the mask and the persona hold. */
       const p = await create({ cwd: join(bots, "probe", "journal"), agentPreset: "probe" });
@@ -176,12 +176,12 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
       assert.deepEqual(names(tools.schemas(probe)), ["ask_user_question", "bash", "create_goal", "read"], "allow ∩ tree, unknown names dropped (S2)");
       assert.equal(names(tools.schemas(probe)).some((n) => n.startsWith("role_")), false, "a bot never sees a role tool");
       const probePrompt = await promptOf(probe);
-      assert.ok(probePrompt.includes("You are Probe, a test voice."), "the bot's persona shadows Gravit's (S1)");
-      assert.equal(probePrompt.includes("You are Gravit"), false,
-        "and Gravit's text is gone from the bot's prompt: bot.js's `deployment:persona-prefix` shadows the global prefix");
-      assert.equal(probePrompt.includes("Today is "), false, "the section is scoped to Gravit's preset: a bot never sees it");
-      assert.equal(probePrompt.includes(CYCLE_HEADING), false, "nor the cycle contract, though the bot can call create_goal: `gravit:cycle` is scoped to Gravit's preset too, so a bot never has it");
-      assert.equal(probePrompt.includes(RUN_HEADING), false, "nor the run protocol: `lunhui:run` is scoped to Gravit's preset");
+      assert.ok(probePrompt.includes("You are Probe, a test voice."), "the bot's persona shadows gravit's (S1)");
+      assert.equal(probePrompt.includes("You are gravit"), false,
+        "and gravit's text is gone from the bot's prompt: bot.js's `deployment:persona-prefix` shadows the global prefix");
+      assert.equal(probePrompt.includes("Today is "), false, "the section is scoped to gravit's preset: a bot never sees it");
+      assert.equal(probePrompt.includes(CYCLE_HEADING), false, "nor the cycle contract, though the bot can call create_goal: `gravit:cycle` is scoped to gravit's preset too, so a bot never has it");
+      assert.equal(probePrompt.includes(RUN_HEADING), false, "nor the run protocol: `lunhui:run` is scoped to gravit's preset");
 
       /* S1, the SHIPPED form. `shipped`'s composition is untouched since
        * `createBot` wrote it, so its plugin row is the relative path every real
@@ -205,7 +205,7 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
        * ADMITS them. The refusal below therefore cannot be the mask's: it is the
        * tree-wide guard, and it is the same refusal `order-gate.test.ts` drills
        * for a bare session. Gate 2 is tree-wide: a preset-joined agent whose
-       * mask admits an order tool meets the same guard as Gravit (spec
+       * mask admits an order tool meets the same guard as gravit (spec
        * decision 4). */
       let bodyRan = false;
       const unregister = tools.register({
@@ -250,7 +250,7 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
           agent, signal: new AbortController().signal,
         }, () => Promise.resolve({ kind: "allow" }));
         const decision = await fire(trader, "bot-ask");
-        assert.equal(decision.kind, "ask", "an order from a bot raises the same card Gravit's would");
+        assert.equal(decision.kind, "ask", "an order from a bot raises the same card gravit's would");
         assert.match(decision.reason ?? "", /^Account seat - .*AAPL/);
         /* A bot whose mask hides the order tool is refused in the gate's own
          * words before any card - a card it raised could only park, and,
@@ -270,14 +270,14 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
       assert.equal(broken.ok, false);
       assert.match(broken.ok ? "" : broken.error.code, /agent-preset/);
 
-      /* The pre-rename id: an archived session names `kairos` and must join Gravit's composition. */
+      /* The pre-rename id: an archived session names `kairos` and must join gravit's composition. */
       assert.equal(roster.find((p) => p.id === "kairos")?.broken, undefined, "the legacy alias is listed and whole");
       const l = await create({ cwd: home, agentPreset: "kairos" });
       assert.equal(l.agentPreset, "kairos");
       const legacy = agentOf(l.sessionId);
       assert.equal(legacy.session.header.agentPreset, "kairos");
-      assert.deepEqual(names(tools.schemas(legacy)), names(tools.schemas(gravit)), "the alias declares Gravit's rows: the host's tools plus the role library's, nothing more or less");
-      assert.ok((await promptOf(legacy)).includes(readPersona(PERSONA_PATH).split("{{")[0]), "the alias is told it is Gravit");
+      assert.deepEqual(names(tools.schemas(legacy)), names(tools.schemas(gravit)), "the alias declares gravit's rows: the host's tools plus the role library's, nothing more or less");
+      assert.ok((await promptOf(legacy)).includes(readPersona(PERSONA_PATH).split("{{")[0]), "the alias is told it is gravit");
     } finally {
       await dispose();
     }

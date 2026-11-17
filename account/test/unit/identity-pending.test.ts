@@ -100,7 +100,7 @@ describe("connect Telegram through the account: the token route and the pending 
     const r = await send(srv.url, "/api/account/identity/telegram/token", { body: JSON.stringify({ token: TOKEN, keyHash, salt }) });
     expect(r.status).toBe(200);
     const p = JSON.parse(r.text).pending;
-    expect(p).toMatchObject({ network: "telegram", bot: { id: "777", username: "gravit_desk_bot", name: "Gravit" }, link: "https://t.me/gravit_desk_bot", state: "waiting" });
+    expect(p).toMatchObject({ network: "telegram", bot: { id: "777", username: "gravit_desk_bot", name: "gravit" }, link: "https://t.me/gravit_desk_bot", state: "waiting" });
     expect(Date.parse(p.expiresAt)).toBeGreaterThan(Date.now() + PENDING_MS - 5000);
     expect(r.text).not.toContain(TOKEN);
     const g = await getView(p.id);
@@ -426,7 +426,7 @@ describe("the Bot API client", () => {
     const bot = await fakeBotApi();
     try {
       const api = new BotApi({ token: TOKEN, apiBase: bot.url });
-      expect(await api.getMe()).toEqual({ id: 777, username: "gravit_desk_bot", first_name: "Gravit" });
+      expect(await api.getMe()).toEqual({ id: 777, username: "gravit_desk_bot", first_name: "gravit" });
       const id = await api.sendMessage(555000123, "hello", 41);
       expect(typeof id).toBe("number");
       expect(bot.sent).toEqual([{ chat_id: 555000123, text: "hello", reply_parameters: { message_id: 41, allow_sending_without_reply: true } }]);

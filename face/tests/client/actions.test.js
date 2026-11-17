@@ -208,6 +208,6 @@ test('a command that settles as an error with attachments is a refusal; a droppe
   assert.deepEqual(await plain.actions.send('/goal resume', { sessionId: 's1', sessionId: 's1' }), { sent: 'command', sessionId: 's1' }, 'with no files an error result is still the command\'s answer');
 });
 
-test('the actions create no session: the conversation is the one entry, a bot is talked to through Gravit', () => {
+test('the actions create no session: the conversation is the one entry, a bot is talked to through gravit', () => {
   assert.deepEqual(Object.keys(rig().actions).sort(), ['answer', 'command', 'runCommand', 'send', 'stop', 'stopChild']);
 });

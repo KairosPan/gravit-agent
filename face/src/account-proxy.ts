@@ -211,7 +211,7 @@ export const CALLBACK_HEADERS = {
 } as const;
 
 /** The callback's page when the Account did not answer, or the row is disabled. */
-export const CALLBACK_UNREACHABLE = "The Account did not answer. Go back to Gravit and start the sign-in again.";
+export const CALLBACK_UNREACHABLE = "The Account did not answer. Go back to gravit and start the sign-in again.";
 
 /** Most queries kept per route; the least recently used leaves first. */
 export const ACCOUNT_CACHE_KEYS = UPSTREAM_CACHE_KEYS;

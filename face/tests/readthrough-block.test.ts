@@ -21,7 +21,7 @@ test("pctText signs with + and U+2212, one decimal, and writes zero bare", () =>
 
 test("the block under an alert: head, logic, direction, tape with one shared stamp, counter", () => {
   assert.equal(renderBlock({ direction: D, tape: TAPE, shut: false, forTask: false, now: AT }), [
-    "推演 · Gravit 的推断，不是下单 · 确定度 中",
+    "推演 · gravit 的推断，不是下单 · 确定度 中",
     "· 逻辑：调查带来供应不确定 → 客户找备选",
     "· 方向：做多 AMD（数据中心 GPU 的直接替代）；做多 AVGO（云厂商自研芯片的设计伙伴）",
     "· 盘面：NVDA −7.3% · AMD +5.4% · AVGO +1.2% · SPY −0.4%（ROBINHOOD 04:03 ET）",
@@ -38,10 +38,10 @@ test("prints of different feeds or minutes each carry their stamp; one not of th
 test("a shut market, the certainty words, and a task's two extra lines", () => {
   const task = renderBlock({ direction: { ...D, certainty: "high" }, tape: TAPE, shut: true, forTask: true, now: AT }).split("\n");
   assert.deepEqual([task[0], task[1], task[4], task[6]], [
-    "推演 · Gravit 的推断，不是下单 · 确定度 高", "· 事件：董事会对 CEO 启动独立调查",
+    "推演 · gravit 的推断，不是下单 · 确定度 高", "· 事件：董事会对 CEO 启动独立调查",
     "· 盘面：休市，事件之后还没有成交", "来源：NVIDIA newsroom 11-08 18:00 ET · 8-K 11-09 06:02 ET",
   ]);
-  assert.ok(renderBlock({ direction: { ...D, certainty: "low" }, tape: TAPE, shut: false, forTask: false, now: AT }).startsWith("推演 · Gravit 的推断，不是下单 · 确定度 低\n"));
+  assert.ok(renderBlock({ direction: { ...D, certainty: "low" }, tape: TAPE, shut: false, forTask: false, now: AT }).startsWith("推演 · gravit 的推断，不是下单 · 确定度 低\n"));
 });
 
 test("no direction is one line under an alert, three for a task", () => {

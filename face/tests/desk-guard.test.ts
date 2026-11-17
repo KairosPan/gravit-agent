@@ -597,7 +597,7 @@ test("a read or a grep of the desk session's own spilled results goes on; the sp
   /* Inside it the read check's own rules still stand: a dot-file search, a key name. */
   assert.deepEqual(deskReadDecision("grep", { pattern: "SPILL", path: own, include: "*.txt" }, cwd, repo, DESK_SESSION), DOT_FILES);
   assert.deepEqual(deskReadDecision("read", { file_path: join(own, ".env.local") }, cwd, repo, DESK_SESSION), keyRead(".env.local"));
-  /* Nothing else outside the repository: another session's spills - Gravit's can hold a key file's text - the spill
+  /* Nothing else outside the repository: another session's spills - gravit's can hold a key file's text - the spill
    * root, the temp directory, a link out of its own directory, a `..` out of it; and no spill at all to a call that
    * names no session, or another one. */
   const refused: readonly (readonly [string, Record<string, unknown>, string | undefined])[] = [
@@ -918,7 +918,7 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
   assert.deepEqual(root.registeredWith, [{ prepend: true }], "registered in front, as Gate 2's is");
   const listener = root.preExecute[0];
 
-  /* Nobody else's call is judged: Gravit's, a bot's, an agent with no preset, a call with no agent. */
+  /* Nobody else's call is judged: gravit's, a bot's, an agent with no preset, a call with no agent. */
   for (const agent of [agentOn("gravit"), agentOn("drill-bull"), agentOn(undefined), undefined]) {
     const { decision, nexts } = await judged(listener, write("GRAVIT.md", agent));
     assert.equal(decision, ALLOW, `${agent?.id ?? "no agent"}: the call is handed on, unjudged`);
@@ -934,7 +934,7 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
     { decision: denied(".git"), nexts: 0 });
   assert.deepEqual(await judged(listener, call("edit", { file_path: "../../.agents/skills/x/SKILL.md", old_string: "a", new_string: "b" }, desk)),
     { decision: denied(".agents"), nexts: 0 });
-  /* A desk session whose cwd sits under a fence name writes nothing; Gravit's session in the same place is no desk's. */
+  /* A desk session whose cwd sits under a fence name writes nothing; gravit's session in the same place is no desk's. */
   const homeDesk = agentOn(DESK_PRESET, { cwd: "/Users/pan/.dsh/desk/run", agentPreset: DESK_PRESET });
   assert.deepEqual(await judged(listener, write("notes/today.md", homeDesk)), { decision: sitsUnder(".dsh"), nexts: 0 });
   assert.deepEqual(await judged(listener, write("notes/today.md", agentOn("gravit", { cwd: "/Users/pan/.dsh/desk/run", agentPreset: "gravit" }))),
@@ -970,7 +970,7 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
   assert.deepEqual(await judged(loud.preExecute[0], write("notes/today.md", anonymous)), { decision: UNCHECKED, nexts: 0 });
 
   /* A registry that throws leaves the session's own word: a session created as the desk's fails closed, with one
-   * line - its write, its read and its secret alike, each with its check's reason; Gravit's calls go on, with one
+   * line - its write, its read and its secret alike, each with its check's reason; gravit's calls go on, with one
    * line each. */
   const broken = fakeRoot({ presetError: new Error("the registry is gone") });
   const brokenLines: string[] = [];
@@ -986,10 +986,10 @@ test("the listener judges only gravit-desk agents and never throws", async () =>
   assert.equal(brokenLines.length, 4);
   assert.match(brokenLines[3], /^gravit-face: desk: .*the registry is gone/);
   assert.deepEqual(await judged(broken.preExecute[0], call("grep", { pattern: "x" }, agentOn("gravit"))), { decision: ALLOW, nexts: 1 });
-  assert.equal(brokenLines.length, 5, "Gravit's read reaches the broken registry as its write does, and goes on with a line");
+  assert.equal(brokenLines.length, 5, "gravit's read reaches the broken registry as its write does, and goes on with a line");
   assert.deepEqual(await judged(broken.preExecute[0], call("todo_write", { todos: [] }, agentOn("gravit"))), { decision: ALLOW, nexts: 1 });
   assert.equal(brokenLines.length, 5, "a call no check could deny never reaches the broken registry");
-  /* A thrown value that is no Error, whose message cannot even be shown, still leaves Gravit's write going on. */
+  /* A thrown value that is no Error, whose message cannot even be shown, still leaves gravit's write going on. */
   const odd = fakeRoot({ presetError: { toString() { throw new Error("unshowable"); } } });
   const oddLines: string[] = [];
   installDeskGuard(odd.ctx, REPO, { log: (line) => oddLines.push(line), env: {} });
@@ -1053,7 +1053,7 @@ test("the guard judges a desk agent's call in order - its write, its read, its s
     assert.deepEqual(await judged(listener, exec), { decision: ALLOW, nexts: 1 }, `${exec.name} goes on`);
     assert.equal(backstop(exec), undefined);
   }
-  /* Gravit's, a bot's and an agentless call are never judged, whatever they read or carry. */
+  /* gravit's, a bot's and an agentless call are never judged, whatever they read or carry. */
   for (const agent of [agentOn("gravit"), agentOn("drill-bull"), agentOn(undefined), undefined]) {
     for (const [exec] of [...reads, ...writes, ...secrets, ...ordered]) {
       const theirs = call(exec.name, exec.arguments, agent);
@@ -1216,7 +1216,7 @@ test("a later prepend listener answering allow cannot lift a desk write's deny",
   /* With the backstop, it is denied after all. */
   assert.equal(await pipeline(root.preExecute, root.guards, deskWrite), denied("GRAVIT.md").reason);
   assert.equal(swallowed, 2);
-  /* An ordinary desk write, and Gravit's, still go. */
+  /* An ordinary desk write, and gravit's, still go. */
   assert.equal(await pipeline(root.preExecute, root.guards, write("notes/today.md", agentOn(DESK_PRESET))), undefined);
   assert.equal(await pipeline(root.preExecute, root.guards, write("GRAVIT.md", agentOn("gravit"))), undefined);
   offSwallower();
@@ -1241,7 +1241,7 @@ test("the backstop judges reads and secrets too: a later prepend listener answer
   for (const [exec, reason] of cases) {
     assert.equal(await pipeline(root.preExecute, [], exec), undefined, `the control: without the backstop, ${exec.name} would run`);
     assert.equal(await pipeline(root.preExecute, root.guards, exec), reason, `with it, ${exec.name} is denied`);
-    assert.equal(await pipeline(root.preExecute, root.guards, call(exec.name, exec.arguments, agentOn("gravit"))), undefined, `Gravit's ${exec.name} goes on`);
+    assert.equal(await pipeline(root.preExecute, root.guards, call(exec.name, exec.arguments, agentOn("gravit"))), undefined, `gravit's ${exec.name} goes on`);
   }
   offSwallower();
   await dispose();

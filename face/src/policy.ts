@@ -2,7 +2,7 @@
  * 0.2.0-rc.2 and 0.2.1-rc.5 changed, restored in ONE reviewable place (PLAN
  * §2, S4).
  *
- * Everything here changes what Gravit can do or what leaves the machine, so
+ * Everything here changes what gravit can do or what leaves the machine, so
  * every entry is a DECISION the operator owns (PLAN §6), named by its id. The
  * default is always "keep 0.1.1's behaviour"; following upstream instead is a
  * one-row operator patch, not a code change.
@@ -76,7 +76,7 @@ export const POLICY_ID_PATCHES: readonly PolicyIdPatch[] = [
    * and `web.fetchProvider: http` (base :472-490). 0.1.1 shipped fetch OFF
    * (OLD base :404-418). `tool-web` registers `web_fetch` iff `fetch` is set
    * (NEW packages/web/tool-web/src/index.ts:83-95), so `fetch: false` keeps
-   * the tree registering none: no global `web_fetch`, for Gravit, a bot or a
+   * the tree registering none: no global `web_fetch`, for gravit, a bot or a
    * role. The `web-fetch-http` provider stays ON and `web` selects it
    * (`LOCAL_FETCH_PROVIDER_ID`, "http"), so the desk's own `web_fetch` - dsh's
    * tool, registered by the face in each desk agent's own layer

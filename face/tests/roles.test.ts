@@ -26,14 +26,14 @@ test("toolNameFor: role_ plus the id with dashes as underscores", () => {
  * reviewer shares only `skill` with each analyst (A23: the reviewer is not the writer). The fourth is
  * `pdf-page-reader` (dsh UI port spec §5.6, O8), `read_image` alone; those four are on deepseek-flash.
  * The fifth is `source-reader` (analogs spec §6.5), `web_search` alone, with no route of its own.
- * Gravit's preset is the gravit row, whose summary list names all five, then one one-shot row each - and
+ * gravit's preset is the gravit row, whose summary list names all five, then one one-shot row each - and
  * the committed mirror says so. */
 const MARKET_ANALYST_ALLOW = ["skill", "lunhui_read_environment_context", "lunhui_submit_environment",
   "lunhui_read_sentiment_context", "lunhui_submit_sentiment", "lunhui_read_theme_context", "lunhui_submit_theme"];
 const STOCK_ANALYST_ALLOW = ["skill", "lunhui_read_leader_context", "lunhui_submit_leader", "lunhui_read_mode_context", "lunhui_submit_mode"];
 const REVIEWER_ALLOW = ["skill", "lunhui_read_counterevidence_context", "lunhui_submit_counterevidence"];
 
-test("Gravit's preset has five role rows: the shipped library is cn-market-analyst, cn-reviewer, cn-stock-analyst, pdf-page-reader and source-reader", () => {
+test("gravit's preset has five role rows: the shipped library is cn-market-analyst, cn-reviewer, cn-stock-analyst, pdf-page-reader and source-reader", () => {
   const roles = readRoles(ROLES_ROOT);
   assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-reviewer", "cn-stock-analyst", "pdf-page-reader", "source-reader"], "roles/ holds _template, the two analysts, the reviewer, the PDF page reader and the source reader");
   const [market, reviewer, stock, pdf, source] = roles;
@@ -54,7 +54,7 @@ test("Gravit's preset has five role rows: the shipped library is cn-market-analy
   for (const role of [market, reviewer, stock, pdf]) assert.equal(role.model, "deepseek-official/deepseek-flash", role.id);
   for (const role of [market, reviewer, stock]) {
     assert.ok(!role.allow.some((name) => name.startsWith("lunhui_freeze_")), `${role.id} carries no freeze`);
-    assert.ok(!role.allow.includes("lunhui_present"), `${role.id} cannot present: the composed answer is Gravit's`);
+    assert.ok(!role.allow.includes("lunhui_present"), `${role.id} cannot present: the composed answer is gravit's`);
   }
   assert.deepEqual(market.allow.filter((name) => stock.allow.includes(name)), ["skill"], "the two analysts share no module tool");
   for (const analyst of [market, stock]) {
@@ -135,11 +135,11 @@ test("cn-market-analyst's ROLE.md: Chinese, within 2,000 bytes, the order, the a
   assert.ok(at("按顺序做三个模块") >= 0, "the order sentence is there");
   assert.ok(at("按顺序做三个模块") < at("点名只写"), "the order first, the exception after it");
   const role = readRoles(ROLES_ROOT).find((r) => r.id === "cn-market-analyst")!;
-  assert.ok(role.description.includes("or the one module the brief names"), "the summary Gravit reads says so too");
+  assert.ok(role.description.includes("or the one module the brief names"), "the summary gravit reads says so too");
 });
 
 /* The stock analyst's persona, the tree's own Chinese (D14′, spec §5.9, E4): the brief names the strategy,
- * the run, the market run and the one artifact to write, so Gravit calls the role twice; the module's own
+ * the run, the market run and the one artifact to write, so gravit calls the role twice; the module's own
  * read then submit, the artifact only in `analysis`; a mode conclusion is a daily registration - S01 only
  * for lunhui-s01-repair, S02 refused while its catalyst has no source, else WAIT - and WAIT and
  * NOT_EVALUABLE are results; the blocked exits; the four headings. */

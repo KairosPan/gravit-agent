@@ -44,9 +44,9 @@ export const refuse = {
       `这个运行的冻结调用已达上限（共 ${FREEZE_BUDGET} 次）；不要再冻结这个运行；需要重做时不带 run 冻结即开启新运行。`,
     ),
   notGravit: () =>
-    new LunhuiError("NOT_GRAVIT", "冻结工具只由 Gravit 调用（根会话或其分叉）；委派的子代理不能冻结证据，请把需要的来源告诉 Gravit。"),
+    new LunhuiError("NOT_GRAVIT", "冻结工具只由 gravit 调用（根会话或其分叉）；委派的子代理不能冻结证据，请把需要的来源告诉 gravit。"),
   notARole: () =>
-    new LunhuiError("NOT_A_ROLE", "模块工件只由委派的角色子代理提交；Gravit 的根会话或分叉不能提交，请委派对应的角色。"),
+    new LunhuiError("NOT_A_ROLE", "模块工件只由委派的角色子代理提交；gravit 的根会话或分叉不能提交，请委派对应的角色。"),
   /** A submit with no context read of its module in this process (spec §5.7). */
   readFirst: (module) =>
     new LunhuiError(
@@ -59,7 +59,7 @@ export const refuse = {
   moduleBudget: (module) =>
     new LunhuiError(
       "TOOL_BUDGET",
-      `这个运行的 ${module} 模块调用已达上限（读取与提交合计 ${MODULE_BUDGET} 次）；停止调用本模块的工具，向 Gravit 报告受阻（blocked）并说明缺什么。`,
+      `这个运行的 ${module} 模块调用已达上限（读取与提交合计 ${MODULE_BUDGET} 次）；停止调用本模块的工具，向 gravit 报告受阻（blocked）并说明缺什么。`,
     ),
   /** A validation rejection, as stage 0 worded one: its category, the validator's reason, the category's repair. */
   rejected: (category, reason, repair) => new LunhuiError("INVALID_ANALYSIS", `[${category}] ${reason}\n修复：${repair}`),
@@ -140,9 +140,9 @@ export function callerIsChild(exec) {
 /**
  * Whether the caller may submit a module's artifact: a delegated role child - `callerIsChild`, on a
  * role's own preset, its header's `agentPreset` starting `role-` (src/roles.ts `rolePresetId`). A root
- * session, a seeded fork and a plain `subagent` child, which joins Gravit's preset, are refused
+ * session, a seeded fork and a plain `subagent` child, which joins gravit's preset, are refused
  * `NOT_A_ROLE` (A23). The preset check closes R44: since each role composes its own preset (D20/B1),
- * the header tells a role child from any other delegated child of Gravit's.
+ * the header tells a role child from any other delegated child of gravit's.
  * @param {any} exec the tool's execution context
  */
 export function callerIsRole(exec) {

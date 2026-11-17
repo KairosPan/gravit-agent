@@ -163,10 +163,10 @@ const EXPIRES = START + 300_000;
 const PENDING = json({ ok: true, pending: true, card: { id: "ap-1", reason: "guard", usd: 1830, expiresAt: new Date(EXPIRES).toISOString() }, flight: "f-1", next: "…" });
 const EVIDENCE = ["session s-1", "call c-1"];
 const APPROVED_BUY = {
-  action: "buy", whose: "owner", thesis: "Approved Gravit's order card: buy 10 NVDA · limit 183 · paper-1.",
+  action: "buy", whose: "owner", thesis: "Approved gravit's order card: buy 10 NVDA · limit 183 · paper-1.",
   symbol: "NVDA", market: "US", price: 183, price_source: "the order card's limit price", size: "10", recall: "r-1", evidence: EVIDENCE,
 };
-const POSITION_UNREAD = "not registered: the position could not be read - tell Gravit what you decided";
+const POSITION_UNREAD = "not registered: the position could not be read - tell gravit what you decided";
 
 /* Declined at Gate 2. */
 
@@ -178,7 +178,7 @@ test("declined at Gate 2: one record as gravit-face, a buy's pass, at once; the 
   assert.deepEqual(r.asked.records, [{
     by: "gravit-face",
     input: {
-      action: "pass", whose: "owner", thesis: "Declined Gravit's order card: buy 10 NVDA · limit 183 · paper-1.",
+      action: "pass", whose: "owner", thesis: "Declined gravit's order card: buy 10 NVDA · limit 183 · paper-1.",
       symbol: "NVDA", market: "US", recall: "r-1", evidence: EVIDENCE,
     },
   }]);
@@ -193,7 +193,7 @@ test("declined at Gate 2: a sell's is hold", async () => {
   await r.idle();
   assert.equal(r.asked.records.length, 1);
   assert.equal(r.asked.records[0].input.action, "hold");
-  assert.equal(r.asked.records[0].input.thesis, "Declined Gravit's order card: sell 5 NVDA · limit 190 · paper-1.");
+  assert.equal(r.asked.records[0].input.thesis, "Declined gravit's order card: sell 5 NVDA · limit 190 · paper-1.");
   assert.deepEqual(r.registered(), ["registered: hold"]);
 });
 
@@ -222,7 +222,7 @@ test("approved: a usd order's size is $100; an order with no limit price has no 
   r.gate.settled("c-1", PLACED, "s-1");
   await r.idle();
   assert.deepEqual(r.asked.records[0].input, {
-    action: "buy", whose: "owner", thesis: "Approved Gravit's order card: buy $100 of NVDA · paper-1.",
+    action: "buy", whose: "owner", thesis: "Approved gravit's order card: buy $100 of NVDA · paper-1.",
     symbol: "NVDA", market: "US", size: "$100", recall: "r-1", evidence: EVIDENCE,
   });
 });
@@ -255,7 +255,7 @@ const decisionItem = (line: Record<string, unknown>, voided = false) => ({
 });
 const GRAVITS = { id: "d-20260302-0f3a9c21", by: "gravit", whose: "agent", symbol: "NVDA", t: new Date(START - 60_000).toISOString() };
 
-test("Gravit's own call on the symbol within GATE_OWN_CALL_MS is evidence", async () => {
+test("gravit's own call on the symbol within GATE_OWN_CALL_MS is evidence", async () => {
   assert.equal(GATE_OWN_CALL_MS, 600_000);
   const r = rig({ decisions: async () => ({ items: [decisionItem(GRAVITS)], more: false }) });
   await r.check();
@@ -265,7 +265,7 @@ test("Gravit's own call on the symbol within GATE_OWN_CALL_MS is evidence", asyn
   assert.deepEqual(r.asked.records[0].input.evidence, [...EVIDENCE, "decision d-20260302-0f3a9c21"]);
 });
 
-test("Gravit's own call: an older one, the owner's, another symbol's, a void one add nothing; decisions throwing adds nothing", async () => {
+test("gravit's own call: an older one, the owner's, another symbol's, a void one add nothing; decisions throwing adds nothing", async () => {
   const cases: Array<() => Promise<unknown>> = [
     async () => ({ items: [decisionItem({ ...GRAVITS, t: new Date(START - GATE_OWN_CALL_MS - 1).toISOString() })], more: false }),
     async () => ({ items: [decisionItem({ ...GRAVITS, by: "gravit", whose: "owner" })], more: false }),
@@ -287,7 +287,7 @@ test("Gravit's own call: an older one, the owner's, another symbol's, a void one
   }
 });
 
-test("Gravit's own call: an item whose line is null, or that throws as it is read, is skipped; the line is still written", async () => {
+test("gravit's own call: an item whose line is null, or that throws as it is read, is skipped; the line is still written", async () => {
   const throwing = Object.defineProperty({}, "view", { get() { throw new Error("tampered"); }, enumerable: true });
   const items = [{ view: { line: null, void: false } }, throwing, null, decisionItem(GRAVITS)];
   const r = rig({ decisions: async () => ({ items, more: false }) });
@@ -441,9 +441,9 @@ test("Guard mode: the seat's pending result is the moment - a read answering aft
 /* A conditional order: neither a market nor a limit order. */
 
 const STOP_SELL = { venue: "paper-1", symbol: "NVDA", side: "sell", qty: 5, orderType: "stop", stopPrice: 150 };
-const CONDITIONAL = "not registered: a conditional order - tell Gravit when it fills";
+const CONDITIONAL = "not registered: a conditional order - tell gravit when it fills";
 
-test("a conditional order approved and placed: nothing written, the card says to tell Gravit when it fills", async () => {
+test("a conditional order approved and placed: nothing written, the card says to tell gravit when it fills", async () => {
   for (const args of [STOP_SELL, { ...STOP_SELL, orderType: "stop_limit", limitPrice: 149 }, { ...STOP_SELL, orderType: "trailing_stop", stopPrice: undefined }]) {
     const r = rig();
     r.state.position = async () => ({ side: "long", qty: 10 });
@@ -476,7 +476,7 @@ test("a conditional order declined: registered as any decline, its words naming 
   await r.idle();
   assert.equal(r.asked.records.length, 1);
   assert.equal(r.asked.records[0].input.action, "hold");
-  assert.equal(r.asked.records[0].input.thesis, "Declined Gravit's order card: sell 5 NVDA · stop 150 · paper-1.");
+  assert.equal(r.asked.records[0].input.thesis, "Declined gravit's order card: sell 5 NVDA · stop 150 · paper-1.");
   assert.deepEqual(r.registered(), ["registered: hold"]);
 });
 
@@ -488,7 +488,7 @@ test("a usd sell of a long: no single action, nothing written, the card says why
   r.gate.settled("c-1", PLACED, "s-1");
   await r.idle();
   assert.equal(r.asked.records.length, 0);
-  assert.deepEqual(r.registered(), ["not registered: the order does not say how much of the position it sells - tell Gravit what you decided"]);
+  assert.deepEqual(r.registered(), ["not registered: the order does not say how much of the position it sells - tell gravit what you decided"]);
   assert.equal(r.asked.logs.length, 1);
 });
 
@@ -688,7 +688,7 @@ test("Guard mode: rejected before expiresAt, the Account's decline", async () =>
   assert.deepEqual(r.asked.records, [{
     by: "gravit-face",
     input: {
-      action: "pass", whose: "owner", thesis: "Declined the Account's card for Gravit's order: buy 10 NVDA · limit 183 · paper-1.",
+      action: "pass", whose: "owner", thesis: "Declined the Account's card for gravit's order: buy 10 NVDA · limit 183 · paper-1.",
       symbol: "NVDA", market: "US", recall: "r-1", evidence: EVIDENCE,
     },
   }]);
@@ -913,7 +913,7 @@ test("a coin (no market placed): the record carries no symbol and no market", as
   const input = r.asked.records[0].input;
   assert.equal("symbol" in input, false);
   assert.equal("market" in input, false);
-  assert.equal(input.thesis, "Approved Gravit's order card: buy 1 BTC/USDT · paper-1.");
+  assert.equal(input.thesis, "Approved gravit's order card: buy 1 BTC/USDT · paper-1.");
   assert.deepEqual(r.asked.decisions, [], "no symbol, no own call asked");
 });
 

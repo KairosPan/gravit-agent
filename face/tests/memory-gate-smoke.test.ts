@@ -247,7 +247,7 @@ test("the order card asks the memory: a red line refused, an override and a decl
     assert.equal(approval?.by, FACE_MEMORY_NAME);
     assert.equal(approval?.whose, "owner");
     assert.equal(approval?.action, "buy");
-    assert.equal(approval?.thesis, "Approved Gravit's order card: buy 1 NVDA · limit 100 · paper-1.");
+    assert.equal(approval?.thesis, "Approved gravit's order card: buy 1 NVDA · limit 100 · paper-1.");
     assert.equal(approval?.words, OVERRIDE.reason);
     assert.equal(approval?.wrong_if, OVERRIDE.wrongIf);
     assert.equal(approval?.recall, overridden?.lines[0]?.recall, "the decision names the gate's recall");
@@ -270,7 +270,7 @@ test("the order card asks the memory: a red line refused, an override and a decl
     const [decline] = await ownersDecisions();
     assert.equal(decline?.by, FACE_MEMORY_NAME);
     assert.equal(decline?.action, "pass");
-    assert.equal(decline?.thesis, "Declined Gravit's order card: buy 1 AMD · limit 100 · paper-1.");
+    assert.equal(decline?.thesis, "Declined gravit's order card: buy 1 AMD · limit 100 · paper-1.");
     assert.equal(decline?.recall, seen.get("mg-declined")?.lines[0]?.recall, "the decline names its recall");
     assert.deepEqual(await ownerRecord(), { fired: 2, followed: 1, overridden: 1 }, "the decline is one followed");
 

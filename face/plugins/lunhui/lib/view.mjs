@@ -1,7 +1,7 @@
 // face/plugins/lunhui/lib/view.mjs
 /**
  * The Lunhui run view's evidence half (run view spec §5.3–§5.5): `evidenceView(sealed)` turns a
- * sealed run's frozen evidence into the blocks the client draws and Gravit's `view` digest
+ * sealed run's frozen evidence into the blocks the client draws and gravit's `view` digest
  * summarises - breadth, the indices with their minute lines, the ladder by promotion, yesterday's
  * limit-ups today, and the stocks keyed by code - and `mostMoved` finds the window of a minute line
  * that moved most. Pure functions over what `readSealedRun` reads: no clock, no I/O, and nothing
@@ -659,7 +659,7 @@ function cut(text, limit) {
 }
 
 /**
- * The text Gravit composes its answer from (M15): one line per fact the face will draw - the run,
+ * The text gravit composes its answer from (M15): one line per fact the face will draw - the run,
  * the verdicts, the reviewer, the sources, breadth, each index (close, pct, and with a minute line
  * its high, low and the hour that moved most), the ladder's rungs and promotions, yesterday, the
  * signals - then the names. At most 2,048 UTF-8 bytes: past that the tail is cut and ends in "…",

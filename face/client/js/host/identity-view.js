@@ -1,5 +1,5 @@
 // face/client/js/host/identity-view.js — the Identity tab's view (plan B1b Task 1): what the account's GET /api/account/identity
-// (through the face's proxy, /data/account/identity) says of how Gravit reaches the operator — the networks it is connected on
+// (through the face's proxy, /data/account/identity) says of how gravit reaches the operator — the networks it is connected on
 // (Telegram, Slack since plan B2 Task 7, and iMessage through Photon since the iMessage plan), what reaches them where (the routing's
 // five rows, the face always on), quiet hours on New York's clock, Not you, the strangers who wrote to the bot, and the Slack app
 // manifest the account gives for Install app…. And the routing as the string the owner signs (account/src/portfolio/identity/kinds.ts formatRouting, the same rule).

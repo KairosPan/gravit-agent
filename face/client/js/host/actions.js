@@ -60,7 +60,7 @@ export function makeActions({ store, call, answerGate, requestId = randomUuid, t
     }
   }
 
-  // the words and attachments (content parts) to the session the caller names — Gravit's one conversation (one-entry plan 2),
+  // the words and attachments (content parts) to the session the caller names — gravit's one conversation (one-entry plan 2),
   // which is never in a channel, so no room is tried. attachmentRefused(reason) answers a refusal of the attachments in place
   // of the status line
   async function send(text, { sessionId, attachments = [], attachmentRefused } = {}) {

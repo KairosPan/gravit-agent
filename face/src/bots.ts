@@ -68,7 +68,7 @@ export const isBotId = (value: unknown): value is string =>
  *  when it builds the declaration (src/bot-presets.ts `definitionFor`). */
 export const BOT_PLUGIN_RELATIVE = "../../face/plugins/bot.js";
 
-/** What a voice keeps of Gravit's roster (spec §2.2.1): the shell, file read
+/** What a voice keeps of gravit's roster (spec §2.2.1): the shell, file read
  *  and edit, search, web, skills and the question tool. Absent by design:
  *  delegation (`subagent*`, `workflow`, `ralph`), goals and todos, background
  *  jobs, every `agent_<bin>`, and every order or account tool - the Account

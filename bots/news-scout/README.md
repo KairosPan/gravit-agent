@@ -2,7 +2,7 @@
 
 从一句主题线索查找近期新闻，追溯原始来源、核对日期并按事件去重。
 
-先在 face 的 Discover 里打开 News Scout 的「Gravit 可用」开关。之后请 Gravit 为它开一个任务
+先在 face 的 Discover 里打开 News Scout 的「gravit 可用」开关。之后请 gravit 为它开一个任务
 （工作目录是 `bots/news-scout/journal`），或开一个辩论任务，把它作为只读成员请进来。
 
 示例：

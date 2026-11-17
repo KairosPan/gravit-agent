@@ -292,14 +292,14 @@ const agentRow = a => ({
   limits: records(a.limits).map(l => limitOf(l, l.perPaymentUsd)), cards: cardCount(a), orders: openCount(a),
 });
 
-/** The Agents tab. Gravit's row first whenever the seat view (/data/seat.json) has a standing to show: its standing and its
+/** The Agents tab. gravit's row first whenever the seat view (/data/seat.json) has a standing to show: its standing and its
  *  limits in the seat box's words, and the counts the Account keeps for the seat's own agent — its cards waiting and its open
  *  orders, null while the Account's agents are not read. Then every other agent the Account lists (`agents`), each limit in
  *  the same words. The seat's own agent is the one at the seat view's address (in any case), or by name, in any case, only
- *  while the seat view carries no address (knocking: no key yet); it is left out of the list while Gravit's row stands, so
- *  Gravit is listed once, and a display name alone never hides a row an address could tell. With no seat view to stand on,
+ *  while the seat view carries no address (knocking: no key yet); it is left out of the list while gravit's row stands, so
+ *  gravit is listed once, and a display name alone never hides a row an address could tell. With no seat view to stand on,
  *  the Account's list is the whole answer. The knocking keys are the page's (`requestsOf`). Every row carries its address
- *  and each limit as `{ id, scope, allow, expired, words }` — what the owner's keys name back. Gravit's row also carries the
+ *  and each limit as `{ id, scope, allow, expired, words }` — what the owner's keys name back. gravit's row also carries the
  *  seat's status (`seatStatus`) and, while it knocks, the page's one request at the seat view's address, in any case
  *  (`request: { address, name }`); with no address on the seat view, or none or several requests there, null — a request is
  *  never bound to the seat by its name. */
@@ -313,7 +313,7 @@ export function agentsOf(agentsBody, seatView, page = null) {
   const isSeat = typeof s.address === 'string' && s.address ? a => sameAddress(a.address, s.address) : a => sameName(a.name, name);
   const seats = agents.filter(isSeat);
   // the seat's knock is bound by the seat view's address alone, and only when exactly one request stands there: a name can be
-  // anyone's, so a request that only shares the seat's name is never let in as Gravit
+  // anyone's, so a request that only shares the seat's name is never let in as gravit
   const addr = str(s.address);
   const hits = s.status === 'knocking' && addr ? requestsOf(page).filter(r => sameAddress(r.address, addr)) : [];
   const knock = hits.length === 1 ? hits[0] : null;

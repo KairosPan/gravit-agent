@@ -57,7 +57,7 @@ const LIVE_SAID = "Tencent · answering";
 const UNAVAILABLE_SAID = "Tencent is not answering: A shares cannot be read now";
 const SEARCH_FAILED = "Tencent's search did not answer";
 const ADJUSTMENT = "forward-adjusted (前复权)";
-const SEARCH_HEADERS = { accept: "application/json, text/plain, */*", "user-agent": "Mozilla/5.0 Gravit-Symbol-Search" };
+const SEARCH_HEADERS = { accept: "application/json, text/plain, */*", "user-agent": "Mozilla/5.0 gravit-Symbol-Search" };
 
 const hhmm = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const unavailable = (): Refusal => no("E_VENUE_UNREACHABLE", { venue: CHINA_ID, message: UNAVAILABLE_SAID });

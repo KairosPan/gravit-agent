@@ -1,7 +1,7 @@
 /** THE KINDS OF A MESSAGE, THE ROUTING ROWS AND QUIET HOURS — what the account decides before it sends anything to a network.
  *
  * Every message the account sends names its kind. A kind belongs to one routing row (the rows the Identity tab shows, in this order:
- * Chat with Gravit, Watch alerts, Pre-close brief, Cards waiting, Fills and reports), and the owner ticks, row by row, which connected
+ * Chat with gravit, Watch alerts, Pre-close brief, Cards waiting, Fills and reports), and the owner ticks, row by row, which connected
  * networks it goes to. The watchdog's notice is in no row: it goes to every connected network, because it says the rest is down; so does the
  * account's notice of a browser let in by a code (`device`), because it says someone may have taken the account.
  *
@@ -20,15 +20,15 @@ export const NETWORKS: readonly Network[] = ["telegram", "imessage", "slack"];
 export const NETWORK_NAME: Readonly<Record<Network, string>> = { telegram: "Telegram", imessage: "iMessage", slack: "Slack" };
 
 /** a message's id on the wire, `<network>:<the network's own id>`: Telegram's message_id (digits), Slack's ts (seconds, a dot, six
- * digits), iMessage's message GUID — any 1 to 128 characters but white space, since Photon names no shape for it (the connector logs and skips one that fails, imessage.ts). There is no channel in Slack's: Gravit has exactly one DM there. The one rule the account's send, its route and the face read */
+ * digits), iMessage's message GUID — any 1 to 128 characters but white space, since Photon names no shape for it (the connector logs and skips one that fails, imessage.ts). There is no channel in Slack's: gravit has exactly one DM there. The one rule the account's send, its route and the face read */
 export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6}|imessage:[^\s]{1,128})$/;
 
 /** a Slack token of any kind anywhere in a text (bot, user, app-level, refresh and the rest): taken out as `<token>` wherever the account
  * says or sends anything, on top of the redactor of its own tokens' exact spellings. Global: use it with replace, or with search */
 export const SLACK_TOKEN_ANYWHERE = /\bx(?:ox[abposre]|app)-[A-Za-z0-9-]{10,}/g;
 
-/** what the operator is answered when they write while the Chat with Gravit row does not tick the network they wrote on */
-export const chatOffLine = (network: Network): string => `Chat with Gravit is off on ${NETWORK_NAME[network]}: Account › Identity turns it on.`;
+/** what the operator is answered when they write while the Chat with gravit row does not tick the network they wrote on */
+export const chatOffLine = (network: Network): string => `Chat with gravit is off on ${NETWORK_NAME[network]}: Account › Identity turns it on.`;
 
 export type PhoneKind = "chat" | "alert" | "urgent" | "brief" | "report" | "card" | "fill" | "watchdog" | "device";
 export const PHONE_KINDS: readonly PhoneKind[] = ["chat", "alert", "urgent", "brief", "report", "card", "fill", "watchdog", "device"];

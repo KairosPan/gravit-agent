@@ -112,7 +112,7 @@ export const IDENTITY_WORDS = {
   imessageMalformed: "This route takes one JSON object, {projectId, projectSecret, phone, keyHash, salt}: what was sent is not that, and it was not kept.",
   imessageShape: "That is not a Photon project and a phone number: the project ID and secret come from the project's Settings, and the number is written +, the country code, then the number (+14155550100). Nothing was kept.",
   refusedByPhoton: "Photon does not know this project and secret: nothing was kept. Copy both from the project's Settings again.",
-  photonDedicated: "This Photon project has dedicated lines: Gravit uses the shared pool only. Use a project on the Free or Pro plan. Nothing was kept.",
+  photonDedicated: "This Photon project has dedicated lines: gravit uses the shared pool only. Use a project on the Free or Pro plan. Nothing was kept.",
   photonUserLimit: "This Photon project has no room for another user: remove one in Photon, or use another project. Nothing was kept.",
   photonNoNumber: "Photon has no free shared number for this phone: nothing was kept. Try again later.",
   photonUnreachable: PHOTON_UNREACHABLE,

@@ -169,7 +169,7 @@ export type OwnerAction =
   /** paper money added to a paper account the account keeps itself: `usd` dollars more in its cash, written in its book as paper money put
    * in (its curve and what it made or lost since it started count it as put in, never as a gain) */
   | { type: "topUpPaper"; venue: string; usd: string; nonce: number }
-  /** ACCOUNT › IDENTITY (identity/identity.ts): a network Gravit speaks on, connected — the pending connection of Connect's sheets 1 to 3
+  /** ACCOUNT › IDENTITY (identity/identity.ts): a network gravit speaks on, connected — the pending connection of Connect's sheets 1 to 3
    * (`pending`, its id), the bot heard from (`botId`, `speaksAs` its handle), the one person it talks to (`operatorId`, `talksOnlyWith`),
    * the routing it starts with (kinds.ts, the signed string) and the token's fingerprint — never the token. `keyHash` is hex SHA-256(salt ‖
    * token), made in the owner's browser, `salt` the 16 random bytes it was made with: the token itself travelled once, at sheet 1's Next,

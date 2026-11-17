@@ -1,16 +1,16 @@
 // face/plugins/lunhui/present-row.mjs
 /**
- * `lunhui-present` (run view spec §5.2, M15, M16, M20): `lunhui_present`, Gravit's composed answer
- * to a market run. Gravit names the run, writes a one- or two-sentence summary and picks, orders,
+ * `lunhui-present` (run view spec §5.2, M15, M16, M20): `lunhui_present`, gravit's composed answer
+ * to a market run. gravit names the run, writes a one- or two-sentence summary and picks, orders,
  * titles and focuses blocks from the face's catalog (`PRESENT_KINDS`); the face draws every number
  * from the run's view. The tool checks the composition against the same view the route serves and
- * its digest (`checkPresent`) and, on ok, ends Gravit's turn: the answer is the drawn composition.
+ * its digest (`checkPresent`) and, on ok, ends gravit's turn: the answer is the drawn composition.
  *
  * `execute`, in order: `NOT_GRAVIT` for a delegated child; the run's manifest (`readRun`);
  * `NOT_A_MARKET_RUN` for a strategy run (`checkPresent` keeps its own guard); a card run's `module` that the run has no artifact of is `INVALID_PRESENT` before any view is built; the
  * modules (`presentModules`); the view (`service.view`, `MISSING_EVIDENCE` for an open run); the
  * check; then `exec.concludeTurn()` and the reply `{ ok, blocks, modules }`. A refusal throws and
- * never concludes the turn, so Gravit may call again. Nothing is written or counted.
+ * never concludes the turn, so gravit may call again. Nothing is written or counted.
  */
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { asToolError, callerIsChild, refuse } from "./lib/errors.mjs";

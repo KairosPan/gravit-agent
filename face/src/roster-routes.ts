@@ -1,5 +1,5 @@
 /** The one roster's two routes (one-entry plan 4): the read Discover draws its
- * "Available to Gravit" switches from, and the switch itself.
+ * "Available to gravit" switches from, and the switch itself.
  *
  * `GET /data/roster.json` answers `{ok: true, agents, bots}`, or `{ok: false,
  * corrupt: true}` for a file the face does not understand or no file at all (after

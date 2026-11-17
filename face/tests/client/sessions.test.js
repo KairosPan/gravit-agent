@@ -7,7 +7,7 @@ const ctx = (over = {}) => ({ presets: {}, bots: new Map([['buffett', { name: 'B
 const row = (id, over = {}) => ({ sessionId: id, updatedAt: 5, agentAvailable: false, running: false, blank: false, ...over });
 const titled = (id, title, preset, over = {}) => row(id, { projections: { values: { title, ...(preset ? { agentPreset: preset } : {}) } }, ...over });
 
-test('a bare row is an Untitled Gravit conversation that is not live', () => {
+test('a bare row is an Untitled gravit conversation that is not live', () => {
   const c = conversationOf(row('s1'), ctx());
   assert.equal(c.id, 's1'); assert.equal(c.title, 'Untitled'); assert.equal(c.kind, 'gravit');
   assert.deepEqual(c.members, ['gravit']); assert.equal(c.live, false); assert.equal(c.running, false);
@@ -22,7 +22,7 @@ test("a bot's home session is kind bot, titled by its projection, with the bot a
   assert.equal(c.preset, 'buffett'); assert.equal(c.live, true); assert.equal(c.running, true);
 });
 
-test('a session whose room projection reads room is a group with the projected members after Gravit', () => {
+test('a session whose room projection reads room is a group with the projected members after gravit', () => {
   const rooms = new Map([['s1', { kind: 'room', round: 1, members: { buffett: { state: 'idle' } }, organizing: false }]]);
   const c = conversationOf(titled('s1', 'Pick stocks', 'gravit'), ctx({ rooms }));
   assert.equal(c.kind, 'group'); assert.deepEqual(c.members, ['gravit', 'buffett']);

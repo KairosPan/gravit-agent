@@ -185,7 +185,7 @@ test('every token app.css reads is declared: a var(--x) nobody defines falls bac
   assert.deepEqual([...read].filter(t => !declared.has(t)), [], 'tokens read but never declared');
 });
 
-test("Gravit's markdown has its rules: every class markdown.js emits, and links in an answer that look like links", () => {
+test("gravit's markdown has its rules: every class markdown.js emits, and links in an answer that look like links", () => {
   const sample = '## Breadth\n\n**NVDA** leads; see [the filing](https://www.sec.gov/x) and `ADV`.\n\n- one\n  - two\n\n1. first\n\n> a quote\n\n---\n\n```\nzstd -dc log\n```\n\n| sym | chg |\n|---|---|\n| NVDA | +3.1% |\n| AMD | -1.2% |';
   const html = withMiniDocument(() => renderMarkdown(sample).node.outerHTML);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
@@ -336,16 +336,22 @@ test('--fs and --fm are 1 at the root, and the two families read their base stac
   const root = tokens.match(/^:root \{([^}]*)\}/m)?.[1] ?? '';
   assert.match(root, /--fs: 1;/);
   assert.match(root, /--fm: 1;/);
-  assert.match(root, /--font-sans-base: "Manrope", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Segoe UI", system-ui, sans-serif;/);
+  assert.match(root, /--font-sans-base: "Newsreader", "Noto Serif SC", "Songti SC", Georgia, "Times New Roman", serif;/);
   assert.match(root, /--font-sans: var\(--font-sans-base\);/);
   assert.match(root, /--font-mono: var\(--font-mono-base\);/);
 });
 
 test('the mono stack falls back to Chinese after its mono faces', () => {
-  assert.match(tokens, /--font-mono-base: "IBM Plex Mono", "SF Mono", Menlo, Consolas, "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", monospace;/);
+  assert.match(tokens, /--font-mono-base: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Noto Serif SC", "PingFang SC", "Hiragino Sans GB", monospace;/);
 });
 
-test('the font link loads Noto Sans SC 800', () => {
+test('the font link loads Noto Serif SC 800, Newsreader, Instrument Serif and JetBrains Mono', () => {
   const page = readFileSync(new URL('../../client/index.html', import.meta.url), 'utf8');
-  assert.match(page, /family=Noto\+Sans\+SC:wght@400;500;700;800&/);
+  assert.match(page, /family=Noto\+Serif\+SC:wght@400;500;600;700;800&/);
+  for (const fam of ['Newsreader:', 'Instrument\\+Serif', 'JetBrains\\+Mono:']) assert.match(page, new RegExp(`family=${fam}`));
+});
+
+test('the big titles draw in the display face at its one weight', () => {
+  assert.match(tokens, /--font-display: "Instrument Serif", "Noto Serif SC"/);
+  assert.match(css, /\.brand-name, [^{]*\.networth, \.mk-big \{ font-family: var\(--font-display\); font-weight: 400;/);
 });

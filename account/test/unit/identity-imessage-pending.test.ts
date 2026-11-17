@@ -257,7 +257,7 @@ describe("connect iMessage through the account: the token route and the pending 
     expect(said.filter((l) => l.includes("SMS")).length).toBe(1);
   });
 
-  it("Gravit's own, a group's and a non-text message are skipped; Not me waits again on a fresh stream", async () => {
+  it("gravit's own, a group's and a non-text message are skipped; Not me waits again on a fresh stream", async () => {
     await start();
     pendingId = (await begin()).body.pending!.id;
     await fake.push(msg({ fromMe: true }));

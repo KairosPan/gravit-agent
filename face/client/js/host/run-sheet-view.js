@@ -1,6 +1,6 @@
 // face/client/js/host/run-sheet-view.js — a module card's Run sheet (module cards spec §4 G5, G11–G16, G18,
 // §5.4–§5.5, Appendix B): the slice's first value, the render model with each field's options and greying, the
-// Stocks check, the Run's task title and the Chinese message to Gravit — from /data/modules.json. Pure. Every wire
+// Stocks check, the Run's task title and the Chinese message to gravit — from /data/modules.json. Pure. Every wire
 // string passes through as data for the view to escape.
 import { moduleOf, latestOf, headlineWords } from './modules-view.js';
 import { t, tn, said, sayOf } from '../i18n/words.js';
@@ -22,7 +22,7 @@ const CODE = /^(sh60|sz00)\d{4}$/;
 const CITES_SHOWN = 2;
 
 // Appendix B, one constant per line; the slots in braces. T_TASK is the first line since one entry's plan 2: the Run asks
-// Gravit for a task under its exact title, the title the card's chip finds it by
+// gravit for a task under its exact title, the title the card's chip finds it by
 const T_TASK = '请为此开一个任务，标题恰为「{title}」：';
 const T_MARKET_LATEST = '请只跑 Lunhui 的 {module} 模块：频道 cn-market，运行 {run}（已有运行，不要再冻结）。';
 const T_MARKET_NEW = '请只跑 Lunhui 的 {module} 模块：频道 cn-market，开新运行——先按 lunhui:run 第 1 步冻结整套（index、limit-up、boards），再只写 {module}。';
@@ -234,7 +234,7 @@ export function sheetOf(listing, sheet, now = Date.now()) {
   };
 }
 
-/** The message to Gravit (Appendix B) with the slots filled, the Note on a last line; null without a module or On. */
+/** The message to gravit (Appendix B) with the slots filled, the Note on a last line; null without a module or On. */
 export function messageOf(listing, sheet) {
   const m = moduleOf(sheet?.module);
   if (!m || (sheet.on !== 'latest' && sheet.on !== 'new')) return null;
@@ -254,7 +254,7 @@ export function messageOf(listing, sheet) {
   return note ? text + fill(T_NOTE, { note }) : text;
 }
 
-/** What a Run sends Gravit's conversation: the line asking for a task titled exactly `titleOf(...)`, then the message;
+/** What a Run sends gravit's conversation: the line asking for a task titled exactly `titleOf(...)`, then the message;
  *  null where messageOf is. */
 export function askOf(listing, sheet, now) {
   const text = messageOf(listing, sheet);

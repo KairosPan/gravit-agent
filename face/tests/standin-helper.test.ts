@@ -40,7 +40,7 @@ test("the helper parses the market line beside the account, pairing code and hom
     "STAND-IN ACCOUNT · no network, no real money: every venue, price and fill on it is made up (test/standin)",
     "  account       http://127.0.0.1:51234  — no page: start the face with FACE_ACCOUNT_URL=http://127.0.0.1:51234",
     "  market        http://127.0.0.1:51235  — start the face with FACE_MARKET_URL=http://127.0.0.1:51235",
-    "  pairing code  ABCD-EFGH  — type it on Gravit's face (Account): your browser becomes an owner beside the stand-in's seed key",
+    "  pairing code  ABCD-EFGH  — type it on gravit's face (Account): your browser becomes an owner beside the stand-in's seed key",
     "  home          /tmp/ui-standin-cipTOK  (fresh, kept after you stop; its ledger is /tmp/ui-standin-cipTOK/ledger.jsonl)",
   ].join("\n");
   assert.deepEqual(parseStandinLines(printed), { url: "http://127.0.0.1:51234", marketUrl: "http://127.0.0.1:51235", code: "ABCD-EFGH", home: "/tmp/ui-standin-cipTOK", asks: {} });
@@ -53,7 +53,7 @@ test("the helper reads the codes the account printed for browsers that asked, by
   const printed = [
     "  account       http://127.0.0.1:51234  — no page",
     "  market        http://127.0.0.1:51235  — start the face",
-    "  pairing code  ABCD-EFGH  — type it on Gravit's face (Account)",
+    "  pairing code  ABCD-EFGH  — type it on gravit's face (Account)",
     "  home          /tmp/ui-standin-cipTOK  (fresh)",
     "a browser asks to sign for the account (Laptop · 0123abcd): code KLMN-PQRS, good for 10 minutes — type it on that page",
     "a browser asks to sign for the account (Tablet (2) · 89efcdab): code TUVW-XYZ2, good for 10 minutes — type it on that page",

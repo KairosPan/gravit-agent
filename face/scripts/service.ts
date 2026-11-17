@@ -68,7 +68,7 @@ export const WATCHDOG_LABEL = "com.gravit.face.watchdog";
 /** The watchdog's state file in the desk's directory (scripts/watchdog.ts writes it, `status` reads it). */
 export const WATCHDOG_STATE_FILE = "watchdog.json";
 
-/** The names the service needs from $DSH_HOME/.env - DeepSeek's key for Gravit, Alpaca's pair for
+/** The names the service needs from $DSH_HOME/.env - DeepSeek's key for gravit, Alpaca's pair for
  * the market data and the paper account. `install` names those the home's file lacks: a face
  * booted without one serves until the first prompt or quote that needs it. */
 export const EXPECTED_KEYS = ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY"] as const;

@@ -12,7 +12,7 @@ const str = v => (typeof v === 'string' && v !== '' ? v : undefined);
 const presetOf = s => str(s.agentPreset) ?? str(s.projections?.values?.agentPreset);
 const roomMembers = room => (room && typeof room === 'object' && room.members && typeof room.members === 'object' ? Object.keys(room.members) : []);
 
-// group once the room projection says so or the fold found members; a bot preset is the bot's home; else Gravit's
+// group once the room projection says so or the fold found members; a bot preset is the bot's home; else gravit's
 export function kindOf(summary, room, foldIds = []) {
   if ((room && room.kind === 'room') || foldIds.length > 0) return 'group';
   const preset = presetOf(summary);

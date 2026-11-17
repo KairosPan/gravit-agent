@@ -10,7 +10,7 @@ afterAll(() => srv.close());
 
 describe("the market's answers", () => {
   it("answers 404 MARKET_NO_PAGE outside /api/", async () => {
-    expect(MARKET_NO_PAGE).toBe("The market serves no page: its screens are Gravit's face (Markets). This address answers its API under /api/.");
+    expect(MARKET_NO_PAGE).toBe("The market serves no page: its screens are gravit's face (Markets). This address answers its API under /api/.");
     for (const path of ["/", "/index.html"]) {
       const r = await fetch(`${srv.url}${path}`);
       expect(r.status).toBe(404);

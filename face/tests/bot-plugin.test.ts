@@ -119,10 +119,10 @@ test("expandAllow's star matches mcp__<server>__<raw> exactly, never a longer na
 });
 
 /* dsh 0.2.0 renamed the slot: 0.1.1's `deployment:persona` names NO section
- * now, so a bot registering it would carry Gravit's persona AND its own. Only
+ * now, so a bot registering it would carry gravit's persona AND its own. Only
  * the prefix slot's name shadows the deployment prefix (NEW
  * packages/core/system-prompt/src/index.ts:179, 251-253). */
-test("the persona is dsh's persona-PREFIX slot at the central prefix order - the one name that shadows Gravit's", () => {
+test("the persona is dsh's persona-PREFIX slot at the central prefix order - the one name that shadows gravit's", () => {
   assert.equal(PERSONA_PREFIX_SECTION, DSH_PERSONA_PREFIX_SECTION, "bot.js restates the installed constant exactly");
   const tree = fakeTree(["bash", "read"]);
   apply(tree.ctx, { persona: "You are Probe, a test voice.", allow: ["bash"] });
@@ -215,7 +215,7 @@ test("apply throws before touching the tree when no allowed tool exists", () => 
 });
 
 /* The desk's opt-in (src/desk-preset.ts): a row that MASKS and says nothing, so the deployment's global
- * persona prefix - Gravit's - stays in every prompt of the preset that mounts it. Explicit, never
+ * persona prefix - gravit's - stays in every prompt of the preset that mounts it. Explicit, never
  * inferred from a missing persona: `maskOnly: true` takes no persona at all, and only `true` opts in. */
 test("maskOnly: refused with a persona, accepted without; registers no persona section and still masks", async () => {
   assert.equal(validateBotConfig({ maskOnly: true, allow: ["bash"] }), undefined);
@@ -229,7 +229,7 @@ test("maskOnly: refused with a persona, accepted without; registers no persona s
 
   const tree = fakeTree(["bash", "read", "subagent"]);
   apply(tree.ctx, { maskOnly: true, allow: ["bash", "read", "mcp__*__earnings"] });
-  assert.deepEqual(tree.sections, [], "no persona section: the deployment's prefix - Gravit's persona - stays");
+  assert.deepEqual(tree.sections, [], "no persona section: the deployment's prefix - gravit's persona - stays");
   assert.deepEqual(tree.slots, [], "the persona slot is never looked up");
   assert.deepEqual(tree.masks(), [["bash", "read"]], "the mask is allow ∩ tree, as a bot's is");
   assert.equal(tree.warnings.length, 1, "and the names the tree lacks are warned once, as a bot's are");

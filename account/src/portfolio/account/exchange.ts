@@ -928,7 +928,7 @@ export class AccountEngine {
       case "disconnectNetwork":
       case "setRouting":
       case "blockSender": {
-        // the networks Gravit speaks on (identity/identity.ts). The row that says it was done carries no envelope: its "taken" row above
+        // the networks gravit speaks on (identity/identity.ts). The row that says it was done carries no envelope: its "taken" row above
         // has the one the ledger keeps (ledgered: a connect's fingerprint only), and none of the four is replayed by a restart — the
         // identity's state file is the record, as a brain's key file is
         if (!this.host.identity) return no("E_ACCOUNT_BAD_ACTION", { message: "this account keeps no identity: it is the account layer's" });

@@ -1,5 +1,5 @@
 // Discover's items from the face's listings (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): the abilities on
-// Abilities (spec 2026-11-13 §4.4), MCP servers on Data, bots on Bots, Gravit and the CLI agents on Agents, skills on
+// Abilities (spec 2026-11-13 §4.4), MCP servers on Data, bots on Bots, gravit and the CLI agents on Agents, skills on
 // Skills; ids namespaced.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,7 +35,7 @@ test('Abilities: one item per ability, in the order served, its text the top lev
   assert.deepEqual(first.mark, { type: 'glyph', icon: 'rewind' });
   assert.equal(first.dim, false); assert.equal(first.chip, null);
   assert.equal(first.text.name, first.name); assert.equal(first.text.blurb, first.line);
-  assert.match(first.text.about, /^Give Gravit a stock/);
+  assert.match(first.text.about, /^Give gravit a stock/);
   assert.equal(first.text.asks.length, 3); assert.equal(first.text.limits.length, 4);
   assert.equal(first.source.id, 'event-analogs'); assert.equal(first.source.state, 'on');
   assert.equal(second.name, 'Read-through'); assert.deepEqual(second.mark, { type: 'glyph', icon: 'arrows' });
@@ -115,20 +115,20 @@ test('MCP servers become Data items with their tool counts; the default bot is n
   assert.deepEqual(items.bots.map(i => [i.id, i.name, i.line]), [['bot:buffett', 'Buffett Type', 'Buys cheap, holds long']]);
 });
 
-test('Agents: Gravit first, then the connected agents, then the found candidates', () => {
+test('Agents: gravit first, then the connected agents, then the found candidates', () => {
   const items = itemsOf(discover());
   assert.deepEqual(items.agents.map(i => [i.id, i.name, i.line]), [
-    ['agent:gravit', 'Gravit', 'dsh 0.2.0-rc.2'],
+    ['agent:gravit', 'gravit', 'dsh 0.2.0-rc.2'],
     ['agent:codex', 'Codex', 'Connected'],
     ['agent:gone', 'Gone', 'Not found'],
     ['agent:claude', 'Claude Code', 'Found · 2.1'],
   ]);
-  assert.equal(itemsOf({ query: '', shelves: {} }).agents[0].id, 'agent:gravit', 'Gravit is there before the agents answer');
+  assert.equal(itemsOf({ query: '', shelves: {} }).agents[0].id, 'agent:gravit', 'gravit is there before the agents answer');
 });
 
 test('skills from every group', () => {
   const items = itemsOf(discover());
-  assert.deepEqual(items.skills.map(i => [i.id, i.name, i.line, i.group]), [['skill:rules', 'rules', 'The five honest-eval rules', 'mechanics'], ['skill:voice', 'voice', 'How Gravit writes', 'style-gravit']]);
+  assert.deepEqual(items.skills.map(i => [i.id, i.name, i.line, i.group]), [['skill:rules', 'rules', 'The five honest-eval rules', 'mechanics'], ['skill:voice', 'voice', 'How gravit writes', 'style-gravit']]);
 });
 
 test('search matches name and line across the shelves', () => {

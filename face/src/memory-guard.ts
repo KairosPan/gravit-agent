@@ -1,5 +1,5 @@
 /** The memory's owner-name fence: the owner's name is written, and the owner's decision amended, in one
- * place only - Gravit's one conversation, in a turn the operator's own message opened ("in place": the
+ * place only - gravit's one conversation, in a turn the operator's own message opened ("in place": the
  * calling session is the conversation's held session and its turn is the operator's, both read when
  * the call arrives).
  *

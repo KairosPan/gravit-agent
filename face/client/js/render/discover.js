@@ -1,4 +1,4 @@
-// face/client/js/render/discover.js — Discover as the inventory of what Gravit runs (spec 2026-10-19 §7 Stage 3
+// face/client/js/render/discover.js — Discover as the inventory of what gravit runs (spec 2026-10-19 §7 Stage 3
 // "Discover = My plugins"): six shelves of cards from the face's listings, a grid per shelf, a page per item. No shop:
 // nothing here installs, buys, publishes or counts installs. Every listed string is the host's or the operator's, through
 // esc.
@@ -174,7 +174,7 @@ function agentPage(a) {
   return kv(rows);
 }
 
-// a card of the Gravit page: still reading, failed alone, or its rows
+// a card of the gravit page: still reading, failed alone, or its rows
 const card3 = (label, value, rows) => sec(label, value === null || value === undefined ? dim(t('common.loading')) : value === false ? dim(t('discover.unread')) : kv(rows(value)));
 
 function gravitPage(state) {
@@ -191,7 +191,7 @@ function skillPage(item, state) {
   return kv([[t('discover.key.group'), esc(read?.detail?.group ?? item.group ?? '—')]]) + (item.line ? sec(t('discover.field.description'), line(item.line)) : '') + sec(t('discover.key.content'), content);
 }
 
-// an ability's page (spec 2026-11-13 §4.4): its state, then what it is, the questions to ask Gravit, what it does not tell
+// an ability's page (spec 2026-11-13 §4.4): its state, then what it is, the questions to ask gravit, what it does not tell
 // you and what it is made of, each section drawn only when it has something. Its text is the item's, already in the page's
 // language; a tool is named alone, never with its registered description
 const partsOf = (v, key) => (Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && typeof x[key] === 'string') : []);
@@ -204,7 +204,7 @@ const skillPart = k => (k.present !== true ? part(k.name, t('discover.ability.mi
 // a row's word: its phase while it is enabled and has one; otherwise the State's own Off, the server's rule for an ability off
 const rowWord = r => (r.enabled === true && typeof r.phase === 'string' ? phaseWord(r.phase) : abilityStateWord('off'));
 
-// the ask keys put their words in Gravit's composer: they work while the ability is on and the page knows Gravit's
+// the ask keys put their words in gravit's composer: they work while the ability is on and the page knows gravit's
 // conversation (Messages draws no composer without one), and the line under them says which
 function asksOf(item, state) {
   if (!item.text.asks.length) return '';
@@ -245,7 +245,7 @@ function kindLine(i) {
   return i.kind;
 }
 
-// Available to Gravit (one-entry plan 4): the one roster's switch on a bot or a connected CLI agent, pressed while it is on
+// Available to gravit (one-entry plan 4): the one roster's switch on a bot or a connected CLI agent, pressed while it is on
 // the roster; disabled while the roster is unread or unreadable
 function availableKey(item, state, kind, id) {
   const ready = state.discover.roster?.status === 'ready';
@@ -256,7 +256,7 @@ const switchable = item => typeof item.available === 'boolean';
 
 function keysOf(item, state) {
   if (item.shelf === 'bots') {
-    // a bot is talked to in a room or a task, through Gravit (one-entry plans 2 and 4): its card switches it and edits it
+    // a bot is talked to in a room or a task, through gravit (one-entry plans 2 and 4): its card switches it and edits it
     return `${availableKey(item, state, 'bot', item.source.id)}<button type="button" class="btn-sm" data-action="editBot" data-id="${esc(item.source.id)}">${th('discover.edit')}</button>`;
   }
   if (item.shelf !== 'agents' || item.id === 'agent:gravit') return '';

@@ -1,7 +1,7 @@
 // face/client/js/host/discover.js — Discover from the face (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): the
 // six listings (the Lunhui modules' since the module cards spec §5.1, the abilities' since spec 2026-11-13 §4.4), each
-// alone; the Gravit item's three reads, each alone; a skill's content; the agent writes; the one roster (one-entry plan 4),
-// read with the listings, and its Available to Gravit switch. Impure; nothing here draws. A plain read joins the shelf's
+// alone; the gravit item's three reads, each alone; a skill's content; the agent writes; the one roster (one-entry plan 4),
+// read with the listings, and its Available to gravit switch. Impure; nothing here draws. A plain read joins the shelf's
 // flight, a read after a write starts a fresh one, and only the latest-started read of a shelf lands.
 import { botSettingsPayload, botModelChoices, normalizeBotModel } from '../wire/botSettings.js';
 import { proposeBotId } from '../wire/botId.js';

@@ -158,7 +158,7 @@ test("detection: candidates are the known list, in its order, that answer and ar
     return null;
   };
   const listing = await agentsListing(deps);
-  assert.deepEqual(listing.main, { name: "Gravit", runtime: `dsh ${DSH_PIN}` });
+  assert.deepEqual(listing.main, { name: "gravit", runtime: `dsh ${DSH_PIN}` });
   assert.deepEqual(listing.local, [], "nothing is fixed in place — the roster starts empty");
   assert.deepEqual(listing.candidates, [
     { bin: "claude", label: "Claude Code", version: "2.1.251 (Claude Code)" },

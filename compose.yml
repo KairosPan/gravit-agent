@@ -7,14 +7,14 @@
 # first: the agent box publishes 3090 on the host's loopback. The account box publishes nothing:
 # only the agent box reaches it, at account:4820 on the gravit network. The market box publishes
 # nothing either: the account box reads it at market:4821, and the agent box reaches it there too,
-# for the Markets screens (the face's /data/market proxy) and the mcp-market row (Gravit's
+# for the Markets screens (the face's /data/market proxy) and the mcp-market row (gravit's
 # market_* tools). Stopping the host Account and market too is advised (one of each in sight),
 # not required.
 #
 # The market box runs AKShare and holds the iFinD token; the account box holds neither; the agent
 # box runs no data source.
 #
-# The agent box mounts no docker socket and no path of the Account's home: Gravit's shell sees
+# The agent box mounts no docker socket and no path of the Account's home: gravit's shell sees
 # the allowlisted paths and the box's volumes, no other host file (on Docker Desktop
 # host.docker.internal still reaches the Mac's loopback services, as the host dev loop does).
 

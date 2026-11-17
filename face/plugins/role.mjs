@@ -1,6 +1,6 @@
 // face/plugins/role.mjs
 /**
- * `gravit-role` - the face's role tool: one row per role in Gravit's composition (src/roles.ts
+ * `gravit-role` - the face's role tool: one row per role in gravit's composition (src/roles.ts
  * `gravitRows`; `bots/gravit/agent.cordis.yml` is the render's generated mirror), each registering
  * `role_<id>`, which hands a brief to a one-shot child on the role's own preset and returns the
  * child's report as the tool result.
@@ -8,7 +8,7 @@
  * WHY THE FACE OWNS IT (D20). At dsh 0.2.1 `@deepseek-ai/dsh-tool-subagent` starts a managed child,
  * returns `started subagent <id>` at once and reports through a parent notice when the child settles
  * (installed dsh-tool-subagent `lib/index.js`, its `execute` and `delivery: "parent"`). A role is a
- * bounded piece of work whose report Gravit checks before it goes on, so this tool is one call, one
+ * bounded piece of work whose report gravit checks before it goes on, so this tool is one call, one
  * report: it starts the activation with `delivery: "caller"` - no parent notice, the result handed to
  * the caller alone (dsh-subagent README "Managed delegation") - awaits `result`, and returns the
  * child's closing text. `isConcurrencySafe` is false, so two role calls in one assistant message run
@@ -28,7 +28,7 @@
  *
  * WHAT THE PRESET SUPPLIES. The persona and the mask are the role's own preset, `role-<id>` (src/roles.ts
  * `rolePresetDefinition`, B1), which the face declares after boot; this row only names it. A role child
- * composes that preset, never Gravit's: the tool registered here sits in Gravit's preset layer, out of a
+ * composes that preset, never gravit's: the tool registered here sits in gravit's preset layer, out of a
  * role child's scope chain.
  *
  * WHAT THE TOOL CHECKS ITSELF, before any child exists: a calling agent; every `allow` name in the
@@ -37,7 +37,7 @@
  * tree serves it (`llm.resolveCallConfig`, as src/room.ts `selectionFor` checks a bot's), since
  * dsh-subagent never preflights a route and a bad one would fail only inside the created child.
  * WHAT DSH ENFORCES: the depth limit, the preset - resolved when the child is created, so a role
- * called before its preset is declared fails that call, never Gravit's creation - `maxActiveSubagents`,
+ * called before its preset is declared fails that call, never gravit's creation - `maxActiveSubagents`,
  * and the route itself when the child's agent options are applied.
  *
  * A child that ends other than `completed` is an error naming the stop reason and the provider's
@@ -57,7 +57,7 @@ const ROLE_PRESET = /^role-[a-z0-9][a-z0-9-]*$/;
 /** One `<provider>/<model>` route: src/bots.ts `MODEL_ROUTE_RE`, restated because this file imports
  *  no face module; tests/role-plugin.test.ts pins the two to the same grammar. */
 const MODEL_ROUTE = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
-/** The provider a role child runs on: a fresh child, not a fork of Gravit's history. */
+/** The provider a role child runs on: a fresh child, not a fork of gravit's history. */
 const PROVIDER = "spawn";
 /** A completed child with no closing text, in dsh-subagent's own words for its parent notice. */
 const NO_CLOSING = "It left no closing message.";

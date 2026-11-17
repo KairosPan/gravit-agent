@@ -1042,7 +1042,7 @@ test("installDesk runs the phone bridge only with the desk on, a phone client an
   }
 });
 
-/* One-entry plan 3: the phone reaches Gravit's one conversation once main.ts binds it; with FACE_ROUTER=0 the desk
+/* One-entry plan 3: the phone reaches gravit's one conversation once main.ts binds it; with FACE_ROUTER=0 the desk
  * session answers it as before. */
 
 /** A phone client that hands over `texts` on its first read, then holds each read until it is aborted; and what was sent. */

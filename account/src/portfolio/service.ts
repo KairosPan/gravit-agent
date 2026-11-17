@@ -676,7 +676,7 @@ export class PortfolioService {
       // a paper account the account keeps itself, as its owner runs it (live/paper.ts): started again, or paper money added
       paper: (action) => this.paperControl(action),
       paperWords: (action) => this.paperControlWords(action),
-      // the networks Gravit speaks on (identity/identity.ts): built after the host, so read when an instruction comes
+      // the networks gravit speaks on (identity/identity.ts): built after the host, so read when an instruction comes
       identity: (action) => (this.identity ? this.identity.apply(action) : Promise.resolve(no("E_ACCOUNT_BAD_ACTION", { message: "this account keeps no identity: it is the account layer's" }))),
       identityProblem: (action) => (this.identity ? this.identity.problem(action) : "this account keeps no identity: it is the account layer's"),
       // a venue id taken: connected now, or a connection the owner signed that waits for its venue (the unsigned door's paper opening)
@@ -1722,7 +1722,7 @@ export class PortfolioService {
       asks: page.asks.filter((a) => a.agent === k.address),
       declinedAsks: page.declinedAsks.filter((a) => a.agent === k.address),
       memory: this.memory ? { notes: this.memory.notes(k.address).filter((n) => !n.waiting).length, waiting: this.memory.notes(k.address).filter((n) => n.waiting).length } : { notes: 0, waiting: 0 },
-      flights: this.flights.filter((f) => f.agent.name === k.name && f.agent.code === k.code).slice(-10).reverse().map((f) => ({ no: f.no, at: f.at, request: f.request, legs: f.legs.map((l) => `${l.mark === "ok" ? "✓" : l.mark === "no" ? "✗" : l.mark === "wait" ? "▣" : "·"} ${l.text}`) })),
+      flights: this.flights.filter((f) => f.agent.name.toLowerCase() === k.name.toLowerCase() && f.agent.code === k.code).slice(-10).reverse().map((f) => ({ no: f.no, at: f.at, request: f.request, legs: f.legs.map((l) => `${l.mark === "ok" ? "✓" : l.mark === "no" ? "✗" : l.mark === "wait" ? "▣" : "·"} ${l.text}`) })),
     }));
     // the mode as every other read wires it (`guard` is Guard, `open` is Beast): the face puts the words on it
     return { asOf: page.now, mode: this.openness.mode === "open" ? "open" : "guard", agents, requests: page.requests };
@@ -2429,7 +2429,7 @@ export class PortfolioService {
   private newPairingCode(): void {
     if (this.pairCode === undefined) return;
     this.pairCode = pairingCode();
-    console.log(`signed out: no browser signs for the account now\n  pairing code: ${this.pairCode} — the next browser becomes the owner only with this code, typed on Gravit's face (Account) (the code before it no longer works)`);
+    console.log(`signed out: no browser signs for the account now\n  pairing code: ${this.pairCode} — the next browser becomes the owner only with this code, typed on gravit's face (Account) (the code before it no longer works)`);
   }
 
   /** A PAPER ACCOUNT the account keeps itself, as its owner runs it — what a signed resetPaper or topUpPaper does, once the door has checked

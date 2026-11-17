@@ -30,7 +30,7 @@ const OP = "U0PAN07QK";
 const DM = "D0FAKEDM1";
 /** the ts of the DM the operator was heard by on sheet 2: where the connector's cursor starts */
 const HEARD_TS = "1730811000.000100";
-const CHAT_OFF_SLACK = "Chat with Gravit is off on Slack: Account › Identity turns it on.";
+const CHAT_OFF_SLACK = "Chat with gravit is off on Slack: Account › Identity turns it on.";
 let n = 0;
 const nonce = () => Date.now() + ++n;
 

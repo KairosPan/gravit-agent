@@ -114,7 +114,7 @@ class FakeConversation {
   readonly setOutlet = (outlet: DeskOutlet | undefined): void => { this.outlets.push(outlet); };
 }
 
-/** Gravit's one conversation as the bridge reaches it once bound: its posts, its stops and a status. */
+/** gravit's one conversation as the bridge reaches it once bound: its posts, its stops and a status. */
 class FakeRouter implements PhoneConversation {
   readonly posts: PostInput[] = [];
   readonly stops: string[] = [];
@@ -354,11 +354,11 @@ test("commands answer as chat to the network they came from; /pause and /mute wr
     await polled(r, 12);
     assert.deepEqual(r.conversation.stops, ["stopped from the phone", "stopped from the phone"]);
     assert.deepEqual(r.account.texts().slice(9), ["stopped", "nothing is running"]);
-    assert.equal(r.conversation.posts.length, 0, "no command is text for Gravit");
+    assert.equal(r.conversation.posts.length, 0, "no command is text for gravit");
 
     for (const [i, word] of ["/resume", "/unmute", "/help"].entries()) text(r, word, 12 + i);
     await polled(r, 13);
-    assert.deepEqual(r.conversation.posts.map((p) => p.text), ["/resume", "/unmute", "/help"], "nothing resumes, unmutes or arms: those are text for Gravit");
+    assert.deepEqual(r.conversation.posts.map((p) => p.text), ["/resume", "/unmute", "/help"], "nothing resumes, unmutes or arms: those are text for gravit");
     assert.equal(existsSync(join(deskDir(r.home), OFF_FILE)), true, "and the pause stands");
     assert.ok(r.account.sends.every((s) => s.kind === "chat" && s.network === "telegram"), "every line a chat reply to telegram");
     assert.deepEqual((await readEvents(r.home)).events.map((e) => e.kind), ["off-set", "off-set", "mute-set"]);

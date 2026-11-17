@@ -8,7 +8,7 @@ import { startSeat } from '../../client/js/host/seat.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
-const view = (over = {}) => ({ ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-20T14:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, cardMinutes: 30, seat: { name: 'Gravit', status: 'admitted', limits: [] }, venues: [], cards: [], others: 0, ...over });
+const view = (over = {}) => ({ ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-20T14:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, cardMinutes: 30, seat: { name: 'gravit', status: 'admitted', limits: [] }, venues: [], cards: [], others: 0, ...over });
 
 function rig(json = {}) {
   const store = createStore({ initial: emptyState(), reducers });

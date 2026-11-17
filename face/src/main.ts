@@ -366,7 +366,7 @@ const sessions = booted.ctx.get("sessions") as {
  * their `agentPreset` field at 0.2.0 (NEW packages/api/session-controller/src/
  * types.ts:177-188), and a cold pre-upgrade session's projection cache holds
  * only the title hint, so the persisted header is the client's fallback for
- * bucketing bots vs Gravit (PLAN S8 "Server support for the client":
+ * bucketing bots vs gravit (PLAN S8 "Server support for the client":
  * `/data/channels.json` gains `presets: Record<sessionId, agentPreset>` built
  * from these heads). A header's preset is the one it was CREATED with; a live
  * re-selection shows in the projection, which the client prefers. */
@@ -484,7 +484,7 @@ disposeRoom = () => { room.dispose(); botRuntime.dispose(); };
 registerRoomRoutes(booted.ctx.webServer, room);
 /* The master rail's feeds: in-process reads of the booted tree (skills /
  * tools / loader), plus the local-agent roster — awaited, because every agent
- * already on the roster is registered as a tool for Gravit before the face
+ * already on the roster is registered as a tool for gravit before the face
  * reports itself up. */
 await registerPanelRoutes(booted.ctx.webServer, deps);
 /* Discover's abilities (abilities.ts): every `face/plugins/<folder>/ability.json`, read once
@@ -517,7 +517,7 @@ registerAbilityRoutes(booted.ctx.webServer, {
  * as none, it is started without being awaited: the desk session - cwd
  * `desk/journal/` under the repo root this process chdir'd to - is ensured and
  * supervised, and answers the phone. Otherwise (`router`) the phone waits for
- * `desk.bindRouter` below and reaches Gravit's one conversation, and the desk
+ * `desk.bindRouter` below and reaches gravit's one conversation, and the desk
  * session is never opened. Its
  * model route is `FACE_DESK_MODEL`, validated as a bot's route is and falling
  * back to the default with one line (`resolveDeskRoute`); only a desk that is on
@@ -588,7 +588,7 @@ if (memoryClockEnabled()) {
   memoryClock = installMemoryClock({ open: openMemory, log: (line) => { console.error(`${BIN}: ${line}`); } });
 }
 /* The conversation and its tasks (docs/superpowers/specs/2026-11-08-one-entry-router-design.md), unless
- * `FACE_ROUTER=0`: Gravit's one router session on `gravit-router` in `$DSH_HOME/face/conversation/`, found again
+ * `FACE_ROUTER=0`: gravit's one router session on `gravit-router` in `$DSH_HOME/face/conversation/`, found again
  * through the desk's ledger and supervised (src/conversation.ts), ensured here before any route can use it - a
  * conversation the face cannot open or trust is one line and the face starts without it (installRouter) - then the tasks over its
  * workers (src/tasks.ts): the five task tools and the two routine tools, `task_report`, `GET /data/tasks`, the relays, the boot's recovery notes,

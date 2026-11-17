@@ -3,7 +3,7 @@
 // Open orders), Money (plan 4b Task 2: Receive, an address per account and network on a press; Move, the move sheet from each
 // account money moves from, on a page that signs for an Account that takes writes; the payments waiting for the operator's
 // wallet), Venues (each venue with its health and what it does, its Details drawer; the A-share quotes line; the seat
-// box), Agents (Gravit's seat first — on a page that signs, while admitted, its Give a limit…, End limit… and Revoke…, and while it
+// box), Agents (gravit's seat first — on a page that signs, while admitted, its Give a limit…, End limit… and Revoke…, and while it
 // knocks its Let in… — then the Account's agents and the keys knocking; plan 4b Task 5: the Agent wallets, each with Top up… and
 // Take back… through the move sheet, and Open an agent wallet…), Cards (what waits for the owner, and
 // the agents' asks), Rules (plan 4a Task 5: the mode with its door-by-door rules, the cap on each move, the agents' session and
@@ -386,12 +386,12 @@ function keyStatusWord(status) {
 
 // the kinds of limit the face ends (host/sheet-view.js limitScopes)
 const SCOPES = new Set(['trade', 'venues', 'payees', 'earn']);
-// agents-mount.js:228 — what revoking a key does, asked before its sheet; Gravit's seat revoked stops Gravit's orders too
+// agents-mount.js:228 — what revoking a key does, asked before its sheet; gravit's seat revoked stops gravit's orders too
 const revokeWords = r => (r.gravit ? t('agents.revoke.seat', { name: r.name }) : t('agents.revoke.agent', { name: r.name }));
 
 // an agent's keys, by its address: Give a limit…, End limit… on each limit standing by its scope (its ids comma-joined, never *
 // but a payees limit's any payee), Revoke… — asked twice, the Account's words and the confirm for this agent in its place.
-// Gravit's own row has them while its seat is admitted (by the seat view's address and the seat's name) and, while it knocks,
+// gravit's own row has them while its seat is admitted (by the seat view's address and the seat's name) and, while it knocks,
 // Let in… on the one request at the seat view's address (never one bound by name alone); any other standing, none.
 function agentKeys(r, state) {
   if (r.gravit && r.seatStatus !== 'admitted') {
@@ -454,7 +454,7 @@ function agentsTab(state, now) {
       `${owner ? agentKeys(r, state) : ''}</div>`;
   }).join('');
   const status = a.agents.data === null ? note(a.agents.status === 'error' ? t('agents.unavailable') : t('common.loading')) : rows ? '' : note(t('agents.none'));
-  // the seat's own knock, bound by its address on Gravit's row, is let in there: listed once; any other request keeps its own
+  // the seat's own knock, bound by its address on gravit's row, is let in there: listed once; any other request keeps its own
   const seatKnock = all.find(r => r.gravit)?.request?.address ?? '';
   const knocking = requestsOf(a.data).filter(q => !seatKnock || q.address.toLowerCase() !== seatKnock.toLowerCase())
     .map(q => `<div class="venue"><span>${lines(q.name || t('agents.who.unnamed'), [[q.address, when(q.at, now)].filter(Boolean).join(' · ')])}</span>` +
@@ -506,7 +506,7 @@ function cardsTab(state, now) {
 // ── Rules (plan 4a Task 5) ──
 
 const rulesLead = () => t('rules.lead');
-// Beast lifts the Account's card alone: this face's own gate on Gravit's orders (face/src/orders.ts) stands in both modes
+// Beast lifts the Account's card alone: this face's own gate on gravit's orders (face/src/orders.ts) stands in both modes
 const gate2 = () => t('rules.gate2', { name: HOST_NAME });
 const usd = n => (n === null ? '—' : `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`);
 const ruleRow = (head, words, key = '') => `<div class="venue"><span>${lines(head, [words])}</span>${key}</div>`;

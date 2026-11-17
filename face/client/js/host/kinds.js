@@ -50,7 +50,7 @@ function typeWord(a) {
 // a seat write in words (spec 2026-10-20 §6.1): "buy $100 of AAPL · market · paper-1", "cancel ord-0001 · paper-1",
 // "move 50 USDC · withdraw from okx", "pay up to $2 · api.example.com"; a tool the face never classified is its raw name
 // one order in words, without its venue: "buy $100 of AAPL · market", "sell 10 AAPL · limit 187.4"
-// a seat order's side, Gravit's argument worded: buy and sell, any other as it came, none an order
+// a seat order's side, gravit's argument worded: buy and sell, any other as it came, none an order
 const sideWord = side => (side === 'buy' ? t('thread.seat.buy') : side === 'sell' ? t('thread.seat.sell') : has(side) ? side : t('thread.seat.order'));
 // a seat move's and a seat earn's kind, the Account's codes (portfolio_live_move, portfolio_live_earn) worded; any other as it came
 function moveKindWord(kind) {
@@ -137,8 +137,8 @@ export function seatLift(name, args, text, isError, callId) {
   return null;
 }
 
-// Gravit's composed answer (plan 2 of the Lunhui run view, task 4): an ok `lunhui_present` result is the face's own catalog
-// drawn from the run's view — the summary as Gravit wrote it, the blocks in the order the check confirmed them (each with
+// gravit's composed answer (plan 2 of the Lunhui run view, task 4): an ok `lunhui_present` result is the face's own catalog
+// drawn from the run's view — the summary as gravit wrote it, the blocks in the order the check confirmed them (each with
 // the call's title and focus), the choices, the view modules the answer reads. A refusal (a tool error: the turn goes on,
 // and a later ok call answers it) or any other tool lifts nothing, so only the ok call is drawn.
 export const PRESENT_TOOL = 'lunhui_present';
@@ -164,7 +164,7 @@ export function presentLift(name, args, text, isError, callId) {
     },
   };
 }
-// Gravit's proposed routine (desk-page plan 3 Task 3, spec 2026-11-14 §6.5): an ok `routine_propose` result is the routine
+// gravit's proposed routine (desk-page plan 3 Task 3, spec 2026-11-14 §6.5): an ok `routine_propose` result is the routine
 // card - its name, instruction, note and the routine it replaces as the call gave them, the proposal's id and the face's when
 // line from the result - so a card always shows what that call proposed, a later change notwithstanding; its state is the
 // routines read's (host/desk-page-view.js routineCardOf). A refusal (a tool error the model can fix) lifts nothing.
@@ -185,21 +185,21 @@ export function routineLift(name, args, text, isError, callId) {
     },
   };
 }
-// the tool results that lift a message of their own: a seat write's receipt or refusal, Gravit's composed answer, the routine card
+// the tool results that lift a message of their own: a seat write's receipt or refusal, gravit's composed answer, the routine card
 function liftOf(name, args, text, isError, callId) {
   const [prefix, lift] = isSeatWriteTool(name) ? ['r', seatLift(name, args, text, isError, callId)]
     : isProposeTool(name) ? ['u', routineLift(name, args, text, isError, callId)] : ['p', presentLift(name, args, text, isError, callId)];
   return lift && { id: `${prefix}${callId}`, ...lift };
 }
 
-// who a line is from when it is not Gravit's: the operator, and the face's own lines
+// who a line is from when it is not gravit's: the operator, and the face's own lines
 const NOT_GRAVIT = new Set(['you', 'system']);
-/** The ids of the Gravit words the thread does not draw (spec 2026-11-14 §6.5, "the reply is the card alone"): a turn whose
- *  last tool call is an ok `routine_propose` ends on its card, so Gravit's words after the card - up to the next message that
- *  is not Gravit's (the next turn's opening line), or the list's end - are its closing text. Another tool call after the card
+/** The ids of the gravit words the thread does not draw (spec 2026-11-14 §6.5, "the reply is the card alone"): a turn whose
+ *  last tool call is an ok `routine_propose` ends on its card, so gravit's words after the card - up to the next message that
+ *  is not gravit's (the next turn's opening line), or the list's end - are its closing text. Another tool call after the card
  *  makes them that call's, kept; words before the call are kept; a refused proposal lifts no card and hides nothing. The
  *  messages stay in the store (the preview, the turn rail's excerpt and the phone keep them); only the thread leaves them out.
- *  Gravit's words are told by who did NOT say them: the one conversation runs on the `gravit-router` preset, so its words
+ *  gravit's words are told by who did NOT say them: the one conversation runs on the `gravit-router` preset, so its words
  *  carry that preset as `from` (host/live.js speakerOf), never `gravit`; the operator's are `you`, the face's own `system`. */
 export function routineClosings(messages) {
   const out = new Set();
@@ -272,7 +272,7 @@ function bubble(view, speaker) {
 }
 
 // a task's message (one-entry plan 2, the face's src/task-*.ts): a report relayed into the conversation, and in a worker its
-// brief, a steer Gravit relayed, a recovery note, a stop. A report's head `[task · <title> · <status>]` gives the title (the
+// brief, a steer gravit relayed, a recovery note, a stop. A report's head `[task · <title> · <status>]` gives the title (the
 // text up to the head's last ` · `) and its fenced body; a brief loses the footer the face appends after its last `---` line
 const TASK_FORMS = new Set(['report', 'brief', 'steer', 'recovery', 'stopped']);
 const RELAY_HEAD = '[task · ';

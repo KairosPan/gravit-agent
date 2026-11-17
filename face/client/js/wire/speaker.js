@@ -7,7 +7,7 @@
  *
  * THE BUG THIS CLOSES (R12). A bot's home session answered in the bot's
  * persona and the sidebar filed it under the bot's name, but the four surfaces
- * in `chat.js` that NAME the speaker each wrote a literal `Gravit`: the `who`
+ * in `chat.js` that NAME the speaker each wrote a literal `gravit`: the `who`
  * element over an assistant bubble, the ask card's `… asks` head, the composer
  * placeholder, and the status pulse. Four surfaces, one name, as many agents
  * as the operator had bots.
@@ -21,7 +21,7 @@
  * row - preset projection first, persisted header second - before it reaches here.)
  *
  * THE FALLBACK DIRECTION IS THE POINT. An unknown preset (a deleted bot, a
- * roster fetch that failed) degrades to the ID, never to `Gravit`. Labelling a
+ * roster fetch that failed) degrades to the ID, never to `gravit`. Labelling a
  * bot's words as the host's is the failure worth avoiding; an unlovely
  * `buffett-type` over a bubble is not. Fail-away-from-the-host.
  * @module
@@ -29,7 +29,7 @@
 import { t } from "../i18n/words.js";
 
 /** The host agent's display name — the label for every session no bot owns. */
-export const HOST_NAME = "Gravit"; // en-kept: the agent's name
+export const HOST_NAME = "gravit"; // en-kept: the agent's name
 
 /** The preset ids that ARE the host: `gravit`, and `kairos` — the same agent's
  *  id before the 2026-10-08 rename, which archived sessions still carry and the
@@ -42,9 +42,9 @@ export function isHostPreset(id) {
   return typeof id === "string" && HOST_PRESETS.includes(id);
 }
 
-/** The desk's preset: Gravit on the desk, informing from the phone and the
+/** The desk's preset: gravit on the desk, informing from the phone and the
  *  clock (src/desk-names.ts spells the same id, and src/bots.ts reserves it, so
- *  no bot can take it). It speaks as Gravit, but it is NOT a host preset: the
+ *  no bot can take it). It speaks as gravit, but it is NOT a host preset: the
  *  host-only controls - delegating a subtask (chat.js) - are no desk session's. */
 export const DESK_PRESET = "gravit-desk";
 
@@ -61,11 +61,11 @@ export const ROLE_PRESET_PREFIX = "role-";
 
 /**
  * The voice a session speaks with: `Role · <id>` for a role child's preset
- * (B11: a role child's page shows its role, not Gravit and not the raw preset
+ * (B11: a role child's page shows its role, not gravit and not the raw preset
  * id), a bot's display name when `agentPreset` names one (never a host id,
  * never the desk's, and never a blank string — a header field present but
  * empty is no preset at all), the bot's id when the roster has no name for
- * it, else Gravit - the host's sessions and the desk's.
+ * it, else gravit - the host's sessions and the desk's.
  * @param {{agentPreset?: unknown}|null|undefined} summary - the session
  *   summary from `session/list` (normalized by summaries.js) or `session/create`,
  *   or `null` for no session.

@@ -1,6 +1,6 @@
 // face/client/js/host/run-sheet.js — a module card's Run sheet from the face (module cards spec §4 G6, §5.4–§5.5): open it
 // from the modules listing, recompute it on every field against the listing as it stands, and Run it as one message to
-// Gravit's one conversation (one-entry plan 2, spec §5.13): the module's request under a first line asking for a task
+// gravit's one conversation (one-entry plan 2, spec §5.13): the module's request under a first line asking for a task
 // titled exactly as the card's chip will find it — no session created. Impure; nothing here draws (render/run-sheet.js),
 // every word is the view's (host/run-sheet-view.js).
 import { newSheet, sheetOf, titleOf, askOf } from './run-sheet-view.js';

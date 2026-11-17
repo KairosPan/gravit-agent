@@ -67,7 +67,7 @@ test('the table: its sections, its labels by platform, and words from EN', () =>
     assert.ok(Object.hasOwn(EN, r.words), `${r.id}: ${r.words} is an EN key`);
     assert.equal(shortcutWords(r), EN[r.words]);
   }
-  assert.deepEqual(SHORTCUTS.map(shortcutWords), ['Write to Gravit', 'Search conversations', 'Settings', 'This sheet', 'Send', 'New line',
+  assert.deepEqual(SHORTCUTS.map(shortcutWords), ['Write to gravit', 'Search conversations', 'Settings', 'This sheet', 'Send', 'New line',
     'Commands and skills', 'Files, conversations, bots', 'Close a menu, sheet or drawer']);
 });
 

@@ -61,7 +61,7 @@ function byName(definitions: readonly DeskToolDefinition[], name: string): DeskT
   return found;
 }
 
-test("a gravit-desk agent gets the desk tools and web_fetch once; a Gravit agent gets none", () => {
+test("a gravit-desk agent gets the desk tools and web_fetch once; a gravit agent gets none", () => {
   const root = fakeRoot();
   const definitions = deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus });
   const dispose = installDeskTools(root.ctx, definitions);
@@ -77,7 +77,7 @@ test("a gravit-desk agent gets the desk tools and web_fetch once; a Gravit agent
   const bare = fakeAgent("bare-1", undefined);
   root.create(gravit.agent);
   root.create(bare.agent);
-  assert.deepEqual(gravit.names(), [], "Gravit's agents never get them");
+  assert.deepEqual(gravit.names(), [], "gravit's agents never get them");
   assert.deepEqual(bare.names(), [], "nor does an agent joined to no preset");
 
   dispose();
@@ -97,7 +97,7 @@ test("a desk agent live before install gets the desk tools and web_fetch from th
   installDeskTools(root.ctx, deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }));
   assert.deepEqual(root.calls, ["on", "list"], "the listener first, then the sweep, in the same tick: no agent falls between them");
   assert.deepEqual(before.names(), ["desk_quotes", "desk_state", "desk_headlines", "web_fetch"], "a desk agent already live is swept");
-  assert.deepEqual(gravit.names(), [], "a Gravit agent is not");
+  assert.deepEqual(gravit.names(), [], "a gravit agent is not");
   assert.deepEqual(composing.names(), [], "nor one whose preset is not mounted yet");
 
   root.create(before.agent);
@@ -576,7 +576,7 @@ test("the fetch record takes a session's own word when the registry throws, and 
   assert.equal((await dispatch(root, callFrom(DESK_PRESET, "web_fetch", { url: "https://example.com/a" }))).ran, true);
   assert.deepEqual(recorded, [{ sessionId: "desk-session-1", url: "https://example.com/a" }], "a session created as the desk's is the desk's");
   assert.equal((await dispatch(root, callFrom("gravit", "web_fetch", { url: "https://example.com/b" }, "gravit-session"))).ran, true);
-  assert.equal(recorded.length, 1, "one created as Gravit's is not");
+  assert.equal(recorded.length, 1, "one created as gravit's is not");
   assert.equal(lines.length, 1, "the registry's failure for it is one line");
   assert.match(lines[0], /could not read agent agent-gravit-session's preset/);
   assert.equal((await dispatch(root, callFrom(DESK_PRESET, "web_fetch", { url: "https://example.com/fails" }))).ran, true, "the fetch goes on");
@@ -611,7 +611,7 @@ test("the guard judges a gravit-router agent: <root>/.env.deepseek, a relative p
   await deny(routerCall("read", { file_path: "/Users/pan/.dsh/.credentials.yaml" }), "a path outside the repository");
   await deny(routerCall("grep", { pattern: "x", path: "/etc" }), "a grep outside the repository");
   assert.equal((await dispatch(root, routerCall("read", { file_path: "/repo/strategies/x/status.yaml" }))).ran, true, "a strategy's file by absolute path");
-  /* Gravit's own read of the key file is not this guard's to judge */
+  /* gravit's own read of the key file is not this guard's to judge */
   assert.equal((await dispatch(root, callFrom("gravit", "read", { file_path: "/repo/.env.deepseek" }, "gravit-session"))).ran, true);
   await dispose();
 });

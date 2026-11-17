@@ -2,10 +2,10 @@
  *
  * THE BUG THIS CLOSES (R12). A bot's home session answers in the bot's
  * persona and the sidebar files it under the bot's name, but the four surfaces
- * in `chat.js` that NAME the speaker each wrote the literal `Gravit`: the
+ * in `chat.js` that NAME the speaker each wrote the literal `gravit`: the
  * `who` element over an assistant bubble, the ask card's `… asks` head, the
  * composer placeholder, and the status pulse. The operator running two bots
- * saw every pane claiming to be Gravit.
+ * saw every pane claiming to be gravit.
  *
  * WHAT IT IS NOT. It is not attribution. Nothing here decides which agent
  * actually produced a frame — it reads the SESSION's own `agentPreset` header,
@@ -14,7 +14,7 @@
  * one room log, is plan 3 and does not exist yet.
  *
  * The one property worth pinning is the fallback direction: an unknown preset
- * must degrade to the ID, never to `Gravit`. Claiming the host said something
+ * must degrade to the ID, never to `gravit`. Claiming the host said something
  * a bot said is the failure mode; an ugly `buffett-type` label is not.
  */
 import test from "node:test";
@@ -73,7 +73,7 @@ test("an unlisted preset is its own id - a deleted bot, or a roster that never l
   assert.equal(speakerFor({ agentPreset: "ghost" }, null as any), "ghost");
 });
 
-test("the FALLBACK is never the host: no bot is labelled Gravit by DEFAULT", () => {
+test("the FALLBACK is never the host: no bot is labelled gravit by DEFAULT", () => {
   // Every id here is dsh's preset grammar `[a-z0-9][a-z0-9-]*` minus `gravit`
   // — the closed domain `createBot` (src/bots.ts) admits. The id fallback is
   // safe precisely because a lowercase-only id can never BE the host's name.
@@ -84,15 +84,15 @@ test("the FALLBACK is never the host: no bot is labelled Gravit by DEFAULT", () 
       assert.notEqual(speakerFor({ agentPreset: preset }, roster), HOST_NAME, `${preset} in ${roster.length}-row roster`);
     }
   }
-  // Not a property of the OUTPUT: a roster may legitimately name a bot Gravit,
-  // and then Gravit is what the transcript writes. That is the roster's own
+  // Not a property of the OUTPUT: a roster may legitimately name a bot gravit,
+  // and then gravit is what the transcript writes. That is the roster's own
   // choice, deliberate and visible, not this function falling back to it.
   assert.equal(speakerFor({ agentPreset: "x" }, [{ id: "x", name: HOST_NAME }]), HOST_NAME);
 });
 
 test("isHostPreset: exactly gravit and its pre-rename id kairos", () => {
   assert.deepEqual([...HOST_PRESETS], ["gravit", "kairos"]);
-  assert.equal(HOST_NAME, "Gravit");
+  assert.equal(HOST_NAME, "gravit");
   for (const id of HOST_PRESETS) assert.equal(isHostPreset(id), true, id);
   for (const id of ["gravit-2", "gravits", "kairos-2", "kaiross", "Gravit", " gravit", "", null, undefined, 42, {}]) {
     assert.equal(isHostPreset(id), false, JSON.stringify(id));
@@ -104,7 +104,7 @@ test("a session recorded under the pre-rename id speaks as the host", () => {
   assert.equal(speakerFor({ agentPreset: "kairos" }, [{ id: "kairos", name: "Impostor" }]), HOST_NAME);
 });
 
-test("the desk's sessions speak as Gravit, though the desk is not the host's preset", () => {
+test("the desk's sessions speak as gravit, though the desk is not the host's preset", () => {
   // src/desk-names.ts spells the same id; the face reserves it, so no bot can take it (src/bots.ts RESERVED_IDS).
   assert.equal(DESK_PRESET, "gravit-desk");
   assert.equal(isDeskPreset("gravit-desk"), true);
@@ -119,7 +119,7 @@ test("the desk's sessions speak as Gravit, though the desk is not the host's pre
   assert.equal(speakerFor({ agentPreset: "gravit-desk" }, [{ id: "gravit-desk", name: "Impostor" }]), HOST_NAME, "no roster row renames the desk");
 });
 
-test("a role child speaks as its role: `role-<id>` is `Role · <id>`, never Gravit and never a roster name (B11)", () => {
+test("a role child speaks as its role: `role-<id>` is `Role · <id>`, never gravit and never a roster name (B11)", () => {
   // A role's preset is `role-<id>` (src/roles.ts `rolePresetId`); src/bots.ts refuses the prefix as a bot id.
   assert.equal(ROLE_PRESET_PREFIX, "role-");
   assert.equal(speakerFor({ agentPreset: "role-cn-reviewer" }, bots), "Role · cn-reviewer");

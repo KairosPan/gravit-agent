@@ -24,7 +24,7 @@ const lacks = (html, fragment, why = fragment) => assert.ok(!html.includes(fragm
 // spec 2026-10-20 §6.3: the Account seat's standing as /data/seat.json serves it
 const seatView = (over = {}) => ({
   ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-22T07:32:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, cardMinutes: 30,
-  seat: { name: 'Gravit', status: 'admitted', address: '0xab12', validUntil: new Date(2026, 10, 19).getTime(), limits: [{ scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 100, reservedUsd: 50, leftUsd: 850, validUntil: 1, expired: false }] },
+  seat: { name: 'gravit', status: 'admitted', address: '0xab12', validUntil: new Date(2026, 10, 19).getTime(), limits: [{ scope: 'trade', allow: ['paper-1'], perOrderUsd: 100, budgetUsd: 1000, spentUsd: 100, reservedUsd: 50, leftUsd: 850, validUntil: 1, expired: false }] },
   venues: [{ id: 'paper-1', name: 'Paper account · paper', paper: true, usd: 10000 }, { id: 'okx', name: 'OKX', paper: false, usd: 0, stale: true, notServed: 'OKX does not serve this location' }],
   cards: [{ id: 'card-7', usd: 56 }, { id: 'card-9', usd: 12 }], others: 1, ...over,
 });
@@ -269,7 +269,7 @@ test('Venues: the rows with health, does and Paper; Details opens the drawer; th
   has(html, '<section class="cardbox" aria-label="Account seat"><div class="cardbox-title">Account seat</div><p class="acct-note">Loading…</p>');
   const seat = draw(state({ tab: 'venues', seat: seatView() })).match(SEAT_BOX)?.[0] ?? '';
   has(seat, '<div class="venue"><span><b>127.0.0.1:4820 · reachable</b><br><span class="dim">Guard · Trading on · $100 a move</span></span></div>');
-  has(seat, '<div class="venue"><span><b>Gravit · admitted until Nov 19</b><br><span class="dim">trade · paper-1 · $100 an order · $850 of $1,000 left</span></span></div>');
+  has(seat, '<div class="venue"><span><b>gravit · admitted until Nov 19</b><br><span class="dim">trade · paper-1 · $100 an order · $850 of $1,000 left</span></span></div>');
   has(seat, '<div class="venue"><span><b>Paper account · paper</b> <span class="chip grey">Paper</span><br><span class="dim">$10,000</span></span></div>');
   has(seat, `<p class="acct-note">2 cards waiting · As of ${hhmm('2026-10-22T07:32:00.000Z')}</p>`);
   has(seat, '<div class="btn-row"><button type="button" class="btn-sm" data-action="refreshAccount">Refresh</button><a class="btn-sm" href="#/account/cards">Answer under Cards</a></div>');
@@ -284,20 +284,20 @@ test('Venues: the rows with health, does and Paper; Details opens the drawer; th
   assert.ok(html.indexOf('aria-label="Venues"') < html.indexOf('aria-label="Account seat"'), 'the seat box under the venues');
 });
 
-test('Agents: Gravit first, the stand-in agent after with its limit words; Knocking requests', () => {
+test('Agents: gravit first, the stand-in agent after with its limit words; Knocking requests', () => {
   const page = fx('account');
   const html = draw(state({ tab: 'agents', seat: seatView(), page: { ...page, requests: [{ address: '0xab12', name: 'Scout', at: '2026-10-22T07:30:00.000Z' }] } }));
   const agents = html.match(/<section class="cardbox" aria-label="Agents">[\s\S]*?<\/section>/)?.[0] ?? '';
-  has(agents, '<div class="cardbox-title">Agents</div><div class="venues"><div class="venue"><span><b>Gravit · admitted until Nov 19</b>' +
-    '<br><span class="dim">trade · paper-1 · $100 an order · $850 of $1,000 left</span><br><span class="dim">Cards 0 · Open orders 0</span></span></div>', "Gravit's seat first, its counts the Account's");
+  has(agents, '<div class="cardbox-title">Agents</div><div class="venues"><div class="venue"><span><b>gravit · admitted until Nov 19</b>' +
+    '<br><span class="dim">trade · paper-1 · $100 an order · $850 of $1,000 left</span><br><span class="dim">Cards 0 · Open orders 0</span></span></div>', "gravit's seat first, its counts the Account's");
   has(agents, `<div class="venue"><span><b>Claude Code</b><br><span class="dim">ok · until ${fmtDate(Date.parse('2026-11-21T07:35:46.778Z'))}</span>` +
     '<br><span class="dim">trade · ex, predict, wallet · $150 an order · $380.01 of $600 left</span>' +
     '<br><span class="dim">venues · ex, agent-claude-code · $50 an order · $200 of $200 left</span>' +
     '<br><span class="dim">payees · api.example.com · $2 an order · $20 of $20 left</span><br><span class="dim">Cards 1 · Open orders 1</span></span></div>');
-  assert.ok(agents.indexOf('Gravit ·') < agents.indexOf('Claude Code'));
+  assert.ok(agents.indexOf('gravit ·') < agents.indexOf('Claude Code'));
   has(agents, `<div class="label">Knocking</div><div class="venues"><div class="venue"><span><b>Scout</b><br><span class="dim">0xab12 · ${hhmm('2026-10-22T07:30:00.000Z')}</span></span></div></div>`);
   lacks(draw(state({ tab: 'agents', seat: seatView() })), 'Knocking', 'nobody knocking: no label');
-  // the agents not read yet: Gravit's counts unknown, never 0 and never null; then the list's state
+  // the agents not read yet: gravit's counts unknown, never 0 and never null; then the list's state
   const unread = draw(state({ tab: 'agents', seat: seatView(), agents: null }));
   has(unread, '<span class="dim">Cards — · Open orders —</span>');
   has(unread, '</div><p class="acct-note">Loading…</p>');
@@ -421,7 +421,7 @@ test('no CJK, no icon URL, no raw JSON in any rendered string', () => {
   }
   states.push(R.openStatement(state()), R.openStatement(state({ statement: null })), R.openSettings(state()),
     state({ tab: 'venues', seat: { ok: true, url: 'http://127.0.0.1:4820', reachable: false, error: 'ECONNREFUSED' } }),
-    state({ tab: 'agents', seat: seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } }), agents: null }));
+    state({ tab: 'agents', seat: seatView({ seat: { name: 'gravit', status: 'knocking', limits: [] } }), agents: null }));
   for (const s of states) {
     const html = draw(s) + renderStatement(s, NOW) + renderSettings(s);
     // Settings' Language seg names 中文 in its own script (i18n/langs.js), under both tables; nothing else is Chinese
@@ -475,13 +475,13 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
     sheetKey('endLimit', { address: CC, name: 'Claude Code', scope: 'venues', allow: 'ex,agent-claude-code' }, 'End limit…') +
     sheetKey('endLimit', { address: CC, name: 'Claude Code', scope: 'payees', allow: 'api.example.com' }, 'End limit…') +
     `<button type="button" class="btn-danger" data-action="askRevoke" data-address="${CC}" data-name="Claude Code">Revoke…</button></span></div>`);
-  assert.equal((agents.match(/data-kind="endLimit"/g) ?? []).length, 4, "every limit standing, Gravit's trade limit among them");
+  assert.equal((agents.match(/data-kind="endLimit"/g) ?? []).length, 4, "every limit standing, gravit's trade limit among them");
   // Revoke… asks twice: the confirm for this agent stands in its place
   const asking = box(draw(R.askConfirm(signing(state({ tab: 'agents', seat: seatView() })), { action: 'revoke', name: 'Claude Code', address: CC })), 'Agents');
   has(asking, 'data-allow="api.example.com">End limit…</button><span class="dim">Revoke Claude Code? Its key can do nothing on this account from then on, and cannot be let in again under the same key: a new key is needed. Its limits end with it.</span>' +
     '<span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, revoke</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></span></div>');
   lacks(asking, `data-action="askRevoke" data-address="${CC}"`);
-  has(asking, 'data-action="askRevoke" data-address="0xab12" data-name="Gravit"', "Gravit's own stands");
+  has(asking, 'data-action="askRevoke" data-address="0xab12" data-name="gravit"', "gravit's own stands");
   has(box(draw(R.askConfirm(signing(state({ tab: 'agents' })), { action: 'revoke', name: 'Someone else', address: '0xb0b' })), 'Agents'), 'data-action="askRevoke"', 'a confirm for another agent leaves this one');
   // each limit standing gets End limit…, its ids comma-joined, never * (but a payees limit's any payee); an expired one, or one
   // naming nothing, none
@@ -541,7 +541,7 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
   }
 });
 
-// plan 4b Task 5: the Agent wallets, each with Top up… and Take back… through the move sheet, and Open an agent wallet…; Gravit's
+// plan 4b Task 5: the Agent wallets, each with Top up… and Take back… through the move sheet, and Open an agent wallet…; gravit's
 // own row with Give a limit…, End limit… and Revoke… while admitted, and Let in… while it knocks
 const sheetKeyOf = (kind, data, word) => `<button type="button" class="btn-sm" data-action="openSheet" data-kind="${kind}"${Object.entries(data).map(([k, v]) => ` data-${k}="${v}"`).join('')}>${word}</button>`;
 const boxOf = (html, label) => html.match(new RegExp(`<section class="cardbox" aria-label="${label}">[\\s\\S]*?</section>`))?.[0] ?? '';
@@ -581,39 +581,39 @@ test("the Agents tab's wallet rows and keys", () => {
   has(boxOf(draw(signingAs(state({ tab: 'agents', page: odd }))), 'Agent wallets'), '<b>&lt;b&gt;x&lt;/b&gt;</b><br><span class="dim">pays for &quot;Bob&quot; · ');
 });
 
-test("Gravit's row: Revoke…, Give a limit… and End limit… on a page that signs, none on one that does not; Let in… while it knocks", () => {
-  const gravitRow = html => boxOf(html, 'Agents').match(/<div class="venue"><span><b>Gravit · [\s\S]*?<\/div>/)?.[0] ?? '';
+test("gravit's row: Revoke…, Give a limit… and End limit… on a page that signs, none on one that does not; Let in… while it knocks", () => {
+  const gravitRow = html => boxOf(html, 'Agents').match(/<div class="venue"><span><b>gravit · [\s\S]*?<\/div>/)?.[0] ?? '';
   const row = gravitRow(draw(signingAs(state({ tab: 'agents', seat: seatView() }))));
   has(row, '<span class="dim">Cards 0 · Open orders 0</span></span><span class="btn-row">' +
-    sheetKeyOf('limit', { address: '0xab12', name: 'Gravit' }, 'Give a limit…') +
-    sheetKeyOf('endLimit', { address: '0xab12', name: 'Gravit', scope: 'trade', allow: 'paper-1' }, 'End limit…') +
-    '<button type="button" class="btn-danger" data-action="askRevoke" data-address="0xab12" data-name="Gravit">Revoke…</button></span></div>');
-  // Revoke… asked first, in words that say Gravit's orders stop
-  const asking = gravitRow(draw(R.askConfirm(signingAs(state({ tab: 'agents', seat: seatView() })), { action: 'revoke', name: 'Gravit', address: '0xab12' })));
-  has(asking, `<span class="dim">Revoke Gravit? Its key can do nothing on this account from then on: ${esc("Gravit's")} orders stop, and it places and moves nothing more. ` +
+    sheetKeyOf('limit', { address: '0xab12', name: 'gravit' }, 'Give a limit…') +
+    sheetKeyOf('endLimit', { address: '0xab12', name: 'gravit', scope: 'trade', allow: 'paper-1' }, 'End limit…') +
+    '<button type="button" class="btn-danger" data-action="askRevoke" data-address="0xab12" data-name="gravit">Revoke…</button></span></div>');
+  // Revoke… asked first, in words that say gravit's orders stop
+  const asking = gravitRow(draw(R.askConfirm(signingAs(state({ tab: 'agents', seat: seatView() })), { action: 'revoke', name: 'gravit', address: '0xab12' })));
+  has(asking, `<span class="dim">Revoke gravit? Its key can do nothing on this account from then on: ${esc("gravit's")} orders stop, and it places and moves nothing more. ` +
     'It cannot be let in again under the same key: a new key is needed. Its limits end with it.</span><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, revoke</button>');
-  // a page that does not sign: Gravit's row has no key
+  // a page that does not sign: gravit's row has no key
   for (const role of ['pending', 'none', 'needs-code', 'signed-out', 'unknown']) {
     const quiet = gravitRow(draw(signingAs(state({ tab: 'agents', seat: seatView() }), role)));
-    has(quiet, 'Gravit · admitted', role);
+    has(quiet, 'gravit · admitted', role);
     for (const k of ['data-action="openSheet"', 'data-action="askRevoke"']) lacks(quiet, k, `${role}: ${k}`);
   }
   // knocking: Let in… on the one request at the seat view's address, listed once; no limit or Revoke… yet
-  const page = { ...fx('account'), requests: [{ address: '0xfeed', name: 'Gravit', at: '2026-10-22T07:30:00.000Z' }, { address: '0xab34', name: 'Scout', at: '' }] };
-  const knocks = seatView({ seat: { name: 'Gravit', status: 'knocking', address: '0xFEED', limits: [] } });
+  const page = { ...fx('account'), requests: [{ address: '0xfeed', name: 'gravit', at: '2026-10-22T07:30:00.000Z' }, { address: '0xab34', name: 'Scout', at: '' }] };
+  const knocks = seatView({ seat: { name: 'gravit', status: 'knocking', address: '0xFEED', limits: [] } });
   const agents = boxOf(draw(signingAs(state({ tab: 'agents', seat: knocks, page }))), 'Agents');
-  has(gravitRow(agents), `<span class="btn-row">${sheetKeyOf('letIn', { address: '0xfeed', name: 'Gravit' }, 'Let in…')}</span></div>`);
+  has(gravitRow(agents), `<span class="btn-row">${sheetKeyOf('letIn', { address: '0xfeed', name: 'gravit' }, 'Let in…')}</span></div>`);
   for (const k of ['data-kind="limit"', 'data-action="askRevoke"']) lacks(gravitRow(agents), k);
   assert.equal((agents.match(/data-address="0xfeed"/g) ?? []).length, 1, 'the seat knocks on its own row, not again under Knocking');
   has(agents, sheetKeyOf('letIn', { address: '0xab34', name: 'Scout' }, 'Let in…'));
-  // no address on the seat view: a request named "Gravit" is not bound — no key on Gravit's row, listed under Knocking with its own Let in…
-  const unbound = boxOf(draw(signingAs(state({ tab: 'agents', seat: seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } }), page }))), 'Agents');
+  // no address on the seat view: a request named "gravit" is not bound — no key on gravit's row, listed under Knocking with its own Let in…
+  const unbound = boxOf(draw(signingAs(state({ tab: 'agents', seat: seatView({ seat: { name: 'gravit', status: 'knocking', limits: [] } }), page }))), 'Agents');
   lacks(gravitRow(unbound), 'data-action=');
-  has(unbound, `<div class="label">Knocking</div><div class="venues"><div class="venue"><span><b>Gravit</b>`);
-  has(unbound, sheetKeyOf('letIn', { address: '0xfeed', name: 'Gravit' }, 'Let in…'));
+  has(unbound, `<div class="label">Knocking</div><div class="venues"><div class="venue"><span><b>gravit</b>`);
+  has(unbound, sheetKeyOf('letIn', { address: '0xfeed', name: 'gravit' }, 'Let in…'));
   has(unbound, sheetKeyOf('letIn', { address: '0xab34', name: 'Scout' }, 'Let in…'));
   // knocking with no request at its address, or an expired or revoked seat: no key on its row
-  for (const seat of [knocks, seatView({ seat: { name: 'Gravit', status: 'expired', address: '0xab12', limits: [] } }), seatView({ seat: { name: 'Gravit', status: 'revoked', address: '0xab12', limits: [] } })]) {
+  for (const seat of [knocks, seatView({ seat: { name: 'gravit', status: 'expired', address: '0xab12', limits: [] } }), seatView({ seat: { name: 'gravit', status: 'revoked', address: '0xab12', limits: [] } })]) {
     lacks(gravitRow(draw(signingAs(state({ tab: 'agents', seat })))), 'data-action=', seat.seat.status);
   }
 });
@@ -703,7 +703,7 @@ test('the tabs are Portfolio · Money · Venues · Agents · Cards · Rules · I
   has(html, '<a class="seg-item pressed" aria-current="page" href="#/account/identity">Identity</a>');
   // the three cards, in order
   const at = label => html.indexOf(`<section class="cardbox" aria-label="${label}">`);
-  assert.ok(at('Gravit') > 0 && at('Gravit') < at('What reaches you where') && at('What reaches you where') < at('Not you'), 'Gravit, What reaches you where, Not you');
+  assert.ok(at('gravit') > 0 && at('gravit') < at('What reaches you where') && at('What reaches you where') < at('Not you'), 'gravit, What reaches you where, Not you');
   has(html, '@gravit_desk_bot');
   // not the Portfolio's body
   lacks(html, 'aria-label="Portfolio"');
@@ -718,7 +718,7 @@ test('the tabs are Portfolio · Money · Venues · Agents · Cards · Rules · I
 const RULES_KID = 'a5048199a8081854';
 const signingRules = s => R.ownerStanding(s, { role: 'signs', kid: RULES_KID });
 const rulesKey = (kind, word) => `<button type="button" class="btn-sm" data-action="openSheet" data-kind="${kind}">${word}</button>`;
-const GATE2 = "Beast removes the Account's card only: Gravit's orders still raise their Gate 2 card in this face first.";
+const GATE2 = "Beast removes the Account's card only: gravit's orders still raise their Gate 2 card in this face first.";
 const LEAD = 'Guard: what agents ask for waits for you on a card. Beast: inside the limits you signed, it goes at once. Guard is one click; Beast is signed.';
 
 test('Rules on a writes-on page that signs: Mode, the door rules, each move, the session, their leverage, every key and the Gate 2 sentence', () => {

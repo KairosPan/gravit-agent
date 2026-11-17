@@ -313,10 +313,10 @@ test("Connect Telegram's lines, and a connected network's trouble, each in its w
   const problem = n => identityOf({ ok: true, networks: [{ network: 'telegram', state: 'connected', ...n }] }).networks.telegram.problem;
   assert.deepEqual(problem({ pollFailing: {} }), 'Not hearing Telegram.');
   assert.deepEqual(problem({ pollFailing: { reason: '<502> & down' } }), 'Not hearing Telegram: <502> & down.');
-  assert.deepEqual(problem({ conflictAt: 'x' }), "Another program reads this bot's messages (since x): stop it, or Gravit hears nothing.");
+  assert.deepEqual(problem({ conflictAt: 'x' }), "Another program reads this bot's messages (since x): stop it, or gravit hears nothing.");
   const slack = n => identityOf({ ok: true, networks: [{ network: 'slack', state: 'connected', ...n }] }).networks.slack.problem;
   assert.deepEqual(slack({ pollFailing: { since: 'y', reason: 'socket closed' } }), 'Not hearing Slack since y: socket closed.');
-  assert.deepEqual(slack({ conflictAt: 'x' }), "Another program holds this app's connection to Slack (since x): stop it, or Gravit hears nothing.");
+  assert.deepEqual(slack({ conflictAt: 'x' }), "Another program holds this app's connection to Slack (since x): stop it, or gravit hears nothing.");
   assert.equal(slack({ blocked: true }), undefined, 'blocked is Telegram\'s alone');
   const imessage = n => identityOf({ ok: true, networks: [{ network: 'imessage', state: 'connected', ...n }] }, null, iso => iso, Date.parse('2026-11-04T15:00:00.000Z')).networks.imessage.problem;
   assert.deepEqual(imessage({ pollFailing: { since: 'y', reason: 'auth' } }), 'Not hearing iMessage since y: auth.');
@@ -447,10 +447,10 @@ test("a channel's, Discover's, the Run sheet's and the run view's host lines as 
   const listed = startRunSheet({ store: rs, actions: { send: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => 0 });
   await listed.open('theme');
   await listed.run();
-  follows(rs.get().runSheet.said, "Gravit's conversation is not known yet — open Messages");
+  follows(rs.get().runSheet.said, "gravit's conversation is not known yet — open Messages");
   rs.dispatch('tasksLoaded', { conversation: 'c-gravit', tasks: [], at: 0 });
   await listed.run();
-  follows(rs.get().runSheet.said, "Couldn't send to Gravit's conversation");
+  follows(rs.get().runSheet.said, "Couldn't send to gravit's conversation");
   // the run view's failure words (host/lunhui.js), as the slice holds them: an answer with no view, a read failed in no words
   const RUN = '20261027T201627Z-6937d208';
   const msg = id => ({ id, seq: 1, at: 1, from: 'gravit', kind: 'composed', text: 's', data: { strategy: 'cn-market', run: RUN, blocks: [], choices: [], modules: [id] } });

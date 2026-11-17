@@ -22,7 +22,7 @@ const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => 
 const sha256hex = (saltHex, token) => createHash('sha256').update(Buffer.from(saltHex, 'hex')).update(Buffer.from(token, 'utf8')).digest('hex');
 
 const PENDING = {
-  id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' },
+  id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'gravit' },
   link: 'https://t.me/gravit_desk_bot', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'waiting',
 };
 const HEARD = { ...PENDING, state: 'heard', sender: { id: '555000123', name: 'Pan', handle: '@pan', masked: '…123', text: '/start' } };
@@ -522,7 +522,7 @@ const APP = ['xa', 'pp-1-A0FAKE0001-1234567-', 'ab'.repeat(32)].join('');
 const BOT = ['xo', 'xb-', '1111111-2222222-', 'FakeBotTokenForTestsOnly00'].join('');
 const sha256pair = (saltHex, app, bot) => createHash('sha256').update(Buffer.from(saltHex, 'hex')).update(Buffer.from(`${app}\u0000${bot}`, 'utf8')).digest('hex');
 const SLACK_PENDING = {
-  id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit', workspace: 'Fake Co' },
+  id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'gravit', workspace: 'Fake Co' },
   workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+',
   expiresAt: '2026-11-04T15:10:00.000Z', state: 'waiting',
 };
@@ -602,8 +602,8 @@ test('sheet 2: Say hi with the app_redirect link, its QR, the workspace and the 
   assert.ok(r.gets[0].startsWith(`/data/account/identity/pending?id=${SLACK_PENDING.id}`));
   const two = renderConnectDrawer(r.store.get());
   assert.match(two, /<h2>Connect Slack · 2 of 3 · Say hi<\/h2>/);
-  assert.match(two, /<a href="https:\/\/slack\.com\/app_redirect\?app=A0FAKE0001&amp;team=T0FAKE001" target="_blank" rel="noopener noreferrer">Open Gravit in Fake Co<\/a>/);
-  assert.match(two, /<img class="identity-qr" src="data:image\/svg\+xml;base64,PHN2Zy8\+" alt="QR code for Gravit&#39;s app in Fake Co"/);
+  assert.match(two, /<a href="https:\/\/slack\.com\/app_redirect\?app=A0FAKE0001&amp;team=T0FAKE001" target="_blank" rel="noopener noreferrer">Open gravit in Fake Co<\/a>/);
+  assert.match(two, /<img class="identity-qr" src="data:image\/svg\+xml;base64,PHN2Zy8\+" alt="QR code for gravit&#39;s app in Fake Co"/);
   assert.match(two, /Workspace: Fake Co/);
   assert.match(two, /This connection waits until 10:10 ET; after that, start again\./);
   // a link that is not Slack's app_redirect is no link and no QR

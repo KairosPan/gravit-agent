@@ -1,10 +1,10 @@
 // face/src/roles.ts
 /** The role library: one directory per role under `roles/<id>/`.
  *
- * A role is a one-shot child Gravit hands a bounded piece of work. Its directory holds
+ * A role is a one-shot child gravit hands a bounded piece of work. Its directory holds
  * `ROLE.md` (the child's persona, trimmed) and `role.yml` (`name`; `description`, the
- * one-line summary Gravit reads when it chooses a role; `allow`, the child's tools; an
- * optional `model` route). The operator owns both files and Gravit never writes here.
+ * one-line summary gravit reads when it chooses a role; `allow`, the child's tools; an
+ * optional `model` route). The operator owns both files and gravit never writes here.
  * {@link readRoles} reads and validates the directory and returns plain data; `_template`
  * is the copy source and is never a role.
  *
@@ -42,7 +42,7 @@
  * characters, and an entry under `roles/` it would otherwise drop without a word: a symbolic
  * link, or a directory whose name is not an id.
  *
- * {@link gravitRows} renders the roles as Gravit's composition: the `gravit` plugin row,
+ * {@link gravitRows} renders the roles as gravit's composition: the `gravit` plugin row,
  * whose config carries each role's tool and summary for the `gravit:roles` section
  * (plugins/gravit.js) and, when given, the cycle and the run protocols, then one
  * `plugins/role.mjs` row per role (D20), whose `role_<id>` tool starts a child on the role's
@@ -73,12 +73,12 @@ export const ROLE_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** One `allow` entry: a host tool name or `mcp__<server>__<raw>`. Letters, digits, `_`, `-`;
  *  no `*`, since a name is matched exactly (module header). */
 export const TOOL_NAME_RE = /^[A-Za-z0-9_-]+$/;
-/** The longest `description`, in characters: the one-line summary Gravit reads. */
+/** The longest `description`, in characters: the one-line summary gravit reads. */
 export const SUMMARY_MAX = 300;
 /** The largest `ROLE.md`, in bytes as `wc -c` counts them: it becomes a section of the
  *  child's system prompt. */
 export const ROLE_MD_MAX_BYTES = 2000;
-/** The longest tool name Gravit may be handed, in characters: a model API caps a function
+/** The longest tool name gravit may be handed, in characters: a model API caps a function
  *  name (64 is the common cap), and {@link ROLE_ID_RE} admits ids of 64 characters, so
  *  `role_` plus an id can pass it. */
 export const TOOL_NAME_MAX = 64;
@@ -100,11 +100,11 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
     because: "a role works with the tree's own tools, never the open web; web_search is the source reader's alone, and the face gives web_fetch to the source reader's children itself (src/source-reader.ts)",
     names: ["web_search", "web_fetch"], prefixes: [], rawNames: [] },
   { what: "a delegation tool",
-    because: "Gravit alone delegates; a role is one hand, not a team",
+    because: "gravit alone delegates; a role is one hand, not a team",
     names: ["subagent", "subagent_fork", "send_message", "interrupt_agent", "list_agents", "workflow", "ralph", "dispatch"],
     prefixes: ["role_", "agent_"], rawNames: [] },
   { what: "a goal or todo tool",
-    because: "Gravit tracks the goal and the todos; a role is one bounded call",
+    because: "gravit tracks the goal and the todos; a role is one bounded call",
     names: ["create_goal", "get_goal", "update_goal", "todo_write"], prefixes: [], rawNames: [] },
   { what: "the PTC transport",
     because: "run_code is the reserved PTC mode presentation transport, which tools.restrict() refuses to name, so every delegation would fail; name the end-capability tools instead",
@@ -116,7 +116,7 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
     because: "the AKShare tools carry no point-in-time guard and are never evidence; the evidence is forward paper trading at the Account",
     names: [], prefixes: ["mcp__akshare__"], rawNames: ["portfolio_akshare", "market_akshare"] },
   { what: "an account or order tool",
-    because: "orders go through the Account seat alone, behind its one gate (the face's per-order card); the seat is Gravit's, and a role has no reason to read the account",
+    because: "orders go through the Account seat alone, behind its one gate (the face's per-order card); the seat is gravit's, and a role has no reason to read the account",
     names: [], prefixes: ["mcp__account__"],
     rawNames: ["account", "positions", "orders", "place_order", "cancel_order",
       /* the Account seat's twelve writes (src/orders.ts SEAT_WRITE_RAW_NAMES; spec 2026-10-20 §5.3), under any server name */
@@ -146,10 +146,10 @@ const META_FILE = "role.yml";
 export interface RoleFile {
   /** The directory name; matches {@link ROLE_ID_RE}. */
   id: string;
-  /** The tool Gravit calls: {@link toolNameFor}(id). */
+  /** The tool gravit calls: {@link toolNameFor}(id). */
   tool: string;
   name: string;
-  /** The one-line summary Gravit reads, at most {@link SUMMARY_MAX} characters. */
+  /** The one-line summary gravit reads, at most {@link SUMMARY_MAX} characters. */
   description: string;
   /** `ROLE.md`, trimmed: the child's persona. */
   persona: string;
@@ -159,7 +159,7 @@ export interface RoleFile {
   model?: string;
 }
 
-/** The tool Gravit sees for a role id: `role_` plus the id with `-` as `_`
+/** The tool gravit sees for a role id: `role_` plus the id with `-` as `_`
  *  (`data-check` is `role_data_check`). */
 export function toolNameFor(id: string): string {
   return "role_" + id.replace(/-/g, "_");
@@ -286,7 +286,7 @@ export function readRoles(root: string): RoleFile[] {
   return listRoleIds(base).map((id) => readRole(base, id));
 }
 
-/** The id of Gravit's own plugin row; `bots/gravit/agent.cordis.yml` leads with it. */
+/** The id of gravit's own plugin row; `bots/gravit/agent.cordis.yml` leads with it. */
 export const GRAVIT_ROW_ID = "gravit";
 /** The id of a role's `plugins/role.mjs` row: spelled as its preset id ({@link rolePresetId}) on purpose,
  *  one prefix for both, so a role's row and its preset read as one name. */
@@ -354,12 +354,12 @@ export interface GravitRowsOptions {
 }
 
 /**
- * Gravit's composition rows for `roles`: the `gravit` plugin row first, its config the
+ * gravit's composition rows for `roles`: the `gravit` plugin row first, its config the
  * summaries (and the cycle text and the protocols, when given) the plugin turns into
  * sections, then one `plugins/role.mjs` row per role (D20). The role row registers the
  * role's tool, which starts a one-shot child on the role's own preset ({@link rolePresetId},
  * which carries the persona and the mask) - resolved when the tool is called, not when a
- * Gravit agent is created - on the role's route when `role.yml` names one, and returns the
+ * gravit agent is created - on the role's route when `role.yml` names one, and returns the
  * child's report; it carries a copy of the allow list, the names the tool checks before any
  * child starts. The summary rides on both rows: the tool's description, and the `gravit:roles`
  * list. Pure: the same roles give the same rows.

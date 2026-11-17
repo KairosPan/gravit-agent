@@ -28,9 +28,9 @@
  * here (the default: Gate 1 closed, nothing registers an order tool), or the
  * session's preset hides it. Drilled offline on a bare cordis tree, and on the
  * real one by the subtest at the end, for both: a `gravit-desk` session, whose
- * mask never admits an order tool, names the stand-in, and a Gravit session
+ * mask never admits an order tool, names the stand-in, and a gravit session
  * names one nothing registered; each is refused in the gate's words with no
- * `approval/asked`, while Gravit's session, on the registered stand-in, gets
+ * `approval/asked`, while gravit's session, on the registered stand-in, gets
  * its card.
  *
  * Gated behind `FACE_SMOKE=1` and in its own FILE for the reason `smoke.test.ts`
@@ -551,7 +551,7 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
      * SEE - one the calling scope does not resolve is refused before any card
      * (the hidden-tool subtest below) - so the drill registers the order names
      * it fires, globally: the stub agents here see the global view, and so
-     * does Gravit. Nothing is behind them; each body only records, and `ran`
+     * does gravit. Nothing is behind them; each body only records, and `ran`
      * must stay empty - nothing in this file dispatches an order. Left to the
      * tree's disposal, which takes every registration with it. NO
      * `(operator-gated)` marker on purpose: the listener keys on the NAME, so
@@ -702,9 +702,9 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
       const desk = await open(DESK_PRESET);
       const gravit = await open();
       /* The premise, from the registry itself: the same global stand-in is
-       * hidden from the desk by its mask and visible to Gravit. */
+       * hidden from the desk by its mask and visible to gravit. */
       assert.equal(registry.get(NAME, desk), undefined, "the desk's mask hides the order stand-in");
-      assert.notEqual(registry.get(NAME, gravit), undefined, "Gravit's composition does not");
+      assert.notEqual(registry.get(NAME, gravit), undefined, "gravit's composition does not");
 
       /* Every card raised from here on is recorded, and answered `rejected` at
        * once, outermost (prepend) so the gateway never parks it: a regression
@@ -740,7 +740,7 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
          * and through the registry the card is raised, logged and answered
          * (`rejected` by the recorder), never dispatched. */
         const asked = await fire({ ...pending(NAME, ORDER), agent: gravit });
-        assert.equal(asked.kind, "ask", "a Gravit session calling the same tool still gets ask");
+        assert.equal(asked.kind, "ask", "a gravit session calling the same tool still gets ask");
         assert.match(asked.kind === "ask" ? asked.reason ?? "" : "", /^Account seat - .*symbol=AAPL/);
         gravit.session.append("turn/start", { turn: 1 });
         const answered = await registry.execute({
@@ -748,12 +748,12 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
         });
         gravit.session.append("turn/end", { turn: 1, reason: { kind: "completed" } });
         assert.match(answered.content?.[0]?.text ?? "", /the user rejected tool "mcp__drill__portfolio_live_order"/);
-        assert.deepEqual(cards, [{ toolName: NAME, callId: "drill-gravit-visible" }], "exactly one card was raised: Gravit's");
+        assert.deepEqual(cards, [{ toolName: NAME, callId: "drill-gravit-visible" }], "exactly one card was raised: gravit's");
         assert.ok(gravit.session.snapshotEvents().some((event) =>
-          event.type === "approval/asked" && event.data?.callId === "drill-gravit-visible"), "and it is in Gravit's log");
+          event.type === "approval/asked" && event.data?.callId === "drill-gravit-visible"), "and it is in gravit's log");
 
         /* THE DEFAULT CONFIGURATION: Gate 1 closed, so no order tool is
-         * registered at all, and Gravit's model names one anyway. "Not
+         * registered at all, and gravit's model names one anyway. "Not
          * registered here" is the sentence's first cause: refused the same
          * way, with no card that could never dispatch. */
         const unregistered = "mcp__nowhere__portfolio_live_order";
@@ -765,7 +765,7 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
         gravit.session.append("turn/end", { turn: 2, reason: { kind: "completed" } });
         assert.equal(unseen.content?.[0]?.text,
           "Error: mcp__nowhere__portfolio_live_order is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run");
-        assert.equal(cards.length, 1, "no second card: Gravit's visible order raised the only one");
+        assert.equal(cards.length, 1, "no second card: gravit's visible order raised the only one");
         assert.equal(gravit.session.snapshotEvents().some((event) =>
           event.type === "approval/asked" && event.data?.callId === "drill-gravit-unregistered"), false);
         assert.deepEqual(ran, [], "no order body ran in this file");

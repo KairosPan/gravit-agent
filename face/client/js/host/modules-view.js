@@ -205,7 +205,7 @@ function artifactWords(module, a) {
   return { words: [t('modules.notEvaluable'), ...missing].join(' · '), tone: 'warn', quiet: false }; // words-order: the word, then the sources it missed under the visual separator
 }
 
-// a Run this page sent (spec §5.7; one-entry plan 2, §5.13) asks Gravit for a task under its exact title: it is running
+// a Run this page sent (spec §5.7; one-entry plan 2, §5.13) asks gravit for a task under its exact title: it is running
 // while the newest task of that title, started no earlier than the Run (give or take the clocks), is not done; before such
 // a task shows, for FRESH_MS, it is sent; nothing else is
 export const FRESH_MS = 60_000;

@@ -1,6 +1,6 @@
-# The agent box: the face, dsh, Gravit's shell and the Account seat (compose.yml at the repo root).
+# The agent box: the face, dsh, gravit's shell and the Account seat (compose.yml at the repo root).
 # It runs no data source: the market data is the Account box's (account/Dockerfile).
-# Poppler (poppler-utils: pdftotext, pdfinfo, pdftoppm) is Gravit's PDF tool, run from its shell (GRAVIT.md).
+# Poppler (poppler-utils: pdftotext, pdfinfo, pdftoppm) is gravit's PDF tool, run from its shell (GRAVIT.md).
 # The tree is bind-mounted, not copied, and nothing of the face is installed at build: the
 # entrypoint runs npm ci into the module volumes on the first up.
 FROM node:22-bookworm

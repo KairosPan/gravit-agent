@@ -65,7 +65,7 @@ export const GATE_CHECK_MS = 3_000, GATE_ACCOUNT_MS = 1_000, GATE_FACTS_MS = 1_5
 export const GATE_FACT_READ_MS = 1_200;
 
 /** The position read again for an approval's action; how often the Account's card is polled and how long past its
- * expiry it is watched; how recent Gravit's own decision on the symbol is to be the approval's evidence. */
+ * expiry it is watched; how recent gravit's own decision on the symbol is to be the approval's evidence. */
 export const GATE_POSITION_MS = 5_000, GATE_WATCH_EVERY_MS = 5_000, GATE_WATCH_GRACE_MS = 60_000, GATE_OWN_CALL_MS = 600_000;
 
 /** How recent the position the check read must be, at the approval's arrival, to stand in for the approval's own read. */
@@ -172,14 +172,14 @@ const UNKEPT_CALL_ID = "a call id the gate does not keep - the card is asked unc
 export const CHECK_NOT_FINISHED = "the memory's check of this call is not finished: the order is not run - place it again";
 
 /** The registered theses' leads, each followed by `: <order words>.`, and an approval's price source. */
-const APPROVED = "Approved Gravit's order card", DECLINED = "Declined Gravit's order card";
-const ACCOUNT_DECLINED = "Declined the Account's card for Gravit's order";
+const APPROVED = "Approved gravit's order card", DECLINED = "Declined gravit's order card";
+const ACCOUNT_DECLINED = "Declined the Account's card for gravit's order";
 const PRICE_SOURCE = "the order card's limit price";
 
 /** Why nothing was registered for a line, as `not registered: <why>` on the card and in the log. */
-const POSITION_UNREAD = "the position could not be read - tell Gravit what you decided";
-const SELLS_UNSAID = "the order does not say how much of the position it sells - tell Gravit what you decided";
-const CONDITIONAL = "a conditional order - tell Gravit when it fills";
+const POSITION_UNREAD = "the position could not be read - tell gravit what you decided";
+const SELLS_UNSAID = "the order does not say how much of the position it sells - tell gravit what you decided";
+const CONDITIONAL = "a conditional order - tell gravit when it fills";
 const SEAT_REFUSED = "the seat refused the order";
 const RED_NOT_OVERRIDDEN = "the red line was not overridden";
 const SEAT_UNREADABLE = "the seat's answer could not be read";
@@ -191,7 +191,7 @@ const CARD_UNREAD = "the Account's card could not be read";
 /** A card id the seat's answer may give; a decision id the memory's decisions may hold. */
 const CARD_ID = /^[A-Za-z0-9_.:-]{1,128}$/;
 const DECISION_ID = /^d-\d{8}-[0-9a-f]{8}$/;
-/** How many of the symbol's newest decisions are looked through for Gravit's own; the memory's longest note. */
+/** How many of the symbol's newest decisions are looked through for gravit's own; the memory's longest note. */
 const OWN_CALL_LOOK = 20, NOTE_MAX = 500;
 
 /** One line of a kept call: the order as read, the venue the check resolved, the position it was read against and
@@ -516,7 +516,7 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     return input;
   }
 
-  /** Gravit's own decision on `symbol` within GATE_OWN_CALL_MS of now, by id; undefined on anything else. An item that
+  /** gravit's own decision on `symbol` within GATE_OWN_CALL_MS of now, by id; undefined on anything else. An item that
    * is not a decision's view, or that throws as it is read, is skipped. Never throws or rejects. */
   async function ownCall(memory: MemoryStanding & { connected: true }, symbol: string): Promise<string | undefined> {
     try {
@@ -542,7 +542,7 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     return undefined;
   }
 
-  /** Writes `input` for `line` as FACE_MEMORY_NAME, through the face's own handle; an approval looks for Gravit's
+  /** Writes `input` for `line` as FACE_MEMORY_NAME, through the face's own handle; an approval looks for gravit's
    * own call first. A memory not connected, or a write that fails, leaves the line not registered with why. */
   async function write(entry: Entry, line: LineEntry, input: Record<string, unknown>, approval: boolean): Promise<void> {
     const opened = await within(() => deps.open(), GATE_CHECK_MS);

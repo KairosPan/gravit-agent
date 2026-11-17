@@ -5,7 +5,7 @@ description: How the Account seat's MCP tools behave — paper venues only, the 
 
 # Account seat guide (neutral mechanics)
 
-The `mcp__account__*` tools are Gravit's seat at the operator's Account (Linqi's
+The `mcp__account__*` tools are gravit's seat at the operator's Account (Linqi's
 buyer-agent-demo, a program the operator runs on this machine). The Account holds the
 operator's venues; the seat trades inside limits the operator signs on the face (Account › Agents).
 

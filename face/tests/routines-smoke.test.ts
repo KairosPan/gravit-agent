@@ -12,7 +12,7 @@
  *    headline, reported) and `report`; `events.jsonl` holds its `desk-turn` with `source: "routine"` - what the daily
  *    cap counts, and what no unit test could show of the real supervisor; `GET /data/desk/routines` shows the run
  *    Succeeded with the headline as its note; `GET /data/desk/news` shows the report under the routine;
- * 4. the report's line reaches Gravit's one conversation: the desk is installed with `router: true` and bound to a
+ * 4. the report's line reaches gravit's one conversation: the desk is installed with `router: true` and bound to a
  *    recording stand-in of that conversation (src/phone-bridge.ts `PhoneConversation`), whose `note` receives one
  *    `{ kind: "routine", … }` line - and src/conversation.ts `noteMessage` gives it the id `note-routine:<key>`. The
  *    real conversation's injection of that id is tests/conversation.test.ts's; binding it here would boot the whole
@@ -219,7 +219,7 @@ test("routines smoke: a routine confirmed in the store runs at its slot on a rea
       schedule: { clock, calendar, calendars: { cn }, tickMs: TICK_MS },
       log: (line) => { faceLog.push(line); },
     });
-    /* Gravit's one conversation, as a recorder of what the desk notes into it. */
+    /* gravit's one conversation, as a recorder of what the desk notes into it. */
     const notes: DeskLine[] = [];
     const oneConversation: PhoneConversation = {
       post: async () => { throw new Error("routines smoke: nothing posts to the conversation"); },

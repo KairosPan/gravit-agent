@@ -58,7 +58,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
   const inventory = {
     '/data/abilities.json': { ok: true, ...abilitiesListing() },
     '/data/plugins.json': { ok: true, mcp: [{ server: 'alpaca-kit', phase: 'active', tools: [] }], agentTools: [], rows: [] },
-    '/data/agents.json': { ok: true, main: { name: 'Gravit', runtime: 'dsh 0.2.0-rc.2' }, local: [], candidates: [{ bin: 'claude', label: 'Claude Code', version: '2.1' }] },
+    '/data/agents.json': { ok: true, main: { name: 'gravit', runtime: 'dsh 0.2.0-rc.2' }, local: [], candidates: [{ bin: 'claude', label: 'Claude Code', version: '2.1' }] },
     '/data/memory.json': { ok: true, groups: [] },
     '/data/bots.json': { ok: true, bots: [{ id: 'buffett', name: 'Buffett Type', description: '', homeCwd: '/r/bots/buffett/home', soul: '# B', revision: 'r1', isDefault: false, listed: true, skills: [], setupIssues: [] }] },
     '/data/modules.json': modulesListing(),
@@ -630,7 +630,7 @@ test('Details opens on its key and takes focus on its close key; Escape closes i
   store.timers.clear();
 });
 
-test('Stop Gravit asks in place and cancels the session on the second press', async () => {
+test('Stop gravit asks in place and cancels the session on the second press', async () => {
   const f = fakeWindow({ hash: '' });
   const h = host({ rows: [row('s1', { running: true, agentAvailable: true })] });
   const store = started(f, h);
@@ -931,9 +931,9 @@ test("the Desk's filter, Details and rules keys narrow the news, open a reason a
 });
 
 // the Routines column (desk-page plan 2 Task 7): a row opened, its switch posting and the routines read again, Test posting and
-// reading Running…, Delete asking once more with only Delete routine posting, Edit with Gravit putting its words in the Gravit
+// reading Running…, Delete asking once more with only Delete routine posting, Edit with gravit putting its words in the gravit
 // box's composer, the Desk unmoved, and sending nothing
-test("the Desk's routines: open a row, flip its switch, Test it, Delete it once asked, Edit it with Gravit", async () => {
+test("the Desk's routines: open a row, flip its switch, Test it, Delete it once asked, Edit it with gravit", async () => {
   const f = fakeWindow({ hash: '#/desk', storage: memoryStorage() });
   const say = f.withId('say', { tagName: 'TEXTAREA' });
   const h = host({ rows: [row('s1')], conversation: 's1' });
@@ -1056,7 +1056,7 @@ test('a market page reads no /data/bars, whatever its id; Markets on screen read
   store.timers.clear();
 });
 
-test('Hand to Gravit opens the Gravit box with the words in its composer, the market\'s page unmoved', async () => {
+test('Hand to gravit opens the gravit box with the words in its composer, the market\'s page unmoved', async () => {
   const storage = memoryStorage();
   storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'us:AAPL', market: 'us', symbol: 'AAPL', name: 'Apple', exchange: 'NASDAQ', currency: 'USD' }] }));
   const f = fakeWindow({ hash: '#/markets/us:AAPL', storage });
@@ -1073,7 +1073,7 @@ test('Hand to Gravit opens the Gravit box with the words in its composer, the ma
   store.timers.clear();
 });
 
-test('Hand to Gravit while /data/tasks still loads: the words move to the conversation once it is known', async () => {
+test('Hand to gravit while /data/tasks still loads: the words move to the conversation once it is known', async () => {
   const storage = memoryStorage();
   storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'us:AAPL', market: 'us', symbol: 'AAPL', name: 'Apple', exchange: 'NASDAQ', currency: 'USD' }] }));
   const f = fakeWindow({ hash: '#/markets/us:AAPL', storage });
@@ -1095,8 +1095,8 @@ test('Hand to Gravit while /data/tasks still loads: the words move to the conver
   store.timers.clear();
 });
 
-// an ability's ask key (spec 2026-11-13 §4.4): its words in the Gravit box's composer, after what it holds; nothing sent
-test("an ability's ask key opens the Gravit box with its words in the composer, and sends nothing", async () => {
+// an ability's ask key (spec 2026-11-13 §4.4): its words in the gravit box's composer, after what it holds; nothing sent
+test("an ability's ask key opens the gravit box with its words in the composer, and sends nothing", async () => {
   const f = fakeWindow({ hash: '#/plugin/ability%3Aevent-analogs' });
   const say = f.withId('say', { tagName: 'TEXTAREA' });
   const h = host({ rows: [row('s1')], conversation: 's1' });
@@ -1144,7 +1144,7 @@ test("an ask key with no words does nothing", async () => {
 // without the query: a body, or a function of the path returning one (or a promise of one)
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 const isPage = path => path.split('?')[0] === '/data/account';
-const SEAT = { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T18:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'Gravit', status: 'admitted', limits: [] }, venues: [], cards: [], others: 0 };
+const SEAT = { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T18:40:00.000Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'gravit', status: 'admitted', limits: [] }, venues: [], cards: [], others: 0 };
 const ASSET_SHEETS = { 'crypto:BTC': 'asset-btc', 'crypto:SOL': 'asset-sol', 'equity:NVDA': 'asset-nvda', 'event:SI-FEDCUT-DEC:YES': 'asset-event' };
 function standinAnswer(path) {
   const [route, query = ''] = path.split('?');
@@ -1903,12 +1903,12 @@ test('a press holds renders until it ends, so a streaming quote cannot swallow t
 
 test('boot opens the conversation /data/tasks names, though a newer session is archived', async () => {
   const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5, projections: { values: { title: 'Gravit here' } } })], meta: { ok: true, archived: ['s1'], deleted: [] }, conversation: 's2' });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5, projections: { values: { title: 'gravit here' } } })], meta: { ok: true, archived: ['s1'], deleted: [] }, conversation: 's2' });
   const store = started(f, h);
   await h.ready();
   assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   assert.equal(store.get().tasks.conversation, 's2');
-  assert.match(f.html(), /head-title">Gravit</);
+  assert.match(f.html(), /head-title">gravit</);
   assert.equal(store.get().conversations.find(c => c.id === 's1').archived, 'face');
   store.timers.clear();
 });
@@ -2264,7 +2264,7 @@ function ownerDoor({ role = 'owner', requests = [], exchange = () => ({ ok: true
   };
   door.page = () => {
     const p = { ...fx('account'), requests };
-    if (door.kid && door.role === 'owner') p.signers = { ...p.signers, owners: [...p.signers.owners, { id: `device:${door.kid}`, kind: 'device', label: 'Gravit face' }] };
+    if (door.kid && door.role === 'owner') p.signers = { ...p.signers, owners: [...p.signers.owners, { id: `device:${door.kid}`, kind: 'device', label: 'gravit face' }] };
     // a browser that knocked or asked waits, listed by its kid
     if (door.kid && (door.role === 'pending' || door.role === 'asked')) p.signers = { ...p.signers, pendingDevices: [{ kid: door.kid, at: '2026-11-09T21:00:00.000Z' }] };
     return p;
@@ -3505,7 +3505,7 @@ test("Run on a card opens the sheet; Escape closes it; Run sends the module's me
   assert.match(html, /<label class="opt on"><input type="radio" name="on" value="new" checked data-action="runSheetField"><span>New run<\/span>/);
   assert.ok(html.includes('boards missing in the last run'), "Theme's source line");
   assert.ok(html.includes('>Runs via</span>'));
-  assert.ok(html.includes('Gravit in cn-market → CN market analyst, theme alone'));
+  assert.ok(html.includes('gravit in cn-market → CN market analyst, theme alone'));
   assert.match(html, /<button type="button" class="btn-primary" data-action="runSheetRun">Run<\/button>/);
   assert.equal(f.doc.activeElement, close, 'the sheet takes focus on its close key');
   // a note typed reaches the sheet; Escape closes it and the sheet opens fresh again
@@ -3602,7 +3602,7 @@ test('after Run the card links the task', async () => {
   assert.ok(card().includes(`<a class="chip live" href="#/messages">Sent · ${title} ›</a>`), card());
   assert.match(card(), /data-action="runModule" data-module="theme" disabled title="Running">Run</);
   assert.ok(f.html().includes('>IGNITION · POSITIVE · NONE</span>'), 'sentiment keeps its chip');
-  // Gravit starts the task under the Run's title: the card follows it, and the module page reads the same
+  // gravit starts the task under the Run's title: the card follows it, and the module page reads the same
   tasks.push(taskRow('t-theme', { title, startedAt: clock.at + 2_000, lastEventAt: clock.at + 2_000 }));
   await store.tasks.refresh();
   await settle();
@@ -3745,7 +3745,7 @@ test('Escape clears the open stock', async () => {
 });
 
 // plan 3, task 4: the stock drawer itself — drawn inside <main>, its slider surviving a live redraw (Review Focus 2), Details
-// replacing it, Ask Gravit through the composer's own send path, Open in Markets
+// replacing it, Ask gravit through the composer's own send path, Open in Markets
 test('the drawer survives a live redraw with its slider minute', async () => {
   const { f, store, key, open, follow } = await stockAnswer();
   open();
@@ -3792,7 +3792,7 @@ test('opening Details replaces the stock drawer', async () => {
   store.timers.clear();
 });
 
-test("Ask Gravit sends one message through the composer's path", async () => {
+test("Ask gravit sends one message through the composer's path", async () => {
   const { f, store, open, h } = await stockAnswer();
   const say = f.withId('say', { tagName: 'INPUT' });
   say.value = 'half a thought';
@@ -3935,7 +3935,7 @@ test('Open run goes to the strategy page', async () => {
   store.timers.clear();
 });
 
-// one-entry plan 2 Task 8: a task's full process, and its follow-ups through Gravit. A worker `t1` beside the conversation
+// one-entry plan 2 Task 8: a task's full process, and its follow-ups through gravit. A worker `t1` beside the conversation
 // `c`, the page opened on `hash`, a composed answer with `choices` in the worker's transcript (followed: it is live)
 async function taskAnswer(choices, hash = '#/task/t1') {
   const f = fakeWindow({ hash });
@@ -4756,7 +4756,7 @@ test('typing / on a live conversation opens the menu with no page render, and ea
 
 test('/ on a conversation the list does not carry yet opens nothing; @ there lists files and conversations', async () => {
   const { f, say, slot, h, store } = await menuRig({ hash: '#/messages', conversation: 'fresh' });
-  assert.match(f.html(), /Nothing handed to Gravit yet[\s\S]*class="composer"/, 'the empty state with its composer');
+  assert.match(f.html(), /Nothing handed to gravit yet[\s\S]*class="composer"/, 'the empty state with its composer');
   typeMenu(f, say, '/');
   await settle();
   assert.equal(slot.innerHTML ?? '', '');
@@ -5071,7 +5071,7 @@ test('the menu closes when the editor loses focus, but not to the menu itself or
   store.timers.clear();
 });
 
-// ---- plan 3 task 8: a command chosen from the menu runs; what reaches the room and what reaches Gravit ----
+// ---- plan 3 task 8: a command chosen from the menu runs; what reaches the room and what reaches gravit ----
 const putRuns = (f, say, runs) => { say.runs = runs; say.value = runs.map(r => (r.type === 'text' ? r.text : r.chip.label)).join(''); say.setSelectionRange(say.value.length, say.value.length); f.fire('root', 'input', { target: say }); };
 const saysOf = h => h.posted.filter(p => p[0] === '/data/rooms/say');
 const botChip = { kind: 'bot', id: 'buffett', label: 'Buffett Type' };
@@ -5100,7 +5100,7 @@ test('Compact from the menu runs /compact at once, and the draft keeps its other
   store.timers.clear();
 });
 
-test('a bot chip with a conversation chip is one prompt to Gravit; no room is tried', async () => {
+test('a bot chip with a conversation chip is one prompt to gravit; no room is tried', async () => {
   const { f, say, h, store } = await menuRig();
   putRuns(f, say, [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: botChip }, { type: 'text', text: ' about ' }, { type: 'chip', chip: { kind: 'conversation', id: 's2', label: 'Beta' } }]);
   send(f);
@@ -5113,7 +5113,7 @@ test('a bot chip with a conversation chip is one prompt to Gravit; no room is tr
   store.timers.clear();
 });
 
-test("a bot chip with a file chip is prompted to Gravit with the bot's @id and the file's path", async () => {
+test("a bot chip with a file chip is prompted to gravit with the bot's @id and the file's path", async () => {
   const { f, say, h, store } = await menuRig();
   putRuns(f, say, [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: botChip }, { type: 'text', text: ' about ' }, { type: 'chip', chip: { kind: 'file', path: 'strategies/alpha/notes.md', dir: false, label: 'notes.md' } }]);
   send(f);
@@ -5123,7 +5123,7 @@ test("a bot chip with a file chip is prompted to Gravit with the bot's @id and t
   store.timers.clear();
 });
 
-test('a file chip that reads like a bot, with no bot chip, is prompted to Gravit and never posted to the room', async () => {
+test('a file chip that reads like a bot, with no bot chip, is prompted to gravit and never posted to the room', async () => {
   const { f, say, h, store } = await menuRig();
   putRuns(f, say, [{ type: 'text', text: 'read ' }, { type: 'chip', chip: { kind: 'file', path: 'strategies/alpha/news-scout.md', dir: false, label: 'news-scout.md' } }]);
   send(f);
@@ -5133,7 +5133,7 @@ test('a file chip that reads like a bot, with no bot chip, is prompted to Gravit
   store.timers.clear();
 });
 
-test('a typed @buffett is prompted to Gravit; no room is tried', async () => {
+test('a typed @buffett is prompted to gravit; no room is tried', async () => {
   const { f, say, h, store } = await menuRig();
   putRuns(f, say, [{ type: 'text', text: '@buffett leverage?' }]);
   send(f);
@@ -5625,7 +5625,7 @@ const prompting = (h, answer) => {
     return a;
   };
 };
-const MODEL_LINE = /Gravit(&#39;|')s model takes no images. Remove the image, or run Gravit on a model that does./;
+const MODEL_LINE = /gravit(&#39;|')s model takes no images. Remove the image, or run gravit on a model that does./;
 
 test('a draft with a file sends its receipt and its words, and the draft clears', async () => {
   const f = fakeWindow({ hash: '#/messages/s1' });
@@ -5658,7 +5658,7 @@ test('an image goes inline as base64 with its media type and name', async () => 
   store.timers.clear();
 });
 
-test('files with a bot chip go to Gravit as one prompt; no room is tried', async () => {
+test('files with a bot chip go to gravit as one prompt; no room is tried', async () => {
   const f = fakeWindow({ hash: '#/messages/s1' });
   const { say, input } = composerEls(f);
   const h = menuHost();
@@ -5813,7 +5813,7 @@ test('on the empty state a file uploads to the conversation /data/tasks names, a
   const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 'fresh' });
   const att = fakeAttachments();
   const store = await bootFiles(f, h, att);
-  assert.match(f.html(), /Nothing handed to Gravit yet/);
+  assert.match(f.html(), /Nothing handed to gravit yet/);
   pick(f, input, [CSV()]);
   assert.equal(att.uploads.length, 1);
   assert.equal(att.uploads[0].id, 'fresh', 'uploaded to the conversation, listed or not');
@@ -6237,12 +6237,12 @@ test('with no conversation to write to Messages draws no composer, and a send sa
   const h = host({ rows: [row('s1')], conversation: null });
   const att = fakeAttachments();
   const store = await bootFiles(f, h, att);
-  assert.match(f.html(), /Gravit's conversation is off/);
+  assert.match(f.html(), /gravit's conversation is off/);
   assert.doesNotMatch(f.html(), /class="composer"/);
   type(f, say, 'hello');
   send(f);
   await settle();
-  assert.match(f.html(), /status-line bad" role="status">Gravit(&#39;|')s conversation is not open</);
+  assert.match(f.html(), /status-line bad" role="status">gravit(&#39;|')s conversation is not open</);
   assert.equal(say.value, 'hello', 'the words are kept');
   assert.deepEqual(promptsOf(h), []);
   assert.equal(att.uploads.length, 0);
@@ -7131,7 +7131,7 @@ test('Identity reads the account on entering the tab and with each beat while it
   f.win.location.hash = '#/account/identity';
   await settle();
   assert.deepEqual(h.reads.filter(isIdentity), ['/data/account/identity']);
-  assert.match(f.html(), /aria-label="Gravit"/);
+  assert.match(f.html(), /aria-label="gravit"/);
   assert.match(f.html(), /@gravit_desk_bot/);
   // a beat reads the page and Identity, plain
   h.reads.length = 0;
@@ -7231,7 +7231,7 @@ test("a venue's Disconnect done reads no Identity: the identity disconnect is it
 
 test('Connect… opens sheet 1 on a page that signs; Next posts the field\'s token once and clears it; Escape closes and drops the pending connection', async () => {
   const TOKEN = '7000000001:AAFakeTokenForTestsOnly_abcdefghijklmn';
-  const PENDING = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' }, link: 'https://t.me/gravit_desk_bot', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
+  const PENDING = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'gravit' }, link: 'https://t.me/gravit_desk_bot', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
   const NOT_CONNECTED = { ok: true, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] }, quiet: null, strangers: [] };
   const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
   const field = f.withSelector('#identity-token', { tagName: 'INPUT', type: 'password', id: 'identity-token' });
@@ -7277,8 +7277,8 @@ test('Install app… opens Slack\'s sheet 1; Next posts both fields once and cle
   // made-up tokens joined at run time: no scanner-shaped literal in the tree
   const APP = ['xa', 'pp-1-A0FAKE0001-1234567-', 'ab'.repeat(32)].join('');
   const BOT = ['xo', 'xb-', '1111111-2222222-', 'FakeBotTokenForTestsOnly00'].join('');
-  const PENDING = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
-  const READ = { ok: true, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] }, quiet: null, strangers: [], slackManifest: '{"display_information":{"name":"Gravit"}}' };
+  const PENDING = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
+  const READ = { ok: true, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] }, quiet: null, strangers: [], slackManifest: '{"display_information":{"name":"gravit"}}' };
   const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
   const app = f.withSelector('#identity-app-token', { tagName: 'INPUT', type: 'password', id: 'identity-app-token' });
   const bot = f.withSelector('#identity-bot-token', { tagName: 'INPUT', type: 'password', id: 'identity-bot-token' });
@@ -7403,7 +7403,7 @@ test('Disconnect… asks once, then posts disconnectNetwork unsigned', async () 
   await settle();
   f.click({ tagName: 'BUTTON', dataset: { action: 'askIdentityDisconnect', network: 'telegram' } });
   assert.deepEqual(store.get().confirm, { action: 'identityDisconnect', network: 'telegram' });
-  assert.match(f.html(), /Disconnect Telegram\? Gravit stops talking with you there, and its token is deleted\./);
+  assert.match(f.html(), /Disconnect Telegram\? gravit stops talking with you there, and its token is deleted\./);
   assert.deepEqual(acts, [], 'nothing posted on the ask');
   // No: nothing posted
   f.click({ tagName: 'BUTTON', dataset: { action: 'cancelConfirm' } });
@@ -7432,7 +7432,7 @@ test('Block asks once, then posts blockSender unsigned; a refusal is said in Not
   await settle();
   const ask = () => f.click({ tagName: 'BUTTON', dataset: { action: 'askIdentityBlock', network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789' } });
   ask();
-  assert.match(f.html(), /Block …789\? It never reaches Gravit\./);
+  assert.match(f.html(), /Block …789\? It never reaches gravit\./);
   assert.match(f.html(), /data-action="confirmYes">Yes, block</);
   assert.deepEqual(acts, []);
   f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
@@ -7509,7 +7509,7 @@ test('quiet hours from Off: untick Off, set 22:00-07:00, an unrelated redraw, Sa
 
 test('Enter in the bot token field is Next: the token posted once, with no form for the browser to offer to keep', async () => {
   const TOKEN = '7000000001:AAFakeTokenForTestsOnly_abcdefghijklmn';
-  const PENDING = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' }, link: 'https://t.me/gravit_desk_bot', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
+  const PENDING = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'gravit' }, link: 'https://t.me/gravit_desk_bot', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
   const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
   const field = f.withSelector('#identity-token', { tagName: 'INPUT', type: 'password', id: 'identity-token' });
   const door = ownerDoor();
@@ -8186,7 +8186,7 @@ test('the narrow side panel opens by its disclosure or the search shortcut and f
   assert.equal(store.get().listOpen, true);
   assert.match(f.html(), /data-action="toggleList" aria-expanded="true"/);
   assert.equal(say.value, 'Unsent research question');
-  // the Gravit row, its page already on screen: the browser follows nothing new, the panel folds
+  // the gravit row, its page already on screen: the browser follows nothing new, the panel folds
   f.click({ tagName: 'A', dataset: {} });
   assert.equal(store.get().listOpen, false, 'following even the page on screen folds the panel');
   assert.equal(say.value, 'Unsent research question');

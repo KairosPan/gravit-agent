@@ -45,7 +45,7 @@ export function emptyState() {
     status: { line: said('status.connecting'), bad: false, connected: false },
     orphanGates: {},
     lastSeen: {},
-    // Discover from the face (host/discover.js): the six listings, the Gravit item, the skills read, its own line; a module
+    // Discover from the face (host/discover.js): the six listings, the gravit item, the skills read, its own line; a module
     // page's latest artifact by module (host/modules.js); the one roster its switches draw from (one-entry plan 4)
     discover: {
       query: '',
@@ -141,7 +141,7 @@ export function emptyState() {
     // a module card's Run sheet open (host/run-sheet.js), and the Runs this page sent by module: { sessionId, title, startedAt }
     runSheet: null,
     moduleRuns: {},
-    // Gravit's composed answers (host/lunhui.js): each run view by its key, each answer's own picks by its id, the stock drawer
+    // gravit's composed answers (host/lunhui.js): each run view by its key, each answer's own picks by its id, the stock drawer
     // open ({ key, code }: the opening answer's view key and the stock's code) or null
     lunhui: { views: {}, ui: {}, stock: null },
     // the event analog tables (host/analog.js): each task read by its id and each event view by its id

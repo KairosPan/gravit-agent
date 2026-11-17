@@ -498,7 +498,7 @@ test("the annotator imports nothing but types: its machinery loads on first use"
 
 /* ---------- read-through (the read-through plan's Task 7) ---------- */
 
-const BLOCK = { id: "rt-20261109-0000aaaa", text: "推演 · Gravit 的推断，不是下单 · 确定度 中\n· 逻辑：x" };
+const BLOCK = { id: "rt-20261109-0000aaaa", text: "推演 · gravit 的推断，不是下单 · 确定度 中\n· 逻辑：x" };
 const NVDA_EVENT = { symbol: "NVDA", ref: "2026-11-06" };
 const NVDA_ASK = { ...NVDA_EVENT, since: "2026-11-09T09:00:00.000Z" };
 function fakeLane(blocks = [BLOCK], later: string[] = [], broken = false) {

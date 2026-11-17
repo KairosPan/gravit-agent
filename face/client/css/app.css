@@ -203,7 +203,7 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .msg-row { display: flex; align-items: flex-end; gap: 8px; }
 .msg-body { max-width: 66%; min-width: 0; }
 .msg-body.wide { max-width: 80%; }
-/* Gravit's composed answer (the Lunhui run view): wider than a card, the summary over the face's blocks; its working
+/* gravit's composed answer (the Lunhui run view): wider than a card, the summary over the face's blocks; its working
    notes folded above it, closed until opened */
 .msg-body.composed { max-width: min(820px, 100%); }
 .lh-answer { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border-radius: 18px 18px 18px 4px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-card); overflow-wrap: anywhere; }
@@ -436,7 +436,7 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .bubble.grey { background: var(--surface-2); }
 .bubble.green { background: var(--up-fill); display: flex; flex-direction: column; gap: 8px; }
 .bubble .line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-/* Gravit's markdown (js/wire/markdown.js): headings, lists, code, fences, quotes, rules, GFM tables, links that look
+/* gravit's markdown (js/wire/markdown.js): headings, lists, code, fences, quotes, rules, GFM tables, links that look
    like links; insets on --surface so they read against the grey bubble */
 .md p { margin: 0 0 8px; white-space: pre-wrap; }
 .md > :last-child { margin-bottom: 0; }
@@ -522,7 +522,7 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .task-usage { font-size: calc(12px * var(--fs)); color: var(--dim); font-variant-numeric: tabular-nums; }
 .task-keys { display: flex; flex-wrap: wrap; gap: 6px; }
 /* a task's full process (#/task/<id>): back to Messages, the title, the state, the strategy and the keys in the head; in
-   place of a composer one line that sends the operator to Gravit */
+   place of a composer one line that sends the operator to gravit */
 .task-back { flex: none; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-pill); color: var(--dim); }
 .task-back:hover { background: var(--hover); color: var(--text); }
 .task-head-state { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: calc(13px * var(--fs)); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -838,7 +838,7 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .tool-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--dim); }
 .disc-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: calc(12px * var(--fm)); line-height: 1.5; background: var(--surface-2); border-radius: var(--radius-s); padding: 12px; }
 .disc-broken { color: var(--down); font-weight: 700; font-size: calc(13px * var(--fs)); }
-/* Available to Gravit (one-entry plan 4): the one roster's switch, its track filled while on, greyed while the roster is
+/* Available to gravit (one-entry plan 4): the one roster's switch, its track filled while on, greyed while the roster is
    unread or unreadable */
 .switch { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 4px; background: none; border: 0; color: var(--text); font-size: calc(13px * var(--fs)); font-weight: 600; cursor: pointer; }
 .switch-track { flex: none; position: relative; width: 34px; height: 20px; border-radius: var(--radius-pill); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); }
@@ -1362,6 +1362,8 @@ button.tk-at:hover { border-color: var(--dim); }
   .rail .rail-group { gap: 1px; }
   .rail .nav-item, .rail .account, .rail .rail-lines .line-key { width: 38px; }
 }
+/* the display face (kairos-studio's titles): the brand, the page heads, the big numbers, in Instrument Serif at its one weight */
+.brand-name, .list-title, .empty-title, .plug-name, .disc-head .head-title, .acct-head .head-title, .mk-head .head-title, .tp-head .head-title, .mk-who .head-title, .networth, .mk-big { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.01em; }
 
 /* ---- the Gravit box (plan 1 of the box, render/box.js): half a ball on the right edge, the panel over the page ---- */
 .gbox { display: contents; }

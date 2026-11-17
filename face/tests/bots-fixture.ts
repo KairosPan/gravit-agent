@@ -16,7 +16,7 @@ export const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
  *  shipped `../../face/…` lands under `$TMPDIR` and reaches nothing; a
  *  composition made there names this path instead (rebased to a `file:` URL). */
 export const PLUGIN_ABS = join(REPO, "face", "plugins", "bot.js");
-/** {@link PLUGIN_ABS} for Gravit's own plugin (`plugins/gravit.js`): what a
+/** {@link PLUGIN_ABS} for gravit's own plugin (`plugins/gravit.js`): what a
  *  temp root's `gravit` composition names, for the same reason. */
 export const GRAVIT_PLUGIN_ABS = join(REPO, "face", "plugins", "gravit.js");
 
@@ -37,12 +37,12 @@ export async function populateBotsRoot(root: string, gravitPlugin: string = GRAV
   await mkdir(join(root, "gravit"));
   const rows = [{ id: "gravit", name: gravitPlugin, config: {} }];
   await writeFile(join(root, "gravit", "agent.cordis.yml"), dump(rows, { schema: entryListSchema, lineWidth: -1, noRefs: true }));
-  await writeFile(join(root, "gravit", "preset.yml"), "name: Gravit\ndescription: the principal agent\n");
+  await writeFile(join(root, "gravit", "preset.yml"), "name: gravit\ndescription: the principal agent\n");
   return root;
 }
 
 /** A throwaway `bots/` root under the OS temp directory. Compositions made here
- *  must name the plugin by {@link PLUGIN_ABS} (and Gravit's by
+ *  must name the plugin by {@link PLUGIN_ABS} (and gravit's by
  *  {@link GRAVIT_PLUGIN_ABS}, which this root's `gravit` does): the shipped
  *  `../../face/plugins/…`, rebased against a bot directory under `$TMPDIR`,
  *  reaches nothing. */
