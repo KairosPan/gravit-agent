@@ -1374,7 +1374,7 @@ export const EN = Object.freeze({
   'desk.routines.noRuns': 'No runs yet',
   'desk.routines.test': 'Test',
   'desk.routines.running': 'Running…',
-  'desk.routines.edit': 'Edit in Messages',
+  'desk.routines.edit': 'Edit with Gravit',
   'desk.routines.editText': 'Edit your routine: {name}',
   'desk.routines.delete': 'Delete',
   'desk.routines.deleteAsk': "Deleting a routine can't be undone",

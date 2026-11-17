@@ -1367,7 +1367,7 @@ export const ZH = Object.freeze({
   'desk.routines.noRuns': '还没有运行',
   'desk.routines.test': '测试',
   'desk.routines.running': '运行中…',
-  'desk.routines.edit': '在消息中编辑',
+  'desk.routines.edit': '让 Gravit 修改',
   'desk.routines.editText': '编辑我的例行任务：{name}',
   'desk.routines.delete': '删除',
   'desk.routines.deleteAsk': '删除例行任务后无法撤销',

@@ -2,7 +2,7 @@
 // bar - the title, the state chip, one line and the Pause key (none while off or paused) - the paused
 // banner, then two columns: News (the sources, Calendar's one line, the filter chips, each symbol's group with its latest
 // alert, Details and the earlier rows, the routines' reports, the watch rules folded) and Routines (plan 2 Task 7: the cap's
-// line, each routine's row with its switch, opened to its instruction, when it runs, its run history, Test, Edit in Messages
+// line, each routine's row with its switch, opened to its instruction, when it runs, its run history, Test, Edit with Gravit
 // and Delete; then the standing orders as read-only rows, made in a terminal; the foot saying where routines are created).
 // The desk off, or its status not read, is one line and no columns. Every text from the ledgers is drawn escaped, as
 // written; the words are host/desk-page-view.js's and the table's.

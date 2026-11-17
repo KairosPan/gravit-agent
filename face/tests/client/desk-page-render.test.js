@@ -174,7 +174,7 @@ test('opened: Instruction, When to run and Run history with its five status word
   const html = draw(R.deskRoutineOpen(withRoutines(), { id: 'idea-screening' }));
   assert.match(html, /aria-expanded="true"/);
   for (const word of ['Instruction', 'When to run', 'Run history', 'Running', 'Succeeded', 'Failed', 'Missed', 'Skipped', 'timed out after 10 min', 'asleep',
-    'the daily cap was spent', 'the face stopped mid-run', 'the face was not running', 'Edit in Messages', 'Delete']) assert.ok(html.includes(word), word);
+    'the daily cap was spent', 'the face stopped mid-run', 'the face was not running', 'Edit with Gravit', 'Delete']) assert.ok(html.includes(word), word);
   assert.match(html, /Read quotes and headlines and screen for trade ideas\. &lt;b&gt;Place no orders\.&lt;\/b&gt;/, 'the instruction escaped');
   assert.match(html, /1 idea: long AMD &lt;img src=x onerror=alert\(1\)&gt;/, 'the headline escaped');
   assert.match(html, /model answered &lt;nothing&gt;/, "an error's detail escaped");
@@ -251,6 +251,6 @@ test("a report under News: the routine, its headline, Details opening its body e
 
 test('under ZH: a routine row and its parts in 例行任务 words', () => {
   const html = withTable(ZH, () => draw(R.deskRoutineAsk(R.deskRoutineOpen(withRoutines(), { id: 'idea-screening' }), { id: 'idea-screening' })));
-  for (const word of ['例行任务', '运行记录', '指令', '运行时间', '已暂停', '删除例行任务', '10 分钟后超时', '在消息中编辑']) assert.ok(html.includes(word), word);
+  for (const word of ['例行任务', '运行记录', '指令', '运行时间', '已暂停', '删除例行任务', '10 分钟后超时', '让 Gravit 修改']) assert.ok(html.includes(word), word);
   assert.match(html, /data-text="编辑我的例行任务：Idea screening"/);
 });

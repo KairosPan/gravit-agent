@@ -841,9 +841,9 @@ test("the Desk's filter, Details and rules keys narrow the news, open a reason a
 });
 
 // the Routines column (desk-page plan 2 Task 7): a row opened, its switch posting and the routines read again, Test posting and
-// reading Running…, Delete asking once more with only Delete routine posting, Edit in Messages putting its words in Gravit's
-// composer and sending nothing
-test("the Desk's routines: open a row, flip its switch, Test it, Delete it once asked, Edit it in Messages", async () => {
+// reading Running…, Delete asking once more with only Delete routine posting, Edit with Gravit putting its words in the Gravit
+// box's composer, the Desk unmoved, and sending nothing
+test("the Desk's routines: open a row, flip its switch, Test it, Delete it once asked, Edit it with Gravit", async () => {
   const f = fakeWindow({ hash: '#/desk', storage: memoryStorage() });
   const say = f.withId('say', { tagName: 'TEXTAREA' });
   const h = host({ rows: [row('s1')], conversation: 's1' });
@@ -883,8 +883,8 @@ test("the Desk's routines: open a row, flip its switch, Test it, Delete it once 
   assert.equal(store.get().deskPage.rAsk, '');
   f.click({ tagName: 'BUTTON', dataset: { action: 'dkEdit', text: 'Edit your routine: Idea screening' } });
   await settle();
-  assert.equal(f.win.location.hash, '#/messages');
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(f.win.location.hash, '#/desk', 'the Desk stays');
+  assert.equal(store.get().boxOpen, true, 'the box opens');
   assert.equal(say.value, 'Edit your routine: Idea screening');
   assert.deepEqual(h.calls.filter(c => c[0] === 'session/prompt' || c[0] === 'commands/execute' || c[0] === 'session/create'), [], 'nothing sent');
   store.timers.clear();
@@ -966,7 +966,7 @@ test('a market page reads no /data/bars, whatever its id; Markets on screen read
   store.timers.clear();
 });
 
-test('Hand to Gravit opens the conversation with the words in the composer', async () => {
+test('Hand to Gravit opens the Gravit box with the words in its composer, the market\'s page unmoved', async () => {
   const storage = memoryStorage();
   storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'us:AAPL', market: 'us', symbol: 'AAPL', name: 'Apple', exchange: 'NASDAQ', currency: 'USD' }] }));
   const f = fakeWindow({ hash: '#/markets/us:AAPL', storage });
@@ -976,7 +976,8 @@ test('Hand to Gravit opens the conversation with the words in the composer', asy
   await h.ready();
   f.click({ tagName: 'BUTTON', dataset: { action: 'handToGravit', id: 'us:AAPL' } });
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(store.get().route.screen, 'markets');
+  assert.equal(store.get().boxOpen, true);
   assert.equal(say.value, 'Look at AAPL (Apple)');
   assert.equal(f.doc.activeElement, say);
   store.timers.clear();
@@ -1004,8 +1005,8 @@ test('Hand to Gravit while /data/tasks still loads: the words move to the conver
   store.timers.clear();
 });
 
-// an ability's ask key (spec 2026-11-13 §4.4): its words in Gravit's composer on Messages, after what it holds; nothing sent
-test("an ability's ask key opens the conversation with its words in the composer, and sends nothing", async () => {
+// an ability's ask key (spec 2026-11-13 §4.4): its words in the Gravit box's composer, after what it holds; nothing sent
+test("an ability's ask key opens the Gravit box with its words in the composer, and sends nothing", async () => {
   const f = fakeWindow({ hash: '#/plugin/ability%3Aevent-analogs' });
   const say = f.withId('say', { tagName: 'TEXTAREA' });
   const h = host({ rows: [row('s1')], conversation: 's1' });
@@ -1017,14 +1018,15 @@ test("an ability's ask key opens the conversation with its words in the composer
   const ask = 'Line one\nIs "A&B" <up>?';
   f.click({ tagName: 'BUTTON', dataset: { action: 'askAbility', text: ask } });
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(store.get().route.screen, 'plugin', 'the page stays');
+  assert.equal(store.get().boxOpen, true);
   assert.equal(say.value, ask, 'exactly its words');
   assert.equal(f.doc.activeElement, say);
   f.win.location.hash = '#/discover';
   await settle();
   f.click({ tagName: 'BUTTON', dataset: { action: 'askAbility', text: 'And another' } });
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(store.get().route.screen, 'discover');
   assert.equal(say.value, `${ask}\nAnd another`, 'a second ask after the first, on a new line');
   assert.deepEqual(h.calls.filter(c => c[0] === 'session/prompt' || c[0] === 'commands/execute' || c[0] === 'session/create'), [], 'nothing sent');
   store.timers.clear();
@@ -7487,8 +7489,8 @@ test('⌥⌘N focuses the composer on Messages', async () => {
   assert.ok(prevented, "the browser's own key is not run");
   assert.equal(f.doc.activeElement, say, 'the composer has focus');
   assert.deepEqual(store.get().route, { screen: 'messages', id: null });
-  // from another screen: Messages, then the composer once it is drawn
-  const g = fakeWindow({ hash: '#/discover' });
+  // from a screen with no box (History): Messages, then the composer once it is drawn
+  const g = fakeWindow({ hash: '#/history' });
   g.win.navigator = { platform: 'MacIntel' };
   const gsay = g.withId('say', { tagName: 'TEXTAREA', presentIf: /id="say"/ });
   const h2 = host({ rows: [row('s1')] });
@@ -8189,6 +8191,7 @@ const boxFollows = (h, id) => h.streams.filter(st => st.name === 'session/follow
 const boxPrompts = h => h.calls.filter(c => c[0] === 'session/prompt').map(c => c[1].request);
 const boxRig = (hash, over = {}) => {
   const f = fakeWindow({ hash, ...(over.storage ? { storage: over.storage } : {}) });
+  if (over.mac) f.win.navigator = { platform: 'MacIntel' };
   const h = host({ rows: [row('conv', { updatedAt: 30, agentAvailable: true }), ...(over.rows ?? [])], conversation: 'conv', tasks: over.tasks ?? [] });
   const store = started(f, h);
   return { f, h, store };
@@ -8319,4 +8322,100 @@ test('a card answered in the box is settled everywhere', async () => {
   const gate = store.get().conversations.find(c => c.id === 'w1').messages.find(x => x.id === 'ev-9');
   assert.equal(gate.answer, 'approved', 'the worker\'s record holds the answer the rail and the task page read');
   store.timers.clear();
+});
+
+// ---- the box's keys and the hand-offs (plan 1 of the box, Task 5)
+const keyN = f => f.fire('doc', 'keydown', { code: 'KeyN', key: 'n', altKey: true, metaKey: true, ctrlKey: false, shiftKey: false, preventDefault() {} });
+const macBox = (hash, over = {}) => boxRig(hash, { ...over, mac: true });
+const escIn = (f, inBox) => f.fire('doc', 'keydown', { key: 'Escape', target: { closest: sel => (inBox && sel === '.gbox-panel' ? {} : null) }, preventDefault() {} });
+
+test('⌥⌘N on the Desk opens the box and stays on the Desk', async () => {
+  const { f, h, store } = macBox('#/desk');
+  await h.ready(); await settle();
+  keyN(f); await settle();
+  assert.match(f.html(), /class="gbox-panel"/);
+  assert.equal(f.win.location.hash, '#/desk');
+  assert.equal(store.get().boxOpen, true);
+  // already open: the composer takes focus, nothing else moves
+  const say = f.withId('say', { tagName: 'INPUT' });
+  keyN(f); await settle();
+  assert.equal(f.doc.activeElement, say);
+  assert.equal(f.win.location.hash, '#/desk');
+});
+
+test('⌥⌘N under the identity sheet does nothing', async () => {
+  const { f, h, store } = macBox('#/account/identity');
+  await h.ready(); await settle();
+  store.dispatch('identityConnectOpen', 'telegram'); await settle();
+  keyN(f); await settle();
+  assert.equal(store.get().boxOpen, false);
+  assert.equal(f.win.location.hash, '#/account/identity');
+});
+
+test("⌥⌘N on a task's page still goes to Messages", async () => {
+  const { f, h, store } = macBox('#/task/w1', { rows: [row('w1', { agentAvailable: true })], tasks: [taskRow('w1')] });
+  await h.ready(); await settle();
+  keyN(f); await settle();
+  assert.equal(store.get().route.screen, 'messages');
+  assert.equal(store.get().boxOpen, false);
+});
+
+test("Esc inside the box minimizes it and leaves Trade's ticket open", async () => {
+  const { f, h, store } = boxRig('#/trade/stock:NVDA');
+  await h.ready(); await settle();
+  store.dispatch('ticketOpen', { id: 'stock:NVDA', side: 'buy' });
+  openBox(f); await settle();
+  escIn(f, true); await settle();
+  assert.equal(store.get().boxOpen, false);
+  assert.notEqual(store.get().trade.ticket, null);
+});
+
+test("Esc outside the box keeps today's ladder", async () => {
+  const { f, h, store } = boxRig('#/trade/stock:NVDA');
+  await h.ready(); await settle();
+  store.dispatch('ticketOpen', { id: 'stock:NVDA', side: 'buy' });
+  openBox(f); await settle();
+  escIn(f, false); await settle();
+  assert.equal(store.get().trade.ticket, null);
+  assert.equal(store.get().boxOpen, true);
+});
+
+test('the hand-offs fill the box and stay on the page', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  const say = f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkEdit', text: 'Edit your routine: Idea screening' } }); await settle();
+  assert.equal(f.win.location.hash, '#/desk');
+  assert.equal(store.get().boxOpen, true);
+  assert.equal(say.value, 'Edit your routine: Idea screening');
+  assert.deepEqual(boxPrompts(h), [], 'nothing sent');
+  const g = boxRig('#/plugin/ability:event-analogs');
+  await g.h.ready(); await settle();
+  const gsay = g.f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  g.f.click({ tagName: 'BUTTON', dataset: { action: 'askAbility', text: 'Measure the past events like NVDA today' } }); await settle();
+  assert.equal(g.f.win.location.hash, '#/plugin/ability:event-analogs');
+  assert.equal(g.store.get().boxOpen, true);
+  assert.equal(gsay.value, 'Measure the past events like NVDA today');
+});
+
+test("a hand-off on a task's page still goes to Messages", async () => {
+  const { f, h, store } = boxRig('#/task/w1', { rows: [row('w1', { agentAvailable: true })], tasks: [taskRow('w1')] });
+  await h.ready(); await settle();
+  const say = f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkEdit', text: 'Edit your routine: Idea screening' } }); await settle();
+  assert.equal(store.get().route.screen, 'messages');
+  assert.equal(store.get().boxOpen, false);
+});
+
+test('a hand-off under a sheet fills the draft for later', async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  const say = f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  store.dispatch('identityConnectOpen', 'telegram'); await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'dkEdit', text: 'Edit your routine: Idea screening' } }); await settle();
+  assert.equal(store.get().boxOpen, true);
+  assert.doesNotMatch(f.html(), /class="gbox-panel"/);
+  store.dispatch('identityConnectClose'); await settle();
+  assert.match(f.html(), /class="gbox-panel"/);
+  assert.equal(say.value, 'Edit your routine: Idea screening');
 });

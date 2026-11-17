@@ -76,7 +76,8 @@ import { startTrade } from './host/trade.js';
 import { startSearch } from './host/search.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
-import { onScreenId, boxOpenHere } from './host/sessions.js';
+import { onScreenId, boxOpenHere, boxShown } from './host/sessions.js';
+import { boxCovered, boxAside } from './host/box-view.js';
 import { renderBox } from './render/box.js';
 import { createAccountStream } from './wire/account-stream.js';
 import { createMarketStream } from './wire/market-stream.js';
@@ -1934,7 +1935,7 @@ export function boot(win, host = {}) {
     dkFilter: el => store.dispatch('deskFilter', { value: el.dataset.value }),
     dkToggle: el => store.dispatch('deskToggle', { id: el.dataset.id }),
     dkRules: () => store.dispatch('deskRules'),
-    // the Routines column: a row opened or folded, its switch, its Test, Delete asked once more and answered; Edit in Messages
+    // the Routines column: a row opened or folded, its switch, its Test, Delete asked once more and answered; Edit with Gravit
     // puts its words in Gravit's composer as an ability's ask key does, and sends nothing
     dkRoutine: el => store.dispatch('deskRoutineOpen', { id: el.dataset.id }),
     dkSwitch: el => { void deskRoutines.switchOne(el.dataset.id, el.dataset.value === 'true'); },
@@ -1942,8 +1943,7 @@ export function boot(win, host = {}) {
     dkEdit: el => {
       const words = el.dataset.text;
       if (!words) return;
-      go({ screen: 'messages', id: null });
-      putWords(words);
+      handOff(words);
     },
     dkDelete: el => store.dispatch('deskRoutineAsk', { id: el.dataset.id }),
     dkDeleteYes: el => { void deskRoutines.remove(el.dataset.id); },
@@ -1975,15 +1975,13 @@ export function boot(win, host = {}) {
       const s = store.get();
       const asset = handWordsOf(s.markets, s.account, el.dataset.id, now());
       if (!asset) return;
-      go({ screen: 'messages', id: null });
-      putWords(asset.name && asset.name !== asset.symbol ? t('markets.lookAt.named', { symbol: asset.symbol, name: asset.name }) : t('markets.lookAt.symbol', { symbol: asset.symbol }));
+      handOff(asset.name && asset.name !== asset.symbol ? t('markets.lookAt.named', { symbol: asset.symbol, name: asset.name }) : t('markets.lookAt.symbol', { symbol: asset.symbol }));
     },
     // an ability's ask key (spec 2026-11-13 §4.4): its words in Gravit's composer, as Hand to Gravit puts them; nothing is sent
     askAbility: el => {
       const words = el.dataset.text;
       if (!words) return;
-      go({ screen: 'messages', id: null });
-      putWords(words);
+      handOff(words);
     },
     // the owner device: Get a code, the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out, Let
     // it sign and Remove
@@ -2323,11 +2321,34 @@ export function boot(win, host = {}) {
     render();
     doc.getElementById('gbox-ball')?.focus();
   }
-  // ⌥⌘N: the conversation's composer takes focus, its caret after what it holds; from another screen once Messages draws it
+  // the box stands here but is not drawn: an owner sheet or the identity sheet over it, or a drawer it steps aside for at a
+  // width where the drawer takes the box's place (app.css hides the panel there)
+  function boxHidden(s) {
+    return boxCovered(s) || (boxAside(s) === 'drawer' && win.matchMedia?.('(max-width: 907px)')?.matches === true);
+  }
+  // words handed to Gravit (Edit with Gravit, Hand to Gravit, an ability's ask key): into the box where it stands — opened, the
+  // page behind unmoved, the draft filled even while a sheet covers it — else into Messages' composer as before; nothing is sent
+  function handOff(words) {
+    if (boxShown(store.get())) {
+      if (store.get().boxOpen !== true) openBox();
+      putWords(words);
+      return;
+    }
+    go({ screen: 'messages', id: null });
+    putWords(words);
+  }
+  // ⌥⌘N: the conversation's composer takes focus, its caret after what it holds; where the box stands it opens (or, open,
+  // its composer takes focus), and does nothing while the box is hidden; from any other screen once Messages draws it
   function focusComposer() {
     const s = store.get();
     const say = doc.getElementById('say');
     if (s.route.screen === 'messages' && say) { say.focus(); editor.place(say, lengthOf(currentRuns())); return; }
+    if (boxShown(s)) {
+      if (boxHidden(s)) return;
+      if (s.boxOpen !== true) { openBox(); return; }
+      if (say) { say.focus(); editor.place(say, lengthOf(currentRuns())); }
+      return;
+    }
     sayFocus = true;
     go({ screen: 'messages', id: null });
   }
@@ -2401,6 +2422,13 @@ export function boot(win, host = {}) {
       if (s.lightbox) { store.dispatch('closeLightbox'); return; }
       // the shortcut sheet after the lightbox, before the search box (D34)
       if (s.shortcuts) { store.dispatch('closeShortcuts'); return; }
+      // inside the open box: an edit or a confirm first, else the box minimizes — no drawer and no Trade ticket closes from there
+      if (boxOpenHere(s) && ev.target?.closest?.('.gbox-panel')) {
+        if (s.edit) store.dispatch('cancelEdit');
+        else if (s.confirm) store.dispatch('cancelConfirm');
+        else closeBox();
+        return;
+      }
       // the search box while it has focus, before today's chain (spec D34): the first Esc clears the query, the next leaves the box
       const box = doc.activeElement;
       if (box && box.id === 'cq') {
