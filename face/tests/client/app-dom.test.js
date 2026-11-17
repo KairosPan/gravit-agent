@@ -86,7 +86,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
   };
   return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, reads, inventory, overviews, statuses, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
 }
-const started = (f, h) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
+const started = (f, h, more = {}) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
 const send = f => f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'send' } }) } });
 // a session opened as a link the browser followed (one-entry plan 2: no row action opens one): its old address, which lands on
 // Messages, its task's page or history
@@ -8420,7 +8420,7 @@ const boxRig = (hash, over = {}) => {
   const f = fakeWindow({ hash, ...(over.storage ? { storage: over.storage } : {}) });
   if (over.mac) f.win.navigator = { platform: 'MacIntel' };
   const h = host({ rows: [row('conv', { updatedAt: 30, agentAvailable: true }), ...(over.rows ?? [])], conversation: 'conv', tasks: over.tasks ?? [], channels: over.channels ?? [] });
-  const store = started(f, h);
+  const store = started(f, h, over.now ? { now: over.now } : {});
   return { f, h, store };
 };
 const openBox = f => f.click({ tagName: 'BUTTON', dataset: { action: 'boxOpen' } });
@@ -8548,6 +8548,57 @@ test('a card answered in the box is settled everywhere', async () => {
   assert.doesNotMatch(f.html(), /class="gbox-line"/, 'answered: no longer waiting in the box');
   const gate = store.get().conversations.find(c => c.id === 'w1').messages.find(x => x.id === 'ev-9');
   assert.equal(gate.answer, 'approved', 'the worker\'s record holds the answer the rail and the task page read');
+  store.timers.clear();
+});
+
+// the live drill (2026-11-17): on a market's page, whose quotes redraw the page, render() writes a new panel each time and the
+// panel's grow played again on every one — the panel faded and every key slid under the operator's click, which landed beside
+// the key (a Decline that did nothing). The grow is drawn only inside BOX_GROW_MS of the box's opening
+const quote = (store, price) => store.dispatch('accountQuotesLoaded', { quotes: [{ venue: 'broker', symbol: 'NVDA', market: { price, quoteAt: '2026-11-17T15:00:00.000Z' } }] });
+const PANEL_STILL = '<section class="gbox-panel" role="dialog" aria-modal="false" aria-label="gravit">';
+test('the panel grows once as the box opens: a redraw inside the grow carries it on, one after it draws the panel still', async () => {
+  const clock = { t: 1_000_000 };
+  const { f, h, store } = boxRig('#/markets', { now: () => clock.t });
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  assert.match(f.html(), /<section class="gbox-panel" role="dialog" aria-modal="false" aria-label="gravit" data-grow>/, 'opened: the grow from its start');
+  clock.t += 50;
+  quote(store, 182.4); await settle();
+  assert.match(f.html(), /<section class="gbox-panel" [^>]*data-grow style="animation-delay:-50ms">/, 'a quote 50 ms in: the new panel carries the grow on from 50 ms');
+  clock.t += 500;
+  const writes = f.writes;
+  quote(store, 182.5); await settle();
+  assert.ok(f.writes > writes, 'the quote redrew the page');
+  assert.ok(f.html().includes(PANEL_STILL), 'a redraw after the grow draws the panel still: its keys stand where the operator sees them');
+  assert.doesNotMatch(f.html(), /data-grow|animation-delay/);
+  clock.t += 2_000;
+  quote(store, 182.6); await settle();
+  assert.ok(f.html().includes(PANEL_STILL), 'and on every redraw after it');
+  closeBox(f); await settle();
+  openBox(f); await settle();
+  assert.match(f.html(), /aria-label="gravit" data-grow>/, 'opened again: it grows again, once');
+  store.timers.clear();
+});
+
+test('a panel that was open at the load draws still: the grow is the opening\'s, not a render\'s', async () => {
+  const storage = memoryStorage();
+  storage.setItem(PREFS_KEY, JSON.stringify({ boxOpen: true }));
+  const { f, h, store } = boxRig('#/markets', { storage });
+  await h.ready(); await settle();
+  assert.ok(f.html().includes(PANEL_STILL));
+  quote(store, 182.4); await settle();
+  assert.ok(f.html().includes(PANEL_STILL));
+  store.timers.clear();
+});
+
+test("the waiting strip keeps where the operator scrolled it across a quote's redraw", async () => {
+  const { f, h, store } = boxRig('#/markets', { rows: [row('w1', { agentAvailable: true })], tasks: [taskRow('w1', { title: 'Pick a venue', state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c9', tool: 'x' } })] });
+  const strip = f.withSelector('.gbox-waiting', { presentIf: /class="gbox-waiting"/ });
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  strip.scrollTop = 140;   // scrolled down to a question's Answer key
+  quote(store, 182.4); await settle();
+  assert.equal(strip.scrollTop, 140, 'the redraw put the strip back where it stood, not at its top');
   store.timers.clear();
 });
 

@@ -2,7 +2,7 @@
 // conversation's thread and Messages' own composer, where it stands and what it steps aside for.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderBox } from '../../client/js/render/box.js';
+import { renderBox, BOX_GROW_MS } from '../../client/js/render/box.js';
 import { renderThread } from '../../client/js/render/thread.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -65,6 +65,15 @@ test('open: the panel with the thread and Messages\' own composer', () => {
   assert.doesNotMatch(h, /id="gbox-ball"/);
   assert.doesNotMatch(h, /class="status up"/);
   assert.match(renderBox(R.boxOpen(withConv(at('markets'), { running: true })), NOW), /<span class="status up"><span class="status-dot"><\/span>Working<\/span>/);
+});
+
+test('the grow is drawn only while it runs: from its start, carried on from how far it came, and never after it', () => {
+  const open = R.boxOpen(at('markets'));
+  const head = grow => renderBox(open, NOW, {}, { grow }).match(/<section[^>]*>/)[0];
+  assert.equal(head(0), '<section class="gbox-panel" role="dialog" aria-modal="false" aria-label="gravit" data-grow>');
+  assert.equal(head(42.4), '<section class="gbox-panel" role="dialog" aria-modal="false" aria-label="gravit" data-grow style="animation-delay:-42ms">');
+  for (const still of [BOX_GROW_MS, 5_000, -1, null, undefined]) assert.equal(head(still), '<section class="gbox-panel" role="dialog" aria-modal="false" aria-label="gravit">', String(still));
+  assert.equal(BOX_GROW_MS, 180);
 });
 
 test('open on a conversation known but not listed: one plain line in place of the thread', () => {

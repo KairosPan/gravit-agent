@@ -554,6 +554,12 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .question .q:last-of-type { border-bottom: 0; padding-bottom: 0; }
 .opt { display: flex; align-items: baseline; gap: 8px; font-size: calc(14px * var(--fs)); cursor: pointer; }
 .opt .dim { font-size: calc(12px * var(--fs)); }
+/* a question's option is drawn by the run sheet's .opt grid below (the radio, its label beside it): its description goes
+   under the label, never into the radio's column, whose width it would take and squeeze the label to a letter a line; and
+   in a column the small field's flex basis would be a height (80 px), so the free answer and the override's fields keep
+   their own */
+.question .opt > .dim { grid-column: 2; }
+.question .q > .input.small, .mg-field > .input.small { flex: none; }
 /* a turn in progress */
 .thinking { display: inline-flex; gap: 4px; align-items: center; min-height: 20px; }
 .thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); animation: think 1.2s infinite ease-in-out; }
@@ -1457,7 +1463,11 @@ button.tk-at:hover { border-color: var(--dim); }
 .gbox-dot.steady { opacity: 1; }
 .gbox-dot.pulse { animation: gbox-pulse 1.4s ease-in-out infinite; }
 @keyframes gbox-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
-.gbox-panel { position: fixed; right: 24px; bottom: 24px; z-index: 40; width: 400px; height: min(600px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border: 1px solid var(--card-border); border-radius: 16px; box-shadow: var(--shadow); transform-origin: 100% 100%; animation: gbox-grow .18s ease-out; }
+.gbox-panel { position: fixed; right: 24px; bottom: 24px; z-index: 40; width: 400px; height: min(600px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border: 1px solid var(--card-border); border-radius: 16px; box-shadow: var(--shadow); transform-origin: 100% 100%; }
+/* the grow, once as the box opens (render/box.js BOX_GROW_MS): render() writes a new panel each time, so the plain panel has
+   no animation — a redraw on a busy page would play it again and move every key while it plays — and one drawn inside the
+   grow carries data-grow with how far it has come as a negative delay */
+.gbox-panel[data-grow] { animation: gbox-grow .18s ease-out; }
 @keyframes gbox-grow { from { opacity: 0; transform: translateX(16px) scale(.96); } to { opacity: 1; transform: none; } }
 .gbox-head { flex: none; display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--border); }
 .gbox-head h2 { margin: 0; font-size: calc(15px * var(--fs)); font-weight: 650; }
@@ -1516,5 +1526,5 @@ button.tk-at:hover { border-color: var(--dim); }
 }
 @media (prefers-reduced-motion: reduce) {
   .gbox-ball { transition: none; }
-  .gbox-panel, .gbox-dot.pulse { animation: none; }
+  .gbox-panel[data-grow], .gbox-dot.pulse { animation: none; }
 }
