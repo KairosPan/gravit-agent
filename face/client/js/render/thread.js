@@ -23,6 +23,8 @@ import { routineCardOf } from '../host/desk-page-view.js';
 import { routineClosings } from '../host/kinds.js';
 import { gateOf } from '../host/memory-gate.js';
 import { visible } from '../visible.js';
+import { lessonHtml, lessonCount, isRedLine } from './lesson-line.js';
+import { lessonsFor } from '../host/memory-lunhui.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -59,20 +61,12 @@ function gateKeys(m, conv) {
 // words, a lesson's words, what an untold lesson needs, what was registered — is made visible, then escaped
 const plain = text => esc(visible(text));
 const dimLine = html => `<div class="dim">${html}</div>`;
-const count = n => (Number.isFinite(n) && n > 0 ? n : 0);
-const isRedLine = l => l?.strength === 'red-line' && l?.says === 'dont';
+const count = lessonCount;
 const linesOf = g => (Array.isArray(g.lines) ? g.lines : []);
 const lessonsOf = line => (Array.isArray(line?.lessons) ? line.lessons : []);
 // a red line holds the card when the face says so or any lesson drawn is one: a lesson of strength red-line that says dont
 const redLined = g => g.redLine === true || linesOf(g).some(line => lessonsOf(line).some(isRedLine));
 const applies = g => linesOf(g).some(line => lessonsOf(line).length > 0 || count(line?.lessonsMore) > 0);
-
-function lessonHtml(l) {
-  const red = isRedLine(l);
-  const counts = t('thread.memory.counts', { fired: count(l?.fired), followed: count(l?.followed), overridden: count(l?.overridden) });
-  return `<div class="${cls('mg-lesson', red && 'red')}"><div class="mg-head">${red ? th('thread.memory.redLine') : th('thread.memory.lesson')}</div>` +
-    `<div class="mg-words">${th('thread.memory.quoted', { words: visible(l?.words) })}</div>${dimLine(esc(counts))}</div>`;
-}
 
 function memoryLine(line, many) {
   const parts = [];
@@ -184,9 +178,12 @@ function body(m, conv, state, { rail = false } = {}) {
   const d = m.data ?? {};
   switch (m.kind) {
     // Gravit's composed answer, drawn from its run's view as the lunhui slice holds it
-    case 'composed':
-      // (a history page reads its answers and sends nothing: their follow-ups are not drawn)
-      return composedHtml(m, state?.lunhui?.views?.[viewOf(m).key], state?.lunhui?.ui?.[composedId(m, conv)], conv, state?.channels, { asks: state?.route?.screen !== 'history' });
+    case 'composed': {
+      // (a history page reads its answers and sends nothing: their follow-ups are not drawn); the owner's lessons on the run's
+      // leaders, once the face answered them (host/memory-lunhui.js)
+      const entry = state?.lunhui?.views?.[viewOf(m).key];
+      return composedHtml(m, entry, state?.lunhui?.ui?.[composedId(m, conv)], conv, state?.channels, { asks: state?.route?.screen !== 'history', lessons: lessonsFor(state, entry?.view) });
+    }
     case 'card': {
       // no gate kept for its call: the card as it has always been drawn
       const g = gateOf(state, m);

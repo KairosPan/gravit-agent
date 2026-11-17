@@ -2150,4 +2150,12 @@ export const ZH = Object.freeze({
   'lunhui.stock.openMarkets': '在市场中打开',
   'lunhui.stock.minuteLine': '分时线',
   'lunhui.stock.inRun': '本次运行中',
+  'lunhui.memory.title': '你在龙头上的教训',
+  'lunhui.memory.yours': '你的教训',
+  'lunhui.memory.boards': '{n} 板',
+  'lunhui.memory.fault': '无法核对：{words}',
+  'lunhui.memory.old': '这次运行没有核对教训',
+  'lunhui.memory.noPool': '没有核对教训：这次运行没有冻结涨停池',
+  'lunhui.memory.unreadable': '为这次运行保存的教训无法读取',
+  'lunhui.memory.notConnected': '记忆未连接',
 });

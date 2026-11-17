@@ -454,6 +454,28 @@ export function namedStates() {
     // override form over a batch of two lines; an untold lesson beside a position not read; a memory not connected and a
     // line's fault; an answered card with what was registered; and the rail's line pointing at the task
     ...memoryGateStates(),
+    // the owner's lessons on a Lunhui run's leaders (memory alert and Lunhui Task 5): under the ladder, a leader's caveat and
+    // another's untold lesson; a run not checked; a memory not connected; and the drawer of a leader with a lesson
+    ...memoryLunhuiStates(),
+  ];
+}
+
+// a composed answer with a ladder on the sealed 10-27 run's view, and the face's answer for that run's lessons
+function memoryLunhuiStates() {
+  const run = VIEW_1027.run;
+  const answer = m('lp1', { kind: 'composed', text: '弱势日', data: { callId: 'lp', strategy: 'cn-market', run, summary: '弱势日', blocks: [{ kind: 'ladder' }], choices: [], modules: [] } });
+  const key = `cn-market/${run}/`;
+  const thread = R.lunhuiViewLoaded(onConv(R.hostList(emptyState(), { conversations: [conv('lm', { messages: [answer], loaded: true })], channels: [], bots: [] }), 'lm'), { key, view: VIEW_1027 });
+  const caveat = { id: 'L-1', strength: 'caveat', says: 'careful', words: 'Do not chase a third board after a weak open', fired: 3, followed: 2, overridden: 1 };
+  const leader = (code, boards, over = {}) => ({ code, boards, lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, ...over });
+  const checked = { state: 'checked', strategy: 'cn-market', run, askedAt: '2026-10-27T08:00:00Z', leaders: [
+    leader('600001', 5, { recall: 'R-1', lessons: [caveat], lessonsMore: 1 }), leader('600011', 4, { recall: 'R-2', untold: [{ id: 'L-3', needs: ['industry'] }] }), leader('600012', 4, { recall: 'R-3' })] };
+  const kept = lessons => R.memoryLunhuiLoaded(thread, { runKey: `cn-market/${run}`, lessons });
+  return [
+    ['lunhui-memory-ladder', kept(checked)],
+    ['lunhui-memory-not-checked', kept({ state: 'not checked', why: 'old', words: 'lessons were not checked for this run' })],
+    ['lunhui-memory-not-connected', kept({ state: 'not connected', words: 'no memory here' })],
+    ['lunhui-memory-drawer', R.lunhuiStockOpen(kept(checked), { key, code: '600001' })],
   ];
 }
 
@@ -1098,8 +1120,10 @@ const CONTENT_FIELDS = new Set([
 // task as the face read them (the worker's and web pages' words); the desk's news as the face answered it (its ledgers' and
 // Gravit's words), and a routine's when line and instruction (the face's line, the operator's words), a routine card's too
 // (Gravit's call and the face's when line) and a proposal's the read holds; the gate the face kept for an order card's call
-// (the face's order words and sentences, the memory's lessons); `*` is any one key
-const CONTENT = [['memoryGate', '*', 'gate'],['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
+// (the face's order words and sentences, the memory's lessons), and of a Lunhui run's leaders the memory's words: a lesson's
+// words, what an untold lesson needs, a leader's fault; `*` is any one key
+const CONTENT = [['memoryGate', '*', 'gate'], ['memoryLunhui', '*', 'lessons', 'leaders', 'lessons', 'words'], ['memoryLunhui', '*', 'lessons', 'leaders', 'untold', 'needs'],
+  ['memoryLunhui', '*', 'lessons', 'leaders', 'fault'],['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data'],
   ['deskPage', 'routines', 'data', 'routines', 'when'], ['deskPage', 'routines', 'data', 'routines', 'instruction'],
   ['conversations', 'messages', 'data', 'when'], ['conversations', 'messages', 'data', 'instruction'],

@@ -475,3 +475,77 @@ test("the sources' codes and modules, a bucket's label and a rung's names are li
     assert.match(readout(focused), /missed: 样本000022 \+1\.00%、/);
   });
 });
+
+// ---- the owner's lessons on the leaders (memory alert and Lunhui, Task 5): drawn under the ladder from the face's answer
+// (GET /data/memory/lunhui), every word the memory or the face gave made visible, then escaped
+const answer = blocks => ({ id: 'p1', kind: 'composed', text: '弱势日', data: { strategy: 'cn-market', run: VIEW_1027.run, summary: '弱势日', blocks, modules: [] } });
+const LOADED = { status: 'loaded', view: VIEW_1027 };
+const caveat = (over = {}) => ({ id: 'L-1', strength: 'caveat', says: 'careful', words: 'Do not chase a gap up on the open', fired: 3, followed: 2, overridden: 1, ...over });
+const leader = (over = {}) => ({ code: '600001', boards: 3, lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, ...over });
+const checked = leaders => ({ state: 'checked', strategy: 'cn-market', run: VIEW_1027.run, askedAt: '2026-10-27T08:00:00Z', leaders });
+const withLessons = (lessons, blocks = [{ kind: 'ladder' }, { kind: 'breadth' }]) => composedHtml(answer(blocks), LOADED, {}, { id: 'c1' }, undefined, { lessons });
+const ladderSection = html => html.match(/<section class="lh-block">[\s\S]*?<\/section>/)[0];
+
+test('the ladder with a leader’s caveat: a block of lessons under it, the leader a stock link with its boards, the lesson’s line', () => {
+  const html = withLessons(checked([leader({ lessons: [caveat()] })]));
+  const ladder = ladderSection(html);
+  const block = ladder.slice(ladder.indexOf('<div class="lh-lessons">'));
+  assert.ok(ladder.indexOf('<div class="lh-lessons">') > ladder.indexOf('lh-readout'), 'under the ladder');
+  assert.match(block, /<div class="lh-label">Your lessons on the leaders<\/div>/);
+  assert.match(block, /<button type="button" class="lh-stock" data-action="lunhuiStock" data-key="cn-market\/20261027T201627Z-6937d208\/" data-code="600001">上海九百<\/button>/);
+  assert.match(text(block), /上海九百 · 3 boards/);
+  assert.match(block, /<div class="mg-words">“Do not chase a gap up on the open”<\/div>/);
+  assert.match(text(block), /fired 3 · followed 2 · overridden 1/);
+  assert.match(block, /<div class="mg-head">Your lesson<\/div>/);
+  assert.doesNotMatch(html.slice(html.indexOf('</section>')), /lh-lessons/, 'nothing under another block');
+});
+
+test('an untold lesson, a leader’s fault and lessons left out each draw their line', () => {
+  const html = withLessons(checked([
+    leader({ untold: [{ id: 'L-3', needs: ['industry'] }], untoldMore: 1 }),
+    leader({ code: '600011', boards: 4, fault: 'the memory did not answer in time' }),
+    leader({ code: '600012', boards: 4, lessons: [caveat()], lessonsMore: 2 }),
+  ]));
+  const out = text(ladderSection(html));
+  assert.match(out, /Could not be checked: needs industry/);
+  assert.match(out, /and 1 more could not be checked/);
+  assert.match(out, /样本600011 · 4 boards/);
+  assert.match(out, /Could not be checked: the memory did not answer in time/);
+  assert.match(out, /and 2 more/);
+  assert.ok(out.indexOf('上海九百 ·') < out.indexOf('样本600011 ·') && out.indexOf('样本600011 ·') < out.indexOf('样本600012 ·'), 'the leaders in the answer’s order');
+});
+
+test('a checked run no leader of which carries anything, and no lessons at all, draw the ladder exactly as without', () => {
+  const bare = composedHtml(answer([{ kind: 'ladder' }, { kind: 'breadth' }]), LOADED, {}, { id: 'c1' });
+  assert.equal(withLessons(checked([leader(), leader({ code: '600011' })])), bare);
+  assert.equal(withLessons(checked([])), bare);
+  assert.equal(withLessons(null), bare);
+  assert.equal(composedHtml(answer([{ kind: 'ladder' }, { kind: 'breadth' }]), LOADED, {}, { id: 'c1' }, undefined, {}), bare);
+});
+
+test('a run not checked draws one dim line by its why, and a memory not connected its own; the server’s words are not drawn', () => {
+  const line = lessons => {
+    const ladder = ladderSection(withLessons(lessons));
+    return text(ladder.slice(ladder.indexOf('<div class="lh-lessons')));
+  };
+  assert.equal(line({ state: 'not checked', why: 'old', words: 'lessons were not checked for this run' }), 'Lessons were not checked for this run');
+  assert.equal(line({ state: 'not checked', why: 'no pool', words: 'x' }), 'Lessons were not checked: the run froze no limit-up pool');
+  assert.equal(line({ state: 'not checked', why: 'unreadable', words: 'x' }), 'The lessons kept for this run could not be read');
+  assert.equal(line({ state: 'not connected', words: 'no memory here' }), 'The memory is not connected');
+  assert.match(ladderSection(withLessons({ state: 'not connected', words: 'x' })), /<div class="lh-lessons dim">/);
+});
+
+test('a lesson’s words, a fault and a need with a direction mark and markup draw as visible, escaped text', () => {
+  const html = withLessons(checked([leader({ lessons: [caveat({ words: 'a\u202eb<i>' })], fault: 'f\u2066<b>', untold: [{ id: 'L-3', needs: ['n\u200b<s>'] }] })]));
+  assert.ok(html.includes('“a\\u202eb&lt;i&gt;”'), 'the words');
+  assert.ok(html.includes('f\\u2066&lt;b&gt;'), 'the fault');
+  assert.ok(html.includes('n\\u200b&lt;s&gt;'), 'the need');
+  assert.doesNotMatch(html, /[\u202e\u2066\u200b]/u);
+  assert.doesNotMatch(html, /<i>|<b>|<s>/);
+});
+
+test('a block of another kind draws nothing of the lessons', () => {
+  const lessons = checked([leader({ lessons: [caveat()] })]);
+  const bare = composedHtml(answer([{ kind: 'breadth' }]), LOADED, {}, { id: 'c1' });
+  assert.equal(withLessons(lessons, [{ kind: 'breadth' }]), bare);
+});

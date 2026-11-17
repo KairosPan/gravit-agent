@@ -2157,4 +2157,12 @@ export const EN = Object.freeze({
   'lunhui.stock.openMarkets': 'Open in Markets',
   'lunhui.stock.minuteLine': 'The minute line',
   'lunhui.stock.inRun': 'In this run',
+  'lunhui.memory.title': 'Your lessons on the leaders',
+  'lunhui.memory.yours': 'Your lessons',
+  'lunhui.memory.boards': { one: '{n} board', other: '{n} boards' },
+  'lunhui.memory.fault': 'Could not be checked: {words}',
+  'lunhui.memory.old': 'Lessons were not checked for this run',
+  'lunhui.memory.noPool': 'Lessons were not checked: the run froze no limit-up pool',
+  'lunhui.memory.unreadable': 'The lessons kept for this run could not be read',
+  'lunhui.memory.notConnected': 'The memory is not connected',
 });

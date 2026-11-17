@@ -406,6 +406,8 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .lh-stk-from { font-size: calc(12px * var(--fs)); color: var(--dim); }
 .lh-stk-note { font-size: calc(12px * var(--fs)); color: var(--dim); }
 .lh-stk-cite { display: flex; flex-direction: column; gap: 2px; font-size: calc(13px * var(--fs)); line-height: 1.4; }
+.lh-lessons { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.lh-lessons-who { font-weight: 600; margin-top: 2px; }
 .lh-limit { stroke-width: 1; }
 .lh-limit.up { stroke: var(--up); }
 .lh-limit.down { stroke: var(--down); }
