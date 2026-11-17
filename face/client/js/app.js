@@ -45,7 +45,7 @@ import { startTraces } from './host/traces.js';
 import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCursors, marketKey, stockCode } from './host/lunhui.js';
 import { ensureAnalog } from './host/analog.js';
 import { startMemoryGate } from './host/memory-gate.js';
-import { wantedLessons, ensureLunhuiLessons } from './host/memory-lunhui.js';
+import { lessonsDue, ensureLunhuiLessons } from './host/memory-lunhui.js';
 import { needsAnswer } from './messages.js';
 import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
@@ -874,8 +874,9 @@ export function boot(win, host = {}) {
     tickClocks(false);
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
-    // a loaded view's run whose lessons were not asked yet, likewise: each run once, the view drawn without waiting on them
-    if (wantedLessons(store.get()).length) void ensureLunhuiLessons(store, getJson);
+    // a loaded view's run whose lessons were not asked yet, likewise: each run once, a failed read once more 5 s on, the view
+    // drawn without waiting on them
+    if (lessonsDue(store)) void ensureLunhuiLessons(store, getJson);
     // an event table's task or view not read yet, likewise; called on every render so it sees each screen entered (a task
     // read that failed is read once more there), reading nothing when nothing is wanted
     void ensureAnalog(store, getJson);

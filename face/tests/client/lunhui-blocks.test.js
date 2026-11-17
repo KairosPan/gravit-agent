@@ -544,6 +544,14 @@ test('a lesson’s words, a fault and a need with a direction mark and markup dr
   assert.doesNotMatch(html, /<i>|<b>|<s>/);
 });
 
+test('a leader whose code the view does not hold draws its code as visible, escaped text, not a stock link', () => {
+  const html = withLessons(checked([leader({ code: '9\u202e<x>', lessons: [caveat()] })]));
+  const block = ladderSection(html);
+  assert.ok(block.includes('<div class="lh-lessons-who">9\\u202e&lt;x&gt; · 3 boards</div>'), 'the code');
+  assert.doesNotMatch(html, /\u202e/u);
+  assert.doesNotMatch(html, /<x>/);
+});
+
 test('a block of another kind draws nothing of the lessons', () => {
   const lessons = checked([leader({ lessons: [caveat()] })]);
   const bare = composedHtml(answer([{ kind: 'breadth' }]), LOADED, {}, { id: 'c1' });

@@ -2,7 +2,7 @@
 // of GET /data/memory/lunhui once per run, the slice it lands in, and what a view and a leader find there.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runKey, wantedLessons, ensureLunhuiLessons, lessonsFor, leaderLessons } from '../../client/js/host/memory-lunhui.js';
+import { runKey, wantedLessons, ensureLunhuiLessons, lessonsDue, lessonsFor, leaderLessons, LESSONS_RETRY_MS } from '../../client/js/host/memory-lunhui.js';
 import { createStore } from '../../client/js/store.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -54,6 +54,54 @@ test('a throw, a 503 and a body with no lessons end failed, and a failed run is 
     await ensureLunhuiLessons(store, async () => { again += 1; return { ok: true, lessons: CHECKED }; });
     assert.equal(again, 0);
   }
+});
+
+test('a failed read is asked once more on a render no sooner than 5,000 ms after it failed; failed twice, it stays failed', async () => {
+  const store = storeOf(stateWith({ lunhui: { views: { 'cn-market/r1/': { status: 'loaded', view: view('cn-market', 'r1') } }, ui: {}, stock: null } }));
+  let at = 1_000_000;
+  const now = () => at;
+  let calls = 0;
+  const failing = async () => { calls += 1; throw new Error('HTTP 503'); };
+  await ensureLunhuiLessons(store, failing, now);
+  assert.equal(calls, 1);
+  assert.equal(lessonsDue(store, now), false, 'nothing due at once');
+  at += LESSONS_RETRY_MS - 1;
+  await ensureLunhuiLessons(store, failing, now);
+  assert.equal(calls, 1, 'not before 5,000 ms');
+  at += 1;
+  assert.equal(lessonsDue(store, now), true);
+  await ensureLunhuiLessons(store, failing, now);
+  assert.equal(calls, 2, 'asked once more');
+  assert.deepEqual(store.get().memoryLunhui['cn-market/r1'], { status: 'failed' });
+  at += 60_000;
+  assert.equal(lessonsDue(store, now), false);
+  await ensureLunhuiLessons(store, failing, now);
+  assert.equal(calls, 2, 'failed twice: never asked again');
+
+  const healed = storeOf(stateWith({ lunhui: { views: { 'cn-market/r1/': { status: 'loaded', view: view('cn-market', 'r1') } }, ui: {}, stock: null } }));
+  let first = true;
+  const once = async () => { if (first) { first = false; throw new Error('HTTP 503'); } return { ok: true, lessons: CHECKED }; };
+  await ensureLunhuiLessons(healed, once, now);
+  at += LESSONS_RETRY_MS;
+  await ensureLunhuiLessons(healed, once, now);
+  assert.deepEqual(healed.get().memoryLunhui['cn-market/r1'], { status: 'ready', lessons: CHECKED });
+});
+
+test('the one more read under nested renders is asked once', async () => {
+  const store = storeOf(stateWith({ lunhui: { views: { 'cn-market/r1/': { status: 'loaded', view: view('cn-market', 'r1') } }, ui: {}, stock: null } }));
+  let at = 0;
+  const now = () => at;
+  let calls = 0;
+  await ensureLunhuiLessons(store, async () => { calls += 1; throw new Error('HTTP 503'); }, now);
+  at = LESSONS_RETRY_MS;
+  const getJson = async () => { calls += 1; return { ok: true, lessons: CHECKED }; };
+  const pending = [];
+  const off = store.subscribe(() => { pending.push(ensureLunhuiLessons(store, getJson, now)); });
+  await ensureLunhuiLessons(store, getJson, now);
+  await Promise.all(pending);
+  off?.();
+  assert.equal(calls, 2, 'the failed read, then one more');
+  assert.equal(store.get().memoryLunhui['cn-market/r1'].status, 'ready');
 });
 
 test('renders nesting inside each dispatch (the app calls the ensure after every render) ask each run once', async () => {
