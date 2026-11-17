@@ -2288,7 +2288,7 @@ test("lessons that reject or throw cost one line each, and the pass's post goes 
   assert.equal(t.sent.length, 1);
 });
 
-test("lessons that never settle hold no alert and no post, and dispose resolves within its bound", async () => {
+test("lessons that never settle hold no alert, no post and no dispose", async () => {
   const hangs = lessonsFake(() => new Promise<AlertLessonsAnswer | undefined>(() => {}));
   const h = await moveHarness(nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5), { lessons: hangs, deliver: telegram7 });
   await h.wall.advance(0);
@@ -2301,7 +2301,32 @@ test("lessons that never settle hold no alert and no post, and dispose resolves 
   await h.watch.dispose();
   clearInterval(keep);
   const took = Date.now() - started;
-  assert.ok(took < 4_000, `dispose took ${took} ms`);
+  assert.ok(took < 500, `dispose took ${took} ms: it waited on the ask`);
+  assert.equal(h.watch.status().state, "stopped");
+});
+
+test("with an ask in flight at dispose, the send chain and the ledger still settle before the lease is released", async () => {
+  let release!: (r: DeliverResult) => void;
+  const hangs = lessonsFake(() => new Promise<AlertLessonsAnswer | undefined>(() => {}));
+  /* the first alert is sent and its ask hangs; the second alert's send is held until dispose has begun */
+  const h = await moveHarness(nvdaRule("nvda-move", 4) + nvdaRule("nvda-big", 5), {
+    lessons: hangs,
+    deliver: (_text, n) => (n === 1 ? new Promise<DeliverResult>((done) => { release = done; }) : { sent: [`telegram:${100 + n}`] }),
+  });
+  await h.wall.advance(0);
+  await until("the first ask and the held send", () => hangs.calls.length === 1 && h.sent.length === 2);
+  const started = Date.now();
+  const keep = setInterval(() => {}, 100); // the bound's own timer is unref'd: hold the loop open while it runs
+  const disposed = h.watch.dispose();
+  release({ sent: ["telegram:101"] });
+  await disposed;
+  clearInterval(keep);
+  const took = Date.now() - started;
+  assert.ok(took < 500, `dispose took ${took} ms: it waited on the ask`);
+  const records = await h.alertRecords();
+  const delivered = records.filter((r) => r.kind === "delivered").map((r) => r.delivery);
+  assert.deepEqual(delivered, [{ sent: ["telegram:100"] }, { sent: ["telegram:101"] }], "the held send settled and its record was written before dispose resolved");
+  await assert.rejects(readFile(join(deskDir(h.home), WATCH_LEASE_FILE)), "the lease is released");
   assert.equal(h.watch.status().state, "stopped");
 });
 

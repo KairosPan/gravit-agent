@@ -1075,9 +1075,10 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     });
   }
 
-  /** Ask the owner's lessons on a price alert the phone got (`deps.lessons`), beside the send chain and never on it, so
-   * no send and no post waits for the memory: its block goes on the send chain as the alert's reply (with the alert's
-   * kind; with no reply when the outlet queued the alert), and the conversation is told only once that send was not
+  /** Ask the owner's lessons on a price alert the phone got (`deps.lessons`), beside the send chain and never on it nor
+   * among the flights dispose waits for, so no send, no post and no shutdown waits for the memory: its block goes on
+   * the send chain as the alert's reply (with the alert's kind; with no reply when the outlet queued the alert), and
+   * the conversation is told only once that send was not
    * refused - a note with no block is told at once. One block a `key` an ET day (`lessons:<key>` among the dated
    * memories), marked only by a block that was not refused or a note told. Nothing is sent or told once dispose has
    * begun; a throw anywhere is one `watch lessons` line. */
@@ -1086,7 +1087,8 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     if (lessons === undefined) return;
     const replyTo = "sent" in result ? result.sent[0] : undefined;
     const kind = rec.urgent === true ? URGENT : ALERT;
-    track((async () => {
+    /* tracked by nothing: dispose never waits for an ask, whose answer it would drop anyway */
+    void (async () => {
       try {
         const answer = await lessons(rec);
         if (stopped || answer === undefined) return;
@@ -1115,7 +1117,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       } catch (err) {
         fail("lessons", err);
       }
-    })());
+    })();
   }
 
   /** A pass's posted alerts waiting for the annotation lane (why-it-moved task 10), and whether a drain runs. */
