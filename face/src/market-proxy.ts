@@ -16,7 +16,8 @@
  * The half follows the `mcp-market` row as composed (src/market-row.ts `composedMarketRow`): its URL, or, with the
  * row disabled, 503 `disabled` on every valid request and nothing asked — the account's half is not touched.
  * {@link registerMarketProxy} returns the `explore` and `quotes` reads in-process, which the desk's quotes are taken
- * from (src/market-quotes.ts). Nothing of a body, a query or a frame is logged here.
+ * from (src/market-quotes.ts), and the `candles` read, which the memory's price facts are taken from
+ * (src/memory-facts.ts). Nothing of a body, a query or a frame is logged here.
  * @module
  */
 import { marketUrl } from "./market-row.ts";
@@ -61,13 +62,13 @@ export const MARKET_READS: readonly UpstreamRead[] = READ_NAMES.map((name) => ({
 const INVALID = '{"ok":false,"error":"invalid market request"}';
 
 /** Mount the market's eight routes on the host webserver. `url` defaults to `FACE_MARKET_URL` or
- * `http://127.0.0.1:4821`; `disabled` is the composed `mcp-market` row's. `explore` and `quotes` are those reads
+ * `http://127.0.0.1:4821`; `disabled` is the composed `mcp-market` row's. `explore`, `quotes` and `candles` are those reads
  * in-process, through the same caches their routes are served from; `dispose` forgets every kept answer and aborts
  * every open stream's upstream. */
 export function registerMarketProxy(
   webServer: RouteRegistrar,
   deps: { url?: string; fetch?: typeof fetch; now?: () => number; disabled?: boolean } = {},
-): { explore: UpstreamRouteRead; quotes: UpstreamRouteRead; dispose(): void } {
+): { explore: UpstreamRouteRead; quotes: UpstreamRouteRead; candles: UpstreamRouteRead; dispose(): void } {
   const s: UpstreamSettings = {
     url: (deps.url ?? marketUrl()).replace(/\/+$/, ""),
     doFetch: deps.fetch ?? fetch,
@@ -82,6 +83,7 @@ export function registerMarketProxy(
   return {
     explore: reads.read.get("/data/market/explore")!,
     quotes: reads.read.get("/data/market/quotes")!,
+    candles: reads.read.get("/data/market/candles")!,
     dispose: () => {
       reads.clear();
       stream.abortAll();

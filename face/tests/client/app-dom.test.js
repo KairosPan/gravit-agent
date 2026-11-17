@@ -262,6 +262,95 @@ test("an order card's ✓ answers allowed-once through the mux and the chip read
   store.timers.clear();
 });
 
+// a seat card whose call the memory red-lined (memory order card, Task 6): the form takes the owner's reason, the override is
+// posted, and only then is the card approved
+const seatGate = { type: 'waterfall', event: 'approval/request', eventId: 'ev-9', agentId: 's1', request: { toolName: 'mcp__account__portfolio_live_order', callId: 'c9', reason: 'Account seat - mcp__account__portfolio_live_order: side=buy usd=10 symbol=BTC/USD venue=paper-1' } };
+const redLined = { callId: 'c9', state: 'checked', redLine: true, overridden: false, lines: [{ order: 'buy $10 of BTC/USD', considering: ['open'], positionRead: true, lessons: [{ id: 'L-1', strength: 'red-line', says: 'dont', words: 'Never buy a gap', fired: 1, followed: 1, overridden: 0 }], lessonsMore: 0, untold: [], untoldMore: 0 }] };
+const overridePress = f => f.click({ tagName: 'BUTTON', dataset: { action: 'overrideGate', conv: 's1', msg: 'ev-9', call: 'c9' } });
+
+test("a red-lined card's override key with no reason answers nothing and asks for the reason; with one, it posts the override and approves once", async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  h.inventory['/data/memory/gate?callId=c9'] = { ok: true, gate: redLined };
+  const store = started(f, h);
+  await h.ready();
+  h.opts().onGate(seatGate);
+  await settle();
+  assert.ok(h.reads.includes('/data/memory/gate?callId=c9'), 'the card asked for its lessons');
+  assert.match(f.html(), /data-action="overrideGate"/);
+  assert.doesNotMatch(f.html(), /data-value="allowed-once"/, 'no Approve on a red line');
+  overridePress(f);
+  await settle();
+  assert.deepEqual(h.answered, []);
+  assert.equal(h.posted.some(([p]) => p === '/data/memory/gate/override'), false);
+  assert.match(f.html(), /status-line bad" role="status">Say why you override the red line first</);
+  const reason = f.withId('mg-ev-9-reason', { tagName: 'INPUT', type: 'text' });
+  const wrongIf = f.withId('mg-ev-9-wrongIf', { tagName: 'INPUT', type: 'text' });
+  reason.value = '  I sized it small  ';
+  wrongIf.value = 'it gaps down';
+  overridePress(f);
+  overridePress(f);
+  await settle();
+  assert.deepEqual(h.posted.filter(([p]) => p === '/data/memory/gate/override').map(([, b]) => b), [{ callId: 'c9', reason: 'I sized it small', wrongIf: 'it gaps down' }], 'posted once while in flight');
+  assert.deepEqual(h.answered, [['ev-9', 'allowed-once']]);
+  assert.match(f.html(), /class="chip up">Approved</);
+  store.timers.clear();
+});
+
+test("a second press while the approval the override led to is still on its way posts nothing more", async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  h.inventory['/data/memory/gate?callId=c9'] = { ok: true, gate: redLined };
+  let release = () => {};
+  const open = h.openMux;
+  h.openMux = o => {
+    const mux = open(o);
+    const answer = mux.answer;
+    mux.answer = (id, value) => new Promise(r => { release = () => r(answer(id, value)); });
+    return mux;
+  };
+  const store = started(f, h);
+  await h.ready();
+  h.opts().onGate(seatGate);
+  await settle();
+  f.withId('mg-ev-9-reason', { tagName: 'INPUT', type: 'text' }).value = 'I sized it small';
+  overridePress(f);
+  await settle();
+  overridePress(f);
+  await settle();
+  release();
+  await settle();
+  overridePress(f);
+  await settle();
+  assert.equal(h.posted.filter(([p]) => p === '/data/memory/gate/override').length, 1, 'one override, while its approval was in flight and after');
+  assert.deepEqual(h.answered, [['ev-9', 'allowed-once']]);
+  store.timers.clear();
+});
+
+test("a refused override answers nothing and the status line says so", async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1')] });
+  h.inventory['/data/memory/gate?callId=c9'] = { ok: true, gate: redLined };
+  const post = h.postJson;
+  h.postJson = async (path, body) => {
+    if (path !== '/data/memory/gate/override') return post(path, body);
+    h.posted.push([path, body]);
+    throw Object.assign(new Error('this card is answered'), { status: 409 });
+  };
+  const store = started(f, h);
+  await h.ready();
+  h.opts().onGate(seatGate);
+  await settle();
+  f.withId('mg-ev-9-reason', { tagName: 'INPUT', type: 'text' }).value = 'because';
+  overridePress(f);
+  await settle();
+  assert.equal(h.posted.filter(([p]) => p === '/data/memory/gate/override').length, 1);
+  assert.deepEqual(h.answered, []);
+  assert.match(f.html(), /status-line bad" role="status">The override was not kept, so nothing was approved</);
+  assert.match(f.html(), /data-action="overrideGate"/, 'the card still waits');
+  store.timers.clear();
+});
+
 const orderGate = { type: 'waterfall', event: 'approval/request', eventId: 'ev-9', agentId: 's1', request: { toolName: 'mcp__alpaca-kit__place_order', callId: 'c9', reason: 'PAPER order - place_order: side=buy' } };
 const approve = f => f.click({ tagName: 'BUTTON', dataset: { action: 'answer', conv: 's1', msg: 'ev-9', value: 'allowed-once' } });
 

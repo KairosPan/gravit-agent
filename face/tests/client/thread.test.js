@@ -6,6 +6,7 @@ import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
 import { sessionUri } from '../../client/js/composer/draft.js';
 import { withTable } from '../../client/js/i18n/words.js';
+import { ZH } from '../../client/js/i18n/zh.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const state = emptyState();
@@ -688,4 +689,97 @@ test("a bare report whose task read failed draws the failure's words in one line
   assert.match(renderMessage(none, conv(), failed), /<\/details>$/, 'a body naming no view wanted no task: nothing drawn');
   const loading = { ...state, analog: { tasks: { t1: { status: 'loading' } }, views: {} } };
   assert.match(renderMessage(bare, conv(), loading), /<\/details>$/, 'a task still being read: nothing yet');
+});
+
+// ---- the memory's lessons on the order card (memory order card, Task 6): drawn only once the face kept a gate for its call id
+const lesson = (over = {}) => ({ id: 'L-1', strength: 'caveat', says: 'careful', words: 'Do not chase a gap', fired: 3, followed: 2, overridden: 1, ...over });
+const gline = (over = {}) => ({ order: 'buy 2 NVDA limit 120', considering: ['open'], positionRead: true, market: 'US', lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, ...over });
+const kept = (over = {}) => ({ callId: 'c9', state: 'checked', lines: [gline()], redLine: false, overridden: false, ...over });
+const withGate = (gate, status = 'ready') => ({ ...state, memoryGate: { c9: status === 'ready' ? { status, gate } : { status } } });
+const answerKeys = html => [...html.matchAll(/data-action="answer"[^>]*data-value="([^"]+)"/g)].map(x => x[1]);
+
+test('a caveat that applies is drawn under the dim line: its head, its words quoted, its counts; the keys as today', () => {
+  const html = renderMessage(gate('card'), conv(), withGate(kept({ lines: [gline({ lessons: [lesson()] })] })));
+  assert.match(html, /paper-1 · Account seat[^<]*<\/div><div class="mg">/, 'the block under the dim line');
+  assert.match(html, /<div class="mg-head">Your lesson<\/div><div class="mg-words">“Do not chase a gap”<\/div><div class="dim">fired 3 · followed 2 · overridden 1<\/div>/);
+  assert.deepEqual(answerKeys(html), ['rejected', 'allowed-once']);
+  assert.doesNotMatch(html, /overrideGate|data-field/);
+  withTable(ZH, () => {
+    const z = renderMessage(gate('card'), conv(), withGate(kept({ lines: [gline({ lessons: [lesson()] })] })));
+    assert.match(z, /<div class="mg-head">你的教训<\/div>/);
+    assert.match(z, /触发 3 · 遵守 2 · 推翻 1/);
+  });
+});
+
+test('an untold lesson names what it needs; a position not read says so; more lessons than drawn are counted', () => {
+  const html = renderMessage(gate('card'), conv(), withGate(kept({ lines: [gline({ positionRead: false, lessons: [lesson()], lessonsMore: 2, untold: [{ id: 'L-9', needs: ['change_5d_pct', 'market'] }], untoldMore: 1 })] })));
+  assert.match(html, /<div class="dim">Could not be checked: needs change_5d_pct, market<\/div>/);
+  assert.match(html, /<div class="dim">The position was not read<\/div>/);
+  assert.match(html, /<div class="dim">and 2 more lessons<\/div>/);
+  assert.match(html, /<div class="dim">and 1 more could not be checked<\/div>/);
+});
+
+test("a memory not connected, a check not made and a line's fault say their words, dim", () => {
+  const off = renderMessage(gate('card'), conv(), withGate(kept({ state: 'not connected', words: 'no memory here', lines: [] })));
+  assert.match(off, /<div class="mg"><div class="dim">no memory here<\/div><\/div>/);
+  assert.deepEqual(answerKeys(off), ['rejected', 'allowed-once']);
+  const not = renderMessage(gate('card'), conv(), withGate(kept({ state: 'not checked', words: 'a batch of 7 lines is not checked', lines: [] })));
+  assert.match(not, /<div class="dim">a batch of 7 lines is not checked<\/div>/);
+  const fault = renderMessage(gate('card'), conv(), withGate(kept({ lines: [gline({ fault: 'the memory did not answer in time' })] })));
+  assert.match(fault, /<div class="dim">the memory did not answer in time<\/div>/);
+});
+
+test('a red line pending: no Approve; a required reason, an optional wrongIf, the override key naming the call, and Decline', () => {
+  const red = lesson({ strength: 'red-line', says: 'dont', words: 'Never add to a loser' });
+  const html = renderMessage(gate('card'), conv(), withGate(kept({ redLine: true, lines: [gline({ lessons: [red] })] })));
+  assert.match(html, /<div class="mg-lesson red"><div class="mg-head">Your red line<\/div>/);
+  assert.deepEqual(answerKeys(html), ['rejected'], 'Decline alone');
+  assert.doesNotMatch(html, /aria-label="Approve"/);
+  assert.match(html, /<input[^>]*id="mg-ev-1-reason"[^>]*data-field="reason"[^>]*required/);
+  assert.match(html, /<input[^>]*id="mg-ev-1-wrongIf"[^>]*data-field="wrongIf"/);
+  assert.doesNotMatch(html.match(/<input[^>]*data-field="wrongIf"[^>]*>/)[0], /required/);
+  assert.match(html, /data-action="overrideGate" data-conv="s1" data-msg="ev-1" data-call="c9"/);
+  // a red line the face's own flag missed is still one: a lesson of strength red-line that says dont
+  const unflagged = renderMessage(gate('card'), conv(), withGate(kept({ redLine: false, lines: [gline({ lessons: [red] })] })));
+  assert.deepEqual(answerKeys(unflagged), ['rejected']);
+  assert.match(unflagged, /data-action="overrideGate"/);
+  // an override on record: said, and the form stays the only way to approve
+  const over = renderMessage(gate('card'), conv(), withGate(kept({ redLine: true, overridden: true, lines: [gline({ lessons: [red] })] })));
+  assert.match(over, /<div class="dim">You overrode this red line in your own words<\/div>/);
+  assert.deepEqual(answerKeys(over), ['rejected']);
+});
+
+test("a batch of two lines: each line's order words head its own lessons", () => {
+  const html = renderMessage(gate('card'), conv(), withGate(kept({ lines: [gline({ leg: 0, order: 'buy 2 NVDA', lessons: [lesson({ words: 'first' })] }), gline({ leg: 1, order: 'sell 1 AMD', lessons: [lesson({ id: 'L-2', words: 'second' })] })] })));
+  assert.match(html, /<div class="mg-line"><div class="mg-order">buy 2 NVDA<\/div><div class="mg-lesson">[\s\S]*?“first”[\s\S]*?<div class="mg-line"><div class="mg-order">sell 1 AMD<\/div><div class="mg-lesson">[\s\S]*?“second”/);
+  const one = renderMessage(gate('card'), conv(), withGate(kept({ lines: [gline({ lessons: [lesson()] })] })));
+  assert.doesNotMatch(one, /mg-order/, 'a single line is the card: no head of its own');
+});
+
+test('an answered card draws what was registered, dim, and no keys and no form', () => {
+  const red = lesson({ strength: 'red-line', says: 'dont' });
+  const html = renderMessage(gate('card', { answer: 'approved' }), conv(), withGate(kept({ redLine: true, overridden: true, lines: [gline({ lessons: [red], registered: 'registered: pass' })] })));
+  assert.match(html, /<div class="dim">registered: pass<\/div>/);
+  assert.doesNotMatch(html, /data-action="answer"|overrideGate|data-field/);
+  assert.match(html, /class="chip up">Approved</);
+});
+
+test('no gate kept, or one still loading, gone or failed: the card exactly as today', () => {
+  const today = renderMessage(gate('card'), conv(), state);
+  for (const s of [withGate(null, 'loading'), withGate(null, 'none'), withGate(null, 'failed'), { ...state, memoryGate: { other: { status: 'ready', gate: kept() } } }]) {
+    assert.equal(renderMessage(gate('card'), conv(), s), today);
+  }
+  const answered = renderMessage(gate('card', { answer: 'rejected' }), conv(), state);
+  assert.equal(renderMessage(gate('card', { answer: 'rejected' }), conv(), withGate(null, 'loading')), answered);
+});
+
+test("the memory's words are made visible, then escaped: a hidden character is its escape, markup is text", () => {
+  const html = renderMessage(gate('card'), conv(), withGate(kept({ lines: [gline({ order: 'x\u2066<b>', lessons: [lesson({ words: 'a\u202eb<i>' })], untold: [{ id: 'u', needs: ['n\u200b<s>'] }], registered: 'registered: <ok>\n' })] })));
+  assert.ok(html.includes('“a\\u202eb&lt;i&gt;”'), 'the escape visible as six characters, the markup as text');
+  assert.ok(!html.includes('\u202e') && !html.includes('\u200b') && !html.includes('\u2066'), 'no raw character reaches the page');
+  assert.ok(html.includes('needs n\\u200b&lt;s&gt;'));
+  assert.ok(html.includes('registered: &lt;ok&gt;\\u000a'));
+  assert.doesNotMatch(html, /<i>|<s>|<ok>/);
+  const batch = renderMessage(gate('card'), conv(), withGate(kept({ lines: [gline({ order: 'x\u2066<b>' }), gline()] })));
+  assert.ok(batch.includes('<div class="mg-order">x\\u2066&lt;b&gt;</div>'));
 });

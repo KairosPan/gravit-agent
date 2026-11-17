@@ -47,7 +47,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Context, Service } from "@deepseek-ai/cordis";
 import { setupFaceProfile } from "../src/setup.ts";
-import { armOrderGate, bootFace } from "../src/boot.ts";
+import { armOrderGate, bootFace, type OrderRecallParts } from "../src/boot.ts";
+import type { GateNote } from "../src/memory-gate.ts";
 import { DESK_PRESET } from "../src/desk-preset.ts";
 import {
   orderGuardReasonForSession, unreadableSessionLogReason, type PreToolDecision,
@@ -114,7 +115,11 @@ class ListedTools extends Service {
     return this.config.visible.includes(name) ? { description: `drill stand-in` } : undefined;
   }
 
-  guard(): () => void {
+  /** Every check the guard half armed with, so an offline case can call it. */
+  readonly checks: Array<(exec: object) => string | undefined> = [];
+
+  guard(check: (exec: object) => string | undefined): () => void {
+    this.checks.push(check);
     return () => {};
   }
 }
@@ -244,6 +249,271 @@ test("a carded seat write calls onCardAsked once; a denied one and a read never"
     assert.deepEqual(neverAsked, []);
   } finally {
     await never.fiber.dispose();
+  }
+});
+
+/* ---------- the memory's check, awaited before the card, and the red line at the guard ---------- */
+
+const SEAT_ORDER = "mcp__account__portfolio_live_order";
+const SEAT_ARGS = { venue: "alpaca-paper", symbol: "NVDA", side: "buy", qty: 10, orderType: "limit", limitPrice: 183 };
+
+/** A pending seat order from a worker whose session id is `s-worker`. */
+const carded = (name = SEAT_ORDER, args: unknown = SEAT_ARGS) => ({
+  ...pending(name, args),
+  agent: { session: emptySession(), id: "s-worker" },
+});
+
+/** The recall parts, each half replaceable. */
+const recallOf = (over: Partial<OrderRecallParts> = {}): OrderRecallParts => ({
+  check: over.check ?? (async () => undefined),
+  redLineReason: over.redLineReason ?? (() => undefined),
+});
+
+/** A Gate 2 armed on a bare tree with `policy`, every carded name visible; `console.error` captured. */
+async function armed(
+  over: { policy?: "ask" | "never"; visible?: readonly string[]; recall?: () => OrderRecallParts | undefined; timers?: Parameters<typeof armOrderGate>[3] } = {},
+) {
+  const root = new Context();
+  const asked: unknown[][] = [];
+  const seq: string[] = [];
+  const lines: string[] = [];
+  const origError = console.error;
+  console.error = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+  const gate = armOrderGate(root, (...a: unknown[]) => { asked.push(a); seq.push("card"); }, over.recall, over.timers);
+  await root.plugin(FakeApproval, { policy: over.policy ?? "ask" });
+  await gate.listener.await();
+  const tools = root.plugin(ListedTools, { visible: over.visible ?? [SEAT_ORDER, "mcp__account__portfolio_live_cancel"] });
+  await tools;
+  await gate.guard.await();
+  const listed = root.get("tools") as unknown as ListedTools;
+  return {
+    root, asked, seq, lines,
+    guardCheck: (exec: object) => listed.checks[0]!(exec),
+    async done() { console.error = origError; await root.fiber.dispose(); },
+  };
+}
+
+/** The decision for the same call on a gate with no recall at all: what every recall case must equal. */
+async function baseline(exec: object): Promise<PreToolDecision> {
+  const plain = await armed();
+  try {
+    return await firePreExecute(plain.root, exec);
+  } finally {
+    await plain.done();
+  }
+}
+
+test("the memory's check: awaited before the card with the call's id, name, arguments and session; its note reaches onCardAsked", async () => {
+  const exec = carded();
+  const want = await baseline(exec);
+  assert.equal(want.kind, "ask");
+  const checks: unknown[] = [];
+  let seq: string[] = [];
+  const g = await armed({
+    recall: () => recallOf({ check: async (call) => { checks.push(call); seq.push("check"); return { lessons: 1, redLine: false }; } }),
+  });
+  seq = g.seq;
+  try {
+    assert.deepEqual(await firePreExecute(g.root, exec), want, "the same ask as without it");
+    assert.deepEqual(checks, [{ callId: exec.callId, name: SEAT_ORDER, args: SEAT_ARGS, sessionId: "s-worker" }]);
+    assert.deepEqual(g.asked, [[SEAT_ORDER, SEAT_ARGS, { lessons: 1, redLine: false }]]);
+    assert.deepEqual(seq, ["check", "card"], "the card is told after the check");
+    assert.deepEqual(g.lines, []);
+  } finally {
+    await g.done();
+  }
+});
+
+test("an execution with no session id is asked about as today and not checked: the guard could not tell it apart", async () => {
+  const checks: unknown[] = [];
+  const g = await armed({ recall: () => recallOf({ check: async (call) => { checks.push(call); return { lessons: 1, redLine: true }; } }) });
+  try {
+    const exec = pending(SEAT_ORDER, SEAT_ARGS);
+    assert.deepEqual(await firePreExecute(g.root, exec), await baseline(exec));
+    assert.deepEqual(checks, []);
+    assert.equal(g.asked[0]![2], undefined);
+  } finally {
+    await g.done();
+  }
+});
+
+test("a check that rejects or throws, a recall unbound or throwing: the same ask, no note, one line for each fault", async () => {
+  const exec = carded();
+  const want = await baseline(exec);
+  const cases: Array<[string, () => OrderRecallParts | undefined, number]> = [
+    ["check rejects", () => recallOf({ check: () => Promise.reject(new Error("the memory fell over")) }), 1],
+    ["check throws", () => recallOf({ check: () => { throw new Error("the memory threw"); } }), 1],
+    ["recall unbound", () => undefined, 0],
+    ["recall throws", () => { throw new Error("the binding threw"); }, 1],
+  ];
+  for (const [label, recall, faults] of cases) {
+    const g = await armed({ recall });
+    try {
+      assert.deepEqual(await firePreExecute(g.root, exec), want, label);
+      assert.equal(g.asked.length, 1, label);
+      assert.equal(g.asked[0]![2], undefined, `${label}: no note`);
+      assert.equal(g.lines.length, faults, `${label}: ${g.lines.join(" | ")}`);
+    } finally {
+      await g.done();
+    }
+  }
+});
+
+test("a note whose field throws as it is read: the same ask at once, no note, one line - nothing rejects unhandled", async () => {
+  const exec = carded();
+  const want = await baseline(exec);
+  const timers: Array<{ run: () => void; cleared: boolean }> = [];
+  const tampered = Object.defineProperty({ redLine: false }, "lessons", { get() { throw new Error("tampered"); }, enumerable: true });
+  const g = await armed({
+    recall: () => recallOf({ check: async () => tampered as unknown as GateNote }),
+    timers: {
+      setTimer: (run) => { const t = { run, cleared: false }; timers.push(t); return t; },
+      clearTimer: (t) => { (t as { cleared: boolean }).cleared = true; },
+    },
+  });
+  try {
+    let settled: PreToolDecision | undefined;
+    const fired = firePreExecute(g.root, exec).then((d) => { settled = d; return d; });
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    const early = settled;
+    for (const t of timers) if (!t.cleared) t.run();
+    await fired;
+    assert.deepEqual(early, want, "asked without waiting on the gate's own bound");
+    assert.equal(g.asked[0]![2], undefined, "no note");
+    assert.equal(g.lines.length, 1, g.lines.join(" | "));
+    assert.deepEqual(timers.map((t) => t.cleared), [true], "the timer is cleared");
+  } finally {
+    await g.done();
+  }
+});
+
+test("a check that never settles: the listener asks once the gate's own 4,000 ms run out, on an injected timer", async () => {
+  const exec = carded();
+  const want = await baseline(exec);
+  const timers: Array<{ run: () => void; ms: number; cleared: boolean }> = [];
+  const g = await armed({
+    recall: () => recallOf({ check: () => new Promise(() => {}) }),
+    timers: {
+      setTimer: (run, ms) => { const t = { run, ms, cleared: false }; timers.push(t); return t; },
+      clearTimer: (t) => { (t as { cleared: boolean }).cleared = true; },
+    },
+  });
+  try {
+    let settled: PreToolDecision | undefined;
+    const fired = firePreExecute(g.root, exec).then((d) => { settled = d; return d; });
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    assert.equal(settled, undefined, "still waiting on the check");
+    assert.deepEqual(timers.map((t) => t.ms), [4_000]);
+    assert.equal(g.asked.length, 0, "no card told before the bound");
+    timers[0]!.run();
+    assert.deepEqual(await fired, want);
+    assert.equal(g.asked.length, 1);
+    assert.equal(g.asked[0]![2], undefined);
+  } finally {
+    await g.done();
+  }
+
+  /* a check that settles first clears its timer */
+  const quick: Array<{ cleared: boolean }> = [];
+  const q = await armed({
+    recall: () => recallOf({ check: async () => ({ lessons: 0, redLine: false }) }),
+    timers: {
+      setTimer: () => { const t = { cleared: false }; quick.push(t); return t; },
+      clearTimer: (t) => { (t as { cleared: boolean }).cleared = true; },
+    },
+  });
+  try {
+    assert.equal((await firePreExecute(q.root, exec)).kind, "ask");
+    assert.deepEqual(quick.map((t) => t.cleared), [true]);
+  } finally {
+    await q.done();
+  }
+});
+
+test("a call Gate 2 denies is never checked: hidden, policy never, a key field too long, no session; nor a read", async () => {
+  const checks: unknown[] = [];
+  const recall = () => recallOf({ check: async (call) => { checks.push(call); return { lessons: 1, redLine: true }; } });
+  const hidden = await armed({ recall, visible: [] });
+  try {
+    assert.equal((await firePreExecute(hidden.root, carded())).kind, "deny");
+  } finally {
+    await hidden.done();
+  }
+  const never = await armed({ recall, policy: "never" });
+  try {
+    assert.equal((await firePreExecute(never.root, carded())).kind, "deny");
+  } finally {
+    await never.done();
+  }
+  const g = await armed({ recall });
+  try {
+    assert.equal((await firePreExecute(g.root, carded(SEAT_ORDER, { ...SEAT_ARGS, venue: "v".repeat(500) }))).kind, "deny");
+    assert.equal((await firePreExecute(g.root, agentless(SEAT_ORDER))).kind, "deny");
+    assert.equal((await firePreExecute(g.root, carded("mcp__account__portfolio_read", {}))).kind, "allow");
+    assert.equal(g.asked.length, 0);
+  } finally {
+    await g.done();
+  }
+  assert.deepEqual(checks, []);
+});
+
+test("the guard: a red line refuses a granted call; no grant keeps the grant's reason and asks nothing; a throw passes with one line", async () => {
+  const exec = carded();
+  const granted = {
+    ...exec,
+    agent: {
+      id: "s-worker",
+      session: {
+        ...emptySession(),
+        snapshotEvents: () => [
+          { type: "approval/asked", data: { id: "a1", callId: exec.callId, toolName: SEAT_ORDER } },
+          { type: "approval/decided", data: { id: "a1", outcome: "allowed-once" } },
+        ],
+      },
+    },
+  };
+  const ungranted = { ...exec, agent: { id: "s-worker", session: { ...emptySession(), snapshotEvents: () => [] } } };
+  const RED = 'a red line applies to this order - "never add to a loser" - and no override is on record: the owner opens the card and overrides it in their own words';
+
+  const consulted: unknown[] = [];
+  const red = await armed({ recall: () => recallOf({ redLineReason: (callId, sessionId) => { consulted.push([callId, sessionId]); return RED; } }) });
+  try {
+    assert.equal(red.guardCheck(granted), RED);
+    assert.deepEqual(consulted, [[exec.callId, "s-worker"]], "the guard passes the execution's own session id");
+    assert.equal(red.guardCheck(ungranted), orderGuardReasonForSession(SEAT_ORDER, ungranted.agent.session, exec.callId));
+    assert.match(red.guardCheck(ungranted) ?? "", /without a logged allowed-once/);
+    assert.equal(red.guardCheck({ name: "bash", callId: exec.callId, agent: granted.agent }), undefined, "another tool is never consulted");
+    assert.deepEqual(consulted, [[exec.callId, "s-worker"]], "with no grant, or for another tool, the red line is not consulted");
+  } finally {
+    await red.done();
+  }
+
+  const clear = await armed({ recall: () => recallOf() });
+  try {
+    assert.equal(clear.guardCheck(granted), undefined, "a granted call with no red line passes as today");
+  } finally {
+    await clear.done();
+  }
+
+  const unbound = await armed();
+  try {
+    assert.equal(unbound.guardCheck(granted), undefined, "unbound: Gate 2 as it is today");
+    assert.match(unbound.guardCheck(ungranted) ?? "", /without a logged allowed-once/);
+  } finally {
+    await unbound.done();
+  }
+
+  for (const recall of [
+    () => recallOf({ redLineReason: () => { throw new Error("the gate threw"); } }),
+    (): OrderRecallParts => { throw new Error("the binding threw"); },
+  ]) {
+    const throwing = await armed({ recall });
+    try {
+      assert.equal(throwing.guardCheck(granted), undefined, "a throw passes the granted call");
+      assert.equal(throwing.lines.length, 1);
+    } finally {
+      await throwing.done();
+    }
   }
 });
 

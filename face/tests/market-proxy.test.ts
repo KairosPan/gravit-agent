@@ -272,3 +272,18 @@ test("the source directory and source filters reach their upstreams without mixi
     market.dispose(); account.dispose(); await upstream.close();
   }
 });
+
+test("the candles read in-process answers what its route would, from the same cache", async () => {
+  const upstream = await stub((_q, res) => json(res, 200, { ok: true, candles: [{ t: 1, o: 1, h: 1, l: 1, c: 1 }] }));
+  const { routes, registrar } = register();
+  const market = registerMarketProxy(registrar, { url: upstream.url });
+  try {
+    const query = "venue=cboe&symbol=NVDA&interval=1d&range=6M";
+    const routed = await call(routes, `/data/market/candles?${query}`);
+    assert.equal(routed.status, 200);
+    assert.deepEqual(await market.candles(query), { status: 200, body: routed.body });
+    assert.deepEqual(upstream.seen.map((s) => s.path), [`/api/candles?${query}`], "asked once: the in-process read is served from the route's cache");
+  } finally {
+    market.dispose(); await upstream.close();
+  }
+});

@@ -87,6 +87,7 @@ import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskFetch
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
+import type { AlertLessonsAnswer } from "./memory-alert.ts";
 import type { BriefMemory } from "./memory-brief.ts";
 import { readThroughLane } from "./readthrough-lane.ts";
 import type { RoutineClock } from "./routine-clock.ts";
@@ -103,6 +104,7 @@ import type { DeskCalendars } from "./market-clock.ts";
 import type { EdgarFetch } from "./edgar.ts";
 import type { NewsAnswer } from "./market-news.ts";
 import type { WatchHandle, WatchStatus } from "./watch.ts";
+import type { AlertHit } from "./watch-eval.ts";
 
 /** Diagnostic label, the same string every other `${BIN}:`-prefixed line in this program uses
  * (`roster.ts`, `main.ts`) - copied rather than imported, because it is a label rather than a
@@ -1905,7 +1907,9 @@ async function readAlertsCached(home: string): Promise<{ records: (RailAlert | R
  *   posts' filings read both use it - and `news`, a why post's headline read: `null` for none, absent for the
  *   Market's (src/market-news.ts `marketNews`, loaded with the watch or on the first `desk_headlines` call, which
  *   reads the Market's whatever this says); the watch's posts wait on the annotation
- *   lane's `idle`, so passes that come while a turn runs fold into one post; `log`,
+ *   lane's `idle`, so passes that come while a turn runs fold into one post; `lessons`, the owner's lessons on a
+ *   price alert the phone got (src/memory-alert.ts `createAlertLessons`), handed to the watch as it is - none, the
+ *   watch asks nothing; `log`,
  *   where every line of the desk's goes - the guard's, its line at install naming what the secret
  *   check covers included, the tools', the ledger's, the conversation's, the bridge's and the clock's -
  *   stderr when absent, as main.ts leaves it; tests pass their own, or one that drops the line.
@@ -1940,6 +1944,7 @@ export function installDesk(
       news?: ((symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>) | null;
       alive?: (pid: number) => boolean;
     };
+    lessons?: (hit: AlertHit) => Promise<AlertLessonsAnswer | undefined>;
     log?: (line: string) => void;
   },
 ): DeskHandle {
@@ -2167,6 +2172,7 @@ export function installDesk(
         ...(news === undefined ? {} : { news }),
         ...(watchRow.alive === undefined ? {} : { alive: watchRow.alive }),
         ...(watchRow.tickMs === undefined ? {} : { tickMs: watchRow.tickMs }),
+        ...(deps.lessons === undefined ? {} : { lessons: deps.lessons }),
         log,
       });
       watch = handle;

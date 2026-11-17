@@ -13,7 +13,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ANSWER_WAIT_MS, CONVERSATION_DEADLINE_MS, HELD_MAX, INJECTED_KINDS, conversationFenceRefusalLine, OPERATOR_SOURCES, conversationDir, conversationFence, ensureConversation, installConversation,
+  ANSWER_WAIT_MS, CONVERSATION_DEADLINE_MS, HELD_MAX, INJECTED_KINDS, conversationFenceRefusalLine, OPERATOR_SOURCES, conversationDir, conversationFence, ensureConversation, installConversation, noteMessage,
   type ConversationCtxLike, type ConversationDeps,
 } from "../src/conversation.ts";
 import { appendEvent, clearOff, readEvents, writeOff, type DeskEvent } from "../src/desk.ts";
@@ -1533,4 +1533,21 @@ test("with no conversation held a line is not noted, and the note opens none", a
   await settle();
   assert.equal(tree.created.length, 0, "no conversation opened for a line");
   assert.equal(handle.current(), undefined);
+});
+
+test("an alert's lessons line has its own id and head; an alert line without it keeps today's", () => {
+  const lessons = noteMessage({ kind: "alert", alert: "al-7", symbol: "NVDA", lessons: true, text: "the block" }, "N");
+  assert.equal(lessons?.id, "note-lessons:al-7");
+  assert.deepEqual(lessons?.source, { kind: "alert", alert: "al-7", symbol: "NVDA" });
+  assert.ok(lessons?.text.startsWith("[alert · NVDA · lessons]\n"), lessons?.text);
+  const labelled = noteMessage({ kind: "alert", alert: "al-7", symbol: "NVDA", label: "memory", lessons: true, text: "the block" }, "N");
+  assert.equal(labelled?.id, "note-lessons:al-7");
+  assert.ok(labelled?.text.startsWith("[alert · NVDA · memory]\n"), "a label given is the head's");
+  const plain = noteMessage({ kind: "alert", alert: "al-7", symbol: "NVDA", label: "stop", text: "the alert" }, "N");
+  assert.equal(plain?.id, "note-alert:al-7");
+  assert.deepEqual(plain?.source, { kind: "alert", alert: "al-7", symbol: "NVDA" });
+  assert.ok(plain?.text.startsWith("[alert · NVDA · stop]\n"), plain?.text);
+  const bare = noteMessage({ kind: "alert", alert: "al-7", symbol: "NVDA", text: "the alert" }, "N");
+  assert.equal(bare?.id, "note-alert:al-7");
+  assert.ok(bare?.text.startsWith("[alert · NVDA · alert]\n"), bare?.text);
 });

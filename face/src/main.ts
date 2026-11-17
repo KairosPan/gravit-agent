@@ -31,8 +31,14 @@ import { registerMarketProxy } from "./market-proxy.ts";
 import { composedMarketRow } from "./market-row.ts";
 import { composedMemoryRow } from "./memory-row.ts";
 import { memoryOpener } from "./memory.ts";
+import { createAlertLessons } from "./memory-alert.ts";
 import { readBriefMemory } from "./memory-brief.ts";
 import { installMemoryClock, memoryClockEnabled, type MemoryClock } from "./memory-clock.ts";
+import { createMemoryGate, followAnswers, gateAccount, type GateNote, type MemoryGate } from "./memory-gate.ts";
+import { registerMemoryGateRoutes } from "./memory-gate-routes.ts";
+import { priceFacts } from "./memory-facts.ts";
+import { createLunhuiLessons } from "./memory-lunhui.ts";
+import { registerMemoryLunhuiRoute } from "./memory-lunhui-routes.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { claimsOf, deskDir, installDesk, type DeskHandle } from "./desk.ts";
@@ -133,6 +139,11 @@ let disposeProxy: (() => void) | undefined;
 let searchIndex: SearchIndex | undefined;
 /** The market proxy's own unwind (src/market-proxy.ts), run beside the account's, for the same reason. */
 let disposeMarketProxy: (() => void) | undefined;
+/** The memory gate (src/memory-gate.ts), disposed beside the proxies it reads through: its kept calls and races. */
+let memoryGate: MemoryGate | undefined;
+/** The gate's following of the owner's answers and the seat's results (src/memory-gate.ts `followAnswers`), undone
+ * right before the gate is disposed. */
+let stopFollowingAnswers: (() => void) | undefined;
 /** The memory's reconcile clock (src/memory-clock.ts), unless `FACE_MEMORY_RECONCILE=0`: both exits clear its timers
  * first, before anything is torn down, and wait for no run. */
 let memoryClock: MemoryClock | undefined;
@@ -156,6 +167,8 @@ async function shutdown(code: number): Promise<void> {
     await dispose?.();
     disposeProxy?.();
     disposeMarketProxy?.();
+    stopFollowingAnswers?.();
+    memoryGate?.dispose();
   } catch (err) {
     console.error(`${BIN}: dispose failed during shutdown:`, err);
     code ||= 1;
@@ -193,6 +206,8 @@ installFailLoud(BIN, process, async () => {
   await dispose?.();
   disposeProxy?.();
   disposeMarketProxy?.();
+  stopFollowingAnswers?.();
+  memoryGate?.dispose();
 });
 
 /* A `StartupError` is dsh's own grouped diagnostic for a required entry that
@@ -219,7 +234,7 @@ try {
     profileName,
     port,
     deferReady: true,
-    ...(deskEnabled ? { onCardAsked: (name: string, args: unknown) => announceCard(cardPhone, name, args) } : {}),
+    ...(deskEnabled ? { onCardAsked: (name: string, args: unknown, note?: GateNote) => announceCard(cardPhone, name, args, note) } : {}),
   });
 } catch (err) {
   if (err instanceof StartupError) {
@@ -290,6 +305,23 @@ const openMemory = memoryOpener(seatLoader === undefined ? undefined : composedM
  * with nothing in place and nothing checkable; its parts are bound here, where they first exist. It reads the
  * conversation when each call arrives, so with no conversation (FACE_ROUTER=0, or not yet opened) nothing qualifies. */
 booted.bindMemoryFence({ conversation: () => conversation, open: openMemory });
+/* The memory gate (src/memory-gate.ts): before Gate 2 asks a seat write's card it asks the memory which lessons apply
+ * to the order, over the Account proxy's in-process reads and the price facts from the Market's quote and daily bars
+ * (src/memory-facts.ts); Gate 2 reads it through the parts bound here (boot.ts divergence 12), and its two routes serve
+ * the kept view and take the owner's override. It follows the root's session events and tool results, so the owner's
+ * answer to each card it checked is registered in the memory by the face's own code; it watches a Guard-mode card
+ * through the account reader's pending cards, and reads the Account's overview in process once a card leaves them. */
+const gateFactReads = { quotes: marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes }), candles: marketProxy.candles };
+const gate = createMemoryGate({
+  open: openMemory,
+  facts: (symbol, market, opts) => priceFacts(gateFactReads, symbol, market, opts),
+  account: gateAccount({ reader: proxy.reader, positions: proxy.positions, market: proxy.market, overview: proxy.overview }),
+  log: (line) => { console.error(`${BIN}: ${line}`); },
+});
+memoryGate = gate;
+booted.bindOrderRecall(gate);
+stopFollowingAnswers = followAnswers(booted.ctx, gate);
+registerMemoryGateRoutes(booted.ctx.webServer, { gate: () => gate });
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here
@@ -512,6 +544,24 @@ const deskRoute = deskEnabled
  * desk's own symbols and the XNYS clock whether the desk is on or off, so a task's `read_through` works either way. */
 const quotes = marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes });
 wireReadThrough(booted.ctx, { quotes, root: process.cwd() });
+/* The owner's lessons on a price alert (src/memory-alert.ts), asked by the watch as `gravit-face` once the alert is
+ * sent, over the memory and the Market's bars; handed to the desk whether it is on or off. */
+const lessons = createAlertLessons({ open: openMemory, candles: marketProxy.candles, log: (line) => { console.error(`${BIN}: ${line}`); } });
+/* A fresh Lunhui run's leaders as the owner's memory is asked about them (src/memory-lunhui.ts), once per run as
+ * `gravit-face`, over the runs service as provided at each read and the gate's price facts; the answers are kept
+ * under the harness home, whose directory is made at the first write. Behind http.ts's `/data` fence. */
+const lunhuiLessons = createLunhuiLessons({
+  dir: join(dshHome, "face", "memory", "lunhui"),
+  view: async (strategy, run) => {
+    const runs = booted.ctx.get("lunhuiRuns") as LunhuiViewService | undefined;
+    if (runs === undefined) throw Object.assign(new Error("lunhui not mounted"), { code: "NOT_MOUNTED" });
+    return runs.view(strategy, run, { modules: [] });
+  },
+  open: openMemory,
+  facts: (code) => priceFacts(gateFactReads, code, "CN"),
+  log: (line) => { console.error(`${BIN}: ${line}`); },
+});
+registerMemoryLunhuiRoute(booted.ctx.webServer, { store: () => lunhuiLessons, isTrusted: isTrustedDataRequest });
 desk = installDesk(booted.ctx.webServer, {
   home: dshHome,
   enabled: deskEnabled,
@@ -529,6 +579,7 @@ desk = installDesk(booted.ctx.webServer, {
   /* the watch (src/watch.ts) on the production defaults: the wall clock, the face's calendars, and SEC's filings
    * only once ALPHA_EDGAR_USER_AGENT names a contact */
   watchRow: {},
+  lessons,
 });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
 /* The memory's reconcile clock (src/memory-clock.ts), beside the desk: two minutes from now and every eight hours, as

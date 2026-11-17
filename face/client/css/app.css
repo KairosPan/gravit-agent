@@ -406,6 +406,8 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .lh-stk-from { font-size: calc(12px * var(--fs)); color: var(--dim); }
 .lh-stk-note { font-size: calc(12px * var(--fs)); color: var(--dim); }
 .lh-stk-cite { display: flex; flex-direction: column; gap: 2px; font-size: calc(13px * var(--fs)); line-height: 1.4; }
+.lh-lessons { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.lh-lessons-who { font-weight: 600; margin-top: 2px; }
 .lh-limit { stroke-width: 1; }
 .lh-limit.up { stroke: var(--up); }
 .lh-limit.down { stroke: var(--down); }
@@ -561,6 +563,21 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .cut { font-size: calc(12px * var(--fs)); color: var(--dim); font-style: italic; margin-top: 4px; }
 .keys { display: flex; gap: 8px; }
 .keys.right { justify-content: flex-end; }
+/* the memory's lessons on an order card: a block per order line (a batch's headed by its order words), each lesson its head,
+   its words and its counts; a red line in the down colour, with the override form under it; on the rail, the task's link */
+.mg { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.mg-line { display: flex; flex-direction: column; gap: 6px; }
+.mg-order { font-weight: 600; font-size: calc(13px * var(--fs)); }
+.mg-lesson { display: flex; flex-direction: column; gap: 2px; padding-left: 10px; border-left: 2px solid var(--warn-edge); }
+.mg-lesson.red { border-left-color: var(--down-edge); }
+.mg-head { font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--dim); }
+.mg-lesson.red .mg-head { color: var(--down); }
+.mg-words { overflow-wrap: anywhere; }
+.mg .dim, .mg-field .dim { font-size: calc(12px * var(--fs)); overflow-wrap: anywhere; }
+.mg-override { display: flex; flex-direction: column; gap: 8px; }
+.mg-ask { font-size: calc(13px * var(--fs)); }
+.mg-field { display: flex; flex-direction: column; gap: 4px; }
+.mg-open { align-items: center; font-size: calc(13px * var(--fs)); }
 .key { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); }
 .key.yes { color: var(--up); }
 .key.no { color: var(--down); }

@@ -61,6 +61,30 @@ test('an expanded waiting line draws the card with its approve and reject keys',
   assert.match(closed, /^<details class="task-line" data-task="t1">/, 'closed unless the page holds it open');
 });
 
+test('a waiting card with a lesson applying offers no one-click approve on the rail: it points at the task, beside Decline', () => {
+  const w = task('t1', { state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c', tool: 'x' } });
+  const s = R.hostGate(state([w], [conv('t1')]), { convId: 't1', message: { id: 'ev-1', seq: 1.5, at: NOW, from: 'gravit', kind: 'card', text: 'Buy 1 NVDA', data: { eventId: 'ev-1', sessionId: 't1', callId: 'c1', title: 'Buy 1 NVDA', venue: 'paper' } } });
+  const line = l => ({ order: 'buy 1 NVDA', considering: ['open'], positionRead: true, lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, ...l });
+  const at = (gate) => lineOf(renderTaskRail(R.memoryGateLoaded(s, { callId: 'c1', gate }), NOW, { open: new Set(['t1']) }), 't1');
+  for (const strength of ['caveat', 'red-line']) {
+    const lesson = { id: 'L-1', strength, says: strength === 'red-line' ? 'dont' : 'careful', words: 'Do not chase', fired: 1, followed: 0, overridden: 0 };
+    const h = at({ callId: 'c1', state: 'checked', lines: [line({ lessons: [lesson] })], redLine: strength === 'red-line', overridden: false });
+    assert.doesNotMatch(h, /allowed-once|aria-label="Approve"/, strength);
+    assert.doesNotMatch(h, /overrideGate|data-field/, `${strength}: no form on the rail`);
+    assert.match(h, /<a href="#\/task\/t1">A lesson applies - open the task<\/a>/, strength);
+    assert.match(h, /data-action="answer" data-conv="t1" data-msg="ev-1" data-value="rejected"/, `${strength}: Decline`);
+  }
+  // only lessons counted past the drawn ones still apply
+  assert.match(at({ callId: 'c1', state: 'checked', lines: [line({ lessonsMore: 1 })], redLine: false, overridden: false }), /A lesson applies - open the task/);
+  // no lesson applying: the one-click keys as today
+  for (const gate of [{ callId: 'c1', state: 'checked', lines: [line({ untold: [{ id: 'u', needs: ['market'] }] })], redLine: false, overridden: false }, { callId: 'c1', state: 'not connected', words: 'no memory here', lines: [], redLine: false, overridden: false }]) {
+    const h = at(gate);
+    assert.match(h, /data-value="rejected"[\s\S]*data-value="allowed-once"/);
+    assert.doesNotMatch(h, /open the task/);
+  }
+  withTable(ZH, () => assert.match(lineOf(renderTaskRail(R.memoryGateLoaded(s, { callId: 'c1', gate: { callId: 'c1', state: 'checked', lines: [line({ lessonsMore: 1 })], redLine: false, overridden: false } }), NOW, { open: new Set(['t1']) }), 't1'), />有一条教训适用 - 打开任务<\/a>/));
+});
+
 test('a waiting line whose gate this page has not seen (after a reload) points at the full process', () => {
   const w = task('t1', { state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c', tool: 'x' } });
   const line = lineOf(renderTaskRail(state([w], [conv('t1')]), NOW), 't1');

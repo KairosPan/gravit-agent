@@ -18,6 +18,8 @@ import { reducers as jobs } from './jobs.js';
 import { reducers as identity } from './identity.js';
 import { reducers as tasks } from './tasks.js';
 import { reducers as analog } from './analog.js';
+import { reducers as memoryGate } from './memory-gate.js';
+import { reducers as memoryLunhui } from './memory-lunhui.js';
 import { reducers as box } from './box.js';
 
-export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade, ...runSheet, ...lunhui, ...desk, ...deskPage, ...search, ...jobs, ...identity, ...tasks, ...analog, ...box };
+export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade, ...runSheet, ...lunhui, ...desk, ...deskPage, ...search, ...jobs, ...identity, ...tasks, ...analog, ...memoryGate, ...memoryLunhui, ...box };

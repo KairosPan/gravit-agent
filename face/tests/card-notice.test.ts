@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { announceCard, cardNoticeText, scrubLinks } from "../src/card-notice.ts";
+import { announceCard, CARD_NOTICE_MAX, cardNoticeText, scrubLinks } from "../src/card-notice.ts";
 import { describeOrder } from "../src/orders.ts";
 import type { PhoneKind, PhoneSendResult } from "../src/phone.ts";
 
@@ -41,6 +41,38 @@ test("a notice carries no link of any kind and no line break, and stays one boun
   assert.match(long, /— waiting in Gravit$/);
 });
 
+test("a note from the memory's check: how many lessons apply, or that a red line does, before the suffix", () => {
+  const name = "mcp__account__portfolio_live_order";
+  const order = { venue: "alpaca-paper", symbol: "NVDA", side: "buy", qty: 10, orderType: "limit", limitPrice: 183 };
+  const today = "Your call · Buy 10 NVDA · limit 183 · alpaca-paper — waiting in Gravit";
+  assert.equal(cardNoticeText(name, order, { lessons: 1, redLine: false }),
+    "Your call · Buy 10 NVDA · limit 183 · alpaca-paper · 1 lesson applies — waiting in Gravit");
+  assert.match(cardNoticeText(name, order, { lessons: 1, redLine: false }), /· 1 lesson applies — waiting in Gravit$/);
+  assert.match(cardNoticeText(name, order, { lessons: 3, redLine: false }), /· 3 lessons apply — waiting in Gravit$/);
+  assert.match(cardNoticeText(name, order, { lessons: 2, redLine: true }), /· a red line applies — waiting in Gravit$/);
+  assert.equal(cardNoticeText(name, order, { lessons: 0, redLine: false }), today);
+  assert.equal(cardNoticeText(name, order), today);
+  assert.equal(cardNoticeText(name, order, undefined), today);
+
+  /* a line long enough to be cut: the note and the suffix still close it, inside the bound */
+  const many = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`k${i}`, "y".repeat(100)]));
+  assert.ok(cardNoticeText("mcp__account__portfolio_transfer", many).includes("…"), "a line the notice itself cuts");
+  const long = cardNoticeText("mcp__account__portfolio_transfer", many, { lessons: 2, redLine: true });
+  assert.equal(long.length, CARD_NOTICE_MAX);
+  assert.match(long, /… · a red line applies — waiting in Gravit$/);
+  const longer = cardNoticeText("mcp__account__portfolio_transfer", many, { lessons: 12, redLine: false });
+  assert.equal(longer.length, CARD_NOTICE_MAX);
+  assert.match(longer, /… · 12 lessons apply — waiting in Gravit$/);
+});
+
+test("announceCard passes the note into the words it sends", async () => {
+  const sends: string[] = [];
+  announceCard({ send: async (_kind: PhoneKind, text: string) => { sends.push(text); return { sent: ["telegram:9"] }; } },
+    "mcp__account__portfolio_live_order", { venue: "v", symbol: "NVDA", side: "buy", qty: 1 }, { lessons: 1, redLine: false }, () => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(sends, ["Your call · Buy 1 NVDA · v · 1 lesson applies — waiting in Gravit"]);
+});
+
 test("announceCard sends kind card and never throws; held, refused and no phone are one line each", async () => {
   const sends: [PhoneKind, string][] = [];
   const lines: string[] = [];
@@ -51,31 +83,31 @@ test("announceCard sends kind card and never throws; held, refused and no phone 
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   const order = { venue: "alpaca-paper", symbol: "NVDA", side: "buy", qty: 10, orderType: "limit", limitPrice: 183 };
 
-  announceCard(phone(async () => ({ sent: ["telegram:9"] })), "mcp__account__portfolio_live_order", order, log);
+  announceCard(phone(async () => ({ sent: ["telegram:9"] })), "mcp__account__portfolio_live_order", order, undefined, log);
   await settle();
   assert.deepEqual(sends, [["card", "Your call · Buy 10 NVDA · limit 183 · alpaca-paper — waiting in Gravit"]]);
   assert.deepEqual(lines, []);
 
-  announceCard(phone(async () => ({ queued: true })), "mcp__account__portfolio_live_order", order, log);
+  announceCard(phone(async () => ({ queued: true })), "mcp__account__portfolio_live_order", order, undefined, log);
   await settle();
   assert.deepEqual(lines, [], "queued by the account: it will go");
 
-  announceCard(phone(async () => ({ held: "quiet hours" })), "mcp__account__portfolio_live_order", order, log);
+  announceCard(phone(async () => ({ held: "quiet hours" })), "mcp__account__portfolio_live_order", order, undefined, log);
   await settle();
   assert.equal(lines.length, 1);
   assert.match(lines[0]!, /card notice was not sent: the account held it \(quiet hours\)/);
 
-  announceCard(phone(async () => { throw new Error("the account could not be asked: ECONNREFUSED"); }), "mcp__account__portfolio_live_order", order, log);
+  announceCard(phone(async () => { throw new Error("the account could not be asked: ECONNREFUSED"); }), "mcp__account__portfolio_live_order", order, undefined, log);
   await settle();
   assert.equal(lines.length, 2);
   assert.match(lines[1]!, /card notice was not sent: the account could not be asked: ECONNREFUSED/);
 
-  announceCard({ send: () => { throw new Error("sync"); } }, "mcp__account__portfolio_live_order", order, log);
+  announceCard({ send: () => { throw new Error("sync"); } }, "mcp__account__portfolio_live_order", order, undefined, log);
   await settle();
   assert.equal(lines.length, 3);
   assert.match(lines[2]!, /card notice was not sent: sync/);
 
-  announceCard(undefined, "mcp__account__portfolio_live_order", order, log);
+  announceCard(undefined, "mcp__account__portfolio_live_order", order, undefined, log);
   assert.equal(lines.length, 4);
   assert.match(lines[3]!, /card notice was not sent: no phone/);
   assert.equal(sends.length, 4);

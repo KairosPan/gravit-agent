@@ -325,6 +325,16 @@
   "messages-routine-added": "b9b4d69f946bcdfa961178c8fc8b80295952de34f03b04a1960639055198f07d",
   "messages-routine-change": "f09fd18a3d0f06e62095f74c590277d0e360d96c6871b48a632b9ff52412f1cf",
   "messages-routine-limit": "81bb3f6ed1c722537da2602c0449ff027fb6fa0618d698361737bae18449afcc",
+  "task-memory-caveat": "1f1e4cad54992ec108579139564409f29127a7d7c1262303556f76b5ba579ad0",
+  "task-memory-red-line": "ef9e49f93efac94dfedffee3f39085b8f15eec3fdbec371a1d9757de43fef7b1",
+  "task-memory-untold": "312ebd863aa2c06f1711c249bb0c3eb4f4d9ec25987396b1c791477a5b2b9c7f",
+  "task-memory-fault": "bbd761e2e541ac9f64703080211b8b04f1db59ebff670045abe62b835d1df1c6",
+  "task-memory-registered": "3d2689d9ed960642bb2a80fe6e03291d5fd6ef9e75e574db862c80819c2b1335",
+  "messages-memory-rail": "e00b8b597a86768b2329871d2c86fb0196b3f2e1f8a7841363a54f7fe6e07ea0",
+  "lunhui-memory-ladder": "2d1bb318c0f9b7b722b9d8ec497964682a9ac1259a605c3a3252f43ec658ea8a",
+  "lunhui-memory-not-checked": "40cc5063fd66e24257005ce706fba0d513d472c93a60b342c5c15c9073fb5d2b",
+  "lunhui-memory-not-connected": "bb12d77c41847e41b56ca51ac3ed6d5064f52ecaea5e005291c003332d7c9f7f",
+  "lunhui-memory-drawer": "6921c0076e5e52d794e786b5b519824a9dac66094a076de5117f7ef2288364ff",
   "box-ball-desk": "b984a340ecc654740bc09074e37944ba711ea630c396cc201e90d2554d94a59b",
   "box-ball-fresh": "a16a588f6e2d2477102f876781c3c700ff7c576645e08570a0bd23acc4adecf5",
   "box-panel-markets": "1844a051cc8275453b5afa5b9fd76e7164d77e6a7397b10a3c42f24bfc0b2485",
@@ -348,5 +358,7 @@
   "composer-editor": "0a7952b97205ff30eda02587d961c7f6dd384a5218a0496f0c7f19fa90034c0b",
   "host-run-sheet-failed": "d3adcfce4451e07348423ca802058bbffa5617b4a463fc4edfd58ba54f1ebbc8",
   "host-run-sheet-no-conversation": "b370873b68b9f6ed1446f9116d18c194429caed99f0c0f1eb21f0035f36da261",
-  "host-app-answer-first": "6f47e3bc3aeddbaa1eec83ae18dfbcad3763500071d34ea2f2f23c611bb75a77"
+  "host-app-answer-first": "6f47e3bc3aeddbaa1eec83ae18dfbcad3763500071d34ea2f2f23c611bb75a77",
+  "host-app-override-no-reason": "3fed73a018535d13d367f702906339a2954780c31dc69d9f08f0b5c2ed7b7f67",
+  "host-app-override-refused": "b69e117c59b1d2b89d5403d7f4f3496bd3b398bbe93e084e025b284bc7896204"
 }

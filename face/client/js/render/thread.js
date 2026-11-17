@@ -3,7 +3,7 @@
 // icon-only keys, centred dividers; no tool call is drawn.
 import { esc, attrs, cls } from '../html.js';
 import { setMarkdown, markdownHtml } from './markdown.js';
-import { t, th, wordsEpoch, sayOf } from '../i18n/words.js';
+import { t, th, thn, wordsEpoch, sayOf } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { divider } from '../time.js';
 import { levelOf, needsAnswer } from '../messages.js';
@@ -22,6 +22,10 @@ import { eventTablesHtml } from './event-table.js';
 import { routineCardOf } from '../host/desk-page-view.js';
 import { routineClosings } from '../host/kinds.js';
 import { tagWords } from '../host/page-tag.js';
+import { gateOf } from '../host/memory-gate.js';
+import { visible } from '../visible.js';
+import { lessonHtml, lessonCount, isRedLine } from './lesson-line.js';
+import { lessonsFor } from '../host/memory-lunhui.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -51,6 +55,61 @@ function gateKeys(m, conv) {
   if (!needsAnswer(m)) return '';
   const d = { 'data-action': 'answer', 'data-conv': conv.id, 'data-msg': m.id };
   return `<div class="keys right">${key('no', t('thread.gate.decline'), { ...d, 'data-value': 'rejected' })}${key('yes', t('thread.gate.approve'), { ...d, 'data-value': 'allowed-once' })}</div>`;
+}
+
+// ---- the memory's lessons on a seat card (memory order card, Task 6), drawn only once the face kept a gate for its call id
+// (host/memory-gate.js gateOf). Every string the face or the memory gave — the state's and a fault's words, an order's
+// words, a lesson's words, what an untold lesson needs, what was registered — is made visible, then escaped
+const plain = text => esc(visible(text));
+const dimLine = html => `<div class="dim">${html}</div>`;
+const count = lessonCount;
+const linesOf = g => (Array.isArray(g.lines) ? g.lines : []);
+const lessonsOf = line => (Array.isArray(line?.lessons) ? line.lessons : []);
+// a red line holds the card when the face says so or any lesson drawn is one: a lesson of strength red-line that says dont
+const redLined = g => g.redLine === true || linesOf(g).some(line => lessonsOf(line).some(isRedLine));
+const applies = g => linesOf(g).some(line => lessonsOf(line).length > 0 || count(line?.lessonsMore) > 0);
+
+function memoryLine(line, many) {
+  const parts = [];
+  if (many) parts.push(`<div class="mg-order">${plain(line?.order)}</div>`);
+  if (line?.positionRead === false) parts.push(dimLine(th('thread.memory.noPosition')));
+  if (typeof line?.fault === 'string' && line.fault !== '') parts.push(dimLine(plain(line.fault)));
+  for (const l of lessonsOf(line)) parts.push(lessonHtml(l));
+  if (count(line?.lessonsMore) > 0) parts.push(dimLine(thn('thread.memory.more', count(line.lessonsMore))));
+  for (const u of Array.isArray(line?.untold) ? line.untold : []) {
+    const needs = (Array.isArray(u?.needs) ? u.needs : []).map(visible).join(', ');
+    parts.push(dimLine(th('thread.memory.untold', { needs })));
+  }
+  if (count(line?.untoldMore) > 0) parts.push(dimLine(thn('thread.memory.untoldMore', count(line.untoldMore))));
+  if (typeof line?.registered === 'string' && line.registered !== '') parts.push(dimLine(plain(line.registered)));
+  return parts.length ? `<div class="mg-line">${parts.join('')}</div>` : '';
+}
+
+function memoryHtml(g) {
+  const lines = linesOf(g);
+  const parts = [];
+  if (g.state !== 'checked' && typeof g.words === 'string' && g.words !== '') parts.push(dimLine(plain(g.words)));
+  for (const line of lines) parts.push(memoryLine(line, lines.length > 1));
+  if (g.overridden === true) parts.push(dimLine(th('thread.memory.overridden')));
+  const body = parts.join('');
+  return body ? `<div class="mg">${body}</div>` : '';
+}
+
+// a waiting card's keys under a kept gate: on the rail, a lesson that applies sends the owner to the task's page (no one-click
+// approve there); a red line takes the owner's reason in a form whose key overrides, then approves; else ✗ and ✓ as today
+function memoryKeys(m, conv, g, rail) {
+  if (!needsAnswer(m)) return '';
+  const d = { 'data-action': 'answer', 'data-conv': conv.id, 'data-msg': m.id };
+  const decline = key('no', t('thread.gate.decline'), { ...d, 'data-value': 'rejected' });
+  if (rail && (applies(g) || redLined(g))) {
+    return `<div class="keys right mg-open"><a href="#/task/${esc(encodeURIComponent(conv.id))}">${th('thread.memory.openTask')}</a>${decline}</div>`;
+  }
+  if (!redLined(g)) return gateKeys(m, conv);
+  const field = (name, label, required) => `<label class="mg-field"><span class="dim">${esc(label)}</span>` +
+    `<input class="input small" type="text"${attrs({ id: `mg-${m.id}-${name}`, 'data-field': name, 'aria-label': label, maxlength: '500', required })}></label>`;
+  return `<div class="mg-override" data-gate="${esc(m.id)}"><div class="mg-ask">${th('thread.memory.overrideAsk')}</div>` +
+    `${field('reason', t('thread.memory.reason'), true)}${field('wrongIf', t('thread.memory.wrongIf'), false)}` +
+    `<div class="keys right">${decline}<button type="button" class="btn-primary small"${attrs({ 'data-action': 'overrideGate', 'data-conv': conv.id, 'data-msg': m.id, 'data-call': m.data?.callId })}>${th('thread.memory.override')}</button></div></div>`;
 }
 
 // every input is named and id'd by the gate and the question (q-<eventId>-<questionId>), so two pending cards asking
@@ -119,17 +178,25 @@ function routineCard(m, state) {
 // a block that needs Messages' width, in the box's compact thread (box spec §6.5): its name and a link to Messages
 const stub = name => `<div class="gbox-stub"><span>${esc(name)}</span><a href="#/messages">${th('gbox.open')} ›</a></div>`;
 
-function body(m, conv, state, page = {}) {
+// `rail`: a gate drawn on the rail of tasks (gateHtml); `compact`: the box's compact thread (renderMessage's page) — two
+// options, not the page itself, whose own `rail` on Messages is the turn rail's state
+function body(m, conv, state, { rail = false, compact = false } = {}) {
   const d = m.data ?? {};
   switch (m.kind) {
     // Gravit's composed answer, drawn from its run's view as the lunhui slice holds it; in the box, one line to Messages
-    case 'composed':
-      if (page.compact) return stub(t('gbox.stub.composed'));
-      // (a history page reads its answers and sends nothing: their follow-ups are not drawn)
-      return composedHtml(m, state?.lunhui?.views?.[viewOf(m).key], state?.lunhui?.ui?.[composedId(m, conv)], conv, state?.channels, { asks: state?.route?.screen !== 'history' });
-    case 'card':
+    case 'composed': {
+      if (compact) return stub(t('gbox.stub.composed'));
+      // (a history page reads its answers and sends nothing: their follow-ups are not drawn); the owner's lessons on the run's
+      // leaders, once the face answered them (host/memory-lunhui.js)
+      const entry = state?.lunhui?.views?.[viewOf(m).key];
+      return composedHtml(m, entry, state?.lunhui?.ui?.[composedId(m, conv)], conv, state?.channels, { asks: state?.route?.screen !== 'history', lessons: lessonsFor(state, entry?.view) });
+    }
+    case 'card': {
+      // no gate kept for its call: the card as it has always been drawn
+      const g = gateOf(state, m);
       return `<div class="card orange"><div class="card-head"><div class="card-title">${esc(d.title ?? m.text)}</div>${stateChip(m)}</div>` +
-        `<div class="dim">${esc([d.venue, d.line].filter(Boolean).join(' · '))}</div>${gateKeys(m, conv)}</div>`;
+        `<div class="dim">${esc([d.venue, d.line].filter(Boolean).join(' · '))}</div>${g ? memoryHtml(g) + memoryKeys(m, conv, g, rail) : gateKeys(m, conv)}</div>`;
+    }
     case 'approval': {
       const shown = d.displayReason ?? d.reason ?? m.text ?? '';
       const audit = d.reason && d.displayReason && d.reason !== d.displayReason ? `<div class="dim">${esc(d.reason)}</div>` : '';
@@ -149,9 +216,10 @@ function body(m, conv, state, page = {}) {
 }
 
 // one of the three gates (an order card, an approval, a question) as the thread draws it, for a line of the rail of tasks:
-// keyed by the worker's record and the message id, so the answer and answerQuestion actions take it unchanged
+// keyed by the worker's record and the message id, so the answer and answerQuestion actions take it unchanged; on the rail
+// (`rail`) a card a lesson applies to is answered on its task's page, not with one click
 const GATE_KINDS = new Set(['card', 'approval', 'question']);
-export const gateHtml = (conv, m, state) => (GATE_KINDS.has(m?.kind) ? body(m, conv, state) : '');
+export const gateHtml = (conv, m, state, { rail = false } = {}) => (GATE_KINDS.has(m?.kind) ? body(m, conv, state, { rail }) : '');
 
 // a room member's answer can open the turn that produced it: read on opening (host/traces.js), its context lines and
 // words drawn, its tool calls not; the slice and the disclosure's id name the conversation, since two rooms repeat
@@ -312,7 +380,7 @@ export function renderMessage(m, conv, state, page = {}) {
   const name = conv.kind === 'group' && m.from !== 'gravit' ? `<div class="sender-name">${esc(m.data?.name ?? senderName(m.from, state))}</div>` : '';
   // plain talk keeps a bubble's width; every card and green bubble runs wider (spec §16), a composed answer wider still
   const width = m.kind === 'composed' && !page.compact ? 'composed' : m.kind !== 'text' && 'wide';
-  return `<div class="msg left">${name}<div class="msg-row">${avatar(m.from, 28, state)}<div class="${cls('msg-body', width)}">${body(m, conv, state, page)}${trace(m, conv, state)}</div></div></div>`;
+  return `<div class="msg left">${name}<div class="msg-row">${avatar(m.from, 28, state)}<div class="${cls('msg-body', width)}">${body(m, conv, state, { compact: Boolean(page.compact) })}${trace(m, conv, state)}</div></div></div>`;
 }
 
 // the three-dot row while the host streams a turn
