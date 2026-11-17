@@ -4,7 +4,9 @@
 // the differences shown by id, the symbol the decisions are read for.
 const READS = ['lessons', 'decisions', 'waiting', 'health'];
 const memoryPage = (s, patch) => ({ ...s, memoryPage: { ...s.memoryPage, ...patch } });
-const isId = id => typeof id === 'string' && id !== '';
+/** A plain id, the one a row's key carries (render/memory-lessons.js): a letter or digit, then letters, digits, `.`, `_`, `:`
+ *  or `-`, at most 128 characters. */
+export const isId = id => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id);
 // one read's fields changed; a name that is no read changes nothing
 const read = (s, name, patch) => (READS.includes(name) ? memoryPage(s, { [name]: { ...s.memoryPage[name], ...patch } }) : s);
 const flipped = (map, id) => ({ ...map, [id]: !map[id] });

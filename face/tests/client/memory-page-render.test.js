@@ -33,10 +33,10 @@ test('with two proposals waiting the third tab reads Waiting · 2; none, or a me
   assert.match(draw(loaded(on(), 'waiting', memoryNotConnected())), />Waiting<\/a>/);
 });
 
-test('before a read: Loading…; read: one line naming the tab', () => {
+test("before a read: Loading…; read: the Lessons tab's body, a tab not yet drawn one line naming it", () => {
   assert.match(draw(on()), /<p class="mp-dim">Loading…<\/p>/);
   const html = draw(loaded(on(), 'lessons', memoryLessons()));
-  assert.match(html, /<p class="mp-body">Lessons<\/p>/);
+  assert.match(html, /<div class="mp-body mp-lessons"><p class="mp-dim">No lesson yet<\/p><\/div>/);
   assert.doesNotMatch(html, /Loading/);
   assert.match(draw(loaded(on('health'), 'health', { ok: true, connected: true })), /<p class="mp-body">Health<\/p>/);
 });
@@ -53,8 +53,8 @@ test("not connected: its words as given, made visible and escaped, the command i
 test('a failed read with data kept: one dim line with its words above the body as it was; with nothing kept: Unavailable', () => {
   const kept = R.memoryPageFailed(loaded(on(), 'lessons', memoryLessons()), { read: 'lessons', at: NOW, message: 'the memory did not answer in time' });
   const html = draw(kept);
-  assert.match(html, /<div class="mp-page"><p class="mp-dim">the memory did not answer in time<\/p><p class="mp-body">Lessons<\/p><\/div>/);
-  assert.equal(count(html, 'mp-dim'), 1);
+  assert.match(html, /<div class="mp-page"><p class="mp-dim">the memory did not answer in time<\/p><div class="mp-body mp-lessons"><p class="mp-dim">No lesson yet<\/p><\/div><\/div>/);
+  assert.equal(count(html, 'did not answer'), 1);
   const none = draw(R.memoryPageFailed(on(), { read: 'lessons', at: NOW, message: 'the memory could not be read' }));
   assert.match(none, /<p class="mp-dim">the memory could not be read<\/p><p class="mp-dim">Unavailable<\/p>/);
   assert.doesNotMatch(none, /mp-body/);

@@ -2128,6 +2128,9 @@ export function boot(win, host = {}) {
       store.dispatch('openShortcuts');
     },
     closeShortcuts: () => store.dispatch('closeShortcuts'),
+    // the Memory screen: a lesson's cases opened or closed, a changed lesson's two texts shown or hidden
+    memoryPageToggle: el => store.dispatch('memoryPageToggle', { id: el.dataset.id }),
+    memoryPageDiff: el => store.dispatch('memoryPageDiff', { id: el.dataset.id }),
   };
 
   root.addEventListener('click', ev => {

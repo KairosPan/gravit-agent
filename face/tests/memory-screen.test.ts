@@ -81,6 +81,16 @@ test("lessons: a fact the card defines and the face computes takes the face's de
   ]);
 });
 
+test("lessons: the owner's chain broken carries the reseal command for this home; a chain that holds carries no reseal key", async () => {
+  const { memory: broken } = stubMemory({ lessons: { ownerChainBroken: true, lessons: [] } });
+  const answer = await createMemoryScreen({ open: connected(broken) }).lessons();
+  assert.deepEqual(answer, { connected: true, ownerChainBroken: true, lessons: [], reseal: "npx --no gravit-memory reseal --home /h" });
+  const { memory: holds } = stubMemory({ lessons: { ownerChainBroken: false, lessons: [] } });
+  const whole = await createMemoryScreen({ open: connected(holds) }).lessons();
+  assert.ok(whole.connected);
+  assert.equal(Object.hasOwn(whole, "reseal"), false);
+});
+
 test("lessons: the commands each state allows", async () => {
   const changedArmed = card("changed-one", ["price"]);
   const changedFile = card("changed-one", ["price", "held"]);

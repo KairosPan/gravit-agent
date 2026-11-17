@@ -825,9 +825,42 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .mp-body { margin: 0; font-size: calc(14px * var(--fs)); color: var(--text); }
 .mp-say { margin: 0; font-size: calc(14px * var(--fs)); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .mp-command { display: block; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface); font: calc(12px * var(--fm))/1.5 var(--font-mono); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+/* the Lessons tab: the chain's line, then a card each - its head, line, words, texts, record, checks and commands */
+.mp-lessons { display: flex; flex-direction: column; gap: 12px; }
+.mp-chain { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--warn-fill); }
+.mp-chain-say { margin: 0; font-weight: 600; color: var(--warn-text); }
+.mp-lesson { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.mp-lesson-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.mp-id { font: 600 calc(14px * var(--fm)) var(--font-mono); overflow-wrap: anywhere; }
+.mp-when { font-size: calc(13px * var(--fs)); color: var(--dim); }
+.mp-line { font-size: calc(13px * var(--fs)); color: var(--dim); overflow-wrap: anywhere; }
+.mp-words { font-size: calc(15px * var(--fs)); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mp-fault { margin: 0; font-size: calc(13px * var(--fs)); color: var(--down); overflow-wrap: anywhere; }
+.mp-text { margin: 0; max-height: 360px; overflow: auto; padding: 8px 10px; border-radius: var(--radius-s); background: var(--surface-2); font: calc(12px * var(--fm))/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mp-diff { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.mp-diff-side { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.mp-diff-head { font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--dim); }
+.mp-ln.armed { background: var(--down-fill); color: var(--down); }
+.mp-ln.file { background: var(--up-fill); color: var(--up); }
+.mp-record { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.mp-counts { font-size: calc(13px * var(--fs)); color: var(--dim); font-variant-numeric: tabular-nums; }
+.mp-cases { display: flex; flex-direction: column; gap: 10px; }
+.mp-side { display: flex; flex-direction: column; gap: 4px; }
+.mp-side-head { font-size: calc(13px * var(--fs)); font-weight: 600; }
+.mp-median { margin: 0; font-size: calc(13px * var(--fs)); font-variant-numeric: tabular-nums; }
+.mp-horizon { display: flex; flex-direction: column; gap: 2px; }
+.mp-case { display: flex; flex-wrap: wrap; gap: 12px; font-size: calc(13px * var(--fs)); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.mp-change { margin-left: auto; }
+.mp-checks { display: flex; flex-direction: column; gap: 4px; }
+.mp-check-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.mp-check { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; font-size: calc(13px * var(--fs)); }
+.mp-fact { font: calc(12px * var(--fm)) var(--font-mono); overflow-wrap: anywhere; }
+.mp-def { color: var(--dim); overflow-wrap: anywhere; }
+.mp-commands { display: flex; flex-direction: column; gap: 6px; }
 @media (max-width: 900px) {
   .dk-cols { grid-template-columns: minmax(0, 1fr); }
   .dk-body { padding: 18px 16px 32px; }
+  .mp-diff { grid-template-columns: minmax(0, 1fr); }
 }
 /* a plugin's and a market's own page: the way back, the head with its keys, then the body */
 .main.plugin-page, .main.mk-page { gap: 18px; }

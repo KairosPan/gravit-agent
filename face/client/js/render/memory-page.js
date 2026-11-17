@@ -2,12 +2,13 @@
 // tabs as links - Lessons, Decisions, Waiting with the count of the proposals waiting, Health - and the open tab's read:
 // Loading… before it answers; a memory not connected, its words as the face gave them and the command that makes the home,
 // and no tab body; a failed read, one line with its words above what it kept, or Unavailable with nothing kept; else the
-// tab's body. Every text from the memory is made visible (visible.js) and then escaped.
+// tab's body (the Lessons tab's: render/memory-lessons.js). Every text from the memory is made visible (visible.js) and then escaped.
 import { esc } from '../html.js';
 import { t, th, sayOf } from '../i18n/words.js';
 import { visible } from '../visible.js';
 import { MEMORY_TABS } from '../router.js';
 import { segLinks } from './controls.js';
+import { lessonsHtml } from './memory-lessons.js';
 
 const dim = text => `<p class="mp-dim">${esc(text)}</p>`;
 
@@ -33,20 +34,21 @@ function tabs(page, open) {
 
 const notConnected = data => `<p class="mp-say">${esc(visible(data.say))}</p><code class="mp-command">${esc(visible(data.command))}</code>`;
 
-// a tab's body; the tabs' own bodies are drawn by the plan's later tasks, here one line naming the tab
-const tabBody = tab => `<p class="mp-body">${esc(tabWord(tab))}</p>`;
+// a tab's body, each in an mp-body: the Lessons tab's (render/memory-lessons.js); the others, drawn by the plan's later tasks,
+// here one line naming the tab
+const tabBody = (tab, data, page, now) => (tab === 'lessons' ? lessonsHtml(data, page, now) : `<p class="mp-body">${esc(tabWord(tab))}</p>`);
 
-function body(read, tab) {
+function body(read, tab, page, now) {
   const failed = read.status === 'error' || read.message != null;
   const line = read.message != null ? dim(visible(sayOf(read.message))) : '';
   if (read.data == null) return failed ? `${line}${dim(t('memory.page.unavailable'))}` : dim(t('common.loading'));
   if (read.data.connected === false) return `${line}${notConnected(read.data)}`;
-  return `${line}${tabBody(tab)}`;
+  return `${line}${tabBody(tab, read.data, page, now)}`;
 }
 
 export function renderMemoryScreen(state, now) {
   const page = state.memoryPage;
   const tab = MEMORY_TABS.includes(state.route.tab) ? state.route.tab : MEMORY_TABS[0];
   return `<main class="main mp"><header class="head"><h1 class="head-title">${th('memory.page.title')}</h1></header>${tabs(page, tab)}` +
-    `<div class="mp-page">${body(page[tab], tab)}</div></main>`;
+    `<div class="mp-page">${body(page[tab], tab, page, now)}</div></main>`;
 }

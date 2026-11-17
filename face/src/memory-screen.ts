@@ -55,7 +55,8 @@ export interface DecisionRow { view: DecisionView; figures: Figure[]; command?: 
 
 /** The screen's four reads. */
 export interface MemoryScreen {
-  lessons(): Promise<{ connected: true; ownerChainBroken: boolean; lessons: LessonRow[] } | NotConnected>;
+  /** `reseal`: the command that reseals the owner's chain, while it is broken and only then. */
+  lessons(): Promise<{ connected: true; ownerChainBroken: boolean; lessons: LessonRow[]; reseal?: string } | NotConnected>;
   decisions(filter: { symbol?: string; before?: string; limit?: number }): Promise<{ connected: true; items: DecisionRow[]; more: boolean } | NotConnected>;
   waiting(): Promise<{ connected: true; proposals: ProposalLine[]; pastHorizon: string[]; withoutWrongIf: number; command: string } | NotConnected>;
   health(): Promise<{ connected: true; home: string; lines: Record<string, number>; partial: string[]; chains: { file: string; ok: boolean; line?: number }[];
@@ -193,7 +194,11 @@ export function createMemoryScreen(deps: {
   return {
     lessons: () => within(async (memory, home) => {
       const read = await memory.lessons();
-      return { connected: true as const, ownerChainBroken: read.ownerChainBroken === true, lessons: read.lessons.map((view) => lessonRow(view, home)) };
+      const ownerChainBroken = read.ownerChainBroken === true;
+      const lessons = read.lessons.map((view) => lessonRow(view, home));
+      return ownerChainBroken
+        ? { connected: true as const, ownerChainBroken, lessons, reseal: commandOf(home, ["reseal"]) }
+        : { connected: true as const, ownerChainBroken, lessons };
     }),
     decisions: (filter) => within(async (memory, home) => {
       const read = await memory.decisions(filterOf(filter));
