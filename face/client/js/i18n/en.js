@@ -118,6 +118,7 @@ export const EN = Object.freeze({
   'tasks.continue': 'Continue',
   'tasks.gateThere': 'To answer it, open View the full process',
   'tasks.full': 'View the full process',
+  'tasks.gateOpen': 'To answer it, open the task',
   'tasks.page.back': 'Back to Messages',
   'tasks.page.tell': 'To change course, tell Gravit',
   'history.title': 'History',

@@ -52,8 +52,17 @@ test('a text whose first line only looks like a tag stays as written', () => {
 });
 
 test('the turn rail shows the question without the tag', () => {
-  const v = railView({ id: 'conv', outline: [{ turn: 1, seq: 1, prompt: '[on screen · Desk]\nwhy', response: '' }] });
+  // dsh's outline collapses whitespace and caps the prompt at 50 characters, so the tag and the words arrive on one line
+  const v = railView({ id: 'conv', outline: [{ turn: 1, seq: 1, prompt: '[on screen · Desk] why', response: '' }] });
   assert.equal(v.ticks[0].prompt, 'why');
+  const id = railView({ id: 'conv', outline: [{ turn: 1, seq: 1, prompt: '[on screen · Markets · stock:NVDA] and t…', response: '' }] });
+  assert.equal(id.ticks[0].prompt, 'and t…');
+  const clipped = railView({ id: 'conv', outline: [{ turn: 1, seq: 1, prompt: '[on screen · Markets · stock:NVDA · at 2026-…', response: '' }] });
+  assert.equal(clipped.ticks[0].prompt, '');
+  const twoLine = railView({ id: 'conv', outline: [{ turn: 1, seq: 1, prompt: '[on screen · Desk]\nwhy', response: '' }] });
+  assert.equal(twoLine.ticks[0].prompt, 'why');
+  const fake = railView({ id: 'conv', outline: [{ turn: 1, seq: 1, prompt: '[on screen · Nowhere] hi', response: '' }] });
+  assert.equal(fake.ticks[0].prompt, '[on screen · Nowhere] hi');
   const plain = railView({ id: 'conv', outline: [{ turn: 1, seq: 1, prompt: 'plain', response: '' }] });
   assert.equal(plain.ticks[0].prompt, 'plain');
 });

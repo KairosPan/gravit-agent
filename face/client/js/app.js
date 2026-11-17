@@ -534,8 +534,9 @@ export function boot(win, host = {}) {
   // both are empty
   const drafts = new Map();
   const draftKey = s => writeTo(s) ?? 'empty';
-  // Messages is the one screen with a composer, drawn while there is a conversation to write to
-  const composerOn = s => writeTo(s) !== null;
+  // Messages is the one screen with a composer, drawn while there is a conversation to write to — and the open box's, while
+  // the box is drawn: a box under a sheet, or set aside by a drawer on a narrow window, takes no dropped file
+  const composerOn = s => writeTo(s) !== null && !(boxOpenHere(s) && boxHidden(s));
   // the session the screen draws a transcript of: the conversation on Messages, a task's or a history session's on theirs
   const shownConv = s => { const id = onScreenId(s); return id ? s.conversations.find(c => c.id === id) ?? null : null; };
   // a conversation's draft, whose files upload to it as they are added; the `empty` one's wait (D10)
@@ -649,6 +650,8 @@ export function boot(win, host = {}) {
     // what the person had: focus and caret, typed text, picked radios, and where each scrolling box stood
     const active = doc.activeElement;
     const activeKey = focusKey(active);
+    // focus inside the open box: a control of the box's that goes leaves it on the box's composer, never one of the page's
+    const activeInBox = Boolean(active?.closest?.('.gbox-panel'));
     const caret = active && active.id !== 'say' && typeof active.selectionStart === 'number' && (active.id || active.name) ? [active.selectionStart, active.selectionEnd] : null;
     // the editor's selection while it has focus, and whose draft it showed: it comes back on that same draft; another
     // draft put on screen under the focus has its caret at the end
@@ -827,8 +830,9 @@ export function boot(win, host = {}) {
     } else if (!s.confirm && last.confirm && find(confirmFrom)) {
       target = find(confirmFrom); // No: back on the key that asked
     } else if (!target && activeKey) {
-      // the pressed control went away (an answered card's keys): stay inside the drawer if one is up, else the composer
-      target = overlay ? root.querySelector(closeKeyOf(overlay)) : say;
+      // the pressed control went away (an answered card's keys): stay inside the drawer if one is up, else the composer — on
+      // Messages, or the box's when it was in the box; a page control's going under the open box leaves focus where it falls
+      target = overlay ? root.querySelector(closeKeyOf(overlay)) : (s.route.screen === 'messages' || activeInBox ? say : null);
     }
     if (searchFocus && doc.getElementById('cq')) { target = doc.getElementById('cq'); searchFocus = false; }
     // ⌥⌘N's composer, its caret after what it holds
@@ -2430,10 +2434,11 @@ export function boot(win, host = {}) {
       if (s.lightbox) { store.dispatch('closeLightbox'); return; }
       // the shortcut sheet after the lightbox, before the search box (D34)
       if (s.shortcuts) { store.dispatch('closeShortcuts'); return; }
-      // inside the open box: an edit or a confirm first, else the box minimizes — no drawer and no Trade ticket closes from there
-      if (boxOpenHere(s) && ev.target?.closest?.('.gbox-panel')) {
-        if (s.edit) store.dispatch('cancelEdit');
-        else if (s.confirm) store.dispatch('cancelConfirm');
+      // inside the open box: a confirm drawn in the box first, else the box minimizes — the page's own edit (the bot editor) and
+      // confirm (a routine's Delete) stand, and no drawer and no Trade ticket closes from there
+      const inBox = boxOpenHere(s) ? ev.target?.closest?.('.gbox-panel') : null;
+      if (inBox) {
+        if (s.confirm && inBox.querySelector?.('.confirm')) store.dispatch('cancelConfirm');
         else closeBox();
         return;
       }

@@ -120,6 +120,7 @@ export const ZH = Object.freeze({
   'tasks.continue': '继续',
   'tasks.gateThere': '要回答，请打开查看完整过程',
   'tasks.full': '查看完整过程',
+  'tasks.gateOpen': '要回答，请打开任务',
   'tasks.page.back': '返回消息',
   'tasks.page.tell': '要改方向，告诉 Gravit',
   'history.title': '历史',

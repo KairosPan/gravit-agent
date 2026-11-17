@@ -2,7 +2,11 @@
 // rail's ticks from the `turnOutline` projection, the turn the view is on, the figures from `sessionStats` with the
 // window's `tokenUsage`, the head's two pills, and the token, duration and clock formats Usage and a job read. Pure.
 import { t, tn } from '../i18n/words.js';
-import { parseTag } from './page-tag.js';
+
+// a box message's page tag as dsh's outline gives it: whitespace collapsed and the prompt capped at 50 characters, so the
+// tag is on the words' line, or clipped before its ']' (then nothing of the words is left)
+const RAIL_TAG = /^\[on screen · (?:Desk|Markets|Trade|Discover|Account|Strategy)[^\]]*(?:\]\s*|$)/;
+const railPrompt = p => (typeof p === 'string' ? p.replace(RAIL_TAG, '') : p);
 
 // {show, ticks: [{turn, seq, loaded, prompt, response}]}: a tick is loaded when nothing is earlier than the window or its
 // turn starts inside it (paging back through its seq brings the whole turn); a prompt sent from the Gravit box is its words
@@ -11,7 +15,7 @@ export function railView(conv) {
   const outline = Array.isArray(conv?.outline) ? conv.outline : [];
   const w = conv?.window;
   const ticks = outline.map(({ turn, seq, prompt, response }) => ({
-    turn, seq, loaded: !w || w.hasMore !== true || seq >= w.start, prompt: parseTag(prompt)?.rest ?? prompt, response,
+    turn, seq, loaded: !w || w.hasMore !== true || seq >= w.start, prompt: railPrompt(prompt), response,
   }));
   return { show: conv?.loaded === true && ticks.length >= 2, ticks };
 }

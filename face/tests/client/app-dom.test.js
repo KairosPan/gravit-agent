@@ -8371,6 +8371,37 @@ test("Esc inside the box minimizes it and leaves Trade's ticket open", async () 
   assert.notEqual(store.get().trade.ticket, null);
 });
 
+test("Esc inside the box leaves the page's confirm and minimizes the box", async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  store.dispatch('askConfirm', { action: 'routineDelete', id: 'r1' });
+  escIn(f, true); await settle();
+  assert.equal(store.get().boxOpen, false);
+  assert.deepEqual(store.get().confirm, { action: 'routineDelete', id: 'r1' });
+});
+
+test("Esc inside the box cancels a confirm drawn in the box", async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  store.dispatch('askConfirm', { action: 'stopGravit', id: 'conv' });
+  f.fire('doc', 'keydown', { key: 'Escape', target: { closest: sel => (sel === '.gbox-panel' ? { querySelector: q => (q === '.confirm' ? {} : null) } : null) }, preventDefault() {} });
+  await settle();
+  assert.equal(store.get().confirm, null);
+  assert.equal(store.get().boxOpen, true);
+});
+
+test("Esc inside the box leaves the bot editor's edit and minimizes the box", async () => {
+  const { f, h, store } = boxRig('#/plugin/bot:news-scout');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  store.dispatch('startEdit', { kind: 'bot', id: 'news-scout' });
+  escIn(f, true); await settle();
+  assert.equal(store.get().boxOpen, false);
+  assert.deepEqual(store.get().edit, { kind: 'bot', id: 'news-scout' });
+});
+
 test("Esc outside the box keeps today's ladder", async () => {
   const { f, h, store } = boxRig('#/trade/stock:NVDA');
   await h.ready(); await settle();
@@ -8379,6 +8410,34 @@ test("Esc outside the box keeps today's ladder", async () => {
   escIn(f, false); await settle();
   assert.equal(store.get().trade.ticket, null);
   assert.equal(store.get().boxOpen, true);
+});
+
+test("a page control that goes under the open box leaves the box's composer unfocused; one of the box's own lands there", async () => {
+  const { f, h, store } = boxRig('#/desk');
+  await h.ready(); await settle();
+  const say = f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  openBox(f); await settle();
+  const pageKey = f.withId('dk-gone', { tagName: 'BUTTON', presentIf: /never-drawn/ });
+  pageKey.focus();
+  store.dispatch('boxDetach'); await settle();
+  assert.notEqual(f.doc.activeElement, say, 'the page lost its control: the box does not take focus');
+  const boxKey = f.withId('gbox-gone', { tagName: 'BUTTON', presentIf: /never-drawn/, closestMap: { '.gbox-panel': {} } });
+  boxKey.focus();
+  store.dispatch('boxAttach'); await settle();
+  assert.equal(f.doc.activeElement, say, "the box's control went: its composer takes focus");
+});
+
+test('files dragged over the open box while a sheet covers it are refused; with the sheet gone they are taken', async () => {
+  const { f, h, store } = boxRig('#/account/identity');
+  await h.ready(); await settle();
+  openBox(f); await settle();
+  store.dispatch('identityConnectOpen', 'telegram'); await settle();
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
+  assert.equal(store.get().dropping, false, 'the hidden box takes no file');
+  store.dispatch('identityConnectClose'); await settle();
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
+  assert.equal(store.get().dropping, true);
+  store.timers.clear();
 });
 
 test('the hand-offs fill the box and stay on the page', async () => {

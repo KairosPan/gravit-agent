@@ -402,17 +402,19 @@ All three of its stages are built:
   thread (compact: wide blocks such as a Lunhui answer or an event table are one line and Open in
   Messages ›), the waiting lines of the rail drawn open at its top, and Messages' own composer —
   one draft, one `#say`, the `/` and `@` menus included. An owner sheet or the identity sheet hides
-  the box; a drawer moves the open panel to its left and tucks the ball into its edge. Its state
+  the box; a drawer moves the open panel to its left and tucks the ball into its edge (at 907 px
+  and below a drawer hides the panel). Its state
   is kept across reloads. **The page tag:** what the box sends starts with a line such as
   `[on screen · Markets · stock:NVDA]`, built from the route and ids the store already knows
   (`js/host/page-tag.js`), English in both languages, which `dsh/profile/router.md` tells Gravit to
-  read "this" and "it" against; the chip above the composer shows it, × leaves it off one message,
+  read "this" and "it" against; the chip above the composer shows it, × leaves it off what is sent
+  until the page changes or **Attach this page** puts it back,
   and a `/` line or a send of files alone goes untagged. In the thread the tag line is not drawn:
   a caption over the operator's bubble, `Asked from Markets · NVDA`, is read from it. Hand to
   Gravit, an ability's Ask keys and the Desk's **Edit with Gravit** open the box and fill its draft
   without leaving the page; Option-Command-N (Ctrl+Alt+N off a Mac) opens it and focuses the
-  editor, and Esc from inside it closes its menu, edit or confirm first, then minimizes it, and
-  never closes a drawer or Trade's ticket;
+  editor, and Esc from inside it closes its menu or a confirm drawn in it first, then minimizes it,
+  and never closes a drawer, Trade's ticket or the page's own edit or confirm;
 - **the side panel's search** (the dsh UI port's plan 2): a box under the panel's head, `Search
   conversations`, focused by Option-Command-K (Ctrl+Alt+K off a Mac; from another screen it goes to
   Messages first). Titles and channel names match at once; the words inside conversations come from
@@ -3749,7 +3751,8 @@ In the browser, on the installed face after a restart on this code (hard-reload 
    sheet; a drawer hides the open sheet.
 
 Also check on step 1 that a `/` line sent from the box goes untagged and that × on the chip
-leaves the tag off the next message only. Record the date and the commit here when it passes.
+leaves the tag off every message until the page changes or **Attach this page** is pressed.
+Record the date and the commit here when it passes.
 
 ### The conversation drill (owed; keyed)
 

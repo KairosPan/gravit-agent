@@ -3,6 +3,7 @@
 import { canonicalId, isAccountKey } from '../host/market-view.js';
 import { onScreenId } from '../host/sessions.js';
 import { sizeOf, cleanFont } from '../prefs.js';
+import { toHash } from '../router.js';
 
 // one drawer at a time: an opener first closes whatever else was open, with any editor or confirm in it
 // the stock drawer closed, on a state that has the composed answers' slice
@@ -58,6 +59,8 @@ export const reducers = {
     // (and the lightbox: an image belongs to the conversation it was opened in; and the shortcut sheet)
     const changedRoute = state.route.screen !== route.screen || state.route.id !== route.id;
     let s = { ...state, route, listOpen: changedRoute ? false : state.listOpen, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, lightbox: null, shortcuts: null, ...stockClosed(state) };
+    // the box's page tag dropped on a page (× on its chip) comes back on any other page, and on returning to that one
+    if (s.boxDetached != null && toHash(route) !== toHash(state.route)) s.boxDetached = null;
     // the Statement and a venue's Details belong to Account
     if (route.screen !== 'account' && (s.account.statementOpen || s.account.detailsVenue)) s.account = { ...s.account, statementOpen: false, detailsVenue: null };
     // a Receive address read on the Money tab is drawn only while the tab stays on screen: leaving it forgets every one
