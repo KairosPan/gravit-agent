@@ -1,4 +1,4 @@
-// The Gravit box's facts (plan 1 of the box, Task 1): the screens it stands on, the read it names while open, what covers
+// The gravit box's facts (plan 1 of the box, Task 1): the screens it stands on, the read it names while open, what covers
 // it, what it steps aside for, the ball's marks, and its open state kept as a pref.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

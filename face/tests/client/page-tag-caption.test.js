@@ -1,4 +1,4 @@
-// The Gravit box's page tag in the thread (plan 2, Task 3; spec 2026-11-16-gravit-box-design.md 6.7): an operator's message
+// The gravit box's page tag in the thread (plan 2, Task 3; spec 2026-11-16-gravit-box-design.md 6.7): an operator's message
 // that opens with the tag is drawn as their words alone, under Asked from <the page in words>; the preview and the turn rail
 // show the words alone too. Read from the message's text alone, so it holds with an empty store after a reload.
 import test from 'node:test';

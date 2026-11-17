@@ -258,7 +258,7 @@ function bubble(view, speaker) {
   // only the operator's own words are You; every other user-role record (a compaction checkpoint, a plugin notice,
   // runtime context, a member's delta) is a system line, never the operator's blue bubble
   // their attachments ride on the row as the mapper read them (plan 4 Task 3)
-  // a message sent from the Gravit box opens with its page tag (host/page-tag.js): the words alone are drawn, the tag kept as
+  // a message sent from the gravit box opens with its page tag (host/page-tag.js): the words alone are drawn, the tag kept as
   // onScreen for the thread's Asked from caption - read from the text alone, so it holds with an empty store
   if (view.source === 'user' || view.source === undefined) {
     const data = { mention: view.mention, ...(Array.isArray(view.attachments) ? { attachments: view.attachments } : {}) };

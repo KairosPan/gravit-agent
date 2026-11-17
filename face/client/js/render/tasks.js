@@ -85,7 +85,7 @@ export function taskLineHtml({ task, gate, status }, group, state, open) {
   return lineHtml(task.id, dot, task.title, status, `${originOf(task)}${strategy}${steps}${end}${usageOf(task.usage)}${keys(task, state.tasks.busy.includes(task.id))}`, open, task.bot);
 }
 
-/** A line waiting on the operator, as the Gravit box draws it (box spec §6.6): always open, no disclosure — the rail's dot,
+/** A line waiting on the operator, as the gravit box draws it (box spec §6.6): always open, no disclosure — the rail's dot,
  * the title and the status, then the worker's gate, answered there with the thread's own keys, or, while the page has not
  * seen that gate, the rail's words and a link to the task's page. */
 export function waitingLineHtml({ task, gate, status }, state) {

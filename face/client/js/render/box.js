@@ -1,4 +1,4 @@
-// face/client/js/render/box.js — the Gravit box (plan 1 of the box): on the screens that show no conversation, half a ball at
+// face/client/js/render/box.js — the gravit box (plan 1 of the box): on the screens that show no conversation, half a ball at
 // the right edge (its marks: the tasks waiting on the operator, the conversation working, a reply not yet seen), and once
 // it is opened a panel over the page with the one conversation's thread and Messages' own composer. Nothing drawn while
 // the box does not stand here or a sheet covers it; beside a drawer or Trade's open ticket it steps aside (by CSS).
@@ -15,7 +15,7 @@ import { renderThread } from './thread.js';
 import { waitingLineHtml } from './tasks.js';
 import { railOf } from '../host/rail-view.js';
 
-// the ball's name for a screen reader: Ask Gravit, then what waits, working, a new reply, as they apply
+// the ball's name for a screen reader: Ask gravit, then what waits, working, a new reply, as they apply
 function ballLabel({ waiting, working, fresh }) {
   const parts = [t('gbox.ask')];
   if (waiting > 0) parts.push(t('gbox.label.waiting', { n: waiting }));

@@ -1,4 +1,4 @@
-// The Gravit box drawn (plan 1 of the box, Task 2): half a ball at the right edge with its marks, the panel with the one
+// The gravit box drawn (plan 1 of the box, Task 2): half a ball at the right edge with its marks, the panel with the one
 // conversation's thread and Messages' own composer, where it stands and what it steps aside for.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -39,22 +39,22 @@ test('no box under an owner sheet or the identity sheet', () => {
 
 test('closed: the half ball, its marks and its name', () => {
   const h = renderBox(withConv(waitingAt('desk', 2), { running: true }), NOW);
-  assert.match(h, /<button type="button" id="gbox-ball" class="gbox-ball" data-action="boxOpen" aria-label="Ask Gravit, 2 waiting, working"/);
-  assert.match(h, /title="Ask Gravit · ⌥⌘N"/);
+  assert.match(h, /<button type="button" id="gbox-ball" class="gbox-ball" data-action="boxOpen" aria-label="Ask gravit, 2 waiting, working"/);
+  assert.match(h, /title="Ask gravit · ⌥⌘N"/);
   assert.match(h, /class="gbox-g" aria-hidden="true">G</);
   assert.match(h, /class="gbox-badge" aria-hidden="true">2</);
   assert.match(h, /class="gbox-dot pulse"/);
   assert.doesNotMatch(h, /gbox-panel/);
-  assert.match(renderBox(withConv(at('desk'), { updatedAt: 9, lastSeen: 5 }), NOW), /aria-label="Ask Gravit, new reply"[\s\S]*class="gbox-dot steady"/);
+  assert.match(renderBox(withConv(at('desk'), { updatedAt: 9, lastSeen: 5 }), NOW), /aria-label="Ask gravit, new reply"[\s\S]*class="gbox-dot steady"/);
   const quiet = renderBox(at('markets'), NOW);
-  assert.match(quiet, /aria-label="Ask Gravit"/);
+  assert.match(quiet, /aria-label="Ask gravit"/);
   assert.doesNotMatch(quiet, /gbox-badge|gbox-dot/);
-  assert.match(renderBox(at('markets'), NOW, {}, { mac: false }), /title="Ask Gravit · Ctrl\+Alt\+N"/);
+  assert.match(renderBox(at('markets'), NOW, {}, { mac: false }), /title="Ask gravit · Ctrl\+Alt\+N"/);
 });
 
 test('open: the panel with the thread and Messages\' own composer', () => {
   const h = renderBox(R.boxOpen(withConv(at('markets'), { messages: [m('a', { from: 'you', text: 'why?' })], loaded: true })), NOW);
-  assert.match(h, /<section class="gbox-panel" role="dialog" aria-modal="false" aria-label="Gravit">/);
+  assert.match(h, /<section class="gbox-panel" role="dialog" aria-modal="false" aria-label="gravit">/);
   assert.match(h, /<div class="gbox-waiting"><\/div>/);
   assert.match(h, /<div class="gbox-body"><div class="thread" id="thread">/);
   assert.match(h, /why\?/);
@@ -69,7 +69,7 @@ test('open: the panel with the thread and Messages\' own composer', () => {
 
 test('open on a conversation known but not listed: one plain line in place of the thread', () => {
   const h = renderBox(R.boxOpen(at('desk', null, { convs: [] })), NOW);
-  assert.match(h, /<p class="gbox-empty dim">Ask Gravit about this page\.<\/p>/);
+  assert.match(h, /<p class="gbox-empty dim">Ask gravit about this page\.<\/p>/);
   assert.doesNotMatch(h, /id="thread"/);
   assert.match(h, /id="say"/);
 });

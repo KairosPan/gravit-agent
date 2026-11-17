@@ -207,7 +207,7 @@ test("a bot task's rail line shows the bot before its title; a gravit task's non
   assert.match(renderTaskRail(state([task('x', { bot: '<b>' })]), NOW), /task-bot">&lt;b&gt;</, 'the bot id is escaped');
 });
 
-test('the Gravit box draws a waiting card as the rail does: a lesson applying sends the owner to the task, no one-click approve', () => {
+test('the gravit box draws a waiting card as the rail does: a lesson applying sends the owner to the task, no one-click approve', () => {
   const w = task('t1', { state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c', tool: 'x' } });
   const s = R.hostGate(state([w], [conv('t1')]), { convId: 't1', message: { id: 'ev-1', seq: 1.5, at: NOW, from: 'gravit', kind: 'card', text: 'Buy 1 NVDA', data: { eventId: 'ev-1', sessionId: 't1', callId: 'c1', title: 'Buy 1 NVDA', venue: 'paper' } } });
   const lesson = { id: 'L-1', strength: 'caveat', says: 'careful', words: 'Do not chase', fired: 1, followed: 0, overridden: 0 };

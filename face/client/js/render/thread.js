@@ -286,7 +286,7 @@ function youFiles(list, thumbs) {
 export const NETWORKS = { telegram: 'Telegram', slack: 'Slack', imessage: 'iMessage' }; // en-kept: the networks' own names
 const phoneChip = network => chip(Object.hasOwn(NETWORKS, network) ? t('thread.phone.on', { network: NETWORKS[network] }) : t('thread.phone'));
 
-// a message sent from the Gravit box (host/kinds.js onScreen) is the operator's bubble under Asked from <the page in words>
+// a message sent from the gravit box (host/kinds.js onScreen) is the operator's bubble under Asked from <the page in words>
 const askedFrom = onScreen => `<span class="you-from">${icon('screen', 13)}${th('gbox.asked', { where: tagWords(onScreen) })}</span>`; // words-order: an icon before one key's words
 
 function youMessage(m, conv, state, page) {

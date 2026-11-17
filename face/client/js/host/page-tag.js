@@ -1,4 +1,4 @@
-// The Gravit box's page tag (plan 2, Task 1; spec 2026-11-16-gravit-box-design.md 6.7): the first line of a message sent from a
+// The gravit box's page tag (plan 2, Task 1; spec 2026-11-16-gravit-box-design.md 6.7): the first line of a message sent from a
 // box screen, naming the page the operator is on. It is English in every language — the router's contract reads it — and an
 // id goes in only when the store knows it, never a display name; parseTag reads it back for the thread to draw in words.
 import { boxShown } from './sessions.js';

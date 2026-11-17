@@ -166,7 +166,7 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
       assert.match(nav, />Desk</);
       const screen = renderDeskScreen(deskStore.get(), Date.now());
       for (const column of ["News", "Routines"]) assert.match(screen, new RegExp(`<section class="dk-col" aria-label="${column}">`), column);
-      // the Gravit box on the Desk: opened on the same store, it draws its panel and composer, and the page tag names the Desk
+      // the gravit box on the Desk: opened on the same store, it draws its panel and composer, and the page tag names the Desk
       deskStore.dispatch("tasksLoaded", { conversation: "conv", tasks: [], at: Date.now() });
       deskStore.dispatch("boxOpen");
       const boxHtml = renderBox(deskStore.get(), Date.now());

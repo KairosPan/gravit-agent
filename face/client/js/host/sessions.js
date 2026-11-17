@@ -68,7 +68,7 @@ export function childRowsOf(items) {
 // the host moved it after the operator last looked
 export const unreadOf = conv => conv.updatedAt > (conv.lastSeen ?? 0);
 
-// the screens that show no conversation of their own: the Gravit box stands on them once the conversation is known
+// the screens that show no conversation of their own: the gravit box stands on them once the conversation is known
 export const BOX_SCREENS = new Set(['desk', 'markets', 'trade', 'discover', 'plugin', 'module', 'account', 'strategy']);
 export function boxShown(state) {
   const conv = state.tasks?.conversation;
@@ -78,7 +78,7 @@ export function boxShown(state) {
 export const boxOpenHere = state => boxShown(state) && state.boxOpen === true;
 
 // the session a route reads (plan 2 of one entry): the conversation on Messages (none while an old link there waits to land),
-// the task's or the history session's on theirs, the conversation in the open Gravit box; none on any other screen
+// the task's or the history session's on theirs, the conversation in the open gravit box; none on any other screen
 export function onScreenId(state) {
   const r = state.route;
   if (boxOpenHere(state)) return state.tasks.conversation;

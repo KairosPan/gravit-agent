@@ -9,7 +9,7 @@ const RAIL_TAG = /^\[on screen · (?:Desk|Markets|Trade|Discover|Account|Strateg
 const railPrompt = p => (typeof p === 'string' ? p.replace(RAIL_TAG, '') : p);
 
 // {show, ticks: [{turn, seq, loaded, prompt, response}]}: a tick is loaded when nothing is earlier than the window or its
-// turn starts inside it (paging back through its seq brings the whole turn); a prompt sent from the Gravit box is its words
+// turn starts inside it (paging back through its seq brings the whole turn); a prompt sent from the gravit box is its words
 // without the page tag
 export function railView(conv) {
   const outline = Array.isArray(conv?.outline) ? conv.outline : [];

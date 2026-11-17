@@ -18,7 +18,7 @@ import { statsView, pillsText, durationText, clockText } from '../host/turns-vie
 import { jobsView, metaLine, isLive } from '../host/jobs-view.js';
 
 // the conversation Messages writes to (plan 2 of one entry): the one /data/tasks names, once the list carries it; none while
-// it is unknown (the tasks loading, off or failed) or on any other screen but under the open Gravit box, so no composer is
+// it is unknown (the tasks loading, off or failed) or on any other screen but under the open gravit box, so no composer is
 // ever bound to another session
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' || boxOpenHere(state) ? onScreenId(state) : null;

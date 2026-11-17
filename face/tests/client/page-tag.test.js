@@ -1,4 +1,4 @@
-// The Gravit box's page tag (plan 2, Task 1): built from ids the store knows, read back from a message's first line.
+// The gravit box's page tag (plan 2, Task 1): built from ids the store knows, read back from a message's first line.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { pageTagOf, parseTag, tagWords, TAG_MAX } from '../../client/js/host/page-tag.js';

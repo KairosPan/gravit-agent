@@ -1,4 +1,4 @@
-// face/client/js/host/box-view.js — the Gravit box's facts beyond where it stands (host/sessions.js boxShown): what covers it,
+// face/client/js/host/box-view.js — the gravit box's facts beyond where it stands (host/sessions.js boxShown): what covers it,
 // what it steps aside for, and the ball's marks. Pure.
 import { waitingCount } from './rail-view.js';
 import { unreadOf } from './sessions.js';

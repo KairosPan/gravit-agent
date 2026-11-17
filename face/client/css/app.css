@@ -1365,7 +1365,7 @@ button.tk-at:hover { border-color: var(--dim); }
 /* the display face (kairos-studio's titles): the brand, the page heads, the big numbers, in Instrument Serif at its one weight */
 .brand-name, .list-title, .empty-title, .plug-name, .disc-head .head-title, .acct-head .head-title, .mk-head .head-title, .tp-head .head-title, .mk-who .head-title, .networth, .mk-big { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.01em; }
 
-/* ---- the Gravit box (plan 1 of the box, render/box.js): half a ball on the right edge, the panel over the page ---- */
+/* ---- the gravit box (plan 1 of the box, render/box.js): half a ball on the right edge, the panel over the page ---- */
 .gbox { display: contents; }
 .gbox-ball { position: fixed; right: -28px; bottom: 40px; z-index: 40; display: flex; align-items: center; justify-content: flex-start; width: 56px; height: 56px; padding: 0 0 0 9px; border: 0; border-radius: var(--radius-pill); background: var(--primary); color: var(--on-primary); box-shadow: var(--shadow-lift); transition: transform .16s ease; }
 .gbox-ball:hover { transform: translateX(-8px); }

@@ -390,15 +390,15 @@ All three of its stages are built:
   line under the composer (not signed in, reconnecting, a host error, a command's word), and
   Settings (since plan 7 Language first, English · 中文, every word at once and kept in the browser; Cream · Black · System; since plan 6 the text and code sizes, the two
   font families and Keyboard shortcuts, below);
-- **the Gravit box** (since 2026-11-16; spec `docs/superpowers/specs/2026-11-16-gravit-box-design.md`):
-  Gravit's one conversation docked at the bottom right of every screen that shows no
+- **the gravit box** (since 2026-11-16; spec `docs/superpowers/specs/2026-11-16-gravit-box-design.md`):
+  gravit's one conversation docked at the bottom right of every screen that shows no
   conversation — Desk, Markets, Trade, Discover (a plugin's or a module's page too), Account and a
   strategy's page; never Messages, a task's page or History, which already read a session, and not
   while the conversation is unknown (`FACE_ROUTER=0`, or its first read not yet in). Closed it is
   half a ball (56 px, its left half showing) at the window's right edge, 40 px above the bottom;
   hover leans it out 8 px, Tab slides it fully into view, a click, Return or Space opens the panel
   (400 px wide, up to 600 tall; a sheet on windows of 860 px and below). A badge on the ball counts
-  the cards that wait; a dot says Gravit is working or has something new. The panel is Messages' own
+  the cards that wait; a dot says gravit is working or has something new. The panel is Messages' own
   thread (compact: wide blocks such as a Lunhui answer or an event table are one line and Open in
   Messages ›), the waiting lines of the rail drawn open at its top, and Messages' own composer —
   one draft, one `#say`, the `/` and `@` menus included. An owner sheet or the identity sheet hides
@@ -406,12 +406,12 @@ All three of its stages are built:
   and below a drawer hides the panel). Its state
   is kept across reloads. **The page tag:** what the box sends starts with a line such as
   `[on screen · Markets · stock:NVDA]`, built from the route and ids the store already knows
-  (`js/host/page-tag.js`), English in both languages, which `dsh/profile/router.md` tells Gravit to
+  (`js/host/page-tag.js`), English in both languages, which `dsh/profile/router.md` tells gravit to
   read "this" and "it" against; the chip above the composer shows it, × leaves it off what is sent
   until the page changes or **Attach this page** puts it back,
   and a `/` line or a send of files alone goes untagged. In the thread the tag line is not drawn:
   a caption over the operator's bubble, `Asked from Markets · NVDA`, is read from it. Hand to
-  Gravit, an ability's Ask keys and the Desk's **Edit with Gravit** open the box and fill its draft
+  gravit, an ability's Ask keys and the Desk's **Edit with gravit** open the box and fill its draft
   without leaving the page; Option-Command-N (Ctrl+Alt+N off a Mac) opens it and focuses the
   editor, and Esc from inside it closes its menu or a confirm drawn in it first, then minimizes it,
   and never closes a drawer, Trade's ticket or the page's own edit or confirm;
@@ -4037,15 +4037,15 @@ In the browser, on the installed face after a restart on this code (hard-reload 
    stock; the message in the box carries `Asked from Markets · NVDA` and no raw tag line.
 2. **Messages.** Ask the same on Messages. PASS: the same exchange, its bubble captioned `Asked
    from …` the same way, and after a reload the caption is still there.
-3. **An order.** Ask Gravit for a paper order. PASS: the card waits at the top of the box, drawn
-   open; answering it settles the rail's line and the ball's badge, and Gravit's reply only says a
+3. **An order.** Ask gravit for a paper order. PASS: the card waits at the top of the box, drawn
+   open; answering it settles the rail's line and the ball's badge, and gravit's reply only says a
    task started.
 4. **A drawer and a sheet.** Account › Statement: the open panel steps left of the drawer and the
    ball tucks into the drawer's edge. Open an owner sheet (Trade's order step included): the box
    is hidden until it closes, and then back as it was.
 5. **The Desk.** Half the ball shows at the right edge; hover leans it out and no more, a click
    pops the box; Option-Command-N opens it with the caret in the editor; Esc minimizes it back
-   into the half ball with focus on it. **Edit with Gravit** on a routine opens the box with
+   into the half ball with focus on it. **Edit with gravit** on a routine opens the box with
    `Edit your routine: {name}` in its draft and sends nothing.
 6. **A narrow window.** At 860 px and below the ball is the same half ball and the open box is a
    sheet; a drawer hides the open sheet.
@@ -7743,7 +7743,7 @@ hard-reload the page.
    PASS: one `Skipped` · `the desk was paused` line, the head bar `Paused` meanwhile, the skipped
    slot not run after the resume (resume inside its 5-minute grace to try it), and the next slot
    after the resume runs.
-8. **A change.** Press **Edit with Gravit**, then say "make it 09:00". PASS: the composer held
+8. **A change.** Press **Edit with gravit**, then say "make it 09:00". PASS: the composer held
    `Edit your routine: <name>` and nothing was sent until you sent it; the card reads `Change` with
    `Replaces the current version of <name>`; until ✓ the old version runs; after ✓ the chip reads
    `Added to Routines` with `Next run <day> at 09:00 ET`, the older card reads `Replaced`, and the

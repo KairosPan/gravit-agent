@@ -15,7 +15,7 @@ export function emptyState() {
     codeFont: '',
     route: { screen: 'messages', id: null },
     railCollapsed: false,
-    // the Gravit box open on the screens that show no conversation (host/sessions.js boxShown), a saved preference
+    // the gravit box open on the screens that show no conversation (host/sessions.js boxShown), a saved preference
     boxOpen: false,
     // the page × took off what the box sends (its hash, router.js toHash), or null; the chip is back on any other page; not a pref
     boxDetached: null,

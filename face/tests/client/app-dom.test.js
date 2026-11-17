@@ -8276,7 +8276,7 @@ test('Stop on a line posts /data/tasks/stop; a line opened stays open across a r
   store.timers.clear();
 });
 
-// ---- the Gravit box (plan 1 of the box, Task 3): it reads and writes the one conversation, nothing else
+// ---- the gravit box (plan 1 of the box, Task 3): it reads and writes the one conversation, nothing else
 const boxFollows = (h, id) => h.streams.filter(st => st.name === 'session/follow' && st.args.request.address.sessionId === id && !st.cancelled).length;
 const boxPrompts = h => h.calls.filter(c => c[0] === 'session/prompt').map(c => c[1].request);
 const boxRig = (hash, over = {}) => {
