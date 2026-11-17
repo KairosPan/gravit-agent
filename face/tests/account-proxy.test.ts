@@ -1485,6 +1485,21 @@ test("overview in process: GET /api/overview, never kept, `disabled` honoured, a
   assert.equal(disabled.fetched.length, 0, "a disabled row asks nothing");
 });
 
+test("exchange in process: the envelope posted as JSON to /api/exchange, `disabled` honoured, and no route of its own", async () => {
+  const envelope = { action: { type: "attest", service: "gravit-memory", act: "arm", subject: "cut-losers", digest: "a".repeat(64), nonce: NOW }, nonce: NOW, signature: "c2ln" };
+  const { routes, fetched, inits, proxy } = proxyWith(answering(OK_BODY));
+  assert.deepEqual(await proxy.exchange(envelope), { status: 200, body: OK_BODY });
+  assert.deepEqual(fetched, [`${URL_}/api/exchange`]);
+  assert.equal(inits[0].method, "POST");
+  assert.equal((inits[0].headers as Record<string, string>)["content-type"], "application/json");
+  assert.deepEqual(JSON.parse(String(inits[0].body)), envelope);
+  assert.ok(inits[0].signal instanceof AbortSignal);
+  assert.equal(routes.length, 46, "no route is added: the count stays forty-six");
+  const disabled = proxyWith(answering(OK_BODY), () => NOW, { disabled: true });
+  assert.deepEqual(await disabled.proxy.exchange(envelope), { unreachable: "disabled" });
+  assert.equal(disabled.fetched.length, 0, "a disabled row asks nothing");
+});
+
 test("overview in process: asked with an abort signal, its bound OVERVIEW_ABORT_MS of 7,000 ms; a failed fetch is its code", async () => {
   assert.equal(OVERVIEW_ABORT_MS, 7_000);
   const { inits, proxy } = proxyWith(async () => { throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" }); });

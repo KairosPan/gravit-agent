@@ -25,10 +25,10 @@ export const SCREEN_READ_MS = 5_000;
 /** The most characters of a card's text served. */
 export const SCREEN_TEXT_MAX = 16_384;
 
-/** A lesson id the screen builds a command from. */
-const LESSON_SHAPE = /^[a-z0-9][a-z0-9-]{1,39}$/;
-/** A decision id the screen builds a command from. */
-const DECISION_SHAPE = /^d-\d{8}-[0-9a-f]{8}$/;
+/** A lesson id the screen builds a command from, and the owner's acts take (src/memory-acts.ts). */
+export const LESSON_SHAPE = /^[a-z0-9][a-z0-9-]{1,39}$/;
+/** A decision id the screen builds a command from, and the owner's acts take (src/memory-acts.ts). */
+export const DECISION_SHAPE = /^d-\d{8}-[0-9a-f]{8}$/;
 /** A home written into a command unquoted. */
 const PLAIN_HOME = /^[A-Za-z0-9_./~-]+$/;
 /** The place of the owner's words in a command: a double quote, an ellipsis, a double quote. */

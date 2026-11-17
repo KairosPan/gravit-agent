@@ -30,7 +30,9 @@
  * route, for a seat route handed none. Beside it are the `positions` and
  * `market` reads in process, through their routes' caches, and the
  * `overview` read, in process alone and never kept, which the memory gate
- * reads (src/memory-gate.ts `gateAccount`).
+ * reads (src/memory-gate.ts `gateAccount`), and the `exchange` post, in
+ * process alone, which the memory's owner acts forward a signed attest
+ * through (src/memory-acts.ts).
  *
  * The rules, the seat route's generalised (since plan A2 they live in the proxy core, src/upstream-proxy.ts,
  * which the market's half, src/market-proxy.ts, is built on too; the writes and the callback stay here):
@@ -389,12 +391,18 @@ const originHeader = (req: IncomingMessage): Record<string, string> => {
  * `market` are those routes' reads in process, through the same caches their routes are served from, each asked past
  * its TTL when called with `fresh`. `overview` is
  * `GET /api/overview` in process alone - no face route reaches it - asked afresh each time, cut at
- * {@link OVERVIEW_ABORT_MS}, `{ unreachable: "disabled" }` with nothing asked under a disabled row. `dispose`
- * forgets every kept answer and aborts every open stream's upstream. */
+ * {@link OVERVIEW_ABORT_MS}, `{ unreachable: "disabled" }` with nothing asked under a disabled row. `exchange` is
+ * `POST /api/exchange` in process alone, the envelope it is given sent as JSON - the memory's owner acts
+ * (src/memory-acts.ts) forward a signed attest through it, and no face route reaches it beyond the `exchange` write's
+ * own - cut at the `exchange` write's {@link WRITE_ABORT_MS}, `{ unreachable: "disabled" }` with nothing asked under
+ * a disabled row. `dispose` forgets every kept answer and aborts every open stream's upstream. */
 export function registerAccountProxy(
   webServer: RouteRegistrar,
   deps: AccountProxyDeps = {},
-): { reader: AccountReader; positions: UpstreamRouteRead; market: UpstreamRouteRead; overview: () => Promise<UpstreamAnswer>; dispose(): void } {
+): {
+  reader: AccountReader; positions: UpstreamRouteRead; market: UpstreamRouteRead; overview: () => Promise<UpstreamAnswer>;
+  exchange: (envelope: unknown) => Promise<UpstreamAnswer>; dispose(): void;
+} {
   const s = settingsOf(deps);
   const reads = READ_ROUTES.map((route) => readOf(route, s.abortMs));
   const accountRead = reads[READ_ROUTES.indexOf("account")]!;
@@ -417,6 +425,11 @@ export function registerAccountProxy(
     positions: mounted.read.get("/data/account/positions")!,
     market: mounted.read.get("/data/account/market")!,
     overview: () => (s.disabled ? Promise.resolve({ unreachable: "disabled" }) : askUpstream(s.doFetch, `${s.url}/api/overview`, OVERVIEW_ABORT_MS)),
+    exchange: (envelope) => (s.disabled
+      ? Promise.resolve({ unreachable: "disabled" })
+      : askUpstream(s.doFetch, `${s.url}${WRITE_PATHS.exchange.account}`, WRITE_ABORT_MS.exchange, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(envelope),
+      })),
     dispose: () => {
       mounted.clear();
       stream.abortAll();
