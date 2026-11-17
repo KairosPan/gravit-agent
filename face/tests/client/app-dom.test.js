@@ -22,7 +22,7 @@ import { sayOf, setTable, said as wordLine, wordsEpoch } from '../../client/js/i
 import { EN } from '../../client/js/i18n/en.js';
 import { ZH } from '../../client/js/i18n/zh.js';
 import { deskNews, deskPageStatus, deskRoutines } from './helpers/desk-news.js';
-import { memoryDecisions, memoryDecisionRows, memoryLessons, armedLesson, changedLesson } from './helpers/memory-page.js';
+import { memoryDecisions, memoryDecisionRows, memoryLessons, armedLesson, changedLesson, memoryWaiting, memoryWaitingProposals } from './helpers/memory-page.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -8760,4 +8760,65 @@ test('Messages never tags', async () => {
   await goTo(f, '#/messages');
   typeSay(f, 'hello'); send(f); await settle();
   assert.equal(boxPrompts(h).at(-1).content[0].text, 'hello');
+});
+
+// the owner's acts on the Memory screen (memory owner acts plan Task 4): a page opened at #/memory learns that it signs from
+// the Account's page read at boot; a proposal's key opens the drawer, the owner's words quiet for a moment are prepared, the
+// go key signs and posts the act once, and once it is done the lessons, the waiting and the decisions are read again
+test("the Memory screen's key opens the act's drawer; words typed and the key pressed sign and post it; done reads the three again", async () => {
+  const f = fakeWindow({ hash: '#/memory/waiting', storage: memoryStorage() });
+  const box = f.withId('mp-act-words', { tagName: 'TEXTAREA', dataset: { action: 'memoryActWords' } });
+  const door = ownerDoor();
+  const [proposal] = memoryWaitingProposals();
+  const memoryPosts = [];
+  const post = async (path, body) => {
+    if (path === '/data/memory/prepare') {
+      memoryPosts.push([path, body]);
+      const draft = body.words === undefined ? null : { type: 'attest', service: 'gravit-memory', act: body.act, subject: body.subject, digest: 'e'.repeat(64) };
+      return { status: 200, body: { ok: true, show: { kind: 'proposal', proposal }, draft } };
+    }
+    if (path === '/data/memory/act') { memoryPosts.push([path, body]); return { status: 200, body: { ok: true, act: body.act, subject: body.subject } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: {
+    '/data/account': () => door.page(), '/data/memory/review': memoryWaiting({ proposals: memoryWaitingProposals() }),
+    '/data/memory/lessons': memoryLessons(), '/data/memory/decisions': memoryDecisions(),
+  } });
+  const timers = new HeldTimers(ms => ms === 300 || ms >= 5_000);
+  const store = bootOwner(f, h, door, fakeMarkets(), { ownerPost: post, timers, now: () => 1_000_000 });
+  await h.ready();
+  await until(signs(store), 'the page to sign at #/memory');
+  await settle();
+  const key = `data-action="memoryActOpen" data-act="reject" data-subject="${proposal.id}">Reject…</button>`;
+  assert.ok(f.html().includes(key), 'the key while the page signs');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryActOpen', act: 'reject', subject: proposal.id } });
+  await settle();
+  assert.equal(store.get().memoryPage.act.status, 'words');
+  assert.match(f.html(), /<div class="drawer sheet mp-act" role="dialog" aria-label="Reject p-20261115-0a1b2c3d">/);
+  assert.match(f.html(), /<textarea class="textarea mp-act-words" id="mp-act-words"/);
+  box.value = ' not a pattern ';
+  f.fire('root', 'input', { target: box });
+  assert.equal(store.get().memoryPage.act.words, ' not a pattern ');
+  timers.run(300);
+  await until(() => store.get().memoryPage.act?.status === 'ready', 'the act to be prepared');
+  assert.deepEqual(door.sent('/data/account/prepare'), [{ draft: { type: 'attest', service: 'gravit-memory', act: 'reject', subject: proposal.id, digest: 'e'.repeat(64) } }]);
+  assert.match(f.html(), /What you sign/);
+  const readsBefore = h.reads.filter(p => p.startsWith('/data/memory/')).length;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryActGo' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'memoryActGo' } });
+  await until(() => store.get().memoryPage.act?.status === 'done', 'the act to be done');
+  await settle();
+  const acts = memoryPosts.filter(([p]) => p === '/data/memory/act').map(([, b]) => b);
+  assert.equal(acts.length, 1, 'posted once');
+  assert.deepEqual(Object.keys(acts[0]).sort(), ['act', 'envelope', 'subject', 'words']);
+  assert.equal(acts[0].words, 'not a pattern', 'the words trimmed, as prepared');
+  assert.equal(acts[0].envelope.signature.kid, door.kid, "signed by this page's key");
+  assert.equal(door.sent('/data/account/exchange').length, 0, 'the face forwards it, not the page');
+  assert.match(f.html(), /<p class="mp-act-done">Done<\/p>/);
+  const again = h.reads.filter(p => p.startsWith('/data/memory/')).slice(readsBefore).map(p => p.split('?')[0]).sort();
+  for (const read of ['/data/memory/decisions', '/data/memory/lessons', '/data/memory/review']) assert.ok(again.includes(read), read);
+  // Esc closes the drawer
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().memoryPage.act, null);
+  store.timers.clear();
 });

@@ -124,8 +124,10 @@ export function emptyState() {
     deskPage: { status: 'idle', data: null, at: null, message: null, filter: 'all', open: {}, rules: false,
       routines: { status: 'idle', data: null, at: null, message: null }, rOpen: '', rAsk: '', rBusy: {}, rSaid: {}, pSaid: {}, pBusy: {} },
     // the Memory screen (host/memory-page.js): each of its four reads as last answered, read while the screen shows, with
-    // the words of its last failure; the rows opened and the differences shown by id, the symbol the decisions are read for
-    memoryPage: { lessons: { ...MEMORY_READ }, decisions: { ...MEMORY_READ }, waiting: { ...MEMORY_READ }, health: { ...MEMORY_READ }, open: {}, diff: {}, symbol: '', before: '' },
+    // the words of its last failure; the rows opened and the differences shown by id, the symbol the decisions are read for;
+    // the owner's act open in its drawer (host/memory-acts.js): null, or { act, subject, words, status, show, prepared,
+    // message, done } - status 'reading' | 'words' | 'preparing' | 'ready' | 'signing' | 'done' | 'refused'
+    memoryPage: { lessons: { ...MEMORY_READ }, decisions: { ...MEMORY_READ }, waiting: { ...MEMORY_READ }, health: { ...MEMORY_READ }, open: {}, diff: {}, symbol: '', before: '', act: null },
     // the list's search (host/search.js): the box, the content read's phase, its items
     search: { query: '', contentPhase: 'idle', content: [], hasMore: false },
     // the open conversation's background jobs (host/jobs.js): the one watched, its rows, the job open in Details, the finished

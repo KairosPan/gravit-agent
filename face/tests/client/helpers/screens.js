@@ -22,6 +22,7 @@ import { renderDeskScreen } from '../../../client/js/render/desk-page.js';
 import { renderMemoryScreen } from '../../../client/js/render/memory-page.js';
 import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
+import { renderMemoryAct } from '../../../client/js/render/memory-act.js';
 import { renderBox } from '../../../client/js/render/box.js';
 import { newSheet } from '../../../client/js/host/run-sheet-view.js';
 import { MODULES } from '../../../client/js/host/modules-view.js';
@@ -514,6 +515,47 @@ function memoryPageStates() {
     ['memory-page-decisions-none-for', loaded(R.memoryPageSymbol(decisionsOn, { symbol: 'nvda' }), 'decisions', memoryDecisions())],
     ['memory-page-why', R.memoryPageFailed(kept, { read: 'lessons', at: NOW, message: 'the memory could not be read', why: 'config.json is not valid JSON' })],
     ['memory-page-not-connected-no-install', loaded(on, 'lessons', noInstall)],
+    // the owner's acts (memory owner acts plan Task 4): the three tabs while the page signs, each row's keys in place of its
+    // commands; a page the Account answered does not sign, its line under the head; the act's drawer ready for an arm, with
+    // What you sign; waiting for the words of a retire; a void refused, its words kept; an edit done, with the file it wrote
+    ...memoryActStates(on, loaded),
+  ];
+}
+
+// the owner's acts on the Memory screen, each over a page that signs but the one that says it does not
+function memoryActStates(on, loaded) {
+  const signs = st => R.ownerStanding(st, { role: 'signs', kid: 'a5048199a8081854' });
+  const lessonsOn = signs(loaded(on, 'lessons', memoryLessons({ lessons: [armedLesson(), changedLesson(), unarmedLesson(), refusedLesson()] })));
+  const waitingOn = signs(loaded(R.nav(on, { screen: 'memory', tab: 'waiting' }), 'waiting', memoryWaiting({ proposals: memoryWaitingProposals() })));
+  const decisionsOn = signs(loaded(R.nav(on, { screen: 'memory', tab: 'decisions' }), 'decisions', memoryDecisions({ items: memoryDecisionRows() })));
+  const attest = (act, subject) => ({
+    ok: true, action: { type: 'attest', service: 'gravit-memory', act, subject, digest: '9f'.repeat(32), nonce: 1763380800000 },
+    primaryType: 'AccountAttest:Sign', domain: { name: 'AgentAccountSignTransaction', version: '1', chainId: 424242 }, accountChain: 'Simulation',
+    shown: [{ name: 'service', value: 'gravit-memory' }, { name: 'act', value: act }, { name: 'subject', value: subject }, { name: 'digest', value: '9f'.repeat(32) }, { name: 'nonce', value: '1763380800000' }],
+  });
+  const card = unarmedLesson();
+  const armReady = R.memoryActPrepared(R.memoryActPreparing(R.memoryActShown(R.memoryActOpen(lessonsOn, { act: 'arm', subject: card.id }),
+    { show: { kind: 'card', lesson: card.id, state: 'unarmed', text: card.file.text } })), { prepared: attest('arm', card.id) });
+  const armed = armedLesson();
+  const retireWords = R.memoryActWords(R.memoryActShown(R.memoryActOpen(lessonsOn, { act: 'retire', subject: armed.id }),
+    { show: { kind: 'card', lesson: armed.id, state: 'armed', text: armed.armed.text } }), { words: 'It fired on names that kept going' });
+  const [decision] = memoryDecisionRows();
+  const voidRefused = R.memoryActRefused(R.memoryActSigning(R.memoryActPrepared(R.memoryActPreparing(R.memoryActWords(R.memoryActShown(
+    R.memoryActOpen(decisionsOn, { act: 'void', subject: decision.view.line.id }), { show: { kind: 'decision', decision: decision.view.line } }),
+    { words: 'Entered on the wrong ticket' })), { prepared: attest('void', decision.view.line.id) })), { message: 'it changed while it was shown: nothing was done' });
+  const [proposal] = memoryWaitingProposals();
+  const editDone = R.memoryActDone(R.memoryActSigning(R.memoryActPrepared(R.memoryActPreparing(R.memoryActShown(R.memoryActOpen(waitingOn, { act: 'edit', subject: proposal.id }),
+    { show: { kind: 'proposal', proposal } })), { prepared: attest('edit', proposal.id) })),
+  { done: { ok: true, act: 'edit', subject: proposal.id, lesson: 'chase-gap', path: '/srv/owner/memory/lessons/chase-gap.md' } });
+  return [
+    ['memory-page-lessons-signs', lessonsOn],
+    ['memory-page-waiting-signs', waitingOn],
+    ['memory-page-decisions-signs', decisionsOn],
+    ['memory-page-not-signing', R.ownerStanding(loaded(on, 'lessons', memoryLessons({ lessons: [armedLesson()] })), { role: 'pending', kid: 'a5048199a8081854' })],
+    ['memory-page-act-arm-ready', armReady],
+    ['memory-page-act-retire-words', retireWords],
+    ['memory-page-act-void-refused', voidRefused],
+    ['memory-page-act-edit-done', editDone],
   ];
 }
 
@@ -1078,7 +1120,7 @@ export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMark
 // a state's page as css.test.js draws it: the rail, the screen, then every drawer and sheet that may stand over it
 export function pageHtml(st, { mac = true } = {}) {
   return renderRail(st, NOW, { mac }) + screenOf(st, NOW) + renderBox(st, NOW, {}, { mac }) + (st.settingsOpen ? renderSettings(st, { mac }) : '') + stockDrawerHtml(st) + renderSellMany(st) +
-    renderSheet(st, NOW) + renderConnectDrawer(st) + renderRunSheet(st, NOW) + renderShortcuts(st, { mac });
+    renderSheet(st, NOW) + renderConnectDrawer(st) + renderRunSheet(st, NOW) + (st.route.screen === 'memory' ? renderMemoryAct(st, NOW) : '') + renderShortcuts(st, { mac });
 }
 
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0)); };
@@ -1217,7 +1259,9 @@ const CONTENT_FIELDS = new Set([
 // each fact is defined, by the card and by the face, the face's commands and the reseal command, and
 // each case's date, symbol and action; the symbol the owner typed; of its decisions read each decision's line and its void
 // command; of its waiting read each proposal whole and the ids past their horizon; of its health read the home, each ledger's
-// name, the price source's address and when it last ran, the face's facts and its commands; `*` is any one key
+// name, the price source's address and when it last ran, the face's facts and its commands; of the owner's act open in its
+// drawer its subject, the owner's words, the refusal's words, what the face showed it acts on and what the done act
+// answered (an edit's file); `*` is any one key
 const CONTENT = [['memoryGate', '*', 'gate'], ['memoryLunhui', '*', 'lessons', 'leaders', 'lessons', 'words'], ['memoryLunhui', '*', 'lessons', 'leaders', 'untold', 'needs'],
   ['memoryLunhui', '*', 'lessons', 'leaders', 'fault'],['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits'], ['analog', 'views', '*', 'view'], ['analog', 'tasks', '*', 'task'], ['deskPage', 'data'],
@@ -1234,7 +1278,8 @@ const CONTENT = [['memoryGate', '*', 'gate'], ['memoryLunhui', '*', 'lessons', '
   ['memoryPage', 'symbol'], ['memoryPage', 'decisions', 'data', 'items', 'view', 'line', '*'], ['memoryPage', 'decisions', 'data', 'items', 'command'],
   ['memoryPage', 'waiting', 'data', 'proposals', '*'], ['memoryPage', 'waiting', 'data', 'pastHorizon'],
   ['memoryPage', 'health', 'data', 'home'], ['memoryPage', 'health', 'data', 'lines'], ['memoryPage', 'health', 'data', 'partial'], ['memoryPage', 'health', 'data', 'chains', 'file'],
-  ['memoryPage', 'health', 'data', 'prices', 'url'], ['memoryPage', 'health', 'data', 'prices', 'last', 't'], ['memoryPage', 'health', 'data', 'facts', '*'], ['memoryPage', 'health', 'data', 'commands', '*']];
+  ['memoryPage', 'health', 'data', 'prices', 'url'], ['memoryPage', 'health', 'data', 'prices', 'last', 't'], ['memoryPage', 'health', 'data', 'facts', '*'], ['memoryPage', 'health', 'data', 'commands', '*'],
+  ['memoryPage', 'act', 'subject'], ['memoryPage', 'act', 'words'], ['memoryPage', 'act', 'message'], ['memoryPage', 'act', 'show', '*'], ['memoryPage', 'act', 'done', '*']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 // the strings a content field holds that are an ability's declared parts, its tools' and skills' names in the abilities listing
 // (an array adds nothing to a path): drawn each whole, they pass as runs (abilityRuns below) and lend no known word

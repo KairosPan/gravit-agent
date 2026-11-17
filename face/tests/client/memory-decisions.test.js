@@ -150,6 +150,22 @@ test('the frame draws the Decisions tab for a connected decisions read', () => {
   assert.match(html, /<div class="mp-page"><div class="mp-body mp-decisions">/);
 });
 
+// the owner's acts (memory owner acts plan Task 4): while the page signs, a decision that is not void carries Void… in place
+// of its void command; for any other role the command stands
+test('while the page signs, a decision that is not void carries Void… and no void command', () => {
+  const st = R.ownerStanding(loaded(memoryDecisions({ items: memoryDecisionRows() })), { role: 'signs', kid: 'k1' });
+  const html = renderMemoryScreen(st, NOW);
+  const [owned, voided, agents, backfilled] = articles(html);
+  for (const [a, id] of [[owned, 'd-20261114-0a1b2c3d'], [agents, 'd-20261113-1b2c3d4e'], [backfilled, 'd-20261111-3d4e5f6a']]) {
+    assert.ok(a.includes(`<button type="button" class="btn-sm" data-action="memoryActOpen" data-act="void" data-subject="${id}">Void…</button>`), id);
+  }
+  assert.doesNotMatch(voided, /memoryActOpen/);
+  assert.doesNotMatch(html, /mp-command|At the terminal/);
+  const other = renderMemoryScreen(R.ownerStanding(loaded(memoryDecisions({ items: memoryDecisionRows() })), { role: 'signed-out', kid: '' }), NOW);
+  assert.doesNotMatch(other, /memoryActOpen/);
+  assert.equal(count(other, '<code class="mp-command">npx --no gravit-memory void'), 3);
+});
+
 test('the Decisions tab under ZH', () => {
   const html = withTable(ZH, () => draw(memoryDecisions({ items: memoryDecisionRows(), more: true })));
   for (const word of ['无代码', '作废', '你的原话', '显示更早的']) assert.ok(html.includes(word), word);

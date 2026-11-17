@@ -3,7 +3,8 @@
 // older one; No decision yet, or with a symbol typed that none was found for it, matched exactly; else the decisions in the
 // order the memory gives them, newest first, each under its symbol's head (one with none under No symbol) - each its date,
 // whose and by, its action, its id, its marks, its thesis in quotes, wrong if, the owner's words in quotes under In your
-// words, what followed at each measured horizon, and, while it is not void, its void command; a void one struck - and, when
+// words, what followed at each measured horizon, and, while it is not void, its void command (while this page signs for the
+// Account, its Void… key in its place); a void one struck - and, when
 // older decisions are not shown, Show older from the last one, or a line saying so when its id is not plain. Every text from
 // the memory is made visible (visible.js) and then escaped; a class comes from the face's own tables alone, and a key's id is
 // a plain one (reducers/memory-page.js isId).
@@ -12,7 +13,8 @@ import { t, th, tn, rawHtml } from '../i18n/words.js';
 import { visible } from '../visible.js';
 import { isId } from '../reducers/memory-page.js';
 import { followedLine, decisionMarks } from '../host/memory-page-view.js';
-import { shown, dim, terminalHtml, dayOf } from './memory-lessons.js';
+import { shown, dim, terminalHtml, dayOf, actKeysHtml } from './memory-lessons.js';
+import { decisionActs } from '../host/memory-acts.js';
 
 // each mark's words and its chip's colour
 const MARKS = {
@@ -37,7 +39,7 @@ function followedHtml(figures) {
   return lines.length ? `<ul class="mp-followed">${lines.join('')}</ul>` : '';
 }
 
-function decisionHtml(row, now) {
+function decisionHtml(row, now, signs) {
   const view = row.view;
   const line = view.line && typeof view.line === 'object' ? view.line : {};
   const marks = decisionMarks(view);
@@ -52,12 +54,14 @@ function decisionHtml(row, now) {
   const yours = filled(line.words)
     ? `<div class="mp-yours"><div class="mp-dim">${esc(t('memory.decisions.yourWords'))}</div><div class="mp-words">${th('thread.memory.quoted', { words: visible(line.words) })}</div></div>`
     : '';
-  const voidCommand = isVoid ? '' : terminalHtml([row.command]);
+  // while the page signs, Void… in place of the void command
+  const keys = signs ? decisionActs(row) : [];
+  const voidCommand = isVoid ? '' : keys.length ? actKeysHtml(keys, line.id) : terminalHtml([row.command]);
   return `<article class="${cls('mp-decision', isVoid && 'void')}">${head}${thesis}${wrong}${yours}${followedHtml(row.figures)}${voidCommand}</article>`;
 }
 
 // the decisions under their symbol's head, each symbol once in the order it is first met
-function grouped(rows, now) {
+function grouped(rows, now, signs) {
   const groups = new Map();
   for (const row of rows) {
     const symbol = row.view.line?.symbol;
@@ -65,7 +69,7 @@ function grouped(rows, now) {
     if (!groups.has(key)) groups.set(key, { head: filled(symbol) ? shown(symbol) : esc(t('memory.decisions.noSymbol')), rows: [] });
     groups.get(key).rows.push(row);
   }
-  return [...groups.values()].map(g => `<section class="mp-group"><h2 class="mp-group-head">${g.head}</h2>${g.rows.map(r => decisionHtml(r, now)).join('')}</section>`).join('');
+  return [...groups.values()].map(g => `<section class="mp-group"><h2 class="mp-group-head">${g.head}</h2>${g.rows.map(r => decisionHtml(r, now, signs)).join('')}</section>`).join('');
 }
 
 // a key of the tab's own, with the decision it names when it names one
@@ -79,11 +83,12 @@ function noneHtml(symbol) {
 
 /** The Decisions tab's body for a connected decisions read: `read` its body, `page` the screen's slice (the symbol typed, the
  *  decision the window is read before), `now` the clock's time, against which a decision's day carries its year when it is
- *  another. */
-export function decisionsHtml(read, page, now) {
+ *  another; `signs`, whether this page signs for the Account: then a decision that is not void carries Void… in place of its
+ *  void command. */
+export function decisionsHtml(read, page, now, signs = false) {
   const rows = Array.isArray(read?.items) ? read.items.filter(r => r && typeof r === 'object' && r.view && typeof r.view === 'object') : [];
   const newest = filled(page?.before) ? `<div class="mp-record">${key('memoryPageNewest', t('memory.decisions.newest'))}</div>` : '';
-  const list = rows.length ? grouped(rows, now) : noneHtml(page?.symbol);
+  const list = rows.length ? grouped(rows, now, signs) : noneHtml(page?.symbol);
   const lastId = rows.at(-1)?.view?.line?.id;
   const more = read?.more !== true ? ''
     : isId(lastId) ? `<div class="mp-record">${key('memoryPageOlder', t('memory.decisions.older'), lastId)}</div>`

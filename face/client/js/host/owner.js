@@ -1,9 +1,9 @@
 // face/client/js/host/owner.js — the owner device (spec 2026-10-22 §6.3, plan 2): this page as an owner device of the
 // Account, the Account's own owner.js under the face's names (docs/research/2026-10-22-account-owner-path-map.md §1–§2) —
 // the key from the injected store (made and kept when there is none), paired at /data/account/pair, the standing read off
-// every /data/account read, prepare at /data/account/prepare, the signed envelope to /data/account/exchange, sign-out and
-// sign-in. Everything goes through the face's proxy, never to the Account directly. The host draws nothing and owns no
-// words for the screen: it dispatches ownerStanding, ownerRefusal and ownerBusy and hands every answer back as it came.
+// every /data/account read, prepare at /data/account/prepare, an envelope signed and handed back (`sign`) or sent to
+// /data/account/exchange, sign-out and sign-in. Everything goes through the face's proxy, never to the Account directly. The
+// host draws nothing and owns no words for the screen: it dispatches ownerStanding, ownerRefusal and ownerBusy and hands every answer back as it came.
 // No key material, code or envelope is logged or kept beyond the call.
 import { kidOf, publicJwkOf, signPrepared, makeKey } from '../wire/owner-key.js';
 import { pageOk } from './account-view.js';
@@ -153,8 +153,24 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'gravit fa
   /** The Account's preparation of a draft, unsigned, as it came. */
   const prepare = draft => post(PREPARE, { draft });
 
-  /** The envelope for a preparation: exactly the action, its nonce and this key's signature over the shown fields. The
-   *  door's bad signature (a 401) on a page that signs reads the standing again and keeps the Account's words; an exchange
+  /** This key's envelope for a preparation, posted nowhere: `{ ok: true, envelope: { action, nonce, signature } }` - exactly
+   *  the action, its nonce and the signature over the shown fields -, or `{ ok: false, said }` for a page that does not sign,
+   *  a preparation with nothing to show, or a key that cannot sign. */
+  async function sign(prepared) {
+    const { role, kid } = store.get().owner;
+    if (role !== 'signs' || !kid || !subtle) return { ok: false, said: notSigning() };
+    if (!isObject(prepared?.action) || !Array.isArray(prepared?.shown)) return { ok: false, said: notSigning() };
+    try {
+      const pair = await keys.get();
+      if (!pair?.privateKey) return { ok: false, said: notSigning() };
+      const signature = await signPrepared(subtle, pair.privateKey, kid, prepared);
+      return { ok: true, envelope: { action: prepared.action, nonce: prepared.action.nonce, signature } };
+    } catch {
+      return { ok: false, said: notSigning() };
+    }
+  }
+
+  /** The envelope for a preparation (`sign`'s), posted to the Account. The door's bad signature (a 401) on a page that signs reads the standing again and keeps the Account's words; an exchange
    *  the Account takes clears them. This page's own sign-out (Settings › Devices' sheet signs it here) pairs nothing while
    *  it is in the air and, taken, ends the device as signOut() does: the flag set, the key deleted. */
   async function submit(prepared) {
@@ -164,15 +180,9 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'gravit fa
     const leaving = prepared.action.type === 'signOut' && prepared.action.device === `device:${kid}`;
     if (leaving) { generation += 1; signingOut = true; }
     try {
-      let signature;
-      try {
-        const pair = await keys.get();
-        if (!pair?.privateKey) return refused(notSigning());
-        signature = await signPrepared(subtle, pair.privateKey, kid, prepared);
-      } catch {
-        return refused(notSigning());
-      }
-      const r = await post(EXCHANGE, { action: prepared.action, nonce: prepared.action.nonce, signature });
+      const signed = await sign(prepared);
+      if (!signed.ok) return refused(signed.said);
+      const r = await post(EXCHANGE, signed.envelope);
       if (closed) return r;
       if (leaving && taken(r)) {
         flag.set(true);
@@ -235,5 +245,5 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'gravit fa
     closed = true;
   }
 
-  return { ready, askCode, standing, prepare, submit, act, unsigned, signOut, signIn, close };
+  return { ready, askCode, standing, prepare, sign, submit, act, unsigned, signOut, signIn, close };
 }

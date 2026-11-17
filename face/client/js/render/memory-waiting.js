@@ -4,12 +4,15 @@
 // and for a new card or a change the card as it would be written: its line, its words in quotes, each check as fact, operator
 // and value, each fact it defines with its definition -; then the decisions past their horizon with no review, as text, the
 // count of decisions with no wrong if, and the review command; Nothing waits for you when no proposal and no decision waits.
+// While this page signs for the Account, each proposal carries the keys of the owner's acts it allows (host/memory-acts.js),
+// and the review command stands only for the decisions past their horizon.
 // Every text from the memory is made visible (visible.js) and then escaped; no id is a link and a class comes from the face's
 // own tables alone; no empty text is drawn in quotes.
 import { esc } from '../html.js';
 import { t, th, tn, rawHtml } from '../i18n/words.js';
 import { visible } from '../visible.js';
-import { shown, dim, terminalHtml, lineOf, checkText, dayOf } from './memory-lessons.js';
+import { shown, dim, terminalHtml, lineOf, checkText, dayOf, actKeysHtml } from './memory-lessons.js';
+import { proposalActs } from '../host/memory-acts.js';
 
 const str = v => (typeof v === 'string' ? v : '');
 const strings = v => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
@@ -38,7 +41,8 @@ function cardHtml(card) {
     `${list(t('memory.waiting.checks'), checks)}${list(t('memory.waiting.defines'), defines)}</div>`;
 }
 
-function proposalHtml(p, now) {
+/** One proposal as the tab draws it, `keys` (markup the caller built) at its foot; the act drawer draws it with none. */
+export function proposalHtml(p, now, keys = '') {
   const at = Date.parse(str(p.t));
   const by = visible(str(p.by));
   const when = !Number.isNaN(at) ? `<div class="mp-when">${esc(t('memory.waiting.proposedBy', { by, date: dayOf(at, now) }))}</div>`
@@ -48,12 +52,14 @@ function proposalHtml(p, now) {
   return `<article class="mp-proposal"><div class="mp-proposal-head"><span class="mp-what">${whatOf(p)}</span></div>${when}` +
     quoted(p.reason) +
     (evidence.length ? `<div class="mp-line">${esc(t('memory.waiting.evidence', { ids: visible(evidence.join(t('common.list.sep'))) }))}</div>` : '') +
-    `${card}</article>`;
+    `${card}${keys}</article>`;
 }
 
 /** The Waiting tab's body for a connected waiting read: `read` its body, `page` the screen's slice, `now` the clock's time,
- *  against which a proposal's day carries its year when it is another. */
-export function waitingHtml(read, page, now) {
+ *  against which a proposal's day carries its year when it is another; `signs`, whether this page signs for the Account: then
+ *  each proposal carries the keys of the acts it allows (host/memory-acts.js), and the review command stands only for the
+ *  decisions past their horizon, which have none. */
+export function waitingHtml(read, page, now, signs = false) {
   const proposals = Array.isArray(read?.proposals) ? read.proposals.filter(p => p && typeof p === 'object') : [];
   const past = strings(read?.pastHorizon);
   const without = Number.isInteger(read?.withoutWrongIf) && read.withoutWrongIf > 0 ? read.withoutWrongIf : 0;
@@ -62,5 +68,6 @@ export function waitingHtml(read, page, now) {
   const pastHtml = past.length
     ? `<div class="mp-past"><h2 class="mp-section-head">${esc(t('memory.waiting.pastHorizon'))}</h2><p class="mp-ids">${shown(past.join(t('common.list.sep')))}</p></div>`
     : '';
-  return `<div class="mp-body mp-waiting">${proposals.map(p => proposalHtml(p, now)).join('')}${pastHtml}${count}${terminalHtml([read?.command])}</div>`;
+  const command = !signs || past.length ? terminalHtml([read?.command]) : '';
+  return `<div class="mp-body mp-waiting">${proposals.map(p => proposalHtml(p, now, signs ? actKeysHtml(proposalActs(p), p.id) : '')).join('')}${pastHtml}${count}${command}</div>`;
 }

@@ -39,8 +39,8 @@ function rig() {
   return { store, mp, reads, answers, timers, fire, clock, s: () => store.get().memoryPage };
 }
 
-test('the memoryPage slice starts idle: four reads unread, nothing open, no symbol, the newest decisions', () => {
-  assert.deepEqual(emptyState().memoryPage, { lessons: READ, decisions: READ, waiting: READ, health: READ, open: {}, diff: {}, symbol: '', before: '' });
+test('the memoryPage slice starts idle: four reads unread, nothing open, no symbol, the newest decisions, no act', () => {
+  assert.deepEqual(emptyState().memoryPage, { lessons: READ, decisions: READ, waiting: READ, health: READ, open: {}, diff: {}, symbol: '', before: '', act: null });
   assert.equal(MEMORY_POLL_MS, 20_000);
   assert.deepEqual(PATH_OF_READ, { lessons: '/data/memory/lessons', decisions: '/data/memory/decisions', waiting: '/data/memory/review', health: '/data/memory/status' });
 });

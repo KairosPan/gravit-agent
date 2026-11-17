@@ -883,11 +883,23 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .mp-section-head { margin: 0; font-size: calc(14px * var(--fs)); font-weight: 600; }
 .mp-ledgers { display: flex; flex-direction: column; gap: 4px; }
 .mp-ledger { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+/* the owner's acts: the line under the head for a page that does not sign; a row's keys; the act's drawer - what it acts
+   on, the owner's words, What you sign, what was said, done */
+.mp-signs { margin: 0; padding: 10px 30px 0; font-size: calc(13px * var(--fs)); }
+.mp-signs-link { color: var(--warn-text); }
+.mp-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.mp-act .drawer-body { display: flex; flex-direction: column; gap: 12px; }
+.textarea.mp-act-words { min-height: 72px; white-space: pre-wrap; }
+.mp-act-sign { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; border-top: 1px solid var(--border); font: calc(12px * var(--fm))/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.mp-act-symbol { font: 600 calc(13px * var(--fm)) var(--font-mono); overflow-wrap: anywhere; }
+.mp-act-said { margin: 0; font-size: calc(13px * var(--fs)); color: var(--down); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mp-act-done { margin: 0; font-weight: 600; color: var(--up); }
 @media (max-width: 900px) {
   .dk-cols { grid-template-columns: minmax(0, 1fr); }
   .dk-body { padding: 18px 16px 32px; }
   .mp-diff { grid-template-columns: minmax(0, 1fr); }
   .mp-tabs { padding: 16px 16px 0; }
+  .mp-signs { padding: 10px 16px 0; }
   .mp-page { padding: 18px 16px 32px; }
 }
 /* a plugin's and a market's own page: the way back, the head with its keys, then the body */

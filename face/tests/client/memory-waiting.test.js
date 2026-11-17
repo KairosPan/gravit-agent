@@ -123,6 +123,34 @@ test('the frame draws the Waiting tab for a connected waiting read', () => {
   assert.match(html, /<div class="mp-page"><div class="mp-body mp-waiting">/);
 });
 
+// the owner's acts (memory owner acts plan Task 4): while the page signs, each proposal carries Accept…, Reject… and, unless
+// it retires, Edit…; the review command stands only for the decisions past their horizon, which have no key
+const keyOf = (act, id, word) => `<button type="button" class="btn-sm" data-action="memoryActOpen" data-act="${act}" data-subject="${id}">${word}</button>`;
+const signingDraw = data => { const st = R.ownerStanding(loaded(data), { role: 'signs', kid: 'k1' }); return renderMemoryScreen(st, NOW); };
+test('while the page signs, each proposal carries its keys, and the review command goes unless a decision is past its horizon', () => {
+  const html = signingDraw(memoryWaiting({ proposals: memoryWaitingProposals() }));
+  const [fresh, change, retire] = articles(html);
+  for (const [p, id] of [[fresh, 'p-20261115-0a1b2c3d'], [change, 'p-20261115-1b2c3d4e']]) {
+    assert.ok(p.includes(keyOf('accept', id, 'Accept…')), id);
+    assert.ok(p.includes(keyOf('reject', id, 'Reject…')), id);
+    assert.ok(p.includes(keyOf('edit', id, 'Edit…')), id);
+  }
+  assert.ok(retire.includes(keyOf('accept', 'p-20261115-2c3d4e5f', 'Accept…')));
+  assert.ok(retire.includes(keyOf('reject', 'p-20261115-2c3d4e5f', 'Reject…')));
+  assert.doesNotMatch(retire, /data-act="edit"/, 'a retirement is not edited');
+  assert.doesNotMatch(html, /mp-command|At the terminal/);
+  const past = signingDraw(memoryWaiting({ proposals: memoryWaitingProposals(), pastHorizon: PAST }));
+  assert.match(past, /<code class="mp-command">npx --no gravit-memory review --home \/srv\/owner\/memory<\/code>/, 'the decisions past their horizon are reviewed at the terminal');
+  // any other role: no key, the command
+  const pending = renderMemoryScreen(R.ownerStanding(loaded(memoryWaiting({ proposals: memoryWaitingProposals() })), { role: 'pending', kid: 'k1' }), NOW);
+  assert.doesNotMatch(pending, /memoryActOpen/);
+  assert.match(pending, /<code class="mp-command">npx --no gravit-memory review/);
+  assert.match(pending, /This browser does not sign for the account/);
+  // an id off the proposal's shape carries no key
+  const odd = signingDraw(memoryWaiting({ proposals: [{ ...memoryWaitingProposals()[0], id: 'p-x' }] }));
+  assert.doesNotMatch(odd, /memoryActOpen/);
+});
+
 test('the Waiting tab under ZH', () => {
   const html = withTable(ZH, () => draw(memoryWaiting({ proposals: memoryWaitingProposals(), pastHorizon: PAST, withoutWrongIf: 2 })));
   for (const word of ['新教训', '修改 <span class="mp-id">no-chasing</span>', '退役 <span class="mp-id">gap-fade</span>', '在终端的 face/ 目录下运行']) assert.ok(html.includes(word), word);

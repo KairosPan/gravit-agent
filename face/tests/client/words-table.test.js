@@ -62,6 +62,7 @@ test("no words call's result is upper- or lower-cased", () => {
 // two keys may hold one sentence only for two meanings, each named here: a table may word them apart. A sentence of fewer
 // than four words (Refused, Order) is a word's own business. A pair is its two keys sorted, wherever they stand in the table
 const SAME_WORDS = {
+  'memory.act.notSigning owner.standing.pending': "the Memory screen's line for a page the Account answered does not sign; the Account head's line for a browser waiting to be let in",
   'sheet.signIn.failed venues.signIn.unfinished': "the sign-in sheet's own line when it failed; a venue's sign-in the Account said did not finish",
   'sheet.title.paper venues.openPaper': "the sheet's title the Venues tab's key opens; the Venues tab's key",
   'money.earn.none sheet.earn.nothingIn': "Earn's box with nothing earning; the Earn sheet's Take out with nothing in",

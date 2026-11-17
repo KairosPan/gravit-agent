@@ -3,8 +3,9 @@
 // Loading… before it answers; a memory not connected, its words as the face gave them and, when the face gave one, the command
 // that makes the home under At the terminal, in face/, and no tab body; a failed read, one line with its words and, under it,
 // the memory's own why when the face gave one, above what it kept, or Unavailable with nothing kept; else the tab's body
-// (render/memory-lessons.js, memory-decisions.js, memory-waiting.js, memory-health.js). Every text from the memory is made
-// visible (visible.js) and then escaped.
+// (render/memory-lessons.js, memory-decisions.js, memory-waiting.js, memory-health.js), with the keys of the owner's acts
+// while this page signs for the Account; when the Account answered that it does not, one line under the head says so, a link
+// to Account › Portfolio. Every text from the memory is made visible (visible.js) and then escaped.
 import { esc } from '../html.js';
 import { t, th, sayOf } from '../i18n/words.js';
 import { visible } from '../visible.js';
@@ -41,20 +42,25 @@ const notConnected = data => `<p class="mp-say">${esc(visible(data.say))}</p>${t
 
 // a tab's body, each in an mp-body, each drawn by its own renderer
 const BODIES = { lessons: lessonsHtml, decisions: decisionsHtml, waiting: waitingHtml, health: healthHtml };
-const tabBody = (tab, data, page, now) => (Object.hasOwn(BODIES, tab) ? BODIES[tab] : lessonsHtml)(data, page, now);
+const tabBody = (tab, data, page, now, signs) => (Object.hasOwn(BODIES, tab) ? BODIES[tab] : lessonsHtml)(data, page, now, signs);
 
-function body(read, tab, page, now) {
+function body(read, tab, page, now, signs) {
   const failed = read.status === 'error' || read.message != null;
   const why = typeof read.why === 'string' && read.why !== '' ? dim(visible(read.why)) : '';
   const line = read.message != null ? `${dim(visible(sayOf(read.message)))}${why}` : why;
   if (read.data == null) return failed ? `${line}${dim(t('memory.page.unavailable'))}` : dim(t('common.loading'));
   if (read.data.connected === false) return `${line}${notConnected(read.data)}`;
-  return `${line}${tabBody(tab, read.data, page, now)}`;
+  return `${line}${tabBody(tab, read.data, page, now, signs)}`;
 }
+
+// a page the Account answered does not sign for: one line under the head, a link to Account › Portfolio, where it pairs
+const notSigning = role => (role === 'signs' || role === 'unknown' || role === undefined ? ''
+  : `<p class="mp-signs"><a class="mp-signs-link" href="#/account/portfolio">${esc(t('memory.act.notSigning'))}</a></p>`);
 
 export function renderMemoryScreen(state, now) {
   const page = state.memoryPage;
   const tab = MEMORY_TABS.includes(state.route.tab) ? state.route.tab : MEMORY_TABS[0];
-  return `<main class="main mp"><header class="head"><h1 class="head-title">${th('memory.page.title')}</h1></header>${tabs(page, tab)}` +
-    `<div class="mp-page">${body(page[tab], tab, page, now)}</div></main>`;
+  const role = state.owner?.role;
+  return `<main class="main mp"><header class="head"><h1 class="head-title">${th('memory.page.title')}</h1></header>${notSigning(role)}${tabs(page, tab)}` +
+    `<div class="mp-page">${body(page[tab], tab, page, now, role === 'signs')}</div></main>`;
 }

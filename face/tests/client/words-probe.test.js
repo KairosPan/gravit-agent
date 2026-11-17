@@ -144,7 +144,8 @@ test("an ability's blurb and its parts' names pass whole and lend no word", asyn
     const declared = [a.blurb, a.zh.blurb, ...a.tools.map(x => x.name), ...skills, ...skills.map(k => `${k} ›`), ...a.rows.map(r => r.id), ...a.roles.map(r => r.id)];
     for (const run of declared) assert.ok(runs.has(run), `${run} is a run`);
   }
-  for (const w of ['Under', 'bad', 'logic', 'past', 'points', 'rivals', 'analog', 'guide', 'reader', 'service', 'tool', 'views']) {
+  // (not service: an attest's What you sign names its field service, the Account's word drawn as it came)
+  for (const w of ['Under', 'bad', 'logic', 'past', 'points', 'rivals', 'analog', 'guide', 'reader', 'tool', 'views']) {
     assert.ok(!known.has(w), `${w} is not a known word`);
   }
   assert.deepEqual(strayWords('tool views', known, runs), ['tool', 'views'], 'the words drawn outside a declared run are stray');

@@ -606,3 +606,33 @@ test('a first pairing refused or unanswered lets the next page ask again', async
   await r.owner.standing(pageWith([]));
   assert.equal(r.door.calls(PAIR).length, 2, 'answered: no more asks from the pages');
 });
+
+// the owner's acts on the memory (memory owner acts plan Task 4): the envelope signed and handed back, posted nowhere; submit
+// posts what sign makes, to the same path as before
+test("sign answers the envelope submit posts, and posts nothing; a page that does not sign is answered in the owner's words", async () => {
+  const r = await signing();
+  const prepared = (await r.owner.prepare(WATCH)).body;
+  const signed = await r.owner.sign(prepared);
+  assert.equal(signed.ok, true);
+  assert.deepEqual(Object.keys(signed.envelope).sort(), ['action', 'nonce', 'signature']);
+  assert.deepEqual(signed.envelope.action, prepared.action);
+  assert.equal(signed.envelope.nonce, prepared.action.nonce);
+  assert.equal(signed.envelope.signature.kid, r.o().kid);
+  assert.equal(r.door.calls('/data/account/exchange').length, 0, 'sign posts nothing');
+  // the door verifies the envelope sign made
+  assert.equal((await r.door.post('/data/account/exchange', signed.envelope)).status, 200);
+  // submit posts the same body to the same path: the action, its nonce and a signature by this key that the door verifies
+  assert.equal((await r.owner.submit(prepared)).status, 200);
+  const sent = r.door.calls('/data/account/exchange').at(-1);
+  assert.deepEqual(Object.keys(sent.body).sort(), ['action', 'nonce', 'signature']);
+  assert.deepEqual(sent.body.action, prepared.action);
+  assert.equal(sent.body.nonce, prepared.action.nonce);
+  assert.equal(sent.body.signature.kid, r.o().kid);
+
+  const p = rig({ d: door({ seedOwner: true }) });
+  await p.owner.ready();
+  assert.equal(p.o().role, 'pending');
+  assert.deepEqual(spoken(await p.owner.sign(prepared)), { ok: false, said: 'This browser does not sign for the account.' });
+  assert.deepEqual(spoken(await r.owner.sign({ action: WATCH })), { ok: false, said: 'This browser does not sign for the account.' }, 'nothing to show: nothing signed');
+  assert.equal(p.door.calls('/data/account/exchange').length, 0);
+});

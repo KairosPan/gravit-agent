@@ -220,6 +220,41 @@ test('the screen draws the lessons body for the Lessons tab, wrapped in mp-body;
   assert.doesNotMatch(health, /mp-lessons/);
 });
 
+// the owner's acts (memory owner acts plan Task 4): while the page signs, each act a card's state allows is a key, and its
+// terminal command is not drawn; for any other role the commands stand
+const signing = st => R.ownerStanding(st, { role: 'signs', kid: 'k1' });
+const keyOf = (act, id, word) => `<button type="button" class="btn-sm" data-action="memoryActOpen" data-act="${act}" data-subject="${id}">${word}</button>`;
+test('while the page signs, a card carries the keys its state allows in place of their commands', () => {
+  const lessons = [armedLesson(), changedLesson(), unarmedLesson(), retiredLesson(), refusedLesson(), brokenLesson()];
+  const st = signing(loaded(memoryLessons({ lessons })));
+  const html = renderMemoryScreen(st, NOW);
+  const cards = [...html.matchAll(/<article class="mp-lesson">[\s\S]*?<\/article>/g)].map(m => m[0]);
+  const [armed, changed, unarmed, retired, refused, broken] = cards;
+  assert.ok(armed.includes(keyOf('retire', 'no-chasing', 'Retire…')));
+  assert.doesNotMatch(armed, /data-act="arm"|data-act="discard"|mp-command|At the terminal/);
+  for (const [act, word] of [['arm', 'Arm…'], ['retire', 'Retire…'], ['discard', 'Discard…']]) assert.ok(changed.includes(keyOf(act, 'trim-into-strength', word)), act);
+  assert.doesNotMatch(changed, /mp-command|At the terminal/, "a changed card's review is its Discard…");
+  assert.ok(unarmed.includes(keyOf('arm', 'add-below-stop', 'Arm…')));
+  assert.ok(retired.includes(keyOf('arm', 'gap-fade', 'Arm…')));
+  assert.doesNotMatch(refused, /memoryActOpen/);
+  assert.ok(broken.includes(keyOf('arm', 'earnings-hold', 'Arm…')) && broken.includes(keyOf('retire', 'earnings-hold', 'Retire…')));
+  assert.doesNotMatch(broken, /mp-command/);
+  assert.doesNotMatch(html, /does not sign for the account/);
+});
+
+test('for any role but signs the keys are absent and the commands drawn; a role that is not unknown says the browser does not sign', () => {
+  for (const role of ['unknown', 'pending', 'asked', 'needs-code', 'signed-out', 'none']) {
+    const st = R.ownerStanding(loaded(memoryLessons({ lessons: [armedLesson(), changedLesson()] })), { role, kid: '' });
+    const html = renderMemoryScreen(st, NOW);
+    assert.doesNotMatch(html, /memoryActOpen/, role);
+    assert.match(html, /<code class="mp-command">npx --no gravit-memory retire no-chasing/, role);
+    assert.match(html, /<code class="mp-command">npx --no gravit-memory arm trim-into-strength/, role);
+    const line = /<\/header><p class="mp-signs"><a class="mp-signs-link" href="#\/account\/portfolio">This browser does not sign for the account<\/a><\/p>/;
+    if (role === 'unknown') assert.doesNotMatch(html, /mp-signs/, 'the Account has not answered: no line');
+    else assert.match(html, line, role);
+  }
+});
+
 test('the Lessons tab under ZH', () => {
   const st = R.memoryPageToggle(loaded(memoryLessons({ ownerChainBroken: true, reseal: memoryReseal, lessons: [armedLesson(), changedLesson(), unarmedLesson()] })), { id: 'no-chasing' });
   const html = withTable(ZH, () => draw(null, st));

@@ -98,11 +98,15 @@ export const memoryReseal = cmd('reseal');
 
 export const memoryDecisions = (over = {}) => ({ ok: true, connected: true, items: [], more: false, ...over });
 
-const proposal = (id, lesson, reason) => ({ id, t: '2026-11-15T12:00:00.000Z', by: 'gravit', kind: 'proposal', what: 'new', lesson, reason });
+// two new lessons proposed, each with the card the package takes: every fact it checks defined by the card
+const proposal = (id, lesson, reason, card) => ({ id, t: '2026-11-15T12:00:00.000Z', by: 'gravit', kind: 'proposal', what: 'new', lesson, card, reason });
 
 export const memoryProposals = () => [
-  proposal('p-20261115-0a1b2c3d', 'chase-gap', 'Two gap-up buys on the open gave back their gain by noon'),
-  proposal('p-20261115-1b2c3d4e', 'add-on-weakness', 'An add below the stop deepened the loss'),
+  proposal('p-20261115-0a1b2c3d', 'chase-gap', 'Two gap-up buys on the open gave back their gain by noon', proposalCard('chase-gap')),
+  proposal('p-20261115-1b2c3d4e', 'add-on-weakness', 'An add below the stop deepened the loss', proposalCard('add-on-weakness', {
+    actions: ['add'], strength: 'caveat', check: [{ fact: 'unrealized_pct', op: '<', value: -5 }],
+    facts: { unrealized_pct: 'How far the position is under its entry, in percent.' }, words: 'Do not add to a loser down five percent',
+  })),
 ];
 
 export const memoryWaiting = (over = {}) => ({

@@ -29,6 +29,7 @@ import { startDesk } from './host/desk.js';
 import { startDeskNews } from './host/desk-news.js';
 import { startDeskRoutines } from './host/desk-routines.js';
 import { startMemoryPage } from './host/memory-page.js';
+import { startMemoryActs } from './host/memory-acts.js';
 import { startAccount } from './host/account.js';
 import { startSeat } from './host/seat.js';
 import { startChannels } from './host/channels.js';
@@ -38,6 +39,7 @@ import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
 import { renderDeskScreen } from './render/desk-page.js';
 import { renderMemoryScreen } from './render/memory-page.js';
+import { renderMemoryAct } from './render/memory-act.js';
 import { startModules } from './host/modules.js';
 import { renderModule } from './render/modules.js';
 import { startRunSheet } from './host/run-sheet.js';
@@ -244,10 +246,12 @@ const lightboxOf = s => {
   const src = thumbOf(s, s.lightbox.attachmentId);
   return isImageSrc(src) ? { src, name: s.lightbox.name } : null;
 };
+// the owner's act on the Memory screen is a drawer of that screen alone
+const memoryActUp = s => s.route.screen === 'memory' && Boolean(s.memoryPage?.act);
 // a module card's Run sheet is a drawer of any screen too, drawn after the owner sheet
-const overlayOf = s => (sheetUp(s) ? 'sheet' : s.identity?.connect || s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
+const overlayOf = s => (sheetUp(s) ? 'sheet' : s.identity?.connect || s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue || memoryActUp(s) ? 'drawer' : null);
 const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.identity?.connect ? `identity:${s.identity.connect.step}` : s.sellMany ? 'sellMany' : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
-  : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
+  : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : memoryActUp(s) ? `memoryAct:${s.memoryPage.act.act}:${s.memoryPage.act.subject}` : null);
 // the editor an event landed in: #say itself, or a node inside it (a paste's target can be a line's block)
 const sayBoxOf = el => (el?.id === 'say' ? el : el?.closest?.('#say') ?? null);
 const closeKeyOf = overlay => (overlay === 'shortcuts' ? '.shortcuts .close-key' : overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
@@ -498,6 +502,12 @@ export function boot(win, host = {}) {
   const deskRoutines = startDeskRoutines({ store, getJson, postJson, schedule, cancelTimer, now });
   // the Memory screen's reads: its open tab's and what waits, read while it shows
   const memoryPage = startMemoryPage({ store, getJson, schedule, cancelTimer, now });
+  // the owner's acts on the Memory screen: prepared at the face and the Account, signed by the owner device, posted through
+  // the owner door; done, the lessons, the waiting and the decisions are read again
+  const memoryActs = startMemoryActs({
+    store, owner, post: ownerPost, schedule, cancelTimer,
+    afterDone: () => { for (const read of ['lessons', 'waiting', 'decisions']) void memoryPage.reread(read); },
+  });
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
@@ -708,7 +718,8 @@ export function boot(win, host = {}) {
       : s.route.screen === 'task' ? renderTaskScreen(s, now(), { revealed, anchor: anchorSeq, rail })
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail, tasksOpen });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
-    const drawers = (s.settingsOpen ? renderSettings(s, { mac }) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
+    const drawers = (s.settingsOpen ? renderSettings(s, { mac }) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '')
+      + (memoryActUp(s) ? renderMemoryAct(s, now()) : '');
     // the shortcut sheet over the drawers, under the drop overlay and the lightbox
     const scHtml = renderShortcuts(s, { mac });
     // files dragged over a screen with a composer: the drop overlay over the page
@@ -1044,6 +1055,8 @@ export function boot(win, host = {}) {
     // ⌥⌘K's focus waits only for the list it was asked on: a route without one forgets it
     if (!['messages', 'task', 'history', 'strategy'].includes(r.screen)) searchFocus = false;
     if (r.screen !== 'messages') sayFocus = false;
+    // the owner's act belongs to the Memory screen: leaving it closes the act, and nothing in its air lands after
+    if (r.screen !== 'memory' && store.get().memoryPage.act) memoryActs.close();
     showMarkets();
     if (r.screen === 'markets' && was?.screen !== 'markets') readHiddenMarkets();
     showAccount();
@@ -2158,6 +2171,11 @@ export function boot(win, host = {}) {
     memoryPageDiff: el => store.dispatch('memoryPageDiff', { id: el.dataset.id }),
     memoryPageOlder: el => { store.dispatch('memoryPageBefore', { id: el.dataset.id }); void memoryPage.reread('decisions'); },
     memoryPageNewest: () => { store.dispatch('memoryPageBefore', {}); void memoryPage.reread('decisions'); },
+    // the owner's acts: a key opens its drawer on a page that signs (Prepare again opens it afresh); the go key signs and
+    // posts it; × closes it
+    memoryActOpen: el => { if (signs()) memoryActs.open(el.dataset.act, el.dataset.subject); },
+    memoryActGo: () => { void memoryActs.go(); },
+    memoryActClose: () => memoryActs.close(),
   };
 
   root.addEventListener('click', ev => {
@@ -2203,6 +2221,8 @@ export function boot(win, host = {}) {
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
     // the Memory screen's symbol box: the symbol trimmed, as typed, and the decisions read again for it (one read in flight)
     else if (el.dataset?.action === 'memoryPageSymbol') { store.dispatch('memoryPageSymbol', { symbol: String(el.value ?? '').trim() }); void memoryPage.reread('decisions'); }
+    // the owner's words for a Memory act, as typed (the host trims them when it prepares them)
+    else if (el.dataset?.action === 'memoryActWords') memoryActs.words(el.value);
     else if (el.dataset?.action === 'convQuery') convSearch.type(el.value);
     else if (el.dataset?.action === 'scQuery') store.dispatch('setShortcutsQuery', el.value);
     else if (el.dataset?.action === 'setFont') act.typeFont(el);
@@ -2494,6 +2514,7 @@ export function boot(win, host = {}) {
       // a module card's Run sheet first, then the owner sheet over any drawer, then the stock drawer; Trade's ticket after every drawer
       if (s.runSheet) runSheet.close();
       else if (sheetUp(s)) sheet.close();
+      else if (memoryActUp(s)) memoryActs.close();
       else if (s.identity?.connect) identity.close();
       else if (s.sellMany) sellMany.close();
       else if (s.lunhui?.stock) store.dispatch('lunhuiStockClose');

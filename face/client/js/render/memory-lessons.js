@@ -5,7 +5,9 @@
 // lines marked, behind See the change; an unarmed or a retired card's file; for a card that applies its counts and, behind
 // Cases, each outcome side by horizon, the median once there is one, else each case; each check as fact, operator and value,
 // and each fact it defines alone, marked computed by the face or not, with the card's own definition and the face's beside it;
-// and the terminal's commands its state allows, under At the terminal, in face/. Every text from the memory is made visible
+// and the terminal's commands its state allows, under At the terminal, in face/ - or, while this page signs for the Account,
+// a key for each of the owner's acts its state allows (host/memory-acts.js) in place of that act's command. Every text from
+// the memory is made visible
 // (visible.js) and then escaped, a text line by line; a key is drawn only for an id of the plain shape (reducers/memory-page.js
 // isId), and a row's flag is read as its own true alone.
 import { esc, attrs, cls } from '../html.js';
@@ -15,6 +17,7 @@ import { fmtDate } from '../time.js';
 import { isId } from '../reducers/memory-page.js';
 import { textDiff, recordView, cardLine, SCREEN_TEXT_MAX } from '../host/memory-page-view.js';
 import { lessonCount } from './lesson-line.js';
+import { lessonActs } from '../host/memory-acts.js';
 
 /** A text from the memory, made visible and escaped (the other tabs draw theirs with it too). */
 export const shown = v => esc(visible(v));
@@ -26,6 +29,24 @@ export const command = line => `<code class="mp-command">${shown(line)}</code>`;
 export function terminalHtml(lines) {
   const list = (Array.isArray(lines) ? lines : []).filter(v => typeof v === 'string' && v !== '');
   return list.length ? `<div class="mp-commands"><div class="mp-dim">${esc(t('memory.lessons.terminal'))}</div>${list.map(command).join('')}</div>` : '';
+}
+
+// each act's key, its words the face's own
+const ACT_KEYS = {
+  arm: () => t('memory.act.keyArm'),
+  retire: () => t('memory.act.keyRetire'),
+  discard: () => t('memory.act.keyDiscard'),
+  accept: () => t('memory.act.keyAccept'),
+  reject: () => t('memory.act.keyReject'),
+  edit: () => t('memory.act.keyEdit'),
+  void: () => t('memory.act.keyVoid'),
+};
+/** The keys of the owner's acts on `subject`, one per act of the face's own list, each opening its drawer; nothing for none or
+ *  for a subject that is not a plain id. */
+export function actKeysHtml(acts, subject) {
+  const list = (Array.isArray(acts) ? acts : []).filter(a => Object.hasOwn(ACT_KEYS, a));
+  if (!list.length || !isId(subject)) return '';
+  return `<div class="mp-acts">${list.map(a => `<button type="button" class="btn-sm"${attrs({ 'data-action': 'memoryActOpen', 'data-act': a, 'data-subject': subject })}>${esc(ACT_KEYS[a]())}</button>`).join('')}</div>`;
 }
 
 /** A day as the screen writes it: its month and day, and its year when that is not the year of `now`, the clock's time. */
@@ -137,9 +158,16 @@ function checksHtml(checks) {
   return `<div class="mp-checks"><div class="mp-dim">${esc(t('memory.lessons.checks'))}</div><ul class="mp-check-list">${items.join('')}</ul></div>`;
 }
 
-const commandsHtml = commands => terminalHtml(['arm', 'retire', 'review'].map(k => commands?.[k]));
+// a card's acts: while the page signs, a key for each act its state allows and the commands of the others (a changed card's
+// review is its Discard…); else the terminal's commands its state allows
+function actsHtml(row, signs) {
+  const keys = signs ? lessonActs(row) : [];
+  const covers = { arm: 'arm', retire: 'retire', review: 'discard' };
+  const commands = ['arm', 'retire', 'review'].filter(k => !keys.includes(covers[k])).map(k => row.commands?.[k]);
+  return `${actKeysHtml(keys, row.id)}${terminalHtml(commands)}`;
+}
 
-function lessonHtml(row, page, now) {
+function lessonHtml(row, page, now, signs) {
   const card = row.armed?.card ?? row.file?.card;
   const armedAt = typeof row.armedAt === 'string' ? Date.parse(row.armedAt) : NaN;
   const head = `<div class="mp-lesson-head"><span class="mp-id">${shown(row.id)}</span>${chip(row.state)}` +
@@ -157,16 +185,18 @@ function lessonHtml(row, page, now) {
   } else if (row.state === 'unarmed' || row.state === 'retired') {
     text = textHtml(row.file);
   }
-  return `<article class="mp-lesson">${head}${line}${fault}${text}${recordHtml(row, page)}${checksHtml(row.checks)}${commandsHtml(row.commands)}</article>`;
+  return `<article class="mp-lesson">${head}${line}${fault}${text}${recordHtml(row, page)}${checksHtml(row.checks)}${actsHtml(row, signs)}</article>`;
 }
 
 /** The Lessons tab's body for a connected lessons read: `read` its body, `page` the screen's slice (its open rows and shown
- *  differences), `now` the clock's time, against which a card's armed day carries its year when it is another. */
-export function lessonsHtml(read, page, now) {
+ *  differences), `now` the clock's time, against which a card's armed day carries its year when it is another; `signs`,
+ *  whether this page signs for the Account: then each card carries the keys of the acts its state allows in place of their
+ *  commands. */
+export function lessonsHtml(read, page, now, signs = false) {
   const rows = Array.isArray(read?.lessons) ? read.lessons.filter(r => r && typeof r === 'object') : [];
   const chain = read?.ownerChainBroken === true
     ? `<div class="mp-chain"><p class="mp-chain-say">${esc(t('memory.lessons.chainBroken'))}</p>${terminalHtml([read.reseal])}</div>`
     : '';
-  const body = rows.length ? rows.map(r => lessonHtml(r, page, now)).join('') : dim(t('memory.lessons.none'));
+  const body = rows.length ? rows.map(r => lessonHtml(r, page, now, signs)).join('') : dim(t('memory.lessons.none'));
   return `<div class="mp-body mp-lessons">${chain}${body}</div>`;
 }
