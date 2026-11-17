@@ -393,8 +393,9 @@ All three of its stages are built:
 - **the gravit box** (since 2026-11-16; spec `docs/superpowers/specs/2026-11-16-gravit-box-design.md`):
   gravit's one conversation docked at the bottom right of every screen that shows no
   conversation — Desk, Markets, Trade, Discover (a plugin's or a module's page too), Account and a
-  strategy's page; never Messages, a task's page or History, which already read a session, and not
-  while the conversation is unknown (`FACE_ROUTER=0`, or its first read not yet in). Closed it is
+  strategy's page; never Messages, a task's page or History, which already read a session, nor the
+  Memory screen, which shows no conversation and has no box, and not while the conversation is
+  unknown (`FACE_ROUTER=0`, or its first read not yet in). Closed it is
   half a ball (56 px, its left half showing) at the window's right edge, 40 px above the bottom;
   hover leans it out 8 px, Tab slides it fully into view, a click, Return or Space opens the panel
   (400 px wide, up to 600 tall; a sheet on windows of 860 px and below). A badge on the ball counts
@@ -1261,42 +1262,64 @@ through its own handle, as `gravit-face`, calling only the package's `lessons`, 
 and `status`: `GET /data/memory/lessons`, each card with its state (`armed`, `changed`, `broken`,
 `unarmed`, `retired`, `refused`), its fault, when it was armed, its armed copy and its file, each
 text at most `SCREEN_TEXT_MAX`, 16,384 characters, marked `cut` when cut, its record for a card
-that applies and for no other, the facts it checks, each marked computed by the face or not, and
-the commands its state allows, with the command that reseals the owner's chain while that chain is
-broken, and only then; `GET /data/memory/decisions?symbol=&before=&limit=`, the decisions newest
-first with their figures, each not void with its void command (`symbol` of the package's shape,
-`before` a decision id, `limit` 1 to 200, the package's 50 when not given); `GET
+that applies and for no other, what the card that applies checks (the armed copy's card, else the
+file's) — each check in the card's order with its operator and value, the card's own definition of
+the fact and the face's when the face computes it, then each fact the card defines and does not
+check — and the commands its state allows, with the command that reseals the owner's chain while
+that chain is broken, and only then; `GET /data/memory/decisions?symbol=&before=&limit=`, the
+decisions newest first with their figures, each not void with its void command (`symbol` of the
+package's shape, `before` a decision id, `limit` 1 to 200, the package's 50 when not given); `GET
 /data/memory/review`, the proposals and the decisions past their horizon with no review, the count
 with no `wrong_if`, and the review command; and `GET /data/memory/status`, the home, its ledgers'
 lines and chains, a partial last line, the price source, the face's facts and five commands
-(`status`, `verify`, `reconcile`, `review`, `reseal`). Each read opens the memory and makes its one
-call within `SCREEN_READ_MS`, 5,000 ms; a read past it is left to finish and ignored. A parameter
-that does not fit, a repeated one or an unknown one is a 400, a method other than GET a 405, a read
-that faulted a 502 (`the memory could not be read`) and one past its bound a 504 (`the memory did
-not answer in time`), each with one log line. A memory not connected — the row disabled, no
-install, no home named, or a home never made (`why: "no home"`) — answers `connected: false` with
-the face's words and the command that makes the home, and the page shows those two and no tab.
-While the screen is shown and the page visible, the open tab's read and the review read, for
-Waiting's count, are read at once when the screen shows or the tab changes, and again every
-`MEMORY_POLL_MS`, 20,000 ms (on Waiting the two are one read); showing the tab already shown reads
-nothing more, but Decisions reads again when its symbol has changed; nothing is read while the
-screen is not shown. One read of a path is in flight at a time, and a read that fails keeps what
-the page drew with one line above it. The symbol box on Decisions reads the decisions again at each
-keystroke with the box's words as typed, surrounding spaces trimmed; the memory matches a
-decision's symbol exactly, case included, and a symbol off the package's shape is the route's 400.
-Every text from the memory is made visible (`client/js/visible.js`: control and format characters,
-the line and paragraph separators, written as their escapes; a tab left alone) and then escaped,
-drawn as the record's words, quoted or in a block, never as markup, a link, a class or a key; an id
-that does not fit its shape is drawn as text and carries no key. The screen acts on nothing: what
-the owner does is done at the terminal, in `face/`, by the commands the face builds from ids that
-fit the package's shapes and from the home it stands on, as `npx --no gravit-memory <words> --home
-<home>` (the command line reads no `FACE_MEMORY_HOME`), `"…"` where the owner's own words go. They
-are written for a POSIX shell: a home of letters, digits and `_./~-` alone is written bare, any
-other double-quoted with `"`, `\`, `$` and a backtick escaped; a `!` in a home, a home that begins
-with a dash, and the quoting of `cmd.exe` or PowerShell are not handled. Accepting, editing,
-rejecting and discarding share one command, `gravit-memory review`, since the package answers them
-inside its review and has no command for each. The screen writes nothing: no route of it changes the
-home, and it never makes one (`tests/memory-screen-smoke.test.ts`).
+(`status`, `verify`, `reconcile`, `review`, `reseal`). One read of a kind is out at a time on the
+face (the decisions' kind is their filter): a request while one is out awaits it, past its bound
+too, so a slow memory is asked once. Each request waits for the open and the one call within
+`SCREEN_READ_MS`, 5,000 ms; a read past it is left to finish. A parameter that does not fit, a
+repeated one or an unknown one is a 400, a method other than GET a 405, a `before` the memory does
+not know a 404 (`no such decision`), a read that faulted a 502 (`the memory could not be read`,
+with `why`, the package's own sentence in one line of at most 200 characters, when the fault
+carries the package's code: a home of a newer version, a `config.json` that does not parse), one
+past its bound a 504 (`the memory did not answer in time`), and anything else thrown a 500. The
+502, the 504 and the 500 log one line each, and a path's line is logged again only when its words
+change or after a read of that path succeeded; a 400, a 404 and not connected log nothing. A memory
+not connected answers `connected: false` with the face's words: the row disabled, its standing's
+words; no install, those and `run npm ci in face/`; no home named, the boot's notice, which says to
+set `FACE_MEMORY_HOME`; and a home never made (`why: "no home"`), the package's words and the one
+command a not-connected answer carries, `init --home` for the home the face stands on. The page
+shows those and no tab's body. While the screen is shown and the page visible, the open tab's read
+and the review read, for Waiting's count, are read at once when the screen shows or the tab
+changes, and again every `MEMORY_POLL_MS`, 20,000 ms (on Waiting the two are one read); showing
+the tab already shown reads nothing more, but Decisions reads again when its symbol or its window
+has changed; nothing is read while the screen is not shown. One read of a path is in flight at a
+time, and a read that fails keeps what the page drew with one line above it, and the memory's `why`
+under that line when the face gave one. Decisions shows one window at a time, the package's
+default of fifty, each decision under its symbol's head (`No symbol` for one with none): when older
+decisions are not shown, Show older reads the fifty before the window's last decision, and Back to
+the newest, above an older window, reads the newest again. The symbol box narrows the decisions to
+a symbol, reading them again at each keystroke with the box's words as typed, surrounding spaces
+trimmed, from the newest; the memory matches a decision's symbol exactly, capitals included, and a
+symbol that finds none says so; a symbol off the package's shape is the route's 400. Health words
+the price source's last run in the package's three cases: never asked; a last run that asked it
+nothing; else when it was last asked and whether it answered (a source set that refused nothing)
+or how many it refused, of how many asked; with no source, that `prices.url` in the home's
+`config.json` names one. Every text from the memory is made visible (`client/js/visible.js`:
+control and format characters, the line and paragraph separators, written as their escapes; a tab
+left alone) and then escaped, drawn as the record's words, quoted or in a block, never as markup, a
+link, a class or a key; an id that does not fit its shape is drawn as text and carries no key. The
+screen acts on nothing: what the owner does is done at the terminal, in `face/` — every command on
+the screen is headed so — by the commands the face builds from ids that fit the package's shapes
+and from the home it stands on, as `npx --no gravit-memory <words> --home <home>` (the command line
+reads no `FACE_MEMORY_HOME`), `"…"` where the owner's own words go; since the screen serves a
+command only with a home, every command it shows carries `--home`. They are written for a POSIX
+shell: a home of letters, digits and `_./~-` alone is written bare, any other double-quoted with
+`"`, `\`, `$` and a backtick escaped; a `!` in a home, a home that begins with a dash, and the
+quoting of `cmd.exe` or PowerShell are not handled. Accepting, editing, rejecting and discarding
+share one command, `gravit-memory review`, since the package answers them inside its review and has
+no command for each. The Lessons tab marks `industry` not computed: the face supplies it only when
+it asks about a Lunhui run's leaders. The screen writes nothing: no route of it changes the home,
+and it never makes one (`tests/memory-screen-smoke.test.ts`); `tests/memory-screen-draw.test.ts`
+draws the four tabs from a home the package made and filled. The Memory screen has no gravit box.
 
 **What this does not hold.** The owner has no door of their own inside the face: an owner's
 decision said in conversation is registered by gravit, so it reads `by: gravit, whose: owner`. An
@@ -5547,7 +5570,7 @@ FACE_SMOKE=1 npm test     # + the 39 smoke files (53 real boots), isolated; loca
 ```
 
 Offline, `npm test` skips the 39 smoke files (53 real boots) listed below; `FACE_SMOKE=1` runs
-them too (5,166 tests in 331 files on 2026-11-16 with the Memory screen: 5,090 pass and 76 skipped offline; 5,170 tests under `FACE_SMOKE=1`, 5,169 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 5,046 tests in 321 files on 2026-11-16 with lessons under an alert and on a Lunhui run: 4,972 pass and 74 skipped offline; 5,050 tests under `FACE_SMOKE=1`, 5,049 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 4,951 tests in 316 files on 2026-11-16 with the order card's final review's fixes: 4,877 pass and 74 skipped offline; 4,955 tests under `FACE_SMOKE=1`, 4,954 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 4,918 tests in 316 files on 2026-11-16 with the memory at the order card: 4,844 pass and 74 skipped offline; 4,922 tests under `FACE_SMOKE=1`, 4,921 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1) as before; 4,760 tests in 308 files on 2026-11-15 with the memory's owner-name fence armed inside the boot: 4,687 pass and 73 skipped offline; 4,764 tests under `FACE_SMOKE=1`, 4,763 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1), as it does with the fence not yet in the boot; 4,733 tests in 307 files on 2026-11-14 with the Desk, the routines and the memory together: 4,662 pass and 71 skipped offline; 4,653 tests in 302 files on 2026-11-14 with routines from Messages: 4,588 pass and 65 skipped offline; 4,618 tests in 299 files on 2026-11-14 with the routines' engine: 4,555 pass and 63 skipped offline; 4,544 tests in 292 files on 2026-11-14 with the memory connected and its final review's fixes: 4,476 pass and 68 skipped offline; 4,539 tests at its build, where `FACE_SMOKE=1` ran 4,543 tests, 4,543 pass; 4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+them too (5,258 tests in 336 files on 2026-11-17 with the Memory screen's final review's fixes: 5,182 pass and 76 skipped offline, the full `FACE_SMOKE=1` run not made, `memory-screen-smoke` 2 of 2; 5,166 tests on 2026-11-16 with the Memory screen: 5,090 pass and 76 skipped offline; 5,170 tests under `FACE_SMOKE=1`, 5,169 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 5,046 tests in 321 files on 2026-11-16 with lessons under an alert and on a Lunhui run: 4,972 pass and 74 skipped offline; 5,050 tests under `FACE_SMOKE=1`, 5,049 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 4,951 tests in 316 files on 2026-11-16 with the order card's final review's fixes: 4,877 pass and 74 skipped offline; 4,955 tests under `FACE_SMOKE=1`, 4,954 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1); 4,918 tests in 316 files on 2026-11-16 with the memory at the order card: 4,844 pass and 74 skipped offline; 4,922 tests under `FACE_SMOKE=1`, 4,921 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1) as before; 4,760 tests in 308 files on 2026-11-15 with the memory's owner-name fence armed inside the boot: 4,687 pass and 73 skipped offline; 4,764 tests under `FACE_SMOKE=1`, 4,763 pass, `schedule-smoke` failing its timer count (`clock.pending()` 2, not 1), as it does with the fence not yet in the boot; 4,733 tests in 307 files on 2026-11-14 with the Desk, the routines and the memory together: 4,662 pass and 71 skipped offline; 4,653 tests in 302 files on 2026-11-14 with routines from Messages: 4,588 pass and 65 skipped offline; 4,618 tests in 299 files on 2026-11-14 with the routines' engine: 4,555 pass and 63 skipped offline; 4,544 tests in 292 files on 2026-11-14 with the memory connected and its final review's fixes: 4,476 pass and 68 skipped offline; 4,539 tests at its build, where `FACE_SMOKE=1` ran 4,543 tests, 4,543 pass; 4,476 tests in 287 files on 2026-11-13 with Discover's abilities: 4,414 pass and 62 skipped offline; 4,369 tests in 280 files on 2026-11-12 with the event analog table: 4,307 pass and 62 skipped offline; 4,373 tests, 4,373 pass under `FACE_SMOKE=1`; 4,310 tests in 276 files on 2026-11-11 with the analogs' plan 3 and its final fixes: 4,248 pass and 62 skipped offline; 3,980 tests in 253 files on 2026-11-08 with one entry's plan 1: 3,922 pass and 58 skipped offline; 3,981 tests, 3,977 pass and 4 skipped under `FACE_SMOKE=1` at its task 8; 3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
