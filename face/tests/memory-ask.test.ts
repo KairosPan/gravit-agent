@@ -137,5 +137,19 @@ test("a timer that cannot be set settles at once as late", async () => {
   const { calls, open } = memoryOf(never);
   const answer = await askMemory(open, INPUT, { ms: 3_000, setTimer: () => { throw new Error("no timers"); } });
   assert.deepEqual(answer, { asked: { lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, fault: ASK_LATE } });
-  assert.ok(calls.length <= 1);
+  assert.equal(calls.length, 0);
+});
+
+test("a home that was never made, from the recall or from open: not connected, in the memory's words", async () => {
+  const noHome = Object.assign(new Error("no memory here: run gravit-memory init"), { code: "E_NO_HOME" });
+  const words = memoryFaultWords(noHome);
+  const fromRecall = memoryOf(() => Promise.reject(noHome));
+  assert.deepEqual(await askMemory(fromRecall.open, INPUT, { ms: 3_000 }), { notConnected: words });
+  const throwing = memoryOf(() => { throw noHome; });
+  assert.deepEqual(await askMemory(throwing.open, INPUT, { ms: 3_000 }), { notConnected: words });
+  assert.deepEqual(await askMemory(() => Promise.reject(noHome), INPUT, { ms: 3_000 }), { notConnected: words });
+  assert.deepEqual(await askMemory(() => { throw noHome; }, INPUT, { ms: 3_000 }), { notConnected: words });
+  const other = Object.assign(new Error("locked"), { code: "E_LOCKED" });
+  const coded = await askMemory(memoryOf(() => Promise.reject(other)).open, INPUT, { ms: 3_000 });
+  assert.ok("asked" in coded && coded.asked.fault === memoryFaultWords(other), "another code stays a fault");
 });

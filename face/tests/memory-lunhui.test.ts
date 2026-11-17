@@ -13,7 +13,7 @@ import {
   createLunhuiLessons, industryOf, LEADER_ASK_MS, leadersOf, LUNHUI_FRESH_MS, RUN_ID_RE, STRATEGY_NAME_RE,
   type LunhuiLessonsDeps,
 } from "../src/memory-lunhui.ts";
-import type { MemoryStanding } from "../src/memory.ts";
+import { memoryFaultWords, type MemoryStanding } from "../src/memory.ts";
 
 const NOW = Date.parse("2026-11-16T07:30:00.000Z");
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -261,6 +261,48 @@ test("not connected: its words, nothing kept; a later get with the memory connec
     memory.setConnected(true);
     assert.equal((await store.get("cn-market", "run-1")).state, "checked");
     assert.equal(memory.calls.length, 2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a home that was never made: not connected in the memory's words, nothing kept, no log; once the home answers, a get asks", async () => {
+  const dir = await dirOf();
+  try {
+    let made = false;
+    const noHome = Object.assign(new Error("no memory here: run gravit-memory init"), { code: "E_NO_HOME" });
+    const memory = memoryOf(async (input) => {
+      if (!made) throw noHome;
+      return answerOf(String(input.symbol));
+    });
+    const { store, logs } = storeOf(dir, { open: memory.open });
+    assert.deepEqual(await store.get("cn-market", "run-1"), { state: "not connected", words: memoryFaultWords(noHome) });
+    assert.equal(memory.calls.length, 1, "the remaining leaders are not recalled");
+    assert.deepEqual(logs, []);
+    assert.deepEqual(await readdir(dir), []);
+    made = true;
+    const answer = await store.get("cn-market", "run-1");
+    assert.equal(answer.state, "checked");
+    assert.equal(memory.calls.length, 3);
+    assert.equal(await exists(join(dir, "cn-market", "run-1.json")), true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("an open that throws or rejects otherwise: one log line, not connected in its words, nothing kept", async () => {
+  const dir = await dirOf();
+  try {
+    const error = new Error("the install is broken");
+    const { store, logs, memory } = storeOf(dir, { open: async () => { throw error; } });
+    assert.deepEqual(await store.get("cn-market", "run-1"), { state: "not connected", words: memoryFaultWords(error) });
+    assert.deepEqual(logs, [`memory lunhui: cn-market/run-1: ${memoryFaultWords(error)}`]);
+    assert.deepEqual(await readdir(dir), []);
+    assert.equal(memory.calls.length, 0);
+    const noHome = Object.assign(new Error("no memory here: run gravit-memory init"), { code: "E_NO_HOME" });
+    const quiet = storeOf(dir, { open: () => { throw noHome; } });
+    assert.deepEqual(await quiet.store.get("cn-market", "run-1"), { state: "not connected", words: memoryFaultWords(noHome) });
+    assert.deepEqual(quiet.logs, [], "a home never made logs nothing");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

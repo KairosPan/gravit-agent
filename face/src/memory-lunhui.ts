@@ -11,8 +11,10 @@
  *   more than {@link LUNHUI_FRESH_MS} ago, or whose sealing time does not parse, is not asked, nor is one that froze
  *   no limit-up pool, nor one asked while the memory is not connected. Otherwise each leader's price facts are read
  *   together, each within the facts' own bound, and each leader is recalled in turn within {@link LEADER_ASK_MS}; the
- *   answer, faults included, is kept in the file and in the process and is not asked again. A second read of a run
- *   being asked awaits that ask. A fault and a failed write are one log line each.
+ *   answer, faults included, is kept in the file and in the process and is not asked again. A recall that finds a
+ *   home that was never made ends the ask as not connected: the leaders left are not recalled and nothing is kept.
+ *   A second read of a run being asked awaits that ask. A fault, an `open` that throws for any reason but a home never
+ *   made, and a failed write are one log line each; not connected is none.
  *
  * The file is written under a temporary name beside it (flag `wx`, mode 0o600) and renamed into place, its directory
  * made 0o700 at the first write. The run is keyed, filed and named by the view's own `strategy` and `run` - the names
@@ -26,7 +28,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { UNSAFE_ECHO_RE } from "./echo.ts";
-import { askMemory, type Asked, type GateLesson, type GateUntold } from "./memory-ask.ts";
+import { askMemory, noHome, type Asked, type GateLesson, type GateUntold } from "./memory-ask.ts";
 import { FACT_READ_MS, type Facts } from "./memory-facts.ts";
 import { memoryFaultWords, type MemoryStanding } from "./memory.ts";
 import { CN_SYMBOL_RE } from "./symbols.ts";
@@ -258,7 +260,9 @@ export function createLunhuiLessons(deps: LunhuiLessonsDeps): LunhuiLessonsStore
     try {
       standing = await deps.open();
     } catch (error) {
-      return { state: "not connected", words: memoryFaultWords(error) };
+      const words = memoryFaultWords(error);
+      if (!noHome(error)) say(`memory lunhui: ${strategy}/${run}: ${words}`);
+      return { state: "not connected", words };
     }
     if (standing?.connected !== true) return { state: "not connected", words: String(standing?.say) };
 
@@ -278,7 +282,9 @@ export function createLunhuiLessons(deps: LunhuiLessonsDeps): LunhuiLessonsStore
         { considering: ["buy"], symbol: leader.code, market: "CN", facts: given },
         { ms: LEADER_ASK_MS, setTimer, clearTimer },
       );
-      const asked: Asked = "asked" in result ? result.asked : { lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, fault: result.notConnected };
+      /* a home never made: the whole ask is not connected, nothing kept, the rest not recalled */
+      if (!("asked" in result)) return { state: "not connected", words: result.notConnected };
+      const asked: Asked = result.asked;
       if (asked.fault !== undefined) say(`memory lunhui: ${strategy}/${run}: ${leader.code}: ${asked.fault}`);
       told.push({ code: leader.code, boards: leader.boards, ...asked });
     }

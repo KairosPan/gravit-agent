@@ -258,7 +258,7 @@ test("not connected: the standing's words, no line, nothing asked of the Account
 });
 
 test("a recall that throws: the line's fault in the memory's words, no lesson, no recall id; the check still resolves", async () => {
-  const error = Object.assign(new Error("no home"), { code: "E_NO_HOME" });
+  const error = Object.assign(new Error("no home"), { code: "E_LOCKED" });
   const { gate, asked, clock } = rig({ recall: async () => { throw error; } });
   assert.deepEqual(await clock.run(gate.check(callOf(BUY_NVDA))), { lessons: 0, redLine: false });
   const line = gate.view("call_1")!.lines[0];
@@ -266,6 +266,17 @@ test("a recall that throws: the line's fault in the memory's words, no lesson, n
   assert.deepEqual(line.lessons, []);
   assert.equal("recall" in line, false);
   assert.equal(asked.logs.length, 1, "one log line for the fault");
+});
+
+test("a recall that finds a home never made: the card's view is not connected in the memory's words, no note, no log", async () => {
+  const noHome = Object.assign(new Error("no memory here: run gravit-memory init"), { code: "E_NO_HOME" });
+  const { gate, asked, clock } = rig({ recall: async () => { throw noHome; } });
+  assert.equal(await clock.run(gate.check(callOf({ legs: [BUY_NVDA, { ...BUY_NVDA, symbol: "AMD" }] }, "call_1", BATCH))), undefined);
+  assert.deepEqual(gate.view("call_1"), {
+    callId: "call_1", state: "not connected", words: memoryFaultWords(noHome), lines: [], redLine: false, overridden: false,
+  });
+  assert.deepEqual(asked.logs, []);
+  assert.equal(gate.redLineReason("call_1", "s-1"), undefined);
 });
 
 test("time: an Account that never answers leaves the position unread after GATE_ACCOUNT_MS", async () => {

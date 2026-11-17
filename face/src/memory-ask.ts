@@ -5,8 +5,9 @@
  * face's own facts with their sources, when there are any; nothing else. Its answer is mapped into the lessons that
  * apply, the lessons that could not be told and what each needs, the counts left out, and the recall's id. The memory
  * is opened and asked on one timer of the caller's `ms`: a recall that loses the race is left to finish and ignored,
- * and is the fault {@link ASK_LATE}; one that throws, rejects or answers what cannot be read is a fault in
- * `memoryFaultWords`'s words. Nothing here throws or rejects.
+ * and is the fault {@link ASK_LATE}; an `open` or a recall that rejects with the package's `E_NO_HOME` - a home that
+ * was never made - is not connected, in `memoryFaultWords`'s words; one that otherwise throws, rejects or answers what
+ * cannot be read is a fault in those words. Nothing here throws or rejects.
  * @module
  */
 import type { RecallAnswer } from "gravit-memory";
@@ -36,6 +37,10 @@ export type AskAnswer = { asked: Asked } | { notConnected: string };
 export const ASK_LATE = "the memory did not answer in time";
 
 const count = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+
+/** Whether `error` is the package's for a home that was never made: judged by its `code`, as src/memory.ts
+ * `memoryFaultWords` judges it. */
+export const noHome = (error: unknown): boolean => typeof error === "object" && error !== null && (error as { code?: unknown }).code === "E_NO_HOME";
 
 /** Nothing told, with why. */
 const faulted = (fault: string): AskAnswer => ({ asked: { lessons: [], lessonsMore: 0, untold: [], untoldMore: 0, fault } });
@@ -92,7 +97,7 @@ export function askMemory(
       const answer = await standing.memory.recall(FACE_MEMORY_NAME, recallInput(input));
       return { asked: mapped(answer) };
     };
-    ask().then(settle, (error: unknown) => settle(faulted(memoryFaultWords(error))));
+    ask().then(settle, (error: unknown) => settle(noHome(error) ? { notConnected: memoryFaultWords(error) } : faulted(memoryFaultWords(error))));
     try {
       timer = setTimer(() => settle(faulted(ASK_LATE)), opts.ms);
     } catch {

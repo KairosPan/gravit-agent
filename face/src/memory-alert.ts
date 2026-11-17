@@ -9,8 +9,10 @@
  * - Its facts ({@link hitFacts}): `price`, `change_1d_pct`, `held` and `unrealized_pct` from the hit's own quote and
  *   holding, then the three bar-based changes of src/memory-facts.ts, read within {@link ALERT_FACTS_MS}.
  * - The ask ({@link createAlertLessons}): the shape-checked symbol, its market and the facts computed here, nothing
- *   else; the bars and the recall share one budget of {@link ALERT_ASK_MS}. A read that loses its race is left to
- *   finish and ignored. A fault is one log line; not connected is none. The ask never throws or rejects.
+ *   else; the memory is opened first, so a memory not connected reads nothing at the Market, and the open, the bars
+ *   and the recall share one budget of {@link ALERT_ASK_MS}. A read that loses its race is left to finish and ignored.
+ *   A fault is one log line; not connected, a home that was never made among it, is none. The ask never throws or
+ *   rejects.
  * - The block ({@link alertBlock}) and the note ({@link alertNote}): built by code under a fixed head, each lesson's
  *   words escaped (src/echo.ts) and cut to {@link ALERT_WORDS_MAX} characters, the block at most
  *   {@link ALERT_BLOCK_MAX}. A lesson's id and a need are shown only in the memory's own shapes.
@@ -19,10 +21,10 @@
  * @module
  */
 import { cut, escaped } from "./echo.ts";
-import { askMemory, type Asked, type GateLesson } from "./memory-ask.ts";
+import { ASK_LATE, askMemory, noHome, type Asked, type GateLesson } from "./memory-ask.ts";
 import { changeFacts, type FactMarket, type Facts } from "./memory-facts.ts";
 import { MEMORY_SYMBOL, type Action } from "./memory-order.ts";
-import type { MemoryStanding } from "./memory.ts";
+import { memoryFaultWords, type MemoryStanding } from "./memory.ts";
 import { CN_SYMBOL_RE, SYMBOL_RE } from "./symbols.ts";
 import type { UpstreamRouteRead } from "./upstream-proxy.ts";
 import type { AlertHit } from "./watch-eval.ts";
@@ -164,6 +166,37 @@ export interface AlertLessonsDeps {
   clearTimer?: (timer: unknown) => void;
 }
 
+/** An open's outcome against its timer. */
+type Opened = { kind: "ok"; standing: MemoryStanding } | { kind: "late" } | { kind: "fault"; error: unknown };
+
+/** `deps.open()` raced against a timer of `ms`; a throw is a fault. Never rejects. */
+function openWithin(deps: AlertLessonsDeps, ms: number): Promise<Opened> {
+  const setTimer = deps.setTimer ?? ((run: () => void, wait: number): unknown => setTimeout(run, wait));
+  const clearTimer = deps.clearTimer ?? ((timer: unknown): void => clearTimeout(timer as ReturnType<typeof setTimeout>));
+  return new Promise((resolve) => {
+    let done = false;
+    let timer: unknown;
+    const settle = (outcome: Opened): void => {
+      if (done) return;
+      done = true;
+      try {
+        clearTimer(timer);
+      } catch {
+        /* the timer fires into a settled open */
+      }
+      resolve(outcome);
+    };
+    Promise.resolve()
+      .then(() => deps.open())
+      .then((standing) => settle({ kind: "ok", standing }), (error: unknown) => settle({ kind: "fault", error }));
+    try {
+      timer = setTimer(() => settle({ kind: "late" }), ms);
+    } catch {
+      settle({ kind: "late" });
+    }
+  });
+}
+
 /** The ids, sorted and joined by commas. */
 const idsOf = (items: ReadonlyArray<{ id: string }>): string => items.map((item) => item.id).sort().join(",");
 
@@ -184,11 +217,22 @@ export function createAlertLessons(deps: AlertLessonsDeps): (hit: AlertHit) => P
     const now = deps.now ?? Date.now;
     const timers = { now: deps.now, setTimer: deps.setTimer, clearTimer: deps.clearTimer };
     const start = now();
+    const opened = await openWithin(deps, ALERT_ASK_MS);
+    if (opened.kind === "fault") {
+      if (!noHome(opened.error)) say(`memory alert: ${symbol}: ${shown(memoryFaultWords(opened.error), FAULT_MAX)}`);
+      return undefined;
+    }
+    if (opened.kind === "late") {
+      say(`memory alert: ${symbol}: ${ASK_LATE}`);
+      return undefined;
+    }
+    const standing = opened.standing;
+    if (standing?.connected !== true) return undefined;
     const own = hitFacts(hit);
     const changes = await changeFacts({ candles: deps.candles, ...timers }, symbol, market, hit.quote!.price, market === "CN" ? "trading" : undefined, { readMs: ALERT_FACTS_MS });
     const facts: Facts = { facts: { ...own.facts, ...changes.facts }, sources: { ...own.sources, ...changes.sources } };
     const spent = Math.max(0, now() - start);
-    const answer = await askMemory(deps.open, { considering, symbol, market, facts }, {
+    const answer = await askMemory(() => Promise.resolve(standing), { considering, symbol, market, facts }, {
       ms: ALERT_ASK_MS - spent, setTimer: deps.setTimer, clearTimer: deps.clearTimer,
     });
     if (!("asked" in answer)) return undefined;

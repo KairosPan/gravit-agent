@@ -9,7 +9,8 @@
  * {@link GATE_FACTS_MS} when a market was placed, each of their two reads asked under {@link GATE_FACT_READ_MS}
  * (src/memory-facts.ts); then the recall, as {@link FACE_MEMORY_NAME} (src/memory-ask.ts), with whatever is left of {@link GATE_CHECK_MS}. The recall is asked only the line's validated fields and the face's own facts: nothing of
  * the model's arguments is passed on as text, and a fact the model supplied is not carried over. A read that loses
- * its race is left to finish and ignored; the kept view never changes once the check settles.
+ * its race is left to finish and ignored; the kept view never changes once the check settles. A recall that finds a
+ * home that was never made keeps the whole call `not connected` in the memory's words, as an `open` that says so does.
  *
  * `check` never rejects and settles within {@link GATE_CHECK_MS}. Each entry records the session it was checked for;
  * a callId checked again is held by a placeholder until the new check settles, then replaced whole. At most
@@ -392,11 +393,12 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
     clearTimer(timer);
   };
 
-  /** One line, checked: its account reads, its facts, its recall. */
+  /** One line, checked: its account reads, its facts, its recall; or the memory's words when its recall found a home
+   * that was never made. */
   async function checkLine(
     order: OrderLine, standing: MemoryStanding & { connected: true }, paper: Promise<string | undefined>,
     accountLeft: () => number, left: () => number,
-  ): Promise<LineEntry> {
+  ): Promise<LineEntry | { notConnected: string }> {
     const venue = order.venue === "paper" ? await paper : order.venue;
     let position: Position | null | undefined;
     let positionAt: number | undefined;
@@ -428,8 +430,8 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
       () => Promise.resolve(standing), { considering, symbol, market, facts: given },
       { ms: disposed ? 0 : left(), setTimer: askTimer, clearTimer: askClear },
     );
-    if ("asked" in told) Object.assign(view, told.asked);
-    else view.fault = told.notConnected;
+    if (!("asked" in told)) return { notConnected: told.notConnected };
+    Object.assign(view, told.asked);
     if (view.fault !== undefined) say(`${view.order}: ${view.fault}`);
     return { order, ...(venue === undefined ? {} : { venue }), position, ...(position === undefined || positionAt === undefined ? {} : { positionAt }), view };
   }
@@ -457,7 +459,16 @@ export function createMemoryGate(deps: MemoryGateDeps): MemoryGate {
         return typeof id === "string" && VENUE_ID.test(id) ? id : undefined;
       })
       : Promise.resolve(undefined);
-    const lines = await Promise.all(orders.lines.map((order) => checkLine(order, standing, paper, accountLeft, left)));
+    const checked = await Promise.all(orders.lines.map((order) => checkLine(order, standing, paper, accountLeft, left)));
+    const lines: LineEntry[] = [];
+    for (const line of checked) {
+      if ("notConnected" in line) {
+        /* a home never made: the card is asked as with no memory, as when `open` says so */
+        Object.assign(entry, { state: "not connected", words: String(line.notConnected) });
+        return undefined;
+      }
+      lines.push(line);
+    }
     Object.assign(entry, { state: "checked", lines });
     const views = lines.map((line) => line.view);
     return {

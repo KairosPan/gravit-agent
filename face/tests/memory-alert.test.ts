@@ -301,6 +301,45 @@ test("createAlertLessons: not connected, a fault and a late recall answer nothin
   assert.equal(late.t.live(), 0);
 });
 
+test("createAlertLessons: the memory is opened before the bars - not connected or disabled reads nothing at the Market and logs nothing", async () => {
+  const off = depsOf({ standing: async () => ({ connected: false, why: "disabled", say: "the memory is not connected: the mcp-memory row is disabled" }) });
+  assert.equal(await createAlertLessons(off.deps)(hitOf()), undefined);
+  assert.equal(off.opened(), 1);
+  assert.deepEqual(off.asked, [], "no bars read");
+  assert.deepEqual(off.calls, []);
+  assert.deepEqual(off.logs, []);
+  assert.equal(off.t.live(), 0);
+});
+
+test("createAlertLessons: a home that was never made, from open or from the recall: undefined, no log line", async () => {
+  const noHome = Object.assign(new Error("no memory here: run gravit-memory init"), { code: "E_NO_HOME" });
+  const fromOpen = depsOf({ standing: async () => { throw noHome; } });
+  assert.equal(await createAlertLessons(fromOpen.deps)(hitOf()), undefined);
+  assert.deepEqual(fromOpen.asked, [], "no bars read");
+  assert.deepEqual(fromOpen.logs, []);
+  const fromRecall = depsOf({ answer: async () => { throw noHome; } });
+  assert.equal(await createAlertLessons(fromRecall.deps)(hitOf()), undefined);
+  assert.equal(fromRecall.calls.length, 1);
+  assert.deepEqual(fromRecall.logs, []);
+  assert.equal(fromRecall.t.live(), 0);
+});
+
+test("createAlertLessons: an open that rejects otherwise is a fault: one log line, no bars read", async () => {
+  const s = depsOf({ standing: async () => { throw new Error("the install is broken"); } });
+  assert.equal(await createAlertLessons(s.deps)(hitOf()), undefined);
+  assert.deepEqual(s.asked, []);
+  assert.deepEqual(s.logs, ["memory alert: NVDA: the install is broken"]);
+  const slow = depsOf({ standing: () => new Promise<MemoryStanding>(() => {}) });
+  const pending = createAlertLessons(slow.deps)(hitOf());
+  await flush();
+  const openTimer = slow.t.timers.find((t) => !t.cleared)!;
+  assert.equal(openTimer.ms, ALERT_ASK_MS, "the open is bounded by the whole budget");
+  openTimer.run();
+  assert.equal(await pending, undefined);
+  assert.deepEqual(slow.asked, []);
+  assert.deepEqual(slow.logs, ["memory alert: NVDA: the memory did not answer in time"]);
+});
+
 test("createAlertLessons: nothing applies and nothing untold answers nothing", async () => {
   const s = depsOf({ answer: async () => answerOf({ applies_more: 2 }) });
   assert.equal(await createAlertLessons(s.deps)(hitOf()), undefined);
@@ -320,8 +359,8 @@ test("createAlertLessons: bars that never answer leave the recall the hit's four
   await flush();
   assert.equal(s.calls.length, 1);
   assert.deepEqual((s.calls[0].input as { facts: unknown }).facts, hitFacts(hitOf({ holding: HELD })).facts);
-  assert.equal(s.t.timers.length, 2);
-  assert.equal(s.t.timers[1].ms, ALERT_ASK_MS - ALERT_FACTS_MS, "the recall has what is left of the budget");
+  assert.equal(s.t.timers.length, 3, "the open's, the bars' and the recall's");
+  assert.equal(s.t.timers[2].ms, ALERT_ASK_MS - ALERT_FACTS_MS, "the recall has what is left of the budget");
   assert.ok((await pending)?.phone);
   assert.equal(s.t.live(), 0);
 });
