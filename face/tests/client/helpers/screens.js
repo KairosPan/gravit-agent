@@ -21,6 +21,7 @@ import { renderDiscover, renderPlugin } from '../../../client/js/render/discover
 import { renderDeskScreen } from '../../../client/js/render/desk-page.js';
 import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
+import { renderBox } from '../../../client/js/render/box.js';
 import { newSheet } from '../../../client/js/host/run-sheet-view.js';
 import { MODULES } from '../../../client/js/host/modules-view.js';
 import { t, said } from '../../../client/js/i18n/words.js';
@@ -450,6 +451,32 @@ export function namedStates() {
     // the routine card in Messages (desk-page plan 3 Task 3): pending, with the turn's closing words left out; added, with its
     // first run; a change waiting, with the routine it replaces; a confirm refused for the limit
     ...routineCardStates(),
+    // the Gravit box (plan 1 of the box, Task 2): the ball on the Desk with two waiting and working; on Markets with a new
+    // reply; the panel open on Markets with three messages and earlier ones; open on Account beside the Statement; open on Trade
+    // beside a ticket; open on Discover with the conversation not listed yet
+    ...boxStates(),
+  ];
+}
+
+// the Gravit box's states (plan 1 of the box, Task 2): Gravit's one conversation 'bx' named by the tasks, a screen it stands on
+function boxStates() {
+  const gated = ['bw1', 'bw2'];
+  const asks = gated.map(id => ({ id, title: 'Check ' + id, origin: 'web', state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c', tool: 'x' }, steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 }));
+  const base = (screen, over = {}, tasks = []) => R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('bx', over), ...tasks.map(t => conv(t.id))], channels: [], bots: [] }), { conversation: 'bx', tasks, at: NOW }), { screen, id: null });
+  let waiting = base('desk', { running: true }, asks);
+  for (const id of gated) waiting = R.hostGate(waiting, { convId: id, message: m('g' + id, { kind: 'card', text: 'Buy 1 NVDA', seq: 1.5, data: { eventId: 'g' + id, sessionId: id, title: 'Buy 1 NVDA', venue: 'paper' } }) });
+  const said = [m('bx1', { from: 'you', text: 'Why is NVDA down?' }), m('bx2', { seq: 2, text: 'Its supplier cut guidance this morning.' }), m('bx3', { seq: 3, from: 'you', text: 'Watch it for me.' })];
+  const open = R.boxOpen(base('markets', { messages: said, loaded: true, window: { start: 3, through: 3, hasMore: true, replaced: [] } }));
+  const account = R.boxOpen(base('account', { messages: said, loaded: true }));
+  const trade = R.boxOpen(base('trade', { messages: said, loaded: true }));
+  return [
+    ['box-ball-desk', waiting],
+    ['box-ball-fresh', base('markets', { updatedAt: NOW, lastSeen: NOW - MIN })],
+    ['box-panel-markets', open],
+    ['box-panel-drawer', { ...account, account: { ...account.account, statementOpen: true } }],
+    ['box-panel-ticket', { ...trade, trade: { ...trade.trade, ticket: { id: 'stock:NVDA', side: 'buy', venue: null, outcome: 0 } } }],
+    // the conversation named but not listed yet: one plain line in place of the thread
+    ['box-panel-new', R.boxOpen(R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [], channels: [], bots: [] }), { conversation: 'bx', tasks: [], at: NOW }), { screen: 'discover', id: null }))],
   ];
 }
 
@@ -935,7 +962,7 @@ export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMark
 
 // a state's page as css.test.js draws it: the rail, the screen, then every drawer and sheet that may stand over it
 export function pageHtml(st, { mac = true } = {}) {
-  return renderRail(st, NOW, { mac }) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st, { mac }) : '') + stockDrawerHtml(st) + renderSellMany(st) +
+  return renderRail(st, NOW, { mac }) + screenOf(st, NOW) + renderBox(st, NOW, {}, { mac }) + (st.settingsOpen ? renderSettings(st, { mac }) : '') + stockDrawerHtml(st) + renderSellMany(st) +
     renderSheet(st, NOW) + renderConnectDrawer(st) + renderRunSheet(st, NOW) + renderShortcuts(st, { mac });
 }
 

@@ -4,6 +4,7 @@ export const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"></path>',
   chevDown: '<path d="M6 9l6 6 6-6"></path>',
   chevRight: '<path d="M9 6l6 6-6 6"></path>',
+  openIn: '<path d="M14 4h6v6M20 4l-9 9"></path><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"></path>',
   chevLeft: '<path d="M15 6l-6 6 6 6"></path>',
   compass: '<circle cx="12" cy="12" r="9"></circle><path d="M15.5 8.5l-2 5-5 2 2-5z"></path>',
   markets: '<path d="M4 18l5-6 4 3 7-9"></path>',

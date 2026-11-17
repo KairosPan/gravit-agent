@@ -2134,4 +2134,14 @@ export const ZH = Object.freeze({
   'lunhui.stock.openMarkets': '在市场中打开',
   'lunhui.stock.minuteLine': '分时线',
   'lunhui.stock.inRun': '本次运行中',
+  // the Gravit box (plan 1 of the box, render/box.js): the half ball's name and its marks, the panel's two keys, its lines
+  'gbox.ask': '问 Gravit',
+  'gbox.title': '问 Gravit · {key}',
+  'gbox.label.waiting': '{n} 项等你处理',
+  'gbox.label.working': '处理中',
+  'gbox.label.fresh': '有新回复',
+  'gbox.open': '在消息中打开',
+  'gbox.minimize': '收起',
+  'gbox.earlier': '消息中更早的内容 ›',
+  'gbox.empty': '就这个页面问 Gravit。',
 });

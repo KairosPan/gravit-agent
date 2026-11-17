@@ -2141,4 +2141,14 @@ export const EN = Object.freeze({
   'lunhui.stock.openMarkets': 'Open in Markets',
   'lunhui.stock.minuteLine': 'The minute line',
   'lunhui.stock.inRun': 'In this run',
+  // the Gravit box (plan 1 of the box, render/box.js): the half ball's name and its marks, the panel's two keys, its lines
+  'gbox.ask': 'Ask Gravit',
+  'gbox.title': 'Ask Gravit · {key}',
+  'gbox.label.waiting': '{n} waiting',
+  'gbox.label.working': 'working',
+  'gbox.label.fresh': 'new reply',
+  'gbox.open': 'Open in Messages',
+  'gbox.minimize': 'Minimize',
+  'gbox.earlier': 'Earlier in Messages ›',
+  'gbox.empty': 'Ask Gravit about this page.',
 });
