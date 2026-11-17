@@ -100,11 +100,11 @@ export function fencedGet(
 /** What a POST body that is no JSON object is answered with. */
 const NOT_AN_OBJECT = "body must be a JSON object";
 
-/** The request's body as the JSON object it must be: {@link readBody}'s `413` past its limit, and a
- * `400` for a body that does not parse, or parses as anything but an object - `null`, an array, a
- * number, a string, a boolean. */
-async function readObject(req: IncomingMessage): Promise<Record<string, unknown>> {
-  const text = await readBody(req);
+/** The request's body as the JSON object it must be: {@link readBody}'s `413` past `limit` bytes (default
+ * {@link BODY_LIMIT}), and a `400` for a body that does not parse, or parses as anything but an object -
+ * `null`, an array, a number, a string, a boolean. */
+export async function readObject(req: IncomingMessage, limit: number = BODY_LIMIT): Promise<Record<string, unknown>> {
+  const text = await readBody(req, limit);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

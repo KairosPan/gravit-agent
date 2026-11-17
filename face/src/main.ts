@@ -38,6 +38,8 @@ import { createMemoryGate, followAnswers, gateAccount, type GateNote, type Memor
 import { registerMemoryGateRoutes } from "./memory-gate-routes.ts";
 import { createMemoryScreen } from "./memory-screen.ts";
 import { registerMemoryScreenRoutes } from "./memory-screen-routes.ts";
+import { createMemoryActs } from "./memory-acts.ts";
+import { registerMemoryActsRoutes } from "./memory-acts-routes.ts";
 import { priceFacts } from "./memory-facts.ts";
 import { createLunhuiLessons } from "./memory-lunhui.ts";
 import { registerMemoryLunhuiRoute } from "./memory-lunhui-routes.ts";
@@ -328,6 +330,11 @@ registerMemoryGateRoutes(booted.ctx.webServer, { gate: () => gate });
  * none of them writing; a fault or a late read is the route's fixed refusal and one line here. */
 const memoryScreen = createMemoryScreen({ open: openMemory });
 registerMemoryScreenRoutes(booted.ctx.webServer, { screen: () => memoryScreen, log: (line) => { console.error(`${BIN}: ${line}`); } });
+/* The owner's acts on the memory (src/memory-acts.ts): what an act acts on and the attest to sign, then the signed
+ * envelope forwarded to the Account through the proxy's in-process exchange, and on its yes the memory's own act over
+ * the same opener; the face holds no key and checks no signature. */
+const memoryActs = createMemoryActs({ open: openMemory, exchange: proxy.exchange, log: (line) => { console.error(`${BIN}: ${line}`); } });
+registerMemoryActsRoutes(booted.ctx.webServer, { acts: () => memoryActs, log: (line) => { console.error(`${BIN}: ${line}`); } });
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here
