@@ -19,8 +19,10 @@ dsh hands it `GRAVIT.md` and nothing else.
 - Keep the suite green: `npm test && npm run typecheck` in `face/` (the repo has no Python
   suite), plus `FACE_SMOKE=1 npm test` after any change under `face/src`, `face/plugins` or to
   the dsh pins; after a change under `account/`, its own `npm test && npm run typecheck` there
-  and the face's `FACE_SMOKE=1` run; after a change under `market/`, its own suite and
-  `account/`'s, whose tests import `market/src`.
+  and the face's `FACE_SMOKE=1` run; after a change under `market/`, its own suite, `account/`'s
+  (whose tests import `market/src`) and the face's with `FACE_SMOKE=1` (whose stand-in Account
+  runs it). Before a commit, `node .claude/skills/verify/match.mjs` lists the checks and drills a
+  diff owes (Claude Code's `verify` skill).
 - A face test never opens a real memory: a test that boots or composes a face imports
   `./helpers/no-memory.ts` right after `./helpers/no-market.ts`; in a test process a memory home
   outside the temporary directory is refused, and `face/tests/memory-row.test.ts` checks the import.
