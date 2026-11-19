@@ -104,8 +104,10 @@ function selectedIds(m) {
   return familiesOf(m).find(f => f.id === source)?.ids ?? main;
 }
 const formsOfIds = ids => FORMS.live.filter(f => ids.some(id => (SOURCE_FORMS[id] ?? []).includes(f)));
+// China A, on Stocks and on Indices alike, is Spot alone (the market answers no other form there, spec §5.2)
+const inRegion = (m, forms) => (REGIONED.has(tabOf(m)) && regionOf(m) === 'cn' ? ['spot'] : forms);
 /** The forms the main sources carry (a Form outside them switches Source to All sources, G4). */
-export const mainFormsOf = markets => formsOfIds(sourcesOfTab(markets).main);
+export const mainFormsOf = markets => inRegion(markets, formsOfIds(sourcesOfTab(markets).main));
 /** The forms a Form pick may take now (G3): under Main or All sources every form the tab's sources carry, under a family its
  *  own; China A spot alone. */
 export function formsInView(markets) {
@@ -113,10 +115,10 @@ export function formsInView(markets) {
   if (tabOf(m) === 'watchlist') return [];
   const source = typeof m.source === 'string' ? m.source : 'main';
   const { main, also } = sourcesOfTab(m);
-  return formsOfIds(source === 'main' || source === 'all' ? [...main, ...also] : selectedIds(m));
+  return inRegion(m, formsOfIds(source === 'main' || source === 'all' ? [...main, ...also] : selectedIds(m)));
 }
 /** The forms the Source in effect carries: a Form outside them would empty the table. */
-export const formsOfSource = markets => formsOfIds(selectedIds(isRecord(markets) ? markets : {}));
+export const formsOfSource = markets => inRegion(markets, formsOfIds(selectedIds(isRecord(markets) ? markets : {})));
 /** Whether `v` is a Source value of the tab: Main, All sources, or one of its families. */
 export const isSourceOf = (markets, v) => v === 'main' || v === 'all' || familiesOf(markets).some(f => f.id === v);
 
@@ -132,6 +134,15 @@ export function exploreQueryOf(markets) {
   const form = FORMS.live.includes(m.form) ? `&form=${m.form}` : '';
   const region = REGIONED.has(tab) ? `&region=${regionOf(m)}` : '';
   return `asset=${tab}&sort=${sortOf(m)}&limit=${MARKET_ROWS}${region}${form}&source=${selectedIds(m).join(',')}`;
+}
+/** The query the connected half takes: under All sources the tab's class with no source list, so every connected line of
+ *  the class shows (spec §5.2; the join then rules the public lines alone, `allSources`); otherwise exploreQueryOf's. */
+export function connectedQueryOf(markets) {
+  const query = exploreQueryOf(markets);
+  if (query === null || tabOf(markets) === 'watchlist' || markets?.source !== 'all') return query;
+  const p = new URLSearchParams(query);
+  p.delete('source');
+  return decodeURIComponent(p.toString());
 }
 /** China A's ranking read: by Biggest moves or Most traded, never Closing soonest (China refuses it). */
 export function rankQueryOf(markets) {

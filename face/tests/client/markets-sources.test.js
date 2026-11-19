@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { emptyState } from '../../client/js/data/empty.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import {
-  MARKET_TABS, REGIONS, FORMS, TAB_SOURCES, SOURCE_FORMS, familiesOf, formsInView, exploreQueryOf, rankQueryOf, filtersOf,
+  MARKET_TABS, REGIONS, FORMS, TAB_SOURCES, SOURCE_FORMS, familiesOf, formsInView, exploreQueryOf, connectedQueryOf, rankQueryOf, filtersOf,
   marketOriginOf, tableOf, pageOf, rowsOf,
 } from '../../client/js/host/market-view.js';
 import { t } from '../../client/js/i18n/words.js';
@@ -74,6 +74,33 @@ test('All sources sends the tab’s whole list, never no source', () => {
   assert.equal(decoded(exploreQueryOf(okx.markets)).source, 'okx-preipo');
   // Indices › China A asks with its region and answers its empty state (spec 5.2), never special-cased
   assert.equal(decoded(exploreQueryOf(on('indices', ['setMarketsRegion', 'cn']).markets)).region, 'cn');
+});
+
+test('All sources asks the connected half by class alone; Main and a family ask it the same list', () => {
+  const all = on('crypto', ['setMarketsSource', 'all']);
+  assert.equal(connectedQueryOf(all.markets), 'asset=crypto&sort=volume&limit=200');
+  for (const s of [on('crypto'), on('preipo', ['setMarketsSource', 'okx']), markets()]) assert.equal(connectedQueryOf(s.markets), exploreQueryOf(s.markets));
+  assert.equal(connectedQueryOf(on('stocks', ['setMarketsRegion', 'cn']).markets), null);
+  assert.equal(decoded(connectedQueryOf(on('stocks', ['setMarketsForm', 'token']).markets)).form, 'token', 'a Form picked switches to All sources and goes with it');
+});
+
+test('Indices › China A is Spot alone, as Stocks › China A is', () => {
+  const perp = on('indices', ['setMarketsForm', 'perp']);
+  const cn = R.setMarketsRegion(perp, 'cn');
+  assert.deepEqual([cn.markets.region, cn.markets.form, cn.markets.source], ['cn', '', 'main']);
+  assert.deepEqual(formsInView(cn.markets), ['spot']);
+  assert.equal(R.setMarketsForm(cn, 'perp'), cn);
+  const spot = R.setMarketsForm(cn, 'spot');
+  assert.deepEqual([spot.markets.form, spot.markets.source], ['spot', 'main'], 'Spot is China A’s own: no switch to All sources');
+  assert.deepEqual(filtersOf(cn.markets).form.options.filter(o => !o.disabled).map(o => o.id), ['', 'spot']);
+});
+
+test('the tab already open, with no search, keeps its filters', () => {
+  const s = on('crypto', ['setMarketsSource', 'all'], ['setMarketsForm', 'spot']);
+  assert.equal(R.setMarketsTab(s, 'crypto'), s);
+  const searching = R.setMarketsQuery(s, 'btc');
+  const ended = R.setMarketsTab(searching, 'crypto');
+  assert.deepEqual([ended.markets.q, ended.markets.source, ended.markets.form], ['', 'main', ''], 'a search open: the tab pressed ends it, from its main sources');
 });
 
 test('Stocks › China A is the rank read, never sorted by closing', () => {

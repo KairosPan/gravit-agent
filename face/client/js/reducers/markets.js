@@ -175,7 +175,8 @@ export const reducers = {
   // open, and ends a search; a region pick goes back to the main sources (on China A to Spot alone); a Form the main sources
   // do not carry switches Source to All sources (G4); a Source whose sources do not carry the Form set clears it
   setMarketsTab(s, tab) {
-    if (!MARKET_TABS.includes(tab)) return s;
+    // the tab already open, no search: as it is, its filters kept
+    if (!MARKET_TABS.includes(tab) || (tab === s.markets.tab && blank(s.markets.q))) return s;
     return mk(s, { ...onTab(tab), region: 'us', form: '', source: 'main', open: null, q: '', results: { ...IDLE } });
   },
   setMarketsRegion(s, id) {

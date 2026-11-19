@@ -9,6 +9,7 @@
 // - By underlying (asset, form or region asked, or two sources or more, with no scope), a source list keeps the lines of its
 //   sources only: a public line by its venue id, a connected one by its venue id or the public source it prices from
 //   (`publicSource`); a row left with no lines goes. No source keeps every line; one source on the old params changes nothing.
+//   Under Markets' All sources (`allSources`) the list rules the public lines alone: every connected line of the class stays.
 // - A row both halves list carries the connected lines that are not paper, then the market's kept lines, then the paper ones; the
 //   row's own fields are lent by the market where the connected row is paper or trades less, else by the connected row, the
 //   other filling what the lender lacks.
@@ -121,13 +122,13 @@ function joinRow(m, c) {
  * @param {object|null|undefined} connected the account's connected body, the same way; `stale: true` is down
  * @param {{venues?: Array<{connector?: string, paper?: boolean}>, here?: Array<{connector?: string, verdict?: string}>,
  *   tab?: string, q?: string, sort?: string, scope?: string, source?: string, asset?: string, form?: string, region?: string,
- *   limit?: number, now?: number}} [opts]
+ *   allSources?: boolean, limit?: number, now?: number}} [opts]
  *   `venues` the page's venues (venuesOf), `here` the venues read's rows; `tab`, `q`, `sort` and `limit` the question both
  *   halves were asked (the order and the cut of `items`; no limit: the longer half's length); `source` a comma list, which with
- *   `asset`, `form` or `region` (the class path) keeps lines; `now` the clock `closing` sorts by
+ *   `asset`, `form` or `region` (the class path) keeps lines (`allSources`: its public lines alone); `now` the clock `closing` sorts by
  * @returns {object|null} an explore body as the views read it ({ok:true, items, movers, closing, mostTraded, tabs, missing,
  *   notes, asOf, china?, stale?}); null when neither half answers */
-export function joinExplore(market, connected, { venues = [], here = [], tab = '', q = '', sort = '', scope = '', source = '', asset = '', form = '', region = '', limit, now = Date.now() } = {}) {
+export function joinExplore(market, connected, { venues = [], here = [], tab = '', q = '', sort = '', scope = '', source = '', asset = '', form = '', region = '', allSources = false, limit, now = Date.now() } = {}) {
   const m = halfOf(market, false);
   const c = halfOf(connected, true);
   if (!m && !c) return null;
@@ -150,7 +151,7 @@ export function joinExplore(market, connected, { venues = [], here = [], tab = '
   const byClass = Boolean(str(asset) || str(form) || str(region));
   const ids = str(source).split(',').map(s => s.trim()).filter(Boolean);
   const listed = !scope && ids.length > 0 && (byClass || ids.length > 1);
-  const inList = l => ids.includes(str(l.venue)) || (l.public !== true && ids.includes(str(l.publicSource)));
+  const inList = l => ids.includes(str(l.venue)) || (l.public !== true && (allSources === true || ids.includes(str(l.publicSource))));
   const scopedRows = body => new Map([...byKey(body)].flatMap(([key, row]) => {
     const kept = scoped ? withLines(row, l => inScope(row, l)) : listed ? withLines(row, inList) : row;
     return kept ? [[key, kept]] : [];

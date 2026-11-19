@@ -5,7 +5,9 @@
 // - a half that answers lands the join at once, beside the other's latest body;
 // - a half that failed (or answered no explore) waits for the other's answer to this ask: both failed is `failed`, with the
 //   market's sentence, the last rows kept; the other answering lands it alone;
-// - a new query for a kind, or the kind dropped, forgets what was kept: what is in the air for it lands nowhere.
+// - a new query for a kind, or the kind dropped, forgets what was kept: what is in the air for it lands nowhere;
+// - the connected half takes the same query unless the ask names its own (`connectedQuery`: Markets' All sources asks the
+//   account by class with no source list, spec 2026-11-19 §5.2), and `join` adds to what the join is told (`allSources`).
 // The host owns the flights (`fly`, `drop`, `kinds`: its one-flight-per-kind table); this owns the halves. No DOM.
 import { venuesOf } from './account-view.js';
 import { joinExplore } from './explore-join.js';
@@ -44,8 +46,8 @@ export function orderOf(query) {
  *   now?: () => number, onMarket?: (body: any) => void}} deps `onMarket` is told every market half that answers
  */
 export function exploreHalves({ store, fly, drop, kinds, now = Date.now, onMarket = () => {} }) {
-  const halves = new Map();   // kind → { query, market, connected, said, landed: { market, connected } }
-  const joinOf = kept => joinExplore(kept.market, kept.connected, { ...joinOptsOf(store.get()), ...orderOf(kept.query), now: now() });
+  const halves = new Map();   // kind → { query, connectedQuery, join, market, connected, said, landed: { market, connected } }
+  const joinOf = kept => joinExplore(kept.market, kept.connected, { ...joinOptsOf(store.get()), ...orderOf(kept.query), ...kept.join, now: now() });
 
   /** The kind's two halves dropped: what is in the air lands nowhere, and what was kept goes. */
   function forget(kind) {
@@ -53,10 +55,11 @@ export function exploreHalves({ store, fly, drop, kinds, now = Date.now, onMarke
     drop(`${kind}:account`);
     halves.delete(kind);
   }
-  /** Ask `query` of both halves for `kind`; `land(join, kept)` on every landing that has rows, `failed(sentence)` when both failed. */
-  function read(kind, query, { land, failed, loading = null }) {
-    if (halves.has(kind) && halves.get(kind).query !== query) forget(kind);
-    const kept = halves.get(kind) ?? { query, market: undefined, connected: undefined, said: null, landed: { market: true, connected: true } };
+  /** Ask `query` of both halves for `kind` (the connected half `connectedQuery` when given); `land(join, kept)` on every landing
+   *  that has rows, `failed(sentence)` when both failed. */
+  function read(kind, query, { land, failed, loading = null, connectedQuery = query, join = {} }) {
+    if (halves.has(kind) && (halves.get(kind).query !== query || halves.get(kind).connectedQuery !== connectedQuery)) forget(kind);
+    const kept = halves.get(kind) ?? { query, connectedQuery, join, market: undefined, connected: undefined, said: null, landed: { market: true, connected: true } };
     halves.set(kind, kept);
     const ask = (half, flight, path) => {
       const k = kinds.get(flight);
@@ -76,7 +79,7 @@ export function exploreHalves({ store, fly, drop, kinds, now = Date.now, onMarke
       else if (kept.market === null && kept.connected === null) failed(kept.said);
     };
     fly(`${kind}:market`, ask('market', `${kind}:market`, `${MARKET_EXPLORE}?${query}`), landHalf('market'), loading);
-    fly(`${kind}:account`, ask('connected', `${kind}:account`, `${CONNECTED_EXPLORE}?${query}`), landHalf('connected'));
+    fly(`${kind}:account`, ask('connected', `${kind}:account`, `${CONNECTED_EXPLORE}?${connectedQuery}`), landHalf('connected'));
   }
   return {
     read,

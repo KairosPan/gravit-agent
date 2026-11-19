@@ -328,6 +328,18 @@ test('a connected line is kept when its venue or its publicSource is listed', ()
   assert.equal(joined.items.some(i => i.key === 'coin:ETH'), false, 'a connected row left with no line goes');
 });
 
+test('under All sources the list rules the public lines alone: every connected line of the class stays', () => {
+  const market = body([row('coin:BTC', [pub('hyperliquid', 'BTC-PERP', 'live:hyperliquid'), pub('okx-preipo', 'BTC-PERP', 'live:okx')])]);
+  const connected = body([row('coin:BTC', [con('my-broker', 'BTC/USD')]), row('coin:ETH', [con('my-broker', 'ETH/USD', { publicSource: 'somewhere' })])]);
+  const all = joinExplore(market, connected, { asset: 'crypto', source: 'hyperliquid,coinbase', allSources: true });
+  assert.deepEqual(linesOf(all, 'coin:BTC'), ['my-broker|BTC/USD', 'hyperliquid|BTC-PERP'], 'a public line outside the list goes; the connected one stays');
+  assert.deepEqual(linesOf(all, 'coin:ETH'), ['my-broker|ETH/USD'], 'venue and publicSource outside the list, kept');
+  // Main (no allSources): the same connected lines go
+  const main = joinExplore(market, connected, { asset: 'crypto', source: 'hyperliquid' });
+  assert.deepEqual(linesOf(main, 'coin:BTC'), ['hyperliquid|BTC-PERP']);
+  assert.equal(main.items.some(i => i.key === 'coin:ETH'), false);
+});
+
 test('no source keeps every line, connected and public', () => {
   const market = body([row('coin:BTC', [pub('okx', 'BTC/USDT', 'live:exchange:okx'), pub('kraken', 'BTC/USD', 'live:exchange:kraken')])]);
   const connected = body([row('coin:BTC', [con('paper-1', 'BTC/USDT', { paper: true })]), row('coin:ETH', [con('okx-1', 'ETH/USDT')])]);

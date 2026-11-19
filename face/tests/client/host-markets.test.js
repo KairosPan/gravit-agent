@@ -1844,6 +1844,29 @@ test('Stocks › China A asks the rank, the market alone', async () => {
   r.markets.close();
 });
 
+test('All sources asks the connected half by class alone and keeps its lines; Main asks it the list and drops them', async () => {
+  const market = { ...NO_CONNECTED(), items: [{ key: 'perp:BTC', kind: 'perp', base: 'BTC', name: 'BTC perp', price: 100, volumeUsd24h: 1e8, tabs: ['all'],
+    at: [{ venue: 'hyperliquid', venueName: 'Hyperliquid', symbol: 'BTC-PERP', public: true, connected: false, price: 100 }] }] };
+  const connected = { ...NO_CONNECTED(), items: [{ key: 'coin:BTC', kind: 'coin', base: 'BTC', name: 'BTC', price: 100, volumeUsd24h: 1e6, tabs: ['all'],
+    at: [{ venue: 'my-broker', venueName: 'My broker', symbol: 'BTC/USD', public: false, connected: true, canTrade: true, price: 100 }] }] };
+  const r = rig({ tab: 'crypto', answer: path => (path.startsWith('/data/market/explore?asset=') ? market
+    : path.startsWith('/data/account/connected/explore?asset=') ? connected : undefined) });
+  r.markets.show(true);
+  await settle();
+  assert.ok(r.allReads.includes(CONNECTED_CRYPTO), 'Main: the connected half asked the main list');
+  assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id), ['perp:BTC'], "Main: a connected line outside the list goes");
+  r.store.dispatch('setMarketsSource', 'all');
+  await settle();
+  const asked = r.allReads.filter(p => p.startsWith('/data/account/connected/explore?') && query(p).source === undefined);
+  assert.deepEqual(asked, ['/data/account/connected/explore?asset=crypto&sort=volume&limit=200'], 'All: no source for the connected half');
+  assert.equal(query(r.reads.at(-1)).source, 'hyperliquid,coinbase,kraken,okx,binance,bybit,kalshi,polymarket', 'the market half the full list');
+  assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id).sort(), ['coin:BTC', 'perp:BTC'], 'All: the connected line kept, venue and publicSource outside the list');
+  // the Watchlist's read is one query for both halves, as before
+  r.store.dispatch('setMarketsTab', 'watchlist');
+  assert.deepEqual(r.allReads.slice(-2), [ALL, CONNECTED_ALL]);
+  r.markets.close();
+});
+
 test('a search asks q with no tab and no filter', async () => {
   const r = rig({ tab: 'indices' });
   r.store.dispatch('setMarketsForm', 'perp');

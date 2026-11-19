@@ -22,7 +22,7 @@ import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, chinaPairOf, rankOf, cnQuoteOf, cnHitsOf } from '../wire/china.js';
-import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, rankQueryOf, onChinaA } from './market-view.js';
+import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, connectedQueryOf, rankQueryOf, onChinaA } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
 import { venuesOf } from './account-view.js';
@@ -143,7 +143,10 @@ export function startMarkets({
     const read = exploreOf(store.get().markets);
     if (!read) return;
     const { tab, query } = read;
+    // All sources: the connected half by class alone, every connected line of it kept (spec §5.2)
+    const connectedQuery = connectedQueryOf(store.get().markets);
     halves.read(`explore:${tab}`, query, {
+      connectedQuery, join: connectedQuery !== query ? { allSources: true } : {},
       land: data => { store.dispatch('exploreLoaded', { tab, data, at: now(), query }); if (tab === 'watchlist') locateMissing(); },
       failed: message => store.dispatch('exploreFailed', { tab, at: now(), message, query }),
       loading: ['exploreLoading', { tab }],

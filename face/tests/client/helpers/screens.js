@@ -85,7 +85,8 @@ const lunhuiStates = (s, ui = {}) => ({ ...s, lunhui: { views: { 'cn-market/load
 
 const asset = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), name: id.slice(id.indexOf(':') + 1), exchange: 'NASDAQ', currency: id.startsWith('cn:') ? 'CNY' : 'USD', ...over });
 const quote = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), price: 10, prev_close: 9, change: 1, change_pct: 1.5, volume: 1000, as_of: '2026-10-19T14:30:00Z', received_at: null, volume_as_of: null, source: 'Alpaca', feed: 'iex', basis: 'previous_close', quote_status: 'live', market_status: 'closed', message: '', ...over });
-// a tab's read landed for the query the screen asks (market-view.js exploreQueryOf): drawn under these filters
+// a tab's read landed for the query the screen asks (market-view.js exploreQueryOf): drawn under these filters; on the
+// Watchlist (Markets' first tab) its unscoped read, `limit=200`
 const exploreFor = (s, data) => R.exploreLoaded(s, { tab: s.markets.tab, data, at: NOW, query: exploreQueryOf(s.markets) });
 
 // Markets over the stand-in's answers (tests/fixtures/account/): the empty Watchlist it opens on; Crypto on All sources with the
@@ -726,7 +727,7 @@ function marketEventWindow() {
     candles.push({ t, o, h, l, c, v });
   }
   const route = { screen: 'markets', id: 'stock:WYNN', event: { at: '2018-01-26', view: EVENT_VIEW_ID, case: 'ev-WYNN-2018-01-26' } };
-  let s = R.exploreLoaded(R.setMarketsScope(R.nav(emptyState(), route), 'more'), { tab: 'all', data: all, at: NOW });
+  let s = exploreFor(R.nav(emptyState(), route), all);
   s = R.statementLoaded(R.holdingsLoaded(R.accountLoaded(s, { data: fx('account'), at: NOW }), { data: fx('holdings'), at: NOW }), { data: fx('statement'), at: NOW });
   s = R.eventBarsLoaded(s, { key: 'stock:WYNN@2018-01-26', at: NOW,
     data: { ok: true, candles, source: 'Nasdaq · WYNN', adjustment: 'split-adjusted, not dividend-adjusted', more: true } });
@@ -1054,7 +1055,7 @@ function laterStates() {
   const move = sheets[kinds.indexOf('move')];
   const prepared = R.sheetPrepared(move, { prepared: { ok: true, action: { type: 'liveMove', kind: 'transfer', from: 'ex', to: 'agent-claude-code', toAddress: '0xcd' }, shown: [{ name: 'Move', value: '10 USDC' }] }, at: NOW, asked: askedOf(move.sheet), deadline: NOW + 125_000 });
   // a market page's book, latest trades and funding: read, failed; a perpetual's funding with what it could not read
-  const on = R.nav(R.statementLoaded(R.holdingsLoaded(R.accountLoaded(R.exploreLoaded(R.nav(emptyState(), { screen: 'markets', id: null }), { tab: 'all', data: fx('explore-all'), at: NOW }), { data: page, at: NOW }), { data: fx('holdings'), at: NOW }), { data: fx('statement'), at: NOW }), { screen: 'markets', id: 'coin:BTC' });
+  const on = R.nav(R.statementLoaded(R.holdingsLoaded(R.accountLoaded(exploreFor(R.nav(emptyState(), { screen: 'markets', id: null }), fx('explore-all')), { data: page, at: NOW }), { data: fx('holdings'), at: NOW }), { data: fx('statement'), at: NOW }), { screen: 'markets', id: 'coin:BTC' });
   const depth = (s, id, part, data) => R.depthLoaded(s, { id, part, data, at: NOW });
   const book = depth(depth(on, 'coin:BTC', 'book', fx('book')), 'coin:BTC', 'trades', fx('trades'));
   const perp = R.nav(on, { screen: 'markets', id: 'perp:BTC' });
@@ -1066,7 +1067,7 @@ function laterStates() {
     book, R.depthFailed(R.depthFailed(on, { id: 'coin:BTC', part: 'book', at: NOW, message: 'the account layer is not mounted' }), { id: 'coin:BTC', part: 'trades', at: NOW }),
     depth(perp, 'perp:BTC', 'funding', funding), depth(perp, 'perp:BTC', 'funding', { ok: true, lines: [], missing: [] }), R.depthFailed(perp, { id: 'perp:BTC', part: 'funding', at: NOW }),
   ];
-  const marketsOn = R.exploreLoaded(R.nav(emptyState(), { screen: 'markets', id: null }), { tab: 'all', data: fx('explore-all'), at: NOW });
+  const marketsOn = exploreFor(R.nav(emptyState(), { screen: 'markets', id: null }), fx('explore-all'));
   const watch = ['read', 'unsaved'].map(error => R.watchlistLoaded(marketsOn, { items: [], error }));
   // Settings' sizes and fonts (plan 6 Task 13): both sizes at their tops, both at their bottoms, a family in each box
   const prefs = (s, kv) => Object.entries(kv).reduce((acc, [name, value]) => R.setPref(acc, { name, value }), s);
