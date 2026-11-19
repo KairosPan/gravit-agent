@@ -27,11 +27,16 @@ export function joinOptsOf(state) {
   return { venues: venuesOf(a?.data), here: isRecord(here) && Array.isArray(here.venues) ? here.venues.filter(isRecord) : [] };
 }
 
-/** The question a query asks, as the join orders and cuts by it: its tab, search, sort and limit. */
+/** The question a query asks, as the join orders, cuts and keeps lines by it: its tab, search, sort, scope, source (a comma
+ * list as it was sent), asset, form, region and limit. */
 export function orderOf(query) {
   const p = new URLSearchParams(query);
   const limit = Number(p.get('limit'));
-  return { tab: p.get('tab') ?? '', q: p.get('q') ?? '', sort: p.get('sort') ?? '', scope: p.get('scope') ?? '', source: p.get('source') ?? '', ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}) };
+  const of = name => p.get(name) ?? '';
+  return {
+    tab: of('tab'), q: of('q'), sort: of('sort'), scope: of('scope'), source: of('source'), asset: of('asset'), form: of('form'), region: of('region'),
+    ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
+  };
 }
 
 /** The halves of a host's explore reads.

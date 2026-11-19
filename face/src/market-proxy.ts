@@ -31,9 +31,10 @@ type MarketReadName = typeof READ_NAMES[number];
 const LONG_VALUES: Readonly<Partial<Record<MarketReadName, ReadonlyMap<string, number>>>> = { quotes: new Map([["pairs", 2_000]]) };
 
 /** The whitelist: read → allowed query names (`explore`'s `sort` is China's ranking's too, `volume` or `movers`,
- * beside its `tab=china`); a value is at most 240 characters (`quotes`' `pairs` 2 000), each name at most once. */
+ * beside its `tab=china`; its `asset`, `form` and `region` ask by underlying, its `source` then a comma list, each
+ * judged by the market); a value is at most 240 characters (`quotes`' `pairs` 2 000), each name at most once. */
 export const MARKET_QUERY: Readonly<Record<MarketReadName, readonly string[]>> = {
-  explore: ["tab", "q", "key", "sort", "limit", "scope", "source"],
+  explore: ["tab", "q", "key", "sort", "limit", "scope", "source", "asset", "form", "region"],
   quotes: ["pairs"],
   candles: ["venue", "symbol", "interval", "range", "before", "since", "limit"],
   book: ["venue", "symbol", "depth"],

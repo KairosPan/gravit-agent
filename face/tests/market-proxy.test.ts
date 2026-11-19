@@ -79,7 +79,7 @@ test("mounts eight routes under /data/market and nothing else", () => {
   }
   /* the market's own tables, the values the account's public reads had before plan A2's Task 7 removed them */
   assert.deepEqual(MARKET_QUERY, {
-    explore: ["tab", "q", "key", "sort", "limit", "scope", "source"], quotes: ["pairs"], candles: ["venue", "symbol", "interval", "range", "before", "since", "limit"],
+    explore: ["tab", "q", "key", "sort", "limit", "scope", "source", "asset", "form", "region"], quotes: ["pairs"], candles: ["venue", "symbol", "interval", "range", "before", "since", "limit"],
     book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"], sources: [],
   });
   assert.deepEqual(MARKET_TTL_MS, { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000, sources: 30_000 });
@@ -268,6 +268,30 @@ test("the source directory and source filters reach their upstreams without mixi
     assert.equal(upstream.seen.length, 5);
     await call(routes, "/data/market/explore?scope=more&source=okx&tab=rwas&limit=200");
     assert.equal(upstream.seen.length, 5, "the OKX answer is cached separately from Robinhood's");
+  } finally {
+    market.dispose(); account.dispose(); await upstream.close();
+  }
+});
+
+test("forwards asset, form and region on explore", async () => {
+  const upstream = await stub((_q, res) => json(res, 200, { ok: true, items: [] }));
+  const { routes, registrar } = register();
+  const market = registerMarketProxy(registrar, { url: upstream.url });
+  const account = registerAccountProxy(registrar, { url: upstream.url });
+  try {
+    const want = { asset: "crypto", form: "perp", region: "us", source: "kalshi,polymarket" };
+    for (const [base, path] of [["/data/market/explore", "/api/explore"], ["/data/account/connected/explore", "/api/account/connected/explore"]] as const) {
+      const before = upstream.seen.length;
+      const answer = await call(routes, `${base}?asset=crypto&form=perp&region=us&source=kalshi%2Cpolymarket`);
+      assert.equal(answer.status, 200, base);
+      assert.equal(upstream.seen.length, before + 1, `${base} asked its upstream once`);
+      const seen = new URL(upstream.seen.at(-1)!.path, "http://x");
+      assert.equal(seen.pathname, path);
+      /* the values compared decoded: a comma may arrive as %2C */
+      assert.deepEqual(Object.fromEntries(seen.searchParams), want, `${base} passes the four unchanged`);
+      assert.equal((await call(routes, `${base}?asset=crypto&asset=stocks`)).status, 400, `${base}: a second asset`);
+      assert.equal(upstream.seen.length, before + 1, `${base}: the refused read never reaches the upstream`);
+    }
   } finally {
     market.dispose(); account.dispose(); await upstream.close();
   }

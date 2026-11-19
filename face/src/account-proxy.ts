@@ -218,8 +218,9 @@ export const CALLBACK_UNREACHABLE = "The Account did not answer. Go back to grav
 /** Most queries kept per route; the least recently used leaves first. */
 export const ACCOUNT_CACHE_KEYS = UPSTREAM_CACHE_KEYS;
 
-/** The whitelist: route → allowed query names; a value is at most 240 characters (`connectedQuotes`' `pairs` 2 000),
- * each name at most once. */
+/** The whitelist: route → allowed query names (`connectedExplore`'s `asset`, `form` and `region` ask by underlying,
+ * its `source` then a comma list, each judged by the Account); a value is at most 240 characters
+ * (`connectedQuotes`' `pairs` 2 000), each name at most once. */
 export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   account: ["fresh"],
   market: ["venue", "symbol"],
@@ -239,7 +240,7 @@ export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   earn: ["venue", "asset", "fresh"],
   sellable: ["fresh"],
   signinStatus: ["state"],
-  connectedExplore: ["tab", "q", "key", "sort", "limit", "scope", "source"],
+  connectedExplore: ["tab", "q", "key", "sort", "limit", "scope", "source", "asset", "form", "region"],
   connectedQuotes: ["pairs"],
   connectedCandles: ["venue", "symbol", "interval", "range", "before", "limit"],
   connectedBook: ["venue", "symbol", "depth"],

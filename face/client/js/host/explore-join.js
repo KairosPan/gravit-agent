@@ -6,6 +6,9 @@
 //   where the venues read says its connection does not serve here (`not-served`, `closed`, `close-only`); a row left with no
 //   lines goes. The focused Hyperliquid and xyz scopes keep the latter as read-only public data, without a connect-to-trade
 //   route; an explicitly selected More provider does the same. Broad More and unscoped reads retain the original contract.
+// - By underlying (asset, form or region asked, or two sources or more, with no scope), a source list keeps the lines of its
+//   sources only: a public line by its venue id, a connected one by its venue id or the public source it prices from
+//   (`publicSource`); a row left with no lines goes. No source keeps every line; one source on the old params changes nothing.
 // - A row both halves list carries the connected lines that are not paper, then the market's kept lines, then the paper ones; the
 //   row's own fields are lent by the market where the connected row is paper or trades less, else by the connected row, the
 //   other filling what the lender lacks.
@@ -34,6 +37,10 @@ const volumeOf = i => fin(i.eventVolumeUsd24h) ?? fin(i.volumeUsd24h) ?? fin(i.c
 const byVolume = (a, b) => volumeOf(b) - volumeOf(a);
 const moveOf = i => (fin(i.changePct24h) !== undefined ? Math.abs(i.changePct24h) : -1);
 const byMove = (a, b) => moveOf(b) - moveOf(a) || byVolume(a, b);
+// by underlying (asset, form or region asked): an event's move is the size of its 24-hour change in cents, a dollar row's its
+// percent (explore.ts moveOf, byClassMove), for `items` only
+const classMoveOf = i => (i.kind !== 'event' ? moveOf(i) : fin(i.change24h) !== undefined ? Math.abs(i.change24h) * 100 : -1);
+const byClassMove = (a, b) => classMoveOf(b) - classMoveOf(a) || byVolume(a, b);
 const closeMs = i => (typeof i.closeTime === 'string' ? Date.parse(i.closeTime) : NaN);
 const byClose = now => {
   const at = i => { const ms = closeMs(i); return ms > now ? ms : Number.POSITIVE_INFINITY; };
@@ -113,12 +120,14 @@ function joinRow(m, c) {
  * @param {object|null|undefined} market the market's body; null for a half that failed, undefined for one not landed yet
  * @param {object|null|undefined} connected the account's connected body, the same way; `stale: true` is down
  * @param {{venues?: Array<{connector?: string, paper?: boolean}>, here?: Array<{connector?: string, verdict?: string}>,
- *   tab?: string, q?: string, sort?: string, scope?: string, source?: string, limit?: number, now?: number}} [opts]
+ *   tab?: string, q?: string, sort?: string, scope?: string, source?: string, asset?: string, form?: string, region?: string,
+ *   limit?: number, now?: number}} [opts]
  *   `venues` the page's venues (venuesOf), `here` the venues read's rows; `tab`, `q`, `sort` and `limit` the question both
- *   halves were asked (the order and the cut of `items`; no limit: the longer half's length); `now` the clock `closing` sorts by
+ *   halves were asked (the order and the cut of `items`; no limit: the longer half's length); `source` a comma list, which with
+ *   `asset`, `form` or `region` (the class path) keeps lines; `now` the clock `closing` sorts by
  * @returns {object|null} an explore body as the views read it ({ok:true, items, movers, closing, mostTraded, tabs, missing,
  *   notes, asOf, china?, stale?}); null when neither half answers */
-export function joinExplore(market, connected, { venues = [], here = [], tab = '', q = '', sort = '', scope = '', source = '', limit, now = Date.now() } = {}) {
+export function joinExplore(market, connected, { venues = [], here = [], tab = '', q = '', sort = '', scope = '', source = '', asset = '', form = '', region = '', limit, now = Date.now() } = {}) {
   const m = halfOf(market, false);
   const c = halfOf(connected, true);
   if (!m && !c) return null;
@@ -137,8 +146,13 @@ export function joinExplore(market, connected, { venues = [], here = [], tab = '
     const origin = row.kind === 'perp' ? marketOriginOf({ ...line, connector: connectorOf(line) }) : null;
     return scope === 'more' ? origin === null : origin === scope;
   };
+  // the class path (by underlying): a source list keeps its sources' lines; a scope keeps the rule above
+  const byClass = Boolean(str(asset) || str(form) || str(region));
+  const ids = str(source).split(',').map(s => s.trim()).filter(Boolean);
+  const listed = !scope && ids.length > 0 && (byClass || ids.length > 1);
+  const inList = l => ids.includes(str(l.venue)) || (l.public !== true && ids.includes(str(l.publicSource)));
   const scopedRows = body => new Map([...byKey(body)].flatMap(([key, row]) => {
-    const kept = scoped ? withLines(row, l => inScope(row, l)) : row;
+    const kept = scoped ? withLines(row, l => inScope(row, l)) : listed ? withLines(row, inList) : row;
     return kept ? [[key, kept]] : [];
   }));
   const mRows = scopedRows(m), cRows = scopedRows(c);
@@ -179,7 +193,7 @@ export function joinExplore(market, connected, { venues = [], here = [], tab = '
     const query = str(q).trim().toLowerCase();
     // the Predictions tab with no sort and no search keeps the market's curated order, the account's own rows after it
     const curated = tab === 'predictions' && !sort && !query;
-    const sorted = curated ? rows : [...rows].sort(sort === 'movers' ? byMove : sort === 'closing' ? byClose(now) : byVolume);
+    const sorted = curated ? rows : [...rows].sort(sort === 'movers' ? (byClass ? byClassMove : byMove) : sort === 'closing' ? byClose(now) : byVolume);
     const named = i => str(i.base || i.name).toLowerCase() === query;
     const ordered = query ? [...sorted.filter(named), ...sorted.filter(i => !named(i))] : sorted;
     const n = typeof limit === 'number' && Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : longer('items');

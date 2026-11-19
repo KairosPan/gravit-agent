@@ -295,3 +295,58 @@ test('More keeps excluding an unavailable public market', () => {
   const market = body([row('coin:BTC', [pub('kraken', 'BTC/USD', 'live:exchange:kraken')])]);
   assert.deepEqual(keys(joinExplore(market, body([]), { scope: 'more', here: [{ connector: 'live:exchange:kraken', verdict: 'not-served' }] })), []);
 });
+
+// By underlying (markets-by-underlying Task 5): a source list on the class path (asset, form or region asked, or two sources
+// or more) keeps each half's lines of the listed sources only; the old params keep the join as it was.
+test('a source list keeps the public lines of its sources only', () => {
+  const market = body([
+    row('event:A', [pub('kalshi', 'A-YES', 'live:kalshi'), pub('polymarket-us', 'A-YES', 'live:polymarket-us')], { kind: 'event' }),
+    row('event:B', [pub('polymarket-us', 'B-YES', 'live:polymarket-us')], { kind: 'event' }),
+    row('event:C', [pub('polymarket', 'C-YES', 'live:polymarket')], { kind: 'event' }),
+  ]);
+  const joined = joinExplore(market, body([]), { asset: 'predictions', source: 'kalshi,polymarket' });
+  assert.deepEqual(keys(joined), ['event:A', 'event:C'], 'a row whose only line was polymarket-us goes');
+  assert.deepEqual(linesOf(joined, 'event:A'), ['kalshi|A-YES'], "polymarket-us's public line is dropped");
+  // two sources with no class are the class path too
+  assert.deepEqual(keys(joinExplore(market, body([]), { source: 'kalshi,polymarket' })), ['event:A', 'event:C']);
+  // one source on the old params (no scope) keeps the join as it was: every line
+  assert.deepEqual(keys(joinExplore(market, body([]), { source: 'kalshi' })), ['event:A', 'event:B', 'event:C']);
+});
+
+test('a connected line is kept when its venue or its publicSource is listed', () => {
+  const market = body([row('coin:BTC', [pub('kalshi', 'BTC-YES', 'live:kalshi')])]);
+  const connected = body([
+    row('coin:BTC', [con('paper-1', 'BTC/USDT', { paper: true, publicSource: 'kalshi' }), con('okx-1', 'BTC/USDT')]),
+    row('coin:ETH', [con('okx-1', 'ETH/USDT')]),
+    row('coin:SOL', [con('kalshi', 'SOL/USD')]),
+  ]);
+  const joined = joinExplore(market, connected, { form: 'perp', source: 'kalshi,polymarket' });
+  assert.deepEqual(linesOf(joined, 'coin:BTC'), ['kalshi|BTC-YES', 'paper-1|BTC/USDT'], 'the paper line stays by its publicSource, okx-1 goes');
+  assert.deepEqual(linesOf(joined, 'coin:SOL'), ['kalshi|SOL/USD'], 'a connected line stays by its own venue id');
+  assert.equal(joined.items.some(i => i.key === 'coin:ETH'), false, 'a connected row left with no line goes');
+});
+
+test('no source keeps every line, connected and public', () => {
+  const market = body([row('coin:BTC', [pub('okx', 'BTC/USDT', 'live:exchange:okx'), pub('kraken', 'BTC/USD', 'live:exchange:kraken')])]);
+  const connected = body([row('coin:BTC', [con('paper-1', 'BTC/USDT', { paper: true })]), row('coin:ETH', [con('okx-1', 'ETH/USDT')])]);
+  const joined = joinExplore(market, connected, { asset: 'crypto', source: '' });
+  assert.deepEqual(keys(joined), ['coin:BTC', 'coin:ETH']);
+  assert.deepEqual(linesOf(joined, 'coin:BTC'), ['okx|BTC/USDT', 'kraken|BTC/USD', 'paper-1|BTC/USDT']);
+  assert.deepEqual(linesOf(joined, 'coin:ETH'), ['okx-1|ETH/USDT']);
+});
+
+test('Biggest moves orders events by the size of their cent change', () => {
+  const ev = (key, change24h, volumeUsd24h) => row(key, [pub('kalshi', `${key}-YES`, 'live:kalshi')], { kind: 'event', change24h, volumeUsd24h, tabs: ['all', 'predictions'] });
+  const market = body([ev('event:small', 0.01, 3_000), ev('event:up', 0.05, 2_000), ev('event:down', -0.09, 1_000)]);
+  const joined = joinExplore(market, body([]), { asset: 'predictions', sort: 'movers', source: 'kalshi' });
+  assert.deepEqual(keys(joined), ['event:down', 'event:up', 'event:small']);
+  // the old params order as before: an event has no percent move, so the busiest first
+  assert.deepEqual(keys(joinExplore(market, body([]), { tab: 'predictions', sort: 'movers' })), ['event:small', 'event:up', 'event:down']);
+});
+
+test('a query carries its asset, form, region and raw source list to the join', async () => {
+  const { orderOf } = await import('../../client/js/host/explore-halves.js');
+  assert.deepEqual(orderOf('asset=crypto&form=perp&region=us&source=kalshi%2Cpolymarket&sort=movers&limit=50'),
+    { tab: '', q: '', sort: 'movers', scope: '', source: 'kalshi,polymarket', asset: 'crypto', form: 'perp', region: 'us', limit: 50 });
+  assert.deepEqual(orderOf('tab=crypto&limit=12'), { tab: 'crypto', q: '', sort: '', scope: '', source: '', asset: '', form: '', region: '', limit: 12 });
+});
