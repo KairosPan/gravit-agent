@@ -38,6 +38,13 @@ describe("cn-history", () => {
     expect(() => parseKline(kline("day", [bar("2026-10-30")]), "sh600519", "week")).toThrow();
   });
 
+  it("reads a share with no ex-rights history, whose bars Tencent sends under day", () => {
+    const body = '{"code":0,"data":{"sh688981":{"day":[["2026-11-17","100.00","101.50","102.00","99.50","12345"]],"qt":{},"prec":"100.00","version":"1"}}}';
+    expect(parseKline(body, "sh688981", "day")).toEqual([{ t: Date.parse("2026-11-17T15:00:00+08:00"), o: 100, h: 102, l: 99.5, c: 101.5 }]);
+    const both = JSON.stringify({ code: 0, data: { sh600519: { qfqday: [bar("2026-10-30")], day: [bar("2026-10-29")] } } });
+    expect(parseKline(both, "sh600519", "day")).toEqual([{ t: Date.parse("2026-10-30T15:00:00+08:00"), o: 1325.4, h: 1393.37, l: 1322.6, c: 1392.05 }]);
+  });
+
   it("each range asks Tencent for its own read", () => {
     const want: Record<ChinaRange, string> = {
       "1D": "https://web.ifzq.gtimg.cn/appstock/app/day/query?code=sh600519",

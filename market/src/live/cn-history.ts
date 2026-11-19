@@ -79,9 +79,12 @@ export function parseDayQuery(body: string, code: string): CnMinutes[] {
   return sessions;
 }
 
-/** Tencent's forward-adjusted bars (`qfq<interval>`: date, open, close, high, low, volume) to bars, oldest first. */
+/** Tencent's forward-adjusted bars (`qfq<interval>`: date, open, close, high, low, volume) to bars, oldest first.
+ *  A share with no ex-rights event (688981, 920xxx) comes back under the bare `<interval>` key instead; with no
+ *  adjustment to make the two series are the same, so it is read as forward-adjusted too. */
 export function parseKline(body: string, code: string, interval: Interval): CnBar[] {
-  const rows = nodeOf(body, code)[`qfq${interval}`];
+  const node = nodeOf(body, code);
+  const rows = node[`qfq${interval}`] ?? node[interval];
   if (!Array.isArray(rows)) throw new Error("invalid history");
   const bars: CnBar[] = [];
   for (const row of rows) {
