@@ -30,6 +30,7 @@ import { t, said } from '../../../client/js/i18n/words.js';
 import { listings, modulesListing } from './inventory.js';
 import { setMarkdown } from '../../../client/js/render/thread.js';
 import { reducers as R } from '../../../client/js/reducers/index.js';
+import { exploreQueryOf } from '../../../client/js/host/market-view.js';
 import { emptyState } from '../../../client/js/data/empty.js';
 import { MIN } from '../../../client/js/time.js';
 import { VIEW_1027 } from './lunhui-view.js';
@@ -84,20 +85,24 @@ const lunhuiStates = (s, ui = {}) => ({ ...s, lunhui: { views: { 'cn-market/load
 
 const asset = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), name: id.slice(id.indexOf(':') + 1), exchange: 'NASDAQ', currency: id.startsWith('cn:') ? 'CNY' : 'USD', ...over });
 const quote = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), symbol: id.slice(id.indexOf(':') + 1), price: 10, prev_close: 9, change: 1, change_pct: 1.5, volume: 1000, as_of: '2026-10-19T14:30:00Z', received_at: null, volume_as_of: null, source: 'Alpaca', feed: 'iex', basis: 'previous_close', quote_status: 'live', market_status: 'closed', message: '', ...over });
-// Markets over the stand-in's answers (tests/fixtures/account/): before a read; the Account's rows with an A share, a star the
-// Account could not find, a quote in view and events (one past its end); a kind's tab; Watching with a placeholder; Closing
-// soonest; searching (its hits, on its way, refused); the face's wire polling; a full watchlist; a market's page with its history,
-// its venues, what is held, working and stated, and a conversation naming it; an event's page with its outcomes; a page reading
-// its history; an A share's page; a key no read lists
+// a tab's read landed for the query the screen asks (market-view.js exploreQueryOf): drawn under these filters
+const exploreFor = (s, data) => R.exploreLoaded(s, { tab: s.markets.tab, data, at: NOW, query: exploreQueryOf(s.markets) });
+
+// Markets over the stand-in's answers (tests/fixtures/account/): the empty Watchlist it opens on; Crypto on All sources with the
+// Account's rows and events (one past its end), an A share and a star the Account could not find on the Watchlist, a quote in
+// view; another tab before its read; the Watchlist with a placeholder; Closing soonest; searching (its hits, on its way,
+// refused); the face's wire polling; a full watchlist; a market's page with its history, its venues, what is held, working and
+// stated, and a conversation naming it; an event's page with its outcomes; a page reading its history; an A share's page; a key
+// no read lists
 function marketStates() {
   const fx = name => JSON.parse(readFileSync(new URL(`../../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
-  const on = R.setMarketsScope(R.nav(emptyState(), { screen: 'markets', id: null }), 'more');
+  const on = R.nav(emptyState(), { screen: 'markets', id: null });
   const all = fx('explore-all');
   all.items.push(fx('explore-predictions').items[0], {
     key: 'pm:0xab', kind: 'event', name: 'Will it rain in Paris on Sunday?', price: 0.12, change24h: -0.01, volumeUsd24h: 18000, category: 'Climate',
     closeTime: '2026-10-20T00:00:00.000Z', pastEnd: true, tabs: ['all', 'predictions'], at: [],
   });
-  let read = R.exploreLoaded(on, { tab: 'all', data: all, at: NOW });
+  let read = exploreFor(R.setMarketsSource(R.setMarketsTab(on, 'crypto'), 'all'), all);
   read = R.watchlistLoaded(read, { items: [asset('cn:600519', { name: 'Kweichow Moutai', exchange: 'SH' }), asset('us:ZZZZ', { name: 'Zed Corp' })], error: null });
   read = R.askedOfAccount(read, { faceId: 'us:ZZZZ', key: null });
   read = R.quotesUpdated(read, { quotes: { 'cn:600519': quote('cn:600519', { change_pct: -1 }) }, providers: [], status: 'streaming' });
@@ -107,7 +112,7 @@ function marketStates() {
   const page = (id, s = read) => R.nav(withAccount(s), { screen: 'markets', id });
   const searching = q => R.setMarketsQuery(read, q);
   return [
-    on, read, R.setMarketsTab(read, 'stocks'), R.setMarketsTab(starred, 'watching'), R.setMarketsSort(read, 'closing'),
+    on, read, R.setMarketsTab(read, 'stocks'), R.setMarketsTab(starred, 'watchlist'), R.setMarketsSort(read, 'closing'),
     R.resultsLoaded(searching('fed'), { data: fx('explore-predictions'), at: NOW }), searching('zz'),
     R.resultsFailed(searching('zz'), { at: NOW, message: 'The account is busy' }),
     R.quotesUpdated(R.setMarketsTab(read, 'stocks'), { quotes: {}, providers: [], status: 'polling' }),
@@ -121,9 +126,9 @@ function marketStates() {
     // an A share's 5D history: the sessions on one grid, the previous close dashed, a hairline between sessions
     R.candlesLoaded(R.setRange(page('cn:600519'), { id: 'cn:600519', range: '5D' }), { id: 'cn:600519', range: '5D', at: NOW,
       data: { ok: true, range: '5D', sessions: ['2026-10-29', '2026-10-30'].map(date => ({ date, prec: 100, price: [100, 101, 102], amount: [1, 1, 1] })) } }),
-    // the desk (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab's two places, kept as Watching since it left Markets
+    // the desk (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab's two places, kept as the Watchlist since it left Markets
     // (desk-page plan 1 Task 5), before the desk's status and with it; a level's mark on its row and on its page
-    R.setMarketsTab(read, 'watching'), R.deskLoaded(R.setMarketsTab(read, 'watching'), { data: deskStatus(), at: NOW }),
+    R.setMarketsTab(read, 'watchlist'), R.deskLoaded(R.setMarketsTab(read, 'watchlist'), { data: deskStatus(), at: NOW }),
     R.deskLoaded(read, { data: deskStatus(), at: NOW }), R.deskLoaded(page('stock:NVDA'), { data: deskStatus(), at: NOW }),
   ];
 }
@@ -906,32 +911,34 @@ function sessionPageStates(base) {
   ];
 }
 
-// The two default source entries, with a local source badge on each contract. Appended so existing golden state names stay put.
+// The perps of the two Hyperliquid deployers, each a local source badge on its contract: Crypto on its main source
+// (Hyperliquid), Stocks on All sources (trade.xyz's). Appended so existing golden state names stay put.
 function focusedMarketStates() {
   return [
-    ['hyperliquid', 'hyperliquid', 'BTC', 'BTC-PERP', 'Bitcoin perpetual'],
-    ['xyz', 'trade-xyz', 'xyz:NVDA', 'xyz:NVDA-PERP', 'NVIDIA perpetual'],
+    ['hyperliquid', 'hyperliquid', 'BTC', 'BTC-PERP', 'Bitcoin perp'],
+    ['xyz', 'trade-xyz', 'xyz:NVDA', 'xyz:NVDA-PERP', 'NVIDIA perp'],
   ].map(([scope, venue, base, symbol, name]) => {
-    const s = R.nav(emptyState(), { screen: 'markets', id: null });
     const category = scope === 'xyz' ? 'stocks' : 'crypto';
+    const tab = R.setMarketsTab(R.nav(emptyState(), { screen: 'markets', id: null }), category);
+    const s = scope === 'xyz' ? R.setMarketsSource(tab, 'all') : tab;
     const row = { key: `perp:${base}`, kind: 'perp', name, base, price: 100, changePct24h: 1, volumeUsd24h: 1e6, tabs: ['all', 'perps', category],
+      asset: category, form: 'perp', ...(scope === 'xyz' ? { region: 'us' } : {}),
       at: [{ venue, symbol, venueName: scope === 'xyz' ? 'trade.xyz' : 'Hyperliquid', public: true, connected: false,
         connector: 'live:hyperliquid-trade', connectTo: 'hyperliquid-trade', price: 100 }] };
-    return R.exploreLoaded({ ...s, markets: { ...s.markets, scope } }, { tab: 'all', at: NOW,
-      data: { ok: true, items: [row], movers: [], closing: [], mostTraded: [], tabs: [{ id: 'all', count: 1 }, { id: category, count: 1 }], missing: [], notes: [] } });
+    return exploreFor(s, { ok: true, items: [row], movers: [], closing: [], mostTraded: [], tabs: [{ id: 'all', count: 1 }, { id: category, count: 1 }], missing: [], notes: [] });
   });
 }
 
-// The provider catalog is independent of the selected market, and More opens an exact source, not a connector group.
+// The registry names the Source dropdown's families; a family picked reads that venue alone (Stocks › Robinhood Stock Tokens).
 function providerMarketStates() {
   const s = focusedMarketStates()[0];
   const data = { ok: true, value: [{ id: 'okx', name: 'OKX' }, { id: 'robinhood-stock-tokens', name: 'Robinhood Stock Tokens', kind: 'tokens' },
     { id: 'okx-preipo', name: 'OKX' }, { id: 'hyperliquid-preipo', name: 'Hyperliquid' }] };
   const ready = R.marketSourcesLoaded(s, { data, at: NOW });
-  const picked = R.setMarketsLocation(ready, { scope: 'more', source: 'robinhood-stock-tokens' });
+  const picked = R.setMarketsSource(R.setMarketsTab(ready, 'stocks'), 'robinhood-stock-tokens');
   const item = { key: 'rwa:NVDA', kind: 'rwa', base: 'NVDA', name: 'NVIDIA', price: 100, tabs: ['all', 'rwas'],
     at: [{ venue: 'robinhood-stock-tokens', venueName: 'Robinhood Stock Tokens', symbol: 'NVDA', public: true, connected: false, price: 100 }] };
-  return [ready, R.exploreLoaded(picked, { tab: 'all', at: NOW, data: { ok: true, items: [item], tabs: [{ id: 'all', count: 1 }, { id: 'rwas', count: 1 }] } }),
+  return [ready, exploreFor(picked, { ok: true, items: [item], tabs: [{ id: 'all', count: 1 }, { id: 'rwas', count: 1 }] }),
     R.marketSourcesLoading(s), R.marketSourcesFailed(s, { at: NOW })];
 }
 

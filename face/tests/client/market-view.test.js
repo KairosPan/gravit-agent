@@ -8,10 +8,10 @@ import { readFileSync } from 'node:fs';
 import { boardOf } from '../../client/js/host/lunhui.js';
 import {
   canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, volumeWordOf, watchWord, mentionsOf,
-  accountTabs, accountSorts, ACCOUNT_TAB_IDS, ACCOUNT_SORT_IDS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
+  accountTabs, accountSorts, ACCOUNT_TAB_IDS, ACCOUNT_SORT_IDS, CANDLE_RANGES, isAccountKey, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
   pageOf, faceAssetOf, handWordsOf, watchedOf, watchKeysOf, setWatchOf,
   CHINA_TAB, cnBoardOf, cnTileOf, chinaRowsOf, chinaWord, cnStateWord, cnPageOf,
-  marketScopeOf, marketScopes, marketOriginOf,
+  marketOriginOf, exploreQueryOf, MARKET_TABS,
 } from '../../client/js/host/market-view.js';
 
 const CJK = /[㐀-鿿]/;
@@ -32,14 +32,24 @@ const quote = (id, over = {}) => ({
   change_pct: 11.11, volume: 1000, as_of: '2026-10-19T14:30:00Z', received_at: null, volume_as_of: null, source: 'Alpaca', feed: 'iex',
   basis: 'previous_close', quote_status: 'live', market_status: 'open', message: '', ...over,
 });
-// the markets slice: the face's own fields as today, and the Account's reads beside them (Task 10 builds it so) — `explore` by
-// tab: `all` is explore?limit=200, a kind's own explore?tab=<kind>&limit=200
-const markets = (over = {}) => ({
-  scope: 'more', tab: 'all', sort: 'volume', q: '', watchlist: [], watchError: null, quotes: {}, providers: [], connection: 'idle',
-  hitQuotes: {},
-  explore: {}, results: { status: 'idle', data: null, at: null },
-  accountQuotes: {}, candles: {}, compare: {}, watch: [], asked: {}, ...over,
-});
+// the markets slice: the face's own fields as today, and the reads beside them — `explore` by tab, each kept with the query
+// it was asked with (market-view.js exploreQueryOf). Here `explore.all` is the read of the tab on screen (Crypto on All sources
+// unless a test says another), kept with that tab's query: the rows drawn are a read's own, whatever the tab
+const markets = (over = {}) => {
+  const m = {
+    tab: 'crypto', region: 'us', form: '', source: 'all', sort: 'volume', q: '', watchlist: [], watchError: null, quotes: {}, providers: [],
+    connection: 'idle', hitQuotes: {},
+    explore: {}, results: { status: 'idle', data: null, at: null },
+    accountQuotes: {}, candles: {}, compare: {}, watch: [], asked: {}, ...over,
+  };
+  return shown(m);
+};
+// `explore.all`, when given, as the read of the tab on screen for its query
+function shown(m) {
+  if (!m.explore?.all) return m;
+  const { all, ...rest } = m.explore;
+  return { ...m, explore: { ...rest, [m.tab]: { ...all, query: exploreQueryOf(m) } } };
+}
 // the account slice as host/account.js keeps it, over the stand-in's page, holdings, paper lens and statement
 const accountSlice = (over = {}) => ({
   status: 'ready', data: fx('account'), at: 1, message: null,
@@ -54,53 +64,22 @@ const UNPRICED = { price: null, unit: 'usd', changePct: null, change24h: null, v
 
 // ── The Account's markets ──
 
-test('tabsOf: the fixture tabs in order, All first; Stocks raised by cn rows; Watching and Results when due', () => {
+test("Trade's tabs and the sorts; the Watchlist and a search answer rowsOf", () => {
   assert.deepEqual(ACCOUNT_TAB_IDS, ['all', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'rwas', 'perps', 'preipo', 'predictions']);
   assert.deepEqual(ACCOUNT_SORT_IDS, ['volume', 'movers', 'closing']);
   assert.deepEqual(accountTabs(), [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'Stocks'], ['indices', 'Indices'], ['commodities', 'Commodities'], ['fx', 'FX'], ['rwas', 'RWAs'], ['perps', 'Perps'], ['preipo', 'Pre-IPO'], ['predictions', 'Predictions']]);
   assert.deepEqual(accountSorts(), [{ id: 'volume', label: 'Most traded' }, { id: 'movers', label: 'Biggest moves' }, { id: 'closing', label: 'Closing soonest' }]);
   const explore = fx('explore-all');
-  assert.deepEqual(tabsOf(explore, 0), [
-    { id: 'all', label: 'All', count: 30 }, { id: 'crypto', label: 'Crypto', count: 6 }, { id: 'stocks', label: 'Stocks', count: 4 },
-    { id: 'rwas', label: 'RWAs', count: 4 }, { id: 'perps', label: 'Perps', count: 6 }, { id: 'preipo', label: 'Pre-IPO', count: 1 },
-    { id: 'predictions', label: 'Predictions', count: 9 },
-  ]);
-  // two cn rows: All counts them; Stocks is the Account's alone (the China tab is the A shares' home)
-  assert.deepEqual(tabsOf(explore, 2).map(t => [t.id, t.count]), [['all', 32], ['crypto', 6], ['stocks', 4], ['rwas', 4], ['perps', 6], ['preipo', 1], ['predictions', 9]]);
-  // accountTabs gives the order and the labels, not the Account; an empty tab, or one the face does not know, is not drawn
-  const odd = fx('explore-all');
-  odd.tabs = [...odd.tabs].reverse().map(t => (t.id === 'crypto' ? { ...t, label: 'Krypto' } : t.id === 'rwas' ? { ...t, count: 0 } : t));
-  odd.tabs.push({ id: 'venues', label: 'Venues', count: 3 });
-  assert.deepEqual(tabsOf(odd, 0).map(t => `${t.id}:${t.label}`), ['all:All', 'crypto:Crypto', 'stocks:Stocks', 'perps:Perps', 'preipo:Pre-IPO', 'predictions:Predictions']);
-  // no Stocks from the Account: cn rows make none
-  const noStocks = fx('explore-all');
-  noStocks.tabs = noStocks.tabs.filter(t => t.id !== 'stocks');
-  assert.deepEqual(tabsOf(noStocks, 2).slice(0, 3).map(t => [t.id, t.count]), [['all', 32], ['crypto', 6], ['rwas', 4]]);
-  assert.equal(tabsOf(noStocks, 0).some(t => t.id === 'stocks'), false);
-  // nothing read yet, or a refusal: All alone, counting the cn rows
-  assert.deepEqual(tabsOf(null, 0), [{ id: 'all', label: 'All', count: 0 }]);
-  assert.deepEqual(tabsOf({ ok: false, refusal: { message: 'The account is busy' } }, 3), [{ id: 'all', label: 'All', count: 3 }]);
-  // Watching and All results when due, in the Account's order: All results first while searching, Watching last once anything is starred
-  const RESULTS = { id: 'results', label: 'All results', count: null };
-  const WATCHING = { id: 'watching', label: 'Watching', count: null };
-  assert.deepEqual(tabsOf(explore, 0, { searching: true, watching: true }), [RESULTS, ...tabsOf(explore, 0), WATCHING]);
-  assert.deepEqual(tabsOf(explore, 0, { watching: true }).map(t => t.id), ['all', 'crypto', 'stocks', 'rwas', 'perps', 'preipo', 'predictions', 'watching']);
-  assert.deepEqual(tabsOf(null, 1, { searching: true }), [RESULTS, { id: 'all', label: 'All', count: 1 }]);
-  assert.deepEqual(tabsOf(explore, 2, { searching: false, watching: false }), tabsOf(explore, 2));
-  // the Desk is its own screen (desk-page plan 1 Task 5): no Desk tab closes the row, asked for or not
-  assert.deepEqual(tabsOf(explore, 0, { watching: true, desk: true }).at(-1), WATCHING);
-  assert.deepEqual(tabsOf(null, 0, { desk: true }).map(t => t.id), ['all']);
-  // ... and rowsOf answers them: the stars under Watching, the search's own rows under All results
-  const m = markets({ explore: { all: read(explore) }, watch: ['coin:ETH', 'stock:AAPL'], watchlist: [asset('cn:600519')] });
-  assert.deepEqual(rowsOf({ ...m, tab: 'watching' }).map(r => r.id), ['stock:AAPL', 'coin:ETH', 'cn:600519']);
+  // the stars on the Watchlist, found in its read; the search's own rows while searching, its A shares drawn as cn rows
+  const m = markets({ tab: 'watchlist', explore: { watchlist: { ...read(explore), query: 'limit=200' } }, watch: ['coin:ETH', 'stock:AAPL'], watchlist: [asset('cn:600519')] });
+  assert.deepEqual(rowsOf(m).map(r => r.id), ['stock:AAPL', 'coin:ETH', 'cn:600519']);
   const sol = fx('explore-all');
   sol.items = sol.items.filter(i => i.base === 'SOL');
   sol.items.push(cnItem('601012', 'LONGi'));
-  const searching = { ...m, q: 'sol', tab: 'results', results: read(sol) };
+  const searching = { ...m, q: 'sol', results: read(sol) };
   assert.deepEqual(rowsOf(searching).map(r => [r.id, r.source]), [['perp:SOL', 'account'], ['coin:SOL', 'account'], ['cn:601012', 'face']], "the Account's hits, and its A shares drawn as cn rows");
-  assert.deepEqual(rowsOf({ ...searching, tab: 'all' }).map(r => r.id), ['perp:SOL', 'coin:SOL', 'cn:601012'], 'while searching, All is the search too');
-  assert.deepEqual(rowsOf({ ...searching, tab: 'watching' }).map(r => r.id), ['perp:SOL', 'coin:SOL', 'cn:601012'], 'a search typed on Watching searches every market: the watchlist is not searched');
-  assert.deepEqual(rowsOf({ ...searching, q: '' }), [], 'no query, no results');
+  assert.deepEqual(rowsOf({ ...searching, tab: 'crypto' }).map(r => r.id), ['perp:SOL', 'coin:SOL', 'cn:601012'], 'a search is every market, whatever the tab');
+  assert.deepEqual(rowsOf({ ...searching, q: '' }).map(r => r.id), ['stock:AAPL', 'coin:ETH', 'cn:600519'], 'no query, the tab again');
 });
 
 test('priceOf: a coin in dollars; an event in cents with change in cents; Kalshi volume in contracts; a pre-IPO implied', () => {
@@ -205,7 +184,7 @@ test('legsOf: connected first, best marked, public legs with connectTo', () => {
   assert.deepEqual(legsOf(null), []);
 });
 
-test('rowsOf: the fixture rows and two cn rows side by side; source words; the three sorts; nulls last; a cn row only under All', () => {
+test('rowsOf: the fixture rows, and two cn rows on the Watchlist; source words; the three sorts; nulls last', () => {
   const moutai = quote('cn:600519', { price: 1450, change_pct: -3, volume: 900_000_000, source: '同花顺', feed: 'realtime', message: '行情连接已断开，保留上次报价。' });
   const m = markets({
     explore: { all: read(fx('explore-all')) },
@@ -214,22 +193,26 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
     accountQuotes: { 'broker|NVDA': fx('market').market },
     watch: ['coin:BTC'],
   });
-  const rows = rowsOf(m);
-  assert.deepEqual(rows.map(r => r.id), [
+  // the Watchlist: every row of the read starred, then the cn stars
+  const listed = { ...m, tab: 'watchlist', explore: { watchlist: { ...read(fx('explore-all')), query: 'limit=200' } }, watch: fx('explore-all').items.map(i => i.key) };
+  assert.deepEqual(rowsOf(listed).map(r => r.id), [
     'stock:NVDA', 'stock:SPY', 'stock:AAPL', 'perp:BTC', 'coin:BTC', 'perp:ETH', 'coin:ETH', 'coin:DOGE', 'perp:SOL', 'coin:SOL',
     'coin:LINK', 'perp:DOGE', 'cn:600519', 'cn:000001',
   ], "Most traded: the Account's rows by their dollars, then the cn rows, whose volume is shares; a row without one last");
+  const rows = [...rowsOf(m), ...rowsOf(listed).filter(r => r.source === 'face')];
+  assert.deepEqual(rowsOf(m).map(r => r.id), rowsOf(listed).filter(r => r.source === 'account').map(r => r.id), "a tab's rows are its read's: no cn star there");
   assert.deepEqual(rows.find(r => r.id === 'perp:BTC'), {
     id: 'perp:BTC', source: 'account', kind: 'perp', name: 'BTC perpetual', tile: 'BTC', sub: 'BTC · Perpetual',
     priced: { price: 62498.8, unit: 'usd', changePct: 2.3, change24h: 1404.9, volume: 4121786065, volumeUnit: 'usd', implied: null }, price: 62498.8,
     live: null, sourceWord: 'Stand-in Exchange', closeTime: null, pastEnd: false, paper: false, watched: false, atAccount: false,
     legs: [{ venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', connected: true, paper: false, canTrade: true, public: false, connectTo: '', connector: '', price: 62498.8, bid: 62495.6, ask: 62501.9, best: true }],
-    tabs: ['all', 'perps'],
+    tabs: ['all', 'perps'], asset: null, form: null, region: null,
   });
   assert.deepEqual(rows.find(r => r.id === 'cn:600519'), {
     id: 'cn:600519', source: 'face', asset: asset('cn:600519', { name: '贵州茅台', exchange: 'SSE' }), quote: moutai, kind: 'stock', name: '贵州茅台', tile: '贵', sub: '600519 · SH',
     priced: { price: 1450, unit: 'cny', changePct: -3, change24h: null, volume: 900000000, volumeUnit: 'shares', implied: null }, price: 1450,
     live: null, sourceWord: 'Tencent', closeTime: null, pastEnd: false, paper: false, watched: true, atAccount: false, legs: [], tabs: ['all'],
+    form: 'spot', region: 'cn', noStar: true,
   });
   const byId = Object.fromEntries(rows.map(r => [r.id, r]));
   // the latest quote at the row's most traded connected venue rides beside the item's price; the star is the operator's
@@ -249,40 +232,26 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
 
   // the cn rows under Most traded: after every Account row, among themselves by price × volume (turnover), not shares alone
   const turnover = rowsOf(markets({
-    explore: { all: read(fx('explore-all')) }, watchlist: [asset('cn:000001'), asset('cn:601318'), asset('cn:600519')],
+    ...listed, watchlist: [asset('cn:000001'), asset('cn:601318'), asset('cn:600519')],
     quotes: { 'cn:000001': quote('cn:000001', { price: 11.2, volume: 3e8 }), 'cn:601318': quote('cn:601318', { price: 52.1, volume: 9e7 }), 'cn:600519': quote('cn:600519', { price: 1450, volume: 2e6 }) },
   }));
   assert.equal(turnover.slice(0, 12).every(r => r.source === 'account'), true);
   assert.deepEqual(turnover.slice(12).map(r => r.id), ['cn:601318', 'cn:000001', 'cn:600519']);
 
   // Biggest moves: the size of the 24h move, a tie in the list's order, a row without one last
-  assert.deepEqual(rowsOf({ ...m, sort: 'movers' }).map(r => r.id), [
+  assert.deepEqual(rowsOf({ ...listed, sort: 'movers' }).map(r => r.id), [
     'coin:DOGE', 'perp:DOGE', 'coin:LINK', 'perp:ETH', 'coin:ETH', 'cn:600519', 'perp:BTC', 'coin:BTC', 'stock:NVDA', 'perp:SOL',
     'coin:SOL', 'stock:AAPL', 'stock:SPY', 'cn:000001',
   ]);
   // Closing soonest: the events by their close, the soonest first, the rows that never close last
-  const events = { ...m, explore: { all: read(fx('explore-predictions')) }, sort: 'closing' };
+  const events = markets({ ...m, explore: { all: read(fx('explore-predictions')) }, sort: 'closing' });
   assert.deepEqual(rowsOf(events).map(r => r.id), [
     'event:predict:SI-BTC15-2610220730', 'event:paper-momentum:SX-YIELD-FRI', 'event:standin-pubevents-public:SX-YIELD-FRI',
     'event:predict:SI-CPI-NEXT', 'event:predict:SI-ETH-WEEK', 'event:paper-momentum:SX-JOBS-NEXT', 'event:standin-pubevents-public:SX-JOBS-NEXT',
-    'event:predict:SI-FEDCUT-DEC', 'event:predict:SI-IPO-ANTHROPIC', 'cn:600519', 'cn:000001',
+    'event:predict:SI-FEDCUT-DEC', 'event:predict:SI-IPO-ANTHROPIC',
   ]);
   assert.equal(rowsOf(events)[0].closeTime, '2026-10-22T07:45:00.000Z');
   assert.equal(rowsOf(events)[0].sub, 'Crypto', "an event's second line is its category");
-  // a cn row is under All, and under no kind's tab: Stocks is the Account's alone
-  assert.deepEqual(rowsOf({ ...m, tab: 'stocks' }).map(r => r.id), ['stock:NVDA', 'stock:SPY', 'stock:AAPL']);
-  assert.deepEqual(rowsOf({ ...m, tab: 'crypto' }).map(r => r.id), ['coin:BTC', 'coin:ETH', 'coin:DOGE', 'coin:SOL', 'coin:LINK']);
-  assert.deepEqual(rowsOf({ ...m, tab: 'perps' }).map(r => r.id), ['perp:BTC', 'perp:ETH', 'perp:SOL', 'perp:DOGE']);
-  for (const tab of ['rwas', 'preipo', 'predictions']) assert.deepEqual(rowsOf({ ...m, tab }), [], tab);
-  assert.equal(rowsOf({ ...m, tab: 'somewhere' }).length, 14, 'a tab the view does not know is All');
-
-  // a tab's own read once it lands: its rows, which may lie past All's cut; until then All's rows of that kind
-  const all = fx('explore-all');
-  const rwas = { ...fx('explore-all'), items: fx('explore-all').movers.filter(i => i.kind === 'rwa') };
-  assert.deepEqual(rowsOf({ ...m, tab: 'rwas', explore: { all: read(all), rwas: read(rwas) } }).map(r => [r.id, r.sub]), [['rwa:NVDA', 'Stand-in Stock Tokens'], ['rwa:TSLA', 'Stand-in Stock Tokens']]);
-  assert.deepEqual(rowsOf({ ...m, tab: 'rwas', explore: { all: read(all), rwas: { status: 'loading', data: null, at: null } } }), []);
-  const solOnly = { ...fx('explore-all'), items: [itemOf(fx('explore-all'), 'coin:SOL')] };
-  assert.deepEqual(rowsOf({ ...m, tab: 'crypto', explore: { all: read(all), crypto: read(solOnly) } }).map(r => r.id), ['coin:SOL']);
   // a pre-IPO perpetual's second line says what it is (its implied valuation, or its tab); any other perpetual's names its base
   const anthropic = { key: 'preipo:anthropic', kind: 'perp', name: 'Anthropic', base: 'ANTHROPIC', price: 182.5, implied: { usd: 183e9, unit: 'valuation' }, category: 'Pre-IPO', tabs: ['all', 'preipo'], at: [] };
   const openai = { ...anthropic, key: 'preipo:openai', name: 'OpenAI', base: 'OPENAI', implied: undefined };
@@ -296,12 +265,12 @@ test('rowsOf: the fixture rows and two cn rows side by side; source words; the t
   };
   assert.deepEqual(rowsOf(searching).map(r => [r.id, r.watched]), [['cn:000001', true], ['cn:601318', false]], 'a hit on the watchlist is starred; the hits carry no volume, so in the search order');
   assert.equal(rowsOf(searching).find(r => r.id === 'cn:601318').priced.price, 52.1, 'a hit takes the quote its search read');
-  assert.deepEqual(rowsOf({ ...searching, tab: 'stocks' }).map(r => r.id), []);
-  assert.deepEqual(rowsOf({ ...searching, tab: 'crypto' }), []);
-  // a search not answered yet leaves the explore rows in place
-  assert.equal(rowsOf({ ...searching, results: { status: 'loading', data: null, at: null } }).filter(r => r.source === 'account').length, 12);
-  // nothing read at all: the cn rows alone
-  assert.deepEqual(rowsOf(markets({ watchlist: m.watchlist, quotes: m.quotes })).map(r => r.id), ['cn:600519', 'cn:000001']);
+  assert.deepEqual(rowsOf({ ...searching, tab: 'stocks' }).map(r => r.id), ['cn:000001', 'cn:601318'], 'whatever the tab');
+  // a search not answered yet draws nothing of the tab's
+  assert.deepEqual(rowsOf({ ...searching, results: { status: 'loading', data: null, at: null } }), []);
+  // nothing read at all: the cn rows alone, on the Watchlist
+  assert.deepEqual(rowsOf(markets({ tab: 'watchlist', watchlist: m.watchlist, quotes: m.quotes })).map(r => r.id), ['cn:600519', 'cn:000001']);
+  assert.deepEqual(rowsOf(markets({ watchlist: m.watchlist, quotes: m.quotes })), []);
   assert.deepEqual(rowsOf(undefined), []);
 });
 
@@ -326,11 +295,14 @@ test('unpriced, past-end and contract-volume rows: dashes, Closed, contracts', (
   ];
   const m = markets({ explore: { all: read(body) }, watchlist: [asset('us:ZZZZ', { name: 'Zed Corp' }), asset('crypto:QQQ/USD')], asked: { 'us:ZZZZ': null, 'crypto:QQQ/USD': null } });
   const pm = body.items[1].key;
-  // a contract volume sorts as its number; an unpriced row, and the Not listed lines, after every figure
-  assert.deepEqual(rowsOf(m).map(r => r.id), ['event:predict:SI-FEDCUT-DEC', 'kalshi:KXFED-DEC', pm, 'coin:NEWT', 'us:ZZZZ', 'crypto:QQQ/USD']);
-  assert.deepEqual(rowsOf({ ...m, sort: 'movers' }).map(r => r.id), ['event:predict:SI-FEDCUT-DEC', 'kalshi:KXFED-DEC', pm, 'coin:NEWT', 'us:ZZZZ', 'crypto:QQQ/USD']);
-  assert.deepEqual(rowsOf({ ...m, sort: 'closing' }).map(r => r.id), [pm, 'event:predict:SI-FEDCUT-DEC', 'kalshi:KXFED-DEC', 'coin:NEWT', 'us:ZZZZ', 'crypto:QQQ/USD']);
-  const byId = Object.fromEntries(rowsOf(m).map(r => [r.id, r]));
+  // a contract volume sorts as its number; an unpriced row after every figure
+  assert.deepEqual(rowsOf(m).map(r => r.id), ['event:predict:SI-FEDCUT-DEC', 'kalshi:KXFED-DEC', pm, 'coin:NEWT']);
+  assert.deepEqual(rowsOf({ ...m, sort: 'movers' }).map(r => r.id), ['event:predict:SI-FEDCUT-DEC', 'kalshi:KXFED-DEC', pm, 'coin:NEWT']);
+  assert.deepEqual(rowsOf({ ...m, sort: 'closing' }).map(r => r.id), [pm, 'event:predict:SI-FEDCUT-DEC', 'kalshi:KXFED-DEC', 'coin:NEWT']);
+  // the Not listed lines are the Watchlist's
+  const listed = { ...m, tab: 'watchlist' };
+  assert.deepEqual(rowsOf(listed).map(r => r.id), ['us:ZZZZ', 'crypto:QQQ/USD']);
+  const byId = Object.fromEntries([...rowsOf(m), ...rowsOf(listed)].map(r => [r.id, r]));
   // unpriced: every figure null, for the renderer's dashes; no venue to quote it, no source to name
   assert.deepEqual(byId['coin:NEWT'].priced, UNPRICED);
   assert.deepEqual([byId['coin:NEWT'].live, byId['coin:NEWT'].sourceWord, byId['coin:NEWT'].sub], [null, '', 'NEWT']);
@@ -344,9 +316,9 @@ test('unpriced, past-end and contract-volume rows: dashes, Closed, contracts', (
   assert.deepEqual(byId['us:ZZZZ'], {
     id: 'us:ZZZZ', source: 'face', notListed: true, kind: 'stock', name: 'Zed Corp', tile: 'Zed Corp', sub: 'Not listed at the Account',
     priced: UNPRICED, price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false, watched: true, atAccount: false, legs: [], tabs: ['all', 'stocks'],
+    noStar: true,
   });
   assert.deepEqual([byId['crypto:QQQ/USD'].kind, byId['crypto:QQQ/USD'].name, byId['crypto:QQQ/USD'].tabs], ['coin', 'QQQ/USD', ['all', 'crypto']]);
-  assert.deepEqual(rowsOf({ ...m, tab: 'stocks' }).map(r => r.id), ['us:ZZZZ']);
   // nothing here is NaN: a figure is a number or null
   for (const row of rowsOf(m)) for (const [k, v] of Object.entries(row.priced)) assert.ok(v === null || typeof v === 'string' || Number.isFinite(v), `${row.id} ${k}`);
 });
@@ -369,23 +341,27 @@ test('matchKey and pairsOf', () => {
   // but in no read, a placeholder that can still be un-starred
   const explore = fx('explore-all');
   const old = [asset('us:AAPL', { name: 'Apple' }), asset('crypto:SOL/USD'), asset('us:ZZZZ'), asset('us:TSLA')];
-  assert.deepEqual(rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, tab: 'watching' })), []);
+  assert.deepEqual(rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, tab: 'watchlist' })), []);
   const asked = { 'us:AAPL': 'stock:AAPL', 'crypto:SOL/USD': 'coin:SOL', 'us:ZZZZ': null, 'us:TSLA': 'stock:TSLA' };
-  const after = rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, asked, tab: 'watching' }));
+  const after = rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, asked, tab: 'watchlist' }));
   assert.deepEqual(after.map(r => [r.id, r.source]), [['stock:AAPL', 'account'], ['coin:SOL', 'account'], ['stock:TSLA', 'account'], ['us:ZZZZ', 'face']]);
   assert.deepEqual(after.find(r => r.id === 'stock:TSLA'), {
     id: 'stock:TSLA', source: 'account', placeholder: true, kind: 'stock', name: 'TSLA', tile: 'TSLA', sub: 'Not in this read',
     priced: UNPRICED, price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false, watched: true, atAccount: false, legs: [], tabs: ['all', 'watching'],
+    noStar: true,
   });
   assert.equal(rowsOf(markets({ explore: { all: read(explore) }, watchlist: old, asked })).some(r => r.id.startsWith('us:AAPL') || r.id.startsWith('crypto:')), false, 'a star found at the Account draws as its row, never as its old id');
   // a star past the read's items: found among its movers, closing or most traded lists; found nowhere, a placeholder
-  const outside = rowsOf(markets({ explore: { all: read(explore) }, tab: 'watching', watch: ['kalshi:KXGONE-26', 'rwa:TSLA', 'event:predict:SI-BTC15-2610220730'] }));
+  const outside = rowsOf(markets({ explore: { all: read(explore) }, tab: 'watchlist', watch: ['kalshi:KXGONE-26', 'rwa:TSLA', 'event:predict:SI-BTC15-2610220730'] }));
   assert.deepEqual(outside.map(r => [r.id, r.placeholder === true]), [['rwa:TSLA', false], ['event:predict:SI-BTC15-2610220730', false], ['kalshi:KXGONE-26', true]]);
   assert.deepEqual([outside[0].sub, outside[0].priced.price, outside[1].priced.price], ['Stand-in Stock Tokens', 251.3, 14]);
   assert.deepEqual([outside[2].kind, outside[2].name, outside[2].sub], ['kalshi', 'KXGONE-26', 'Not in this read']);
 
   // pairsOf: the first `limit` rows' most traded connected venue as venue|symbol; a row with none is skipped
-  const rows = rowsOf(markets({ explore: { all: read(explore) }, sort: 'movers', watchlist: [asset('cn:600519')], quotes: { 'cn:600519': quote('cn:600519', { change_pct: -3, volume: 3e9 }) } }));
+  const rows = rowsOf(markets({
+    explore: { all: read(explore) }, tab: 'watchlist', watch: explore.items.map(i => i.key), sort: 'movers', watchlist: [asset('cn:600519')],
+    quotes: { 'cn:600519': quote('cn:600519', { change_pct: -3, volume: 3e9 }) },
+  }));
   assert.deepEqual(rows.slice(0, 7).map(r => r.id), ['coin:DOGE', 'perp:DOGE', 'coin:LINK', 'perp:ETH', 'coin:ETH', 'cn:600519', 'perp:BTC']);
   assert.deepEqual(pairsOf(rows, 6), ['paper-momentum|DOGE/USD', 'paper|DOGE/USDC:USDC', 'paper-momentum|LINK/USD', 'ex|ETH/USDT:USDT', 'ex|ETH/USDT']);
   assert.deepEqual(pairsOf(rows), [
@@ -446,7 +422,7 @@ test('pageOf: the item, its legs, candles for the range, compare rows, held, ord
   assert.deepEqual(tsla.live, tokens);
   assert.equal(tsla.sourceWord, 'Stand-in Stock Tokens · live · 1 min ago');
   const rwas = { ...fx('explore-all'), items: fx('explore-all').movers.filter(i => i.kind === 'rwa') };
-  assert.equal(rowsOf({ ...m, tab: 'rwas', explore: { all: read(fx('explore-all')), rwas: read(rwas) }, accountQuotes: { 'standin-stock-tokens|TSLA': tokens } }).find(r => r.id === 'rwa:TSLA').live, null);
+  assert.equal(rowsOf(markets({ tab: 'macro', explore: { all: read(rwas) }, accountQuotes: { 'standin-stock-tokens|TSLA': tokens } })).find(r => r.id === 'rwa:TSLA').live, null);
   // a market only the current tab's own read lists
   const pepe = { key: 'coin:PEPE', kind: 'coin', name: 'PEPE', base: 'PEPE', price: 0.0000091, tabs: ['all', 'crypto'], at: [] };
   assert.equal(pageOf({ ...m, tab: 'crypto', explore: { all: read(fx('explore-all')), crypto: read({ ...fx('explore-all'), items: [pepe] }) } }, acct, 'coin:PEPE').item.name, 'PEPE');
@@ -492,14 +468,14 @@ test('pageOf: the item, its legs, candles for the range, compare rows, held, ord
   }
 });
 
-test('tableOf: the tabs counted once All answers, the sort in effect, the read the rows are from', () => {
-  // before All's read: All alone, with no count it never read; the read on its way
+test('tableOf: the fixed tabs, the sort in effect, the read the rows are from', () => {
+  // before the tab's read: no rows, the read on its way, the tabs as ever
   const unread = tableOf(markets({ explore: { all: { status: 'loading', data: null, at: null } } }), NOW);
-  assert.deepEqual([unread.rows, unread.tabs, unread.read], [[], [{ id: 'all', label: 'All', count: null }, { id: 'china', label: 'China', count: null }], { status: 'loading', answered: false, message: null }]);
-  // All answered: the Account's counts, the A shares among them; Watching once anything is starred
+  assert.deepEqual([unread.rows, unread.tabs.map(x => x.id), unread.read, unread.empty], [[], MARKET_TABS, { status: 'loading', answered: false, message: null }, null]);
+  // the read answered: the same tabs, no counts
   const m = markets({ explore: { all: read(fx('explore-all')) }, watchlist: [asset('cn:600519')] });
   const t = tableOf(m, NOW);
-  assert.deepEqual(t.tabs.map(x => [x.id, x.count]), [['all', 31], ['crypto', 6], ['stocks', 4], ['rwas', 4], ['perps', 6], ['preipo', 1], ['predictions', 9], ['china', null], ['watching', null]]);
+  assert.deepEqual(t.tabs, unread.tabs);
   assert.deepEqual(t.read, { status: 'ready', answered: true, message: null });
   assert.deepEqual(t.rows, rowsOf(m, NOW));
   // the sort in effect: the kept one when the rows offer it, else Most traded
@@ -507,14 +483,13 @@ test('tableOf: the tabs counted once All answers, the sort in effect, the read t
   assert.deepEqual(tableOf({ ...m, sort: 'movers' }, NOW).sort, 'movers');
   const closing = tableOf({ ...m, sort: 'closing' }, NOW);
   assert.deepEqual([closing.sort, closing.rows.map(r => r.id)], ['volume', t.rows.map(r => r.id)]);
-  const events = tableOf({ ...m, explore: { all: read(fx('explore-predictions')) }, sort: 'closing' }, NOW);
+  const events = tableOf(markets({ ...m, explore: { all: read(fx('explore-predictions')) }, sort: 'closing' }), NOW);
   assert.deepEqual([events.sorts.map(s => s.id), events.sort, events.rows[0].id], [['volume', 'movers', 'closing'], 'closing', 'event:predict:SI-BTC15-2610220730']);
   assert.deepEqual(sortsOf([], 'closing'), { sorts: accountSorts().slice(0, 2), sort: 'volume' });
-  // the read the rows are from: a kind's own once it has answered, else All's, its sentence with it; while searching, the search's
-  const refused = { ...read(fx('explore-all')), status: 'error', message: 'All refused' };
-  assert.deepEqual(tableOf({ ...m, tab: 'crypto', explore: { all: refused, crypto: { status: 'loading', data: null, at: null } } }, NOW).read, { status: 'error', answered: true, message: 'All refused' });
-  assert.deepEqual(tableOf({ ...m, tab: 'crypto', explore: { all: refused, crypto: read(fx('explore-all')) } }, NOW).read, { status: 'ready', answered: true, message: null });
-  assert.deepEqual(tableOf({ ...m, q: 'fed', tab: 'results', results: { status: 'error', data: null, at: 1, message: 'Too many searches' } }, NOW).read, { status: 'error', answered: false, message: 'Too many searches' });
+  // the read the rows are from: the tab's own for these filters, its sentence with it; while searching, the search's
+  const refused = { ...read(fx('explore-all')), status: 'error', message: 'Crypto refused' };
+  assert.deepEqual(tableOf(markets({ ...m, explore: { all: refused } }), NOW).read, { status: 'error', answered: true, message: 'Crypto refused' });
+  assert.deepEqual(tableOf({ ...m, q: 'fed', results: { status: 'error', data: null, at: 1, message: 'Too many searches' } }, NOW).read, { status: 'error', answered: false, message: 'Too many searches' });
   // each row says the price it shows and the word its tile is lettered from
   const live = tableOf({ ...m, accountQuotes: { 'broker|NVDA': { price: 183.1 } } }, NOW).rows.find(r => r.id === 'stock:NVDA');
   assert.deepEqual([live.price, live.priced.price, live.tile, live.paper], [183.1, 182.4, 'NVDA', false]);
@@ -645,7 +620,7 @@ test('watchKeysOf names a china entry by its cn key with no read', () => {
   assert.deepEqual(watchKeysOf(china, everyRowOf(fx('explore-all'))), ['cn:600519', 'coin:BTC', 'coin:DOGE', 'cn:000001'], "in the page's order");
 });
 
-test('Watching and All draw a starred A share as its A-share row', () => {
+test('the Watchlist draws a starred A share as its A-share row; a tab draws none', () => {
   const at = '2026-11-01T01:00:00.000Z';
   const page = { ...fx('account'), watch: [{ venue: 'china', symbol: '000001', at }] };
   const explore = fx('explore-all');
@@ -655,7 +630,7 @@ test('Watching and All draw a starred A share as its A-share row', () => {
     explore: { all: read(explore) }, watch: ['coin:BTC', 'cn:600519'], watchlist: [asset('cn:300750', { name: 'CATL' })],
     quotes: { 'cn:600519': { id: 'cn:600519', market: 'cn', symbol: '600519', name: '贵州茅台', price: 1392.05, change_pct: 2.81, quote_status: 'live', market_status: 'open' } },
   });
-  const watching = rowsOf({ ...m, tab: 'watching' }, NOW, page);
+  const watching = rowsOf({ ...m, tab: 'watchlist' }, NOW, page);
   assert.deepEqual(watching.map(r => [r.id, r.source, r.watched, r.atAccount === true]), [
     ['coin:BTC', 'account', true, false], ['cn:600519', 'face', true, false], ['cn:000001', 'face', true, true], ['cn:300750', 'face', true, false],
   ]);
@@ -663,18 +638,13 @@ test('Watching and All draw a starred A share as its A-share row', () => {
   const moutai = watching.find(r => r.id === 'cn:600519');
   assert.deepEqual([moutai.name, moutai.price, moutai.sub], ['贵州茅台', 1392.05, '600519 · SH']);
   assert.equal(watching.find(r => r.id === 'cn:000001').name, '000001', 'its code where nothing names it');
-  const all = rowsOf(m, NOW, page);
-  assert.deepEqual(all.filter(r => r.id.startsWith('cn:')).map(r => [r.id, r.source, r.watched]).sort(), [
-    ['cn:000001', 'face', true], ['cn:300750', 'face', true], ['cn:600519', 'face', true],
-  ]);
-  assert.equal(all.some(r => r.source === 'account' && r.id.startsWith('cn:')), false);
+  assert.equal(rowsOf(m, NOW, page).some(r => r.id.startsWith('cn:')), false, "a tab's rows are its read's alone");
   for (const id of ['cn:600519', 'cn:000001', 'cn:300750', 'cn:sh600519']) assert.equal(watchedOf(m, id, page), true, id);
   assert.equal(watchedOf(m, 'cn:000001'), false, 'no page: the Account list is not read');
   assert.equal(watchedOf(m, 'cn:688981', page), false);
-  assert.equal(tableOf(m, NOW, page).tabs.at(-1).id, 'watching');
 });
 
-test("Watching is the Account's list and the face's together: watchedOf, the rows' watched, the tab, a market's page", () => {
+test("the Watchlist is the Account's list and the face's together: watchedOf, the rows' watched, a market's page", () => {
   const page = fx('account');
   const explore = fx('explore-all');
   const m = markets({ explore: { all: read(explore) }, watch: ['stock:AAPL', 'coin:BTC'], watchlist: [asset('cn:600519')] });
@@ -682,24 +652,22 @@ test("Watching is the Account's list and the face's together: watchedOf, the row
   assert.equal(watchedOf(m, 'coin:DOGE', page), true, "the Account's list too");
   assert.equal(watchedOf(m, 'coin:ETH', page), false);
   assert.equal(watchedOf(m, 'cn:600519', page), true, 'a cn id: the face’s list');
-  // Watching: the face's stars, the page's beside them, the A shares; a row on the Account's list alone says so
-  const watching = rowsOf({ ...m, tab: 'watching' }, NOW, page);
+  // the Watchlist: the face's stars, the page's beside them, the A shares; a row on the Account's list alone says so
+  const watching = rowsOf({ ...m, tab: 'watchlist' }, NOW, page);
   assert.deepEqual(watching.map(r => [r.id, r.watched, r.atAccount === true]), [
     ['stock:AAPL', true, false], ['coin:BTC', true, false], ['coin:DOGE', true, true], ['cn:600519', true, false],
   ]);
   assert.equal(watching.some(r => r.placeholder === true), false);
-  // All: the page's rows starred among the rest
+  // a tab: the page's rows starred among the rest
   const all = rowsOf(m, NOW, page);
-  assert.deepEqual(all.filter(r => r.watched).map(r => r.id).sort(), ['cn:600519', 'coin:BTC', 'coin:DOGE', 'stock:AAPL']);
+  assert.deepEqual(all.filter(r => r.watched).map(r => r.id).sort(), ['coin:BTC', 'coin:DOGE', 'stock:AAPL']);
   assert.deepEqual(all.filter(r => r.atAccount === true).map(r => r.id), ['coin:DOGE']);
   assert.equal(rowsOf(m, NOW).find(r => r.id === 'coin:DOGE').watched, false, 'no page: the face’s list as before');
-  // the Watching tab for the page's list alone
+  // the Watchlist for the page's list alone
   const bare = markets({ explore: { all: read(explore) } });
-  assert.equal(tableOf(bare, NOW).tabs.some(t => t.id === 'watching'), false);
-  assert.equal(tableOf(bare, NOW, page).tabs.at(-1).id, 'watching');
-  assert.deepEqual(rowsOf({ ...bare, tab: 'watching' }, NOW, page).map(r => r.id), ['coin:BTC', 'coin:DOGE']);
-  // a page-watched market only a kind's read lists is found there, never a placeholder (the rows by Most traded)
-  const both = markets({ explore: { all: read(explore), predictions: read(fx('explore-predictions')) }, tab: 'watching' });
+  assert.deepEqual(rowsOf({ ...bare, tab: 'watchlist' }, NOW, page).map(r => r.id), ['coin:BTC', 'coin:DOGE']);
+  // a page-watched market only another tab's read lists is found there, never a placeholder (the rows by Most traded)
+  const both = markets({ explore: { all: read(explore), macro: read(fx('explore-predictions')) }, tab: 'watchlist' });
   assert.deepEqual(rowsOf(both, NOW, page).map(r => [r.id, r.placeholder === true]), [['coin:BTC', false], ['coin:DOGE', false], ['event:predict:SI-FEDCUT-DEC', false]]);
   // a market's page reads it watched the same way
   assert.equal(pageOf(bare, accountSlice(), 'coin:DOGE', NOW).watched, true);
@@ -760,12 +728,12 @@ test('no icon URL survives any view (an item given an https icon by hand)', () =
   });
   const acct = accountSlice();
   const outputs = [
-    tabsOf(explore, 1, { searching: true, watching: true }), priceOf(btc), sourceWordOf(btc, NOW), legsOf(btc), priceOf(fed), sourceWordOf(fed, NOW), legsOf(fed),
+    priceOf(btc), sourceWordOf(btc, NOW), legsOf(btc), priceOf(fed), sourceWordOf(fed, NOW), legsOf(fed),
     matchKey('crypto:BTC/USD'),
   ];
   for (const q of ['', 'fed']) {
     for (const id of ['coin:BTC', 'coin:AVAX', 'coin:ETH', 'stock:NVDA', fed.key]) outputs.push(pageOf({ ...m, q }, acct, id, NOW));
-    for (const tab of ['all', 'crypto', 'predictions', 'watching', 'results']) for (const { id: sort } of accountSorts()) {
+    for (const tab of ['watchlist', 'crypto', 'macro']) for (const { id: sort } of accountSorts()) {
       const rows = rowsOf({ ...m, q, tab, sort }, NOW);
       outputs.push(rows, pairsOf(rows));
     }
@@ -775,8 +743,8 @@ test('no icon URL survives any view (an item given an https icon by hand)', () =
   assert.equal(pageOf(calm, acct, 'coin:BTC', NOW).live.price, 62481);
   assert.equal(pageOf(calm, acct, 'coin:ETH', NOW).compare.length, 2);
   assert.equal(pageOf(calm, acct, 'stock:NVDA', NOW).candles.candles.length, 12);
-  assert.equal(rowsOf({ ...calm, tab: 'watching' }, NOW).find(r => r.id === 'coin:BTC').live.price, 62481);
-  assert.equal(rowsOf({ ...calm, tab: 'watching' }, NOW).some(r => r.placeholder === true), true);
+  assert.equal(rowsOf({ ...calm, tab: 'watchlist' }, NOW).find(r => r.id === 'coin:BTC').live.price, 62481);
+  assert.equal(rowsOf({ ...calm, tab: 'watchlist' }, NOW).some(r => r.placeholder === true), true);
   for (const out of outputs) {
     const text = JSON.stringify(out) ?? '';
     assert.ok(!text.includes('example-cdn'), text.slice(0, 160));
@@ -910,15 +878,8 @@ const RANK = { ok: true, sort: 'volume', total: 5577, asOf: '2026-10-31T06:46:10
   { id: 'cn:300502', symbol: '300502', name: '新易盛', price: 196, change_pct: -14.19, turnover: 21_607_600_000 },
   { id: 'cn:688825', symbol: '688825', name: '长鑫科技', price: 41.8, change_pct: -2.5, turnover: 12_145_020_000 }] };
 const rankRead = (over = {}) => ({ status: 'ready', data: RANK, at: 1, sort: 'volume', message: null, ...over });
-const china = (over = {}) => markets({ tab: CHINA_TAB, rank: rankRead(), ...over });
-
-test('China is the last tab, before Watching, counted by the ranking', () => {
-  assert.equal(CHINA_TAB, 'china');
-  assert.deepEqual(tableOf(china({ watchlist: [asset('cn:600519')] }), NOW).tabs.map(t => t.id).slice(-2), ['china', 'watching']);
-  assert.deepEqual(tableOf(china({ explore: { all: read(fx('explore-all')) } }), NOW).tabs.map(t => t.id).slice(-2), ['predictions', 'china']);
-  assert.equal(tableOf(china(), NOW).tabs.find(t => t.id === 'china').count, 5577);
-  assert.equal(tableOf(markets(), NOW).tabs.find(t => t.id === 'china').count, null, 'no ranking read yet');
-});
+// Stocks › China A, its ranking read
+const china = (over = {}) => markets({ tab: 'stocks', region: 'cn', source: 'main', rank: rankRead(), ...over });
 
 test("China's rows: the ranking's order, the code and board, the name's first character, yuan turnover, Tencent", () => {
   const t = tableOf(china(), NOW);
@@ -932,9 +893,10 @@ test("China's rows: the ranking's order, the code and board, the name's first ch
   // the Account keys starred and the page's china entries fill China's stars too
   assert.deepEqual(chinaRowsOf(china({ watch: ['cn:300502'] })).map(r => r.watched), [true, false]);
   assert.deepEqual(chinaRowsOf(china(), ['cn:688825']).map(r => r.watched), [false, true]);
-  const onChina = tableOf(china({ tab: CHINA_TAB }), NOW, { ...fx('account'), watch: [{ venue: 'china', symbol: '688825', at: '2026-11-01T01:00:00.000Z' }] });
+  const onChina = tableOf(china(), NOW, { ...fx('account'), watch: [{ venue: 'china', symbol: '688825', at: '2026-11-01T01:00:00.000Z' }] });
   assert.deepEqual(onChina.rows.map(r => r.watched), [false, true], "the page's china entry, through tableOf");
-  assert.equal(tableOf(markets({ explore: { all: read(fx('explore-all')) } }), NOW).china, false, 'an Account tab is not China');
+  assert.equal(tableOf(markets({ explore: { all: read(fx('explore-all')) } }), NOW).china, false, 'another tab is not China A');
+  assert.equal(tableOf(china({ region: 'us' }), NOW).china, false, 'Stocks › US is not China A');
 });
 
 test('no rows in the wrong order: a read for another sort shows none', () => {

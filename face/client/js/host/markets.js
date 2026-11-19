@@ -1,6 +1,6 @@
 // face/client/js/host/markets.js — the Markets screen's impure half (spec 2026-10-22 §6.1): the markets through the face's
-// proxy into the store — explore for the tab on screen at once and every 20 s (China's: its ranking by the sort in
-// effect), the quotes of the rows in view (on a market's page, its own market's) every 5 s (twelve a call) and beside them the
+// proxy into the store — explore for the tab on screen by its filters at once and every 20 s (Stocks › China A's: its ranking by
+// the sort in effect), the quotes of the rows in view (on a market's page, its own market's) every 5 s (twelve a call) and beside them the
 // A shares' (the cn page's first, then the cn rows in view), a market page's candles for its range (an A share's at venue
 // china) and its base's compare rows, and the page's market followed on its stream; one explore?q read for a search,
 // its A shares the hits; the stars in this browser's two stores (the Account's keys under their own key, the A shares under the
@@ -22,7 +22,7 @@ import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, chinaPairOf, rankOf, cnQuoteOf, cnHitsOf } from '../wire/china.js';
-import { ACCOUNT_TAB_IDS, CHINA_TAB, notAnsweringWord, canonicalId, isAccountKey, marketSourceOf, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf } from './market-view.js';
+import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, rankQueryOf, onChinaA } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
 import { venuesOf } from './account-view.js';
@@ -41,7 +41,7 @@ export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 // pending before reaching the proxy and hold the host's same-path deduplication lock forever.
 export const EXPLORE_TIMEOUT_MS = 15_000;
 export const WATCH_LIMIT = 100;   // either list's: the cn list's, the Account keys' cap
-// the China tab's rows one ranking read asks for
+// Stocks › China A's rows one ranking read asks for (market-view.js rankQueryOf's limit)
 export const RANK_ROWS = 20;
 // a market page's book, the levels a side; its latest trades; a perpetual's funding lines
 export const BOOK_DEPTH = 10, TRADES_LIMIT = 20, FUNDING_LIMIT = 100;
@@ -54,9 +54,8 @@ const VENUES = '/data/account/venues';
 const SOURCES = '/data/market/sources';
 // a connected line's part, the account not answering and no public line of the same connection to read instead
 export const accountDownWord = () => said('markets.accountDown');
-const ROWS = 200;                 // the explore rows a tab's read and a search ask for
+const ROWS = 200;                 // the explore rows a search asks for (a tab's: market-view.js exploreQueryOf)
 const ASKED_ROWS = 12;            // the rows an old star's ask reads
-const KINDS = new Set(ACCOUNT_TAB_IDS.filter(id => id !== 'all'));
 // the kinds the Account compares across venues: not an event, not an RWA
 const COMPARED = new Set(['coin', 'perp', 'stock']);
 
@@ -67,16 +66,14 @@ const words = v => (typeof v === 'string' && v.trim() !== '' ? v : null);
 const messageOf = body => words(body?.refusal?.message) ?? (isSaid(body?.error) ? body.error : words(body?.error));
 // an answer (`ok: true`) carrying the list the views read: a body of any other shape is never data
 const answered = (body, list) => body?.ok === true && Array.isArray(body[list]);
-// An older state without a scope keeps the all-market contract; fresh states start on Hyperliquid.
-const scopeQuery = m => ['hyperliquid', 'xyz', 'more'].includes(m.scope) ? `&scope=${m.scope}${marketSourceOf(m) ? `&source=${encodeURIComponent(marketSourceOf(m))}` : ''}` : '';
-
-// the explore read the tab on screen takes: All, Watching, and All results with no query read All's; a kind's tab its own; All
-// results while searching is the search's read, not this — its query, asked of both halves
+// the explore read the tab on screen takes, by its filters (market-view.js exploreQueryOf: the Watchlist's the unscoped read),
+// asked of both halves; none on Stocks › China A, whose read is the ranking (rankQueryOf). A search is its own read beside it.
 function exploreOf(m) {
-  if (KINDS.has(m.tab)) return { tab: m.tab, query: `tab=${m.tab}&limit=${ROWS}${scopeQuery(m)}` };
-  if (m.tab === 'all' || m.tab === 'watching' || (m.tab === 'results' && blank(m.q))) return { tab: 'all', query: `limit=${ROWS}${m.tab === 'watching' ? '' : scopeQuery(m)}` };
-  return null;
+  const query = exploreQueryOf(m);
+  return query === null ? null : { tab: m.tab, query };
 }
+// what the screen reads now: the tab's explore query, or China A's ranking; a change of it reads again at once
+const shownOf = m => (onChinaA(m) ? `rank:${rankQueryOf(m)}` : `explore:${m.tab}:${exploreQueryOf(m)}`);
 // a rejection the proxy answered for an upstream not answering: its 503 `{unreachable}`, or no body at all — never a refusal
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const unreachable = body => body === undefined || body === null || (isRecord(body) && typeof body.unreachable === 'string');
@@ -90,9 +87,8 @@ export function startMarkets({
   let shown = false;
   let exploreTimer = null;
   let quotesTimer = null;
-  let readTab = null;        // the tab the explore poll reads for while shown
-  let readSelection = scopeQuery(store.get().markets);
-  let readSort = null;       // the sort the China ranking was last asked for while shown
+  let readShownOf = null;    // what the explore poll reads for while shown (shownOf's)
+  let wasSearching = false;  // a query was typed when the store last changed
   let inView = null;         // the row ids rowsInView last named; null: every row
   let waiting = null;        // a page asked for whose market no read lists yet: its reads wait for the read that does
   let followed = false;      // a stream follows a page's market
@@ -148,8 +144,8 @@ export function startMarkets({
     if (!read) return;
     const { tab, query } = read;
     halves.read(`explore:${tab}`, query, {
-      land: data => store.dispatch('exploreLoaded', { tab, data, at: now() }),
-      failed: message => store.dispatch('exploreFailed', { tab, at: now(), message }),
+      land: data => { store.dispatch('exploreLoaded', { tab, data, at: now(), query }); if (tab === 'watchlist') locateMissing(); },
+      failed: message => store.dispatch('exploreFailed', { tab, at: now(), message, query }),
       loading: ['exploreLoading', { tab }],
     });
   }
@@ -164,9 +160,9 @@ export function startMarkets({
   }
   // the venues read landed: every explore kept is joined again over its verdicts
   function rejoin() {
-    for (const [kind, data] of halves.rejoin()) {
+    for (const [kind, data, query] of halves.rejoin()) {
       const m = /^explore:(.+)$/.exec(kind);
-      if (m && data) store.dispatch('exploreLoaded', { tab: m[1], data, at: now() });
+      if (m && data) store.dispatch('exploreLoaded', { tab: m[1], data, at: now(), query });
     }
   }
   // the venues read — where each connection serves — asked once when Markets is first shown
@@ -181,10 +177,12 @@ export function startMarkets({
     });
   }
 
-  // Provider discovery is independent of the selected market read: a slow registry never blocks Hyperliquid's list.
-  // Keep one successful catalog for this page; a failure retries on a later visible beat or explicit one-shot entry.
+  // The registry names the Source dropdown's families; the tabs read their main sources without it. Asked on the first tab
+  // other than the Watchlist (a visit to Markets costs the Watchlist's read alone); one successful catalog kept for this
+  // page; a failure retries on a later visible beat or explicit one-shot entry.
   function readSources() {
-    if (store.get().markets.sources?.status === 'ready' || inAir('sources')) return;
+    const m = store.get().markets;
+    if (m.tab === 'watchlist' || m.sources?.status === 'ready' || inAir('sources')) return;
     if (sourcesAskedAt !== null && now() - sourcesAskedAt < EXPLORE_MS) return;
     sourcesAskedAt = now();
     fly('sources', SOURCES, (body, refused) => {
@@ -193,12 +191,13 @@ export function startMarkets({
     }, ['marketSourcesLoading']);
   }
 
-  // China's ranking for the sort in effect, the market's china tab: the answer for a sort the screen has left lands nowhere (one
-  // flight, the newer path's); an answer kept and re-served stale by the proxy lands as the ranking it was, marked stale (rankOf)
+  // China's ranking for the sort in effect (Stocks › China A, rankQueryOf's: never Closing soonest): the answer for a sort the
+  // screen has left lands nowhere (one flight, the newer path's); an answer kept and re-served stale by the proxy lands as the
+  // ranking it was, marked stale (rankOf)
   function readRank() {
-    const sort = store.get().markets.sort === 'movers' ? 'movers' : 'volume';
-    readSort = sort;
-    fly('rank', `${EXPLORE}?tab=${CHINA_TAB}&sort=${sort}&limit=${RANK_ROWS}`, (body, refused) => {
+    const m = store.get().markets;
+    const sort = m.sort === 'movers' ? 'movers' : 'volume';
+    fly('rank', `${EXPLORE}?${rankQueryOf(m)}`, (body, refused) => {
       const data = refused ? null : rankOf(body, sort);
       if (!data) { store.dispatch('rankFailed', { sort, at: now(), message: messageOf(body) }); return; }
       store.dispatch('rankLoaded', { sort, data, at: now() });
@@ -213,19 +212,27 @@ export function startMarkets({
     if (!Array.isArray(providers) || !providers.some(p => p?.market === 'cn' && p.notAnswering === true)) return;
     if (!inAir('rank')) readRank();
   }
-  // the read for the tab on screen: China's ranking there, else the Account's explore
+  // the read for the tab on screen: China A's ranking there, else the explore; on the Watchlist the stars its read lacks
   function readShown() {
-    if (store.get().markets.tab === CHINA_TAB) readRank(); else readExplore();
-    if (store.get().markets.tab === 'watching' && scopeQuery(store.get().markets)) {
-      for (const id of store.get().markets.watch ?? []) if (!isCnKey(id) && isAccountKey(id)) locate(id);
-    }
+    if (onChinaA(store.get().markets)) readRank(); else readExplore();
+    if (store.get().markets.tab === 'watchlist') locateMissing();
+  }
+  // the Watchlist's stars (Account keys, not A shares) its unscoped read does not list, each found by its exact key (locate)
+  // once that read has answered — until found: a found one's price is the quotes poll's from then on
+  function locateMissing() {
+    const m = store.get().markets;
+    const data = m.explore?.watchlist?.data;
+    if (m.tab !== 'watchlist' || data?.ok !== true) return;
+    const listed = new Set(['items', 'movers', 'closing', 'mostTraded'].flatMap(list => (Array.isArray(data[list]) ? data[list] : [])).map(i => i?.key));
+    const found = id => m.located?.[id]?.status === 'ready';
+    for (const id of m.watch ?? []) if (!isCnKey(id) && isAccountKey(id) && !listed.has(id) && !found(id)) locate(id);
   }
 
   // Loading a requested screen is independent of periodic visibility-based polling. Embedded browsers can start hidden,
   // or keep reporting hidden during a user interaction; they still need one answer without starting background polls.
   function readOnce() {
     if (closed) return;
-    readTab = store.get().markets.tab;
+    readShownOf = shownOf(store.get().markets);
     leaveExplores();
     readVenues();
     readShown();
@@ -304,13 +311,14 @@ export function startMarkets({
     if (exploreTimer !== null) { cancelTimer(exploreTimer); exploreTimer = null; }
     if (quotesTimer !== null) { cancelTimer(quotesTimer); quotesTimer = null; }
   }
-  // the tab on screen changed while shown: its read at once, and its poll over from now
+  // the tab or its filters changed while shown: its read at once, and its poll over from now
   function retab() {
-    readTab = store.get().markets.tab;
+    readShownOf = shownOf(store.get().markets);
     leaveExplores();
     if (exploreTimer !== null) { cancelTimer(exploreTimer); exploreTimer = null; }
     armExplore();
     readShown();
+    readSources();
   }
 
   // the range a page's chart is drawn at: the one kept for it, 1D until one is chosen
@@ -404,7 +412,7 @@ export function startMarkets({
     if (!view) {
       waiting = id;
       if (followed) unfollow();
-      if (scopeQuery(s.markets)) locate(id);
+      locate(id);
       return;
     }
     waiting = null;
@@ -587,17 +595,13 @@ export function startMarkets({
   function onStore() {
     if (closed) return;
     readEvent();
-    const selection = scopeQuery(store.get().markets);
-    if (selection !== readSelection) {
-      readSelection = selection;
-      for (const kind of kinds.keys()) {
-        const match = /^(explore:[^:]+|results):(market|account)$/.exec(kind);
-        if (match) halves.forget(match[1]);
-      }
-      drop('rank');
-      if (shown) retab();
-    } else if (shown && store.get().markets.tab !== readTab) retab();
-    else if (shown && store.get().markets.tab === CHINA_TAB && (store.get().markets.sort === 'movers' ? 'movers' : 'volume') !== readSort) readRank();
+    // the tab, a filter or the sort changed what the screen reads: read it at once (a read asked for other filters lands under
+    // its own query, never drawn under these: market-view.js tableOf)
+    if (shown && shownOf(store.get().markets) !== readShownOf) retab();
+    // the search ended (Back to <tab>, another tab pressed): its read in the air lands nowhere
+    const searching = !blank(store.get().markets.q);
+    if (wasSearching && !searching) halves.forget('results');
+    wasSearching = searching;
     if (waiting !== null) open(waiting);
   }
   const onStorage = event => { if (!closed && (event?.key === STORAGE_KEY || event?.key === ACCOUNT_WATCH_KEY || event?.key === null)) load(); };
@@ -637,7 +641,8 @@ export function startMarkets({
         return;
       }
       // a new query forgets what the last one kept (explore-halves.js)
-      halves.read('results', `q=${encodeURIComponent(q.trim())}&limit=${ROWS}${scopeQuery(store.get().markets)}`, {
+      // every market, whatever the tab and its filters (G5)
+      halves.read('results', `q=${encodeURIComponent(q.trim())}&limit=${ROWS}`, {
         land: (data, kept) => {
           store.dispatch('resultsLoaded', { data, at: now() });
           // the A shares the hits, the market's alone

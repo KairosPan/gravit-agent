@@ -30,9 +30,9 @@ const FORM = { amount: '', unit: 'usd', orderType: 'market', limit: '', extended
 
 function rig({ answer = () => undefined, act = () => ({ status: 200, body: { ok: true, kind: 'order', order: { id: 'ord-0010', status: 'canceled' } } }) } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
-  // the Account's page and All's explore read, as the Account and Markets hosts land them
+  // the Account's page and the Watchlist's explore read (the unscoped one), as the Account and Markets hosts land them
   store.dispatch('accountLoaded', { data: fx('account'), at: NOW });
-  store.dispatch('exploreLoaded', { tab: 'all', data: fx('explore-all'), at: NOW });
+  store.dispatch('exploreLoaded', { tab: 'watchlist', data: fx('explore-all'), at: NOW, query: 'limit=200' });
   // `reads` are the reads but each explore's connected twin (`allReads` has it); the connected explore a test does not answer
   // lists nothing, so the join is the market's rows
   const reads = [];

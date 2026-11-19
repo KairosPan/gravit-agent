@@ -81,8 +81,8 @@ export function exploreHalves({ store, fly, drop, kinds, now = Date.now, onMarke
   return {
     read,
     forget,
-    /** Each kind kept and its join made again now (the venues read landed, say); null where neither half answers. */
-    rejoin: () => [...halves].map(([kind, kept]) => [kind, joinOf(kept)]),
+    /** Each kind kept, its join made again now (the venues read landed, say; null where neither half answers) and its query. */
+    rejoin: () => [...halves].map(([kind, kept]) => [kind, joinOf(kept), kept.query]),
     /** The market halves kept, every one. */
     markets: () => [...halves.values()].map(k => k.market).filter(isRecord),
   };

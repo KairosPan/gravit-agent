@@ -1,9 +1,9 @@
 // face/client/js/reducers/markets.js — Markets on the face: what the host layer (host/markets.js) brings in — the Account's
 // explore reads by tab and the search's, the quotes of the rows in view and of the market a page follows, a page's candles and
 // its base's compare rows, the Account keys starred and what each old us:/crypto: star was found as; the A shares' quotes, their
-// search hits' prices and China's state, the Account's too — and the screen's own view of it: the tab, the sort, the query, a
-// page's range
-import { ACCOUNT_TAB_IDS, ACCOUNT_SORT_IDS, CANDLE_RANGES, MARKET_SCOPE_IDS, marketScopeOf, marketSourceOf, moreSourcesOf, marketCategoryIds, isAccountKey } from '../host/market-view.js';
+// search hits' prices and China's state, the Account's too — and the screen's own view of it: the tab, its Region, Form and
+// Source and the popover open, the sort, the query, a page's range
+import { ACCOUNT_SORT_IDS, CANDLE_RANGES, MARKET_TABS, REGIONS, isAccountKey, formsInView, formsOfSource, mainFormsOf, isSourceOf } from '../host/market-view.js';
 import { number } from '../wire/market-model.js';
 import { chinaProviderOf, isCnKey } from '../wire/china.js';
 
@@ -15,9 +15,8 @@ const IDLE = { status: 'idle', data: null, at: null };
 // slice's do
 const keyed = (s, field, key, patch) => mk(s, { [field]: { ...s.markets[field], [key]: { ...IDLE, ...own(s.markets[field], key), ...patch } } });
 const read = (s, patch) => mk(s, { results: { ...s.markets.results, ...patch } });
-// the explore reads: All's and each kind's own; the tabs: those, China, Watching and All results
-const EXPLORED = new Set(ACCOUNT_TAB_IDS);
-const TABS = new Set([...EXPLORED, 'china', 'watching', 'results']);
+// the explore reads, one a tab (the Watchlist's the unscoped read), each kept with the query it was asked with
+const EXPLORED = new Set(MARKET_TABS);
 // a market's history: an A share's (cn: and its six digits, never another cn: id) or another Account key's, at one of the
 // candle ranges
 const charted = (id, range) => (isCnKey(id) || (isAccountKey(id) && !String(id).startsWith('cn:'))) && CANDLE_RANGES.includes(range);
@@ -58,12 +57,18 @@ export const reducers = {
   chinaStatusUpdated: (s, { status } = {}) => mk(s, { providers: chinaProviderOf(status) }),
   hitQuotesLoaded: (s, { quotes } = {}) => mk(s, { hitQuotes: isRecord(quotes) ? quotes : {} }),
 
-  // the Account's explore reads by tab (`all` is explore?limit=200, a kind's its own explore?tab=<kind>&limit=200), and the
-  // search's (explore?q=): a failed read keeps its rows, with the Account's sentence when it refused (`message`, else null)
+  // the explore reads by tab (market-view.js exploreQueryOf's, kept with the query asked), and the search's (explore?q=): a
+  // failed read keeps its rows, with the Account's sentence when it refused (`message`, else null)
   exploreLoading: (s, { tab } = {}) => (EXPLORED.has(tab) ? keyed(s, 'explore', tab, { status: 'loading' }) : s),
-  exploreLoaded: (s, { tab, data, at } = {}) => (EXPLORED.has(tab) ? keyed(s, 'explore', tab, { status: 'ready', data, at, message: null }) : s),
-  exploreFailed: (s, { tab, at, message = null } = {}) => (EXPLORED.has(tab) ? keyed(s, 'explore', tab, { status: 'error', at, message }) : s),
-  // the China tab's ranking (the Account's explore?tab=china, as rankOf keeps it), by the sort it was read for: a failed read keeps
+  exploreLoaded: (s, { tab, data, at, query = null } = {}) => (EXPLORED.has(tab) ? keyed(s, 'explore', tab, { status: 'ready', data, at, message: null, query }) : s),
+  // a failed read for the query kept keeps its rows; one for another query drops them, so no rows of other filters are drawn
+  exploreFailed(s, { tab, at, message = null, query } = {}) {
+    if (!EXPLORED.has(tab)) return s;
+    const kept = own(s.markets.explore, tab);
+    const other = typeof query === 'string' && own(kept, 'query') !== query;
+    return keyed(s, 'explore', tab, { status: 'error', at, message, ...(other ? { data: null, query } : {}) });
+  },
+  // Stocks › China A's ranking (explore?asset=stocks&region=cn, as rankOf keeps it), by the sort it was read for: a failed read keeps
   // its rows
   rankLoading: (s, { sort } = {}) => (RANKED.has(sort) ? rank(s, { status: 'loading', sort }) : s),
   rankLoaded: (s, { sort, data, at } = {}) => (RANKED.has(sort) ? rank(s, { status: 'ready', sort, data, at, message: null }) : s),
@@ -166,43 +171,53 @@ export const reducers = {
     return mk(s, { asked });
   },
 
-  // the Account's tabs, Watching and All results; a tab starts from Most traded
-  setMarketsScope(s, scope) {
-    if (!MARKET_SCOPE_IDS.includes(scope) || (scope === marketScopeOf(s.markets) && !marketSourceOf(s.markets))) return s;
-    return mk(s, {
-      scope, source: '', ...onTab('all'), q: '', explore: {}, results: { ...IDLE },
-      rank: { ...IDLE, sort: 'volume', message: null },
-    });
-  },
-  // Choosing another source's category is one transition: the host asks only that final source and tab.
-  setMarketsLocation(s, { scope, source = '', tab = 'all' } = {}) {
-    if (!MARKET_SCOPE_IDS.includes(scope) || !marketCategoryIds(scope).includes(tab)) return s;
-    if (source && (scope !== 'more' || tab === 'china' || !moreSourcesOf(s.markets).some(item => item.id === source))) return s;
-    if (scope === marketScopeOf(s.markets) && source === marketSourceOf(s.markets)) return reducers.setMarketsTab(s, tab);
-    return mk(s, {
-      scope, source, ...onTab(tab), q: '', explore: {}, results: { ...IDLE },
-      rank: { ...IDLE, sort: 'volume', message: null },
-    });
-  },
+  // Markets by underlying (spec 2026-11-19 G1–G6): a tab starts from Most traded, US, every Form, its main sources, no popover
+  // open, and ends a search; a region pick goes back to the main sources (on China A to Spot alone); a Form the main sources
+  // do not carry switches Source to All sources (G4); a Source whose sources do not carry the Form set clears it
   setMarketsTab(s, tab) {
-    if (!TABS.has(tab) || tab === s.markets.tab || (tab === 'china' && marketSourceOf(s.markets))) return s;
-    // Watching reads across every source. Its broad answer must never stand in for a focused source's next list.
-    const leavingWatch = s.markets.tab === 'watching' && MARKET_SCOPE_IDS.includes(s.markets.scope);
-    return mk(s, { ...onTab(tab), ...(leavingWatch ? { explore: {} } : {}) });
+    if (!MARKET_TABS.includes(tab)) return s;
+    return mk(s, { ...onTab(tab), region: 'us', form: '', source: 'main', open: null, q: '', results: { ...IDLE } });
   },
+  setMarketsRegion(s, id) {
+    const m = s.markets;
+    if (!['stocks', 'indices'].includes(m.tab) || !REGIONS.live.includes(id)) return s;
+    const next = { ...m, region: id, source: 'main', open: null };
+    return mk(s, { region: id, source: 'main', open: null, form: formsInView(next).includes(m.form) ? m.form : '' });
+  },
+  setMarketsForm(s, id) {
+    const m = s.markets;
+    if (m.tab === 'watchlist' || (id !== '' && !formsInView(m).includes(id))) return s;
+    const source = id !== '' && m.source === 'main' && !mainFormsOf(m).includes(id) ? 'all' : m.source;
+    return mk(s, { form: id, source, open: null });
+  },
+  setMarketsSource(s, v) {
+    const m = s.markets;
+    if (m.tab === 'watchlist' || !isSourceOf(m, v)) return s;
+    const form = m.form && !formsOfSource({ ...m, source: v }).includes(m.form) ? '' : m.form;
+    return mk(s, { source: v, form, open: null });
+  },
+  // a filter's popover opened by its name, a second press (or null) closing it
+  openMarketsFilter(s, name) {
+    const open = ['region', 'form', 'source'].includes(name) && s.markets.open !== name ? name : null;
+    return open === s.markets.open ? s : mk(s, { open });
+  },
+  // a chip removed: the Form back to all, the Source back to Main (with a Form the main sources do not carry)
+  clearMarketsChip(s, kind) {
+    if (kind === 'form') return s.markets.form ? mk(s, { form: '' }) : s;
+    if (kind === 'source') return s.markets.source !== 'main' ? reducers.setMarketsSource(s, 'main') : s;
+    return s;
+  },
+  // the empty table's button (§5.3): the main sources and every Form, the region kept (G2)
+  marketsBackToMain: s => mk(s, { source: 'main', form: '', open: null }),
   // a sort by its id (the seg's data-value); its word is the renderer's
   setMarketsSort(s, v) {
     return ACCOUNT_SORT_IDS.includes(v) && v !== s.markets.sort ? mk(s, { sort: v }) : s;
   },
-  // a query typed from nothing opens All results; cleared there, it goes back to All; cleared anywhere, the search's read goes
+  // the query typed (G5): the tab and its filters stay as they are, for Back to <tab>; cleared, the search's read goes
   setMarketsQuery(s, q) {
     const v = String(q ?? '');
     const m = s.markets;
     if (v === m.q) return s;
-    const was = !blank(m.q);
-    const is = !blank(v);
-    if (is && !was) return mk(s, { q: v, ...(m.tab === 'results' ? {} : onTab('results')) });
-    if (was && !is) return mk(s, { q: v, results: { ...IDLE }, ...(m.tab === 'results' ? onTab('all') : {}) });
-    return mk(s, { q: v });
+    return blank(v) && !blank(m.q) ? mk(s, { q: v, results: { ...IDLE } }) : mk(s, { q: v });
   },
 };

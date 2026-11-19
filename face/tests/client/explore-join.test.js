@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { joinExplore } from '../../client/js/host/explore-join.js';
-import { rowsOf, pageOf } from '../../client/js/host/market-view.js';
+import { rowsOf, pageOf, exploreQueryOf } from '../../client/js/host/market-view.js';
 import { renderMarketsScreen } from '../../client/js/render/markets.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { spoken } from './helpers/spoken.js';
@@ -269,7 +269,9 @@ test('focused unavailable markets retain read-only public data, including paper 
       }
       assert.equal(got.at[1].canTrade, true, 'the allowed paper line is unchanged');
       const state = emptyState();
-      state.markets = { ...state.markets, scope, explore: { all: { status: 'ready', data: joined } } };
+      // drawn under a tab, as its read for the query the screen asks
+      const tabbed = { ...state.markets, tab: scope === 'xyz' ? 'stocks' : 'crypto', source: 'all' };
+      state.markets = { ...tabbed, explore: { [tabbed.tab]: { status: 'ready', data: joined, query: exploreQueryOf(tabbed) } } };
       const renderedRow = rowsOf(state.markets)[0];
       const page = pageOf(state.markets, state.account, key);
       assert.deepEqual([renderedRow.priced.changePct, renderedRow.priced.volume, page.priced.changePct, page.priced.volume], [-5, 1_234_567, -5, 1_234_567]);

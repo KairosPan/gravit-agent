@@ -55,7 +55,7 @@ import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn, venuesOf } from './host/account-view.js';
 import { rulesOf } from './host/rules-view.js';
-import { isAccountKey, handWordsOf, watchedOf, marketCategoryIds, marketScopeOf, marketSourceOf } from './host/market-view.js';
+import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { makeEditor } from './composer/dom.js';
 import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt } from './composer/draft.js';
@@ -1196,19 +1196,18 @@ export function boot(win, host = {}) {
     if (searchTimer !== null) timers.cancel(searchTimer);
     searchTimer = timers.after(SEARCH_QUIET_MS, () => { searchTimer = null; markets.search(q); });
   }
-  function chooseMarket(scope, tab = 'all', source = '') {
-    if (!marketCategoryIds(scope).includes(tab)) return;
+  // the search ended (Back to <tab>, Clear, another tab): the box emptied, a search still waiting gone, the search's read forgotten
+  function endSearch() {
+    const box = doc.getElementById('mq');
+    if (box) box.value = '';
+    searchNow('');
+  }
+  // a Markets choice (a tab, a filter, a chip, the empty table's button): its reducer, then its read where the screen is hidden
+  // (shown, the host reads it on the change itself)
+  function marketsChoice(name, value) {
     const before = store.get().markets;
-    const changedSource = scope !== marketScopeOf(before) || source !== marketSourceOf(before);
-    if (changedSource) {
-      const box = doc.getElementById('mq');
-      if (box) box.value = '';
-      if (searchTimer !== null) { timers.cancel(searchTimer); searchTimer = null; }
-    }
-    store.dispatch('setMarketsLocation', { scope, source, tab });
-    if (store.get().markets === before) return;
-    if (changedSource) markets.search('');
-    readHiddenMarkets();
+    store.dispatch(name, value);
+    if (store.get().markets !== before) readHiddenMarkets();
   }
   // Trade's search, the same quiet: trade.query (the query and its read) once the box has been quiet, a blank box at once; a
   // search still waiting goes when Trade is left
@@ -1981,20 +1980,21 @@ export function boot(win, host = {}) {
       a.click();
       timers.after(0, () => win.URL.revokeObjectURL(url));
     },
-    // Markets: the tabs, the sort, Clear, the star, Remove, a row's page, a page's range
-    mkScope: el => chooseMarket(el.dataset.value),
-    mkCategory: el => chooseMarket(el.dataset.scope, el.dataset.value, el.dataset.source || ''),
-    mkSource: el => chooseMarket('more', 'all', el.dataset.value),
+    // Markets (spec 2026-11-19): the tabs (a tab ends a search), a filter's popover, Region, Form and Source, a chip, the empty
+    // table's Back to the main sources, Back to <tab>, the sort, Clear, the star, Remove, a row's page, a page's range
     mkTab: el => {
-      const before = store.get().markets.tab;
-      store.dispatch('setMarketsTab', el.dataset.value);
-      if (store.get().markets.tab !== before) readHiddenMarkets();
+      const searching = String(store.get().markets.q ?? '').trim() !== '';
+      marketsChoice('setMarketsTab', el.dataset.value);
+      if (searching) endSearch();
     },
-    mkSort: el => {
-      const before = store.get().markets.sort;
-      store.dispatch('setMarketsSort', el.dataset.value);
-      if (store.get().markets.tab === 'china' && store.get().markets.sort !== before) readHiddenMarkets();
-    },
+    mkFilter: el => store.dispatch('openMarketsFilter', el.dataset.value),
+    mkRegion: el => marketsChoice('setMarketsRegion', el.dataset.value),
+    mkForm: el => marketsChoice('setMarketsForm', el.dataset.value ?? ''),
+    mkSource: el => marketsChoice('setMarketsSource', el.dataset.value),
+    mkChip: el => marketsChoice('clearMarketsChip', el.dataset.value),
+    mkMain: () => marketsChoice('marketsBackToMain'),
+    mkBack: () => endSearch(),
+    mkSort: el => marketsChoice('setMarketsSort', el.dataset.value),
     // the Desk page's one control on the desk: Pause (no Resume: a terminal resumes)
     deskPause: () => { void desk.pause(); },
     // the Desk page's own choices: a symbol's filter (All is `all`), a row opened or folded, the watch rules unfolded

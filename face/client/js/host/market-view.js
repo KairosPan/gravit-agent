@@ -14,53 +14,194 @@ import { MIN, HOUR, DAY } from '../time.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
 import { t, isSaid, sayOf } from '../i18n/words.js';
 
-// the Account's tabs, in the order the table draws them, the sorts its rows take, and the ranges a market's history is read for;
+// the Account's tabs, in the order Trade draws them, the sorts its rows take, and the ranges a market's history is read for;
 // the tabs' and the sorts' words are read from the table at each call (accountTabs, accountSorts)
 export const ACCOUNT_TAB_IDS = ['all', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'rwas', 'perps', 'preipo', 'predictions'];
 export const ACCOUNT_SORT_IDS = ['volume', 'movers', 'closing'];
 export const CANDLE_RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
-export const MARKET_SCOPE_IDS = ['hyperliquid', 'xyz', 'more'];
-/** Fresh states explicitly start on Hyperliquid; an older, unscoped read remains the broad market view. */
-export const marketScopeOf = markets => MARKET_SCOPE_IDS.includes(markets?.scope) ? markets.scope : 'more';
-/** A public provider is a further selection within More; other scopes always name their own source. */
-export const marketSourceOf = markets => marketScopeOf(markets) === 'more' && typeof markets?.source === 'string' ? markets.source : '';
-/** The live public registry supplies the names and exact ids; no inferred connector groups. */
-export function moreSourcesOf(markets) {
-  const seen = new Set();
-  return records(markets?.sources?.data?.value).filter(source => {
-    if (typeof source.id !== 'string' || !source.id || typeof source.name !== 'string' || !source.name
-      || ['hyperliquid', 'trade-xyz'].includes(source.id) || seen.has(source.id)) return false;
-    seen.add(source.id);
-    return true;
-  }).map(source => ({ ...source, label: source.id === 'hyperliquid-preipo' ? t('markets.source.hip3', { name: t('markets.scope.hyperliquid') })
-    : source.id.endsWith('-preipo') ? t('markets.source.preipo', { name: source.name }) : source.name }));
-}
-export const marketScopes = () => [
-  { id: 'hyperliquid', label: t('markets.scope.hyperliquid') },
-  { id: 'xyz', label: t('markets.scope.xyz') },
-  { id: 'more', label: t('markets.scope.more') },
-];
-const FOCUSED_CATEGORIES = { hyperliquid: ['all', 'crypto'], xyz: ['all', 'stocks', 'indices', 'commodities', 'fx', 'preipo'] };
-const MORE_CATEGORIES = ['all', 'crypto', 'stocks', 'rwas', 'perps', 'preipo', 'predictions', 'china'];
-/** Categories accepted within a source. Perpetual stays the contract kind, separate from its underlying asset category. */
-export const marketCategoryIds = scope => Object.hasOwn(FOCUSED_CATEGORIES, scope) ? FOCUSED_CATEGORIES[scope] : scope === 'more' ? [...ACCOUNT_TAB_IDS, 'china'] : [];
 
-/** All three sources stay expanded; only the selected source's All read can lend category counts. */
-export function marketNavigationOf(markets) {
+// ── Markets by underlying (spec 2026-11-19 G1–G8, §5.3): the tabs, Region, Form and Source, and the main sources ──
+
+/** The Markets screen's tabs, fixed (G1): the Watchlist, then one tab an underlying; a non-Watchlist tab's id is its asset. */
+export const MARKET_TABS = ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'preipo', 'macro'];
+/** The regions (G2): those read now, then those piece 2 brings (greyed). Only Stocks and Indices take a region. */
+export const REGIONS = { live: ['us', 'cn'], later: ['hk', 'jp', 'kr', 'tw', 'in', 'eu'] };
+/** The forms (G3): those read now, then Options (piece 3, greyed). */
+export const FORMS = { live: ['spot', 'perp', 'token', 'event'], later: ['option'] };
+const REGIONED = new Set(['stocks', 'indices']);
+/** Each tab's main sources and the further ones "All sources" adds (spec §2's table), by tab, Stocks by region. */
+export const TAB_SOURCES = {
+  crypto: { main: ['hyperliquid'], also: ['coinbase', 'kraken', 'okx', 'binance', 'bybit', 'kalshi', 'polymarket'] },
+  'stocks:us': { main: ['cboe'], also: ['trade-xyz', 'robinhood-stock-tokens', 'xstocks', 'ondo-stocks'] },
+  'stocks:cn': { main: ['china'], also: [] },
+  indices: { main: ['trade-xyz'], also: ['kalshi'] },
+  commodities: { main: ['trade-xyz'], also: [] },
+  fx: { main: ['trade-xyz'], also: [] },
+  preipo: {
+    main: ['hyperliquid-preipo', 'trade-xyz'],
+    also: ['okx-preipo', 'gate-preipo', 'krakenfutures-preipo', 'deribit-preipo', 'kucoinfutures-preipo', 'mexc-preipo', 'binance-preipo', 'bybit-preipo', 'kalshi', 'polymarket'],
+  },
+  macro: { main: ['kalshi', 'polymarket'], also: ['polymarket-us'] },
+};
+const PERP = ['perp'], SPOT = ['spot'], TOKEN = ['token'], EVENT = ['event'];
+/** What each source carries, by form: the face reads it here, never from the rows (G3: a second, formless read otherwise). */
+export const SOURCE_FORMS = {
+  hyperliquid: PERP, 'trade-xyz': PERP,
+  'hyperliquid-preipo': PERP, 'okx-preipo': PERP, 'gate-preipo': PERP, 'krakenfutures-preipo': PERP, 'deribit-preipo': PERP,
+  'kucoinfutures-preipo': PERP, 'mexc-preipo': PERP, 'binance-preipo': PERP, 'bybit-preipo': PERP,
+  cboe: SPOT, china: SPOT, coinbase: SPOT, kraken: SPOT, okx: SPOT, binance: SPOT, bybit: SPOT,
+  'robinhood-stock-tokens': TOKEN, xstocks: TOKEN, 'ondo-stocks': TOKEN,
+  kalshi: EVENT, polymarket: EVENT, 'polymarket-us': EVENT,
+};
+// a tab whose main sources are one venue under one name (Pre-IPO: trade.xyz is a Hyperliquid deployer, spec §2)
+const MAIN_FAMILY = { preipo: 'hyperliquid' };
+const MARKET_ROWS = 200;           // the explore rows a tab's read asks for
+const RANK_LIMIT = 20;             // China A's ranking rows (host/markets.js RANK_ROWS)
+
+const tabOf = m => (MARKET_TABS.includes(m?.tab) ? m.tab : 'watchlist');
+const regionOf = m => (REGIONED.has(tabOf(m)) && REGIONS.live.includes(m?.region) ? m.region : 'us');
+/** Stocks › China A: the Tencent ranking, not an explore read. */
+export const onChinaA = m => tabOf(m) === 'stocks' && regionOf(m) === 'cn';
+const sourcesOfTab = m => {
+  const tab = tabOf(m);
+  if (tab === 'watchlist') return { main: [], also: [] };
+  return TAB_SOURCES[tab === 'stocks' ? `stocks:${regionOf(m)}` : tab] ?? { main: [], also: [] };
+};
+const familyKey = id => id.replace(/-preipo$/, '');
+const registryOf = m => new Map(records(m?.sources?.data?.value)
+  .filter(s => typeof s.id === 'string' && typeof s.name === 'string' && s.name.trim()).map(s => [s.id, s.name.trim()]));
+// a family's name: the registry's for the plain id, else its -preipo source's without " Pre-IPO", else the id
+function familyLabel(id, registry) {
+  if (registry.has(id)) return registry.get(id);
+  const pre = registry.get(`${id}-preipo`);
+  return pre ? pre.replace(/\s*Pre-IPO$/i, '') || id : id;
+}
+
+/** The tab's source families (G4): one a venue (an id and its -preipo sibling one family, its id the plain one), the main
+ *  family or families first; named from the registry's read, by id when there is none. */
+export function familiesOf(markets) {
   const m = isRecord(markets) ? markets : {};
-  const selected = marketScopeOf(m);
-  // Watching's All read spans every source, so it cannot lend any source's counts.
-  const all = m.tab === 'watching' ? null : bodyOf(m.explore, 'all');
-  const counts = new Map(records(all?.tabs).filter(tab => typeof tab.id === 'string' && number(tab.count) !== null).map(tab => [tab.id, Math.max(0, number(tab.count))]));
-  const words = { ...tabWords(), china: t('markets.tab.china') };
-  return marketScopes().map(scope => {
-    const active = scope.id === selected;
-    const ids = FOCUSED_CATEGORIES[scope.id] ?? (marketSourceOf(m)
-      ? ACCOUNT_TAB_IDS.filter(id => id === 'all' || (active && ((counts.get(id) ?? 0) > 0 || m.tab === id)))
-      : ACCOUNT_TAB_IDS.filter(id => MORE_CATEGORIES.includes(id)
-        || (active && ((counts.get(id) ?? 0) > 0 || m.tab === id))).concat('china'));
-    return { ...scope, active, categories: ids.map(id => ({ id, label: words[id], count: active ? counts.get(id) ?? null : null })) };
-  });
+  const { main, also } = sourcesOfTab(m);
+  const registry = registryOf(m);
+  const out = new Map();
+  const add = (key, id, isMain) => {
+    const was = out.get(key);
+    if (was) { if (!was.ids.includes(id)) was.ids.push(id); return; }
+    out.set(key, { id: key, label: familyLabel(key, registry), ids: [id], main: isMain });
+  };
+  const folded = MAIN_FAMILY[tabOf(m)];
+  for (const id of main) add(folded ?? familyKey(id), id, true);
+  for (const id of also) add(familyKey(id), id, false);
+  return [...out.values()];
+}
+
+// the source ids the Source in effect reads: Main the main ids, All sources main and also, a family its own
+function selectedIds(m) {
+  const { main, also } = sourcesOfTab(m);
+  const source = typeof m?.source === 'string' ? m.source : 'main';
+  if (source === 'all') return [...main, ...also];
+  if (source === 'main') return main;
+  return familiesOf(m).find(f => f.id === source)?.ids ?? main;
+}
+const formsOfIds = ids => FORMS.live.filter(f => ids.some(id => (SOURCE_FORMS[id] ?? []).includes(f)));
+/** The forms the main sources carry (a Form outside them switches Source to All sources, G4). */
+export const mainFormsOf = markets => formsOfIds(sourcesOfTab(markets).main);
+/** The forms a Form pick may take now (G3): under Main or All sources every form the tab's sources carry, under a family its
+ *  own; China A spot alone. */
+export function formsInView(markets) {
+  const m = isRecord(markets) ? markets : {};
+  if (tabOf(m) === 'watchlist') return [];
+  const source = typeof m.source === 'string' ? m.source : 'main';
+  const { main, also } = sourcesOfTab(m);
+  return formsOfIds(source === 'main' || source === 'all' ? [...main, ...also] : selectedIds(m));
+}
+/** The forms the Source in effect carries: a Form outside them would empty the table. */
+export const formsOfSource = markets => formsOfIds(selectedIds(isRecord(markets) ? markets : {}));
+/** Whether `v` is a Source value of the tab: Main, All sources, or one of its families. */
+export const isSourceOf = (markets, v) => v === 'main' || v === 'all' || familiesOf(markets).some(f => f.id === v);
+
+const sortOf = m => (ACCOUNT_SORT_IDS.includes(m?.sort) ? m.sort : 'volume');
+/** The explore read the tab on screen takes, or null on Stocks › China A (its ranking, rankQueryOf): the Watchlist the
+ *  unscoped read; a tab its asset, the sort, its region (Stocks, Indices), its form and the source ids the Source selects
+ *  (All sources the tab's whole list, never none). */
+export function exploreQueryOf(markets) {
+  const m = isRecord(markets) ? markets : {};
+  const tab = tabOf(m);
+  if (tab === 'watchlist') return `limit=${MARKET_ROWS}`;
+  if (onChinaA(m)) return null;
+  const form = FORMS.live.includes(m.form) ? `&form=${m.form}` : '';
+  const region = REGIONED.has(tab) ? `&region=${regionOf(m)}` : '';
+  return `asset=${tab}&sort=${sortOf(m)}&limit=${MARKET_ROWS}${region}${form}&source=${selectedIds(m).join(',')}`;
+}
+/** China A's ranking read: by Biggest moves or Most traded, never Closing soonest (China refuses it). */
+export function rankQueryOf(markets) {
+  return `asset=stocks&region=cn&sort=${markets?.sort === 'movers' ? 'movers' : 'volume'}&limit=${RANK_LIMIT}`;
+}
+// a query without its sort: a sort change keeps the rows drawn while its own read is asked
+const unsorted = query => { const p = new URLSearchParams(query); p.delete('sort'); return p.toString(); };
+
+const regionWords = () => ({
+  us: t('markets.region.us'), cn: t('markets.region.cn'), hk: t('markets.region.hk'), jp: t('markets.region.jp'),
+  kr: t('markets.region.kr'), tw: t('markets.region.tw'), in: t('markets.region.in'), eu: t('markets.region.eu'),
+});
+const formWords = () => ({
+  '': t('markets.form.all'), spot: t('markets.form.spot'), perp: t('markets.form.perp'), token: t('markets.form.token'),
+  event: t('markets.form.event'), option: t('markets.form.option'),
+});
+const regionWord = id => regionWords()[id] ?? id;
+const formWord = id => formWords()[id ?? ''] ?? id;
+const mainWord = m => t('markets.source.main', { names: familiesOf(m).filter(f => f.main).map(f => f.label).join(' + ') });
+function sourceWordOfState(m) {
+  const source = typeof m.source === 'string' ? m.source : 'main';
+  if (source === 'all') return t('markets.source.all');
+  if (source === 'main') return mainWord(m);
+  return familiesOf(m).find(f => f.id === source)?.label ?? mainWord(m);
+}
+
+/** The filters the tab draws (G2–G4), or null on the Watchlist (none there, G6): Region on Stocks and Indices (piece 2's
+ *  greyed), Form (one a selection does not carry greyed "none here", Options greyed piece 3), Source (Main · names, All
+ *  sources, then the families, the main first), and a chip for a Form set and for a Source other than Main. */
+export function filtersOf(markets) {
+  const m = isRecord(markets) ? markets : {};
+  const tab = tabOf(m);
+  if (tab === 'watchlist') return null;
+  const inView = formsInView(m);
+  const form = FORMS.live.includes(m.form) ? m.form : '';
+  const source = isSourceOf(m, m.source) ? m.source : 'main';
+  const sourceLabel = sourceWordOfState({ ...m, source });
+  return {
+    ...(REGIONED.has(tab) ? {
+      region: {
+        value: regionOf(m),
+        options: [
+          ...REGIONS.live.map(id => ({ id, label: regionWord(id), disabled: false, note: null })),
+          ...REGIONS.later.map(id => ({ id, label: regionWord(id), disabled: true, note: t('markets.filter.piece2') })),
+        ],
+      },
+    } : {}),
+    form: {
+      value: form,
+      label: formWord(form),
+      options: [
+        { id: '', label: formWord(''), disabled: false, note: null },
+        ...FORMS.live.map(id => ({ id, label: formWord(id), disabled: !inView.includes(id), note: inView.includes(id) ? null : t('markets.filter.noneHere') })),
+        ...FORMS.later.map(id => ({ id, label: formWord(id), disabled: true, note: t('markets.filter.piece3') })),
+      ],
+    },
+    source: {
+      value: source,
+      label: sourceLabel,
+      options: [
+        { id: 'main', label: mainWord(m), main: false },
+        { id: 'all', label: t('markets.source.all'), main: false },
+        ...familiesOf(m).map(f => ({ id: f.id, label: f.label, main: f.main })),
+      ],
+    },
+    chips: [
+      ...(form ? [{ kind: 'form', label: formWord(form) }] : []),
+      ...(source !== 'main' ? [{ kind: 'source', label: sourceLabel }] : []),
+    ],
+  };
 }
 
 /** The market a line belongs to, independent of a connected account's display name. The colon after a CCXT settlement
@@ -323,33 +464,9 @@ export function chinaRowsOf(markets, atPage = []) {
     return {
       id: i.id, source: 'china', kind: 'stock', name: str(i.name) || symbol, tile: cnTileOf(str(i.name), symbol), sub: `${symbol} · ${cnBoardOf(symbol)}`,
       priced, price: priced.price, live: null, sourceWord: TENCENT, closeTime: null, pastEnd: false, paper: false,
-      watched: starred.has(i.id), atAccount: false, legs: [], tabs: [CHINA_TAB],
+      watched: starred.has(i.id), atAccount: false, legs: [], tabs: [CHINA_TAB], form: 'spot', region: 'cn',
     };
   });
-}
-
-/** The table's tabs from All's explore answer: All first, with the Account's count and the cn rows', then the Account's tabs that
- *  have something in them, in accountTabs's order and words (Stocks is the Account's alone: the A shares' home is China). An
- *  answer not read, or one that is not an answer, is All alone. China (`opts.china`, `{ count }`) follows the Account's tabs
- *  (spec 2026-10-31 §4). As the retired page orders them, All results leads while `searching` and Watching follows China
- *  while `watching` (anything is starred), neither with a count. */
-export function tabsOf(explore, cnCount, opts) {
-  const cn = Math.max(0, number(cnCount) ?? 0);
-  const counts = new Map();
-  if (explore?.ok === true && Array.isArray(explore.tabs)) {
-    for (const tab of records(explore.tabs)) if (typeof tab.id === 'string' && !counts.has(tab.id)) counts.set(tab.id, Math.max(0, number(tab.count) ?? 0));
-  }
-  const out = [];
-  for (const [id, label] of accountTabs()) {
-    const count = (counts.get(id) ?? 0) + (id === 'all' ? cn : 0);
-    if (id === 'all' || count > 0) out.push({ id, label, count });
-  }
-  return [
-    ...(opts?.searching ? [{ id: 'results', label: t('markets.tab.results'), count: null }] : []),
-    ...out,
-    ...(opts?.china ? [{ id: CHINA_TAB, label: t('markets.tab.china'), count: opts.china.count ?? null }] : []),
-    ...(opts?.watching ? [{ id: 'watching', label: t('markets.tab.watching'), count: null }] : []),
-  ];
 }
 
 // dollars per contract as cents, without the float's noise (0.14 × 100 is 14, not 14.000000000000002)
@@ -439,7 +556,6 @@ const pairOf = legs => pairAt(legs.find(l => l.connected && named(l)));
  *  listing — a legsOf line, or null. */
 export const followOf = item => { const legs = legsOf(item); return legs.find(l => l.connected && named(l)) ?? legs.find(l => l.public && named(l)) ?? null; };
 const unpriced = () => ({ price: null, unit: 'usd', changePct: null, change24h: null, volume: null, volumeUnit: 'usd', implied: null });
-const KIND_TABS = new Set(ACCOUNT_TAB_IDS.filter(id => id !== 'all'));
 // a contract on a venue's estimate of a private company's valuation: its implied valuation, or its tab, says so
 const isPreipo = item => isRecord(item.implied) || (Array.isArray(item.tabs) && item.tabs.includes('preipo'));
 // what a market is, in a word, as the retired page says it
@@ -456,14 +572,14 @@ const shownPrice = (live, priced) => inUnit(live?.price, priced.unit) ?? priced.
 // the word a market's tile takes its letters from, as the retired page draws it: an event's category, else its base or name
 const displayBase = item => str(item.base).replace(/^[a-z0-9]+:/i, '');
 const tileOf = item => (item.kind === 'event' ? str(item.category) || t('markets.tile.event') : displayBase(item) || str(item.name));
-// The aggregator synthesizes <base> perpetual. Its namespace belongs to the identity and source badge, not the title.
+// The aggregator synthesizes `<base> perp` (G7). Its namespace belongs to the identity and source badge, not the title.
 // Only that exact generated form is shortened; a market's supplied name remains verbatim.
 function displayName(item) {
   const base = str(item.base);
   const name = str(item.name);
   const dex = base.match(/^([a-z0-9]+):/i)?.[1];
   const recognized = dex && records(item.at).some(l => l.dex === dex || (dex === 'xyz' && marketOriginOf(l) === 'xyz'));
-  return item.kind === 'perp' && recognized && name === base + ' perpetual' ? name.slice(dex.length + 1) : name;
+  return item.kind === 'perp' && recognized && name === base + ' perp' ? name.slice(dex.length + 1) : name;
 }
 // the Account's keys starred: the operator's own, then each an old us:/crypto: star was found as
 function starredOf(m) {
@@ -575,6 +691,7 @@ function accountRow(item, quotes, watched, now, atAccount = false) {
     priced, price: shownPrice(live, priced), live, sourceWord: wordOf(item, live, now),
     closeTime: str(item.closeTime) || null, pastEnd: item.pastEnd === true, paper: legs.find(l => l.connected)?.paper === true, watched, atAccount, legs,
     tabs: Array.isArray(item.tabs) ? item.tabs.filter(tab => typeof tab === 'string') : [],
+    asset: str(item.asset) || null, form: str(item.form) || null, region: str(item.region) || null,
   };
 }
 
@@ -601,7 +718,7 @@ function cnRow(asset, markets, watched, atAccount = false) {
     id: asset.id, source: 'face', asset, quote, kind: 'stock', name: asset.name || asset.symbol, tile: cnTileOf(asset.name, asset.symbol),
     sub: `${asset.symbol} · ${cnBoardOf(asset.symbol)}`,
     priced, price: priced.price, live: null, sourceWord: sourceWord(quote ?? { market: 'cn' }), closeTime: null, pastEnd: false, paper: false,
-    watched, atAccount, legs: [], tabs: ['all'],
+    watched, atAccount, legs: [], tabs: ['all'], form: 'spot', region: 'cn',
   };
 }
 
@@ -642,48 +759,62 @@ export function sortsOf(rows, kept) {
   return { sorts, sort: sorts.some(s => s.id === kept) ? kept : sorts[0].id };
 }
 
-/** The table for the slice's tab, query and kept sort, on the renderer's clock (`now`, for the ages beside the source words):
- *  its rows, sorted by the sort in effect (sortsOf's); the sorts offered and that one; its tabs — tabsOf's over All's read, the
- *  A shares counted under All and Stocks, each count the Account's only once All's read has answered (none before), Watching
- *  once anything is starred, All results while searching, the Desk last; and the read the rows are from, `{ status, answered, message }` —
- *  while searching the search's, else the tab's own read once it has answered, else All's — `message` the Account's sentence
- *  when that read refused. The rows: the Account's are `source: 'account'`, each with the word its tile is lettered from, its
- *  figures by kind, the price it shows (`price`: the latest quote at its most traded connected venue, `live`, where that says
- *  one, in the row's unit — an event's in cents — else the explore read's), where its price is from and its lines: a tab's rows
- *  are its own explore read's (`explore[tab]`) once that has answered, else All's (`explore.all`), of the tab's kind; while
- *  there is a query, the search's (`results`) once it has answered. Beside them the A-share rows: the A shares starred (cnStarsOf's —
- *  the Account keys, the page's china entries, an old cn star the move left), or while searching the cn hits alone; and an old us:/crypto: star — one not asked of the Account yet draws nothing,
- *  one it found stars the Account's row, one it could not find is listed once, Not listed at the Account. All is every row, a
- *  kind's tab the rows whose tabs name it, All results (`results`) the search's own. Watching is every star, found in any list
- *  of its tab's read or All's (items, movers, closing, most traded), else a placeholder that can still be un-starred; a query
- *  typed on Watching searches every market, as the retired page does. The stars are the face's and the page's (`page`, the
- *  Account's own watch list: watchKeysOf over every read), one list: a row starred on the page's alone is `atAccount`; on
- *  Watching the page's follow the face's, each found in whichever read lists it. */
+// the Markets tabs' words (Trade's are accountTabs's)
+const marketTabWords = () => ({
+  watchlist: t('markets.tab.watchlist'), crypto: t('markets.tab.crypto'), stocks: t('markets.tab.stocks'), indices: t('markets.tab.indices'),
+  commodities: t('markets.tab.commodities'), fx: t('markets.tab.fx'), preipo: t('markets.tab.preipo'), macro: t('markets.tab.macro'),
+});
+const tabWord = id => marketTabWords()[id] ?? id;
+/** Markets' tabs as `{ id, label }` (G1): fixed, no counts. */
+export const marketTabs = () => MARKET_TABS.map(id => ({ id, label: tabWord(id) }));
+// a search result's class: its asset's tab word (an A share's, whose `asset` is the face's own, Stocks), else its form's word
+const classOf = r => (typeof r.asset === 'string' ? r.asset : r.region === 'cn' ? 'stocks' : '');
+const classWordOf = r => (MARKET_TABS.includes(classOf(r)) ? tabWord(classOf(r)) : r.form ? formWord(r.form) : '');
+// a tab's explore read as the store keeps it, when it was asked with the query the screen asks now (its sort aside); else none
+function shownRead(m, reads) {
+  const tab = tabOf(m);
+  const query = exploreQueryOf(m);
+  const slot = own(reads, tab);
+  return query !== null && isRecord(slot) && typeof slot.query === 'string' && unsorted(slot.query) === unsorted(query) ? slot : null;
+}
+
+/** The table on the renderer's clock (`now`, for the ages beside the source words), `page` the Account's: `{ rows, sorts, sort,
+ *  tabs, filters, read, china, session, searching, empty }`.
+ *  - rows: while searching (G5) the search's (`results`), its A shares the hits, each named by its class (`className`); on
+ *    Stocks › China A the ranking's; on the Watchlist (G6) every star, found in any read (else a placeholder that can still be
+ *    un-starred), the A shares starred and an old us:/crypto: star the Account could not find, each `noStar`; on any other tab
+ *    the rows of its own read once that read is for the filters on screen (a read for other filters is never drawn under
+ *    these: Review Focus), sorted by the sort in effect.
+ *  - sorts: China A and the Watchlist offer Most traded and Biggest moves; elsewhere Closing soonest too where a row closes.
+ *  - tabs: marketTabs's; filters: filtersOf's, none while searching.
+ *  - read: `{ status, answered, message }` of the rows' read — the search's, the ranking's, the tab's own (`loading` while the
+ *    one for these filters is out).
+ *  - empty: `'watchlist'` on an empty Watchlist, `'filters'` on a tab whose read answered with no rows, else null. */
 export function tableOf(markets, now = Date.now(), page = null) {
   const m = isRecord(markets) ? markets : {};
   const searching = !blank(m.q);
+  const tab = tabOf(m);
   const reads = isRecord(m.explore) ? m.explore : {};
   const atPage = watchKeysOf(page, exploreRowsOf(m));
-  // China (spec 2026-10-31 §4): the ranking's rows in its order, its two sorts, its read and its session
-  const onChina = m.tab === CHINA_TAB && !searching;
-  const rows = onChina ? chinaRowsOf(m, atPage) : unsortedRowsOf(m, searching, reads, now, atPage);
-  const { sorts, sort } = onChina
+  const china = !searching && onChinaA(m);
+  const watchlist = !searching && tab === 'watchlist';
+  // China A's ranking for another sort is no answer for this one (its rows are in that sort's order)
+  const rankShown = isRecord(m.rank) && (m.rank.data == null || m.rank.data.sort === (m.sort === 'movers' ? 'movers' : 'volume'));
+  const slot = searching ? m.results : china ? (rankShown ? m.rank : null) : shownRead(m, reads);
+  const rows = china ? chinaRowsOf(m, atPage) : unsortedRowsOf(m, { searching, watchlist, slot }, now, atPage);
+  const twoSorts = china || watchlist;
+  const { sorts, sort } = twoSorts
     ? { sorts: accountSorts().filter(s => s.id !== 'closing'), sort: m.sort === 'movers' ? 'movers' : 'volume' }
     : sortsOf(rows, m.sort);
-  const watchlist = records(m.watchlist).map(a => normalizeAsset(a)).filter(Boolean);
-  const all = bodyOf(reads, 'all');
-  const counted = all !== undefined && all !== null;
-  const watching = starredOf(m).length > 0 || watchlist.length > 0 || atPage.length > 0;
-  const chinaCount = rankOf(m) ? Math.max(0, number(rankOf(m).total) ?? 0) : null;
-  const more = marketScopeOf(m) === 'more' && !marketSourceOf(m);
-  const tabs = tabsOf(all, more ? cnStarsOf(m, atPage).length : 0, { watching: watching || !more, searching, china: more ? { count: chinaCount } : null })
-    .filter(tab => more || [...marketCategoryIds(marketScopeOf(m)), 'results', 'watching'].includes(tab.id))
-    .map(tab => (counted || tab.id === CHINA_TAB ? tab : { ...tab, count: null }));
-  const mine = own(reads, KIND_TABS.has(m.tab) ? m.tab : 'all');
-  const source = onChina ? m.rank : searching ? m.results : mine?.data ? mine : own(reads, 'all');
-  const read = { status: str(source?.status) || 'idle', answered: isRecord(source) && source.data != null,
-    message: (isSaid(source?.message) ? sayOf(source.message) : str(source?.message)) || null };
-  return { rows: onChina ? rows : sorted(rows, sort), sorts, sort, tabs, read, china: onChina, session: onChina ? rankOf(m)?.session ?? null : null };
+  const read = slot === null
+    ? { status: 'loading', answered: false, message: null }
+    : { status: str(slot?.status) || 'idle', answered: isRecord(slot) && slot.data != null,
+      message: (isSaid(slot?.message) ? sayOf(slot.message) : str(slot?.message)) || null };
+  const empty = rows.length > 0 || searching ? null : watchlist ? 'watchlist' : read.answered ? 'filters' : null;
+  return {
+    rows: china ? rows : sorted(rows, sort), sorts, sort, tabs: marketTabs(), filters: searching ? null : filtersOf(m), read,
+    china, session: china ? rankOf(m)?.session ?? null : null, searching, empty,
+  };
 }
 
 /** The table's rows (tableOf's, `page` the Account's), sorted by the sort in effect. */
@@ -691,45 +822,38 @@ export function rowsOf(markets, now = Date.now(), page = null) {
   return tableOf(markets, now, page).rows;
 }
 
-function unsortedRowsOf(m, searching, reads, now, atPage) {
-  const tab = searching && m.tab === 'watching' ? 'results' : m.tab;
-  const all = bodyOf(reads, 'all');
-  const watchlist = records(m.watchlist).map(a => normalizeAsset(a)).filter(Boolean);
-  const old = watchlist.filter(a => a.market !== 'cn');
+function unsortedRowsOf(m, { searching, watchlist, slot }, now, atPage) {
+  const reads = isRecord(m.explore) ? m.explore : {};
+  const listed = records(m.watchlist).map(a => normalizeAsset(a)).filter(Boolean);
+  const old = listed.filter(a => a.market !== 'cn');
   // the A shares starred (the Account keys', the page's china entries, an old cn star not moved): drawn as their A-share rows
   const cnStars = cnStarsOf(m, atPage);
-  const cnPageOnly = new Set(atPage.filter(isCnKey).filter(key => !starredOf(m).includes(key) && !watchlist.some(a => a.id === key)));
-  const cn = cnStars.map(key => cnAssetOf(m, key)).filter(Boolean);
+  const cnPageOnly = new Set(atPage.filter(isCnKey).filter(key => !starredOf(m).includes(key) && !listed.some(a => a.id === key)));
   const starred = starredOf(m).filter(key => !isCnKey(key));
   const isStarred = new Set(starred);
   const pageOnly = atPage.filter(key => !isCnKey(key) && !isStarred.has(key));
   const atAccount = new Set(pageOnly);
   const quotes = isRecord(m.accountQuotes) ? m.accountQuotes : {};
   const row = item => { const key = str(item.key); return accountRow(item, quotes, isStarred.has(key) || atAccount.has(key), now, atAccount.has(key)); };
-  const face = () => [...cn.map(a => cnRow(a, m, true, cnPageOnly.has(a.id))), ...old.filter(a => own(m.asked, a.id) === null).map(notListedRow)];
-  const fromResults = searching && readable(m.results?.data);
-  const listed = new Set(cn.map(a => a.id));
-  // the search's A shares: its cn items, drawn as the cn rows they are (their prices the hits' own), never as the Account's rows
-  const hits = searching ? cnHitsOf(m.results?.data).assets.map(a => cnRow(a, m, listed.has(a.id))) : [];
   const dollars = body => itemsOf(body).filter(i => !isCnKey(i.key));
-  let rows;
-  if (tab === 'watching') {
-    const lists = [...everyRow(bodyOf(reads, 'watching')), ...everyRow(all), ...locatedRowsOf(m)];
-    const everywhere = exploreRowsOf(m);
-    rows = [
-      ...starred.map(key => { const item = lists.find(i => i.key === key); return item ? row(item) : placeholderRow(key); }),
-      ...pageOnly.map(key => row(everywhere.find(i => i.key === key))),
-      ...face(),
-    ];
-  } else if (tab === 'results') {
-    rows = searching ? [...(fromResults ? dollars(m.results.data).map(row) : []), ...hits] : [];
-  } else {
-    const tabBody = bodyOf(reads, tab);
-    const body = fromResults ? m.results.data : readable(tabBody) ? tabBody : all;
-    rows = [...dollars(body).map(row), ...(searching ? hits : marketScopeOf(m) === 'more' && !marketSourceOf(m) ? face() : [])];
-    if (KIND_TABS.has(tab)) rows = rows.filter(r => r.tabs.includes(tab));
+  if (searching) {
+    const cnListed = new Set(cnStars);
+    // the search's A shares: its cn items, drawn as the cn rows they are (their prices the hits' own), never as the Account's rows
+    const hits = cnHitsOf(m.results?.data).assets.map(a => cnRow(a, m, cnListed.has(a.id)));
+    const found = readable(m.results?.data) ? dollars(m.results.data).map(row) : [];
+    return [...found, ...hits].map(r => ({ ...r, className: classWordOf(r) }));
   }
-  return rows;
+  if (watchlist) {
+    const lists = [...everyRow(bodyOf(reads, 'watchlist')), ...exploreRowsOf(m)];
+    const cn = cnStars.map(key => cnAssetOf(m, key)).filter(Boolean);
+    return [
+      ...starred.map(key => { const item = lists.find(i => i.key === key); return item ? row(item) : placeholderRow(key); }),
+      ...pageOnly.map(key => row(lists.find(i => i.key === key))),
+      ...cn.map(a => cnRow(a, m, true, cnPageOnly.has(a.id))),
+      ...old.filter(a => own(m.asked, a.id) === null).map(notListedRow),
+    ].map(r => ({ ...r, noStar: true }));
+  }
+  return slot && readable(slot.data) ? dollars(slot.data).map(row) : [];
 }
 
 /** What an old face star asks the Account (`explore?q=<q>`), and the kind a hit must be: `us:AAPL` a stock by its symbol,
@@ -781,7 +905,7 @@ export function pageOf(markets, account, id, now = Date.now()) {
   const m = isRecord(markets) ? markets : {};
   if (typeof id !== 'string' || id === '') return null;
   const reads = isRecord(m.explore) ? m.explore : {};
-  const found = [bodyOf(reads, m.tab), bodyOf(reads, 'all'), m.results?.data, own(m.located, id)?.data].flatMap(everyRow).find(i => i.key === id);
+  const found = [bodyOf(reads, m.tab), m.results?.data, own(m.located, id)?.data].flatMap(everyRow).concat(exploreRowsOf(m)).find(i => i.key === id);
   if (!found) return null;
   const item = noIcon(found);
   const legs = legsOf(item);

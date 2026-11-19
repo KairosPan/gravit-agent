@@ -323,10 +323,11 @@ test('the rank read: loading keeps the answer, loaded records its sort, a failur
   assert.equal(R.rankLoaded(s, { sort: 'price', data: {}, at: 3 }), s, 'an unknown sort changes nothing');
 });
 
-test('China is a tab, starting from Most traded', () => {
+test('Stocks › China A is a region of Stocks, a tab starting from Most traded', () => {
   let s = R.setMarketsSort(emptyState(), 'movers');
-  s = R.setMarketsTab(s, 'china');
-  assert.deepEqual([s.markets.tab, s.markets.sort], ['china', 'volume']);
+  s = R.setMarketsRegion(R.setMarketsTab(s, 'stocks'), 'cn');
+  assert.deepEqual([s.markets.tab, s.markets.region, s.markets.sort], ['stocks', 'cn', 'volume']);
+  assert.equal(R.setMarketsTab(s, 'china'), s, 'no China tab');
 });
 
 test('an A share page keeps its range and its history like an Account market', () => {

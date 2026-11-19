@@ -56,12 +56,13 @@ export function emptyState() {
       gravit: { host: null, model: null, keys: null }, skills: {}, status: null, models: null, artifacts: {},
       roster: { status: 'idle', agents: [], bots: [] },
     },
-    // the host's markets (host/markets.js) and the screen's own tab, sort and query: the Account's explore reads by tab (`all`,
-    // a kind's own) and the search's, the quotes by 'venue|symbol', a page's candles by its key and compare rows by base, the
+    // the host's markets (host/markets.js) and the screen's own tab, region, form, source, open popover, sort and query (spec
+    // 2026-11-19): the explore reads by tab (each with the query it was asked with; the Watchlist's the unscoped one) and the
+    // search's, the quotes by 'venue|symbol', a page's candles by its key and compare rows by base, the
     // Account keys starred and what each old us:/crypto: star was found as; then the A shares — the cn list, their quotes by cn
     // id and that read's state, China's state as a provider, the search hits' prices
     markets: {
-      scope: 'hyperliquid', source: '', tab: 'all', sort: 'volume', q: '',
+      tab: 'watchlist', region: 'us', form: '', source: 'main', open: null, sort: 'volume', q: '',
       sources: { status: 'idle', data: null, at: null },
       explore: {}, results: { status: 'idle', data: null, at: null },
       located: {},
@@ -70,7 +71,7 @@ export function emptyState() {
       event: {},
       watch: [], watchError: null, asked: {},
       watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
-      // the China tab's ranking read (the Account's explore?tab=china), with the sort it was read for
+      // Stocks › China A's ranking read (explore?asset=stocks&region=cn), with the sort it was read for
       rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null },
       // the market page on screen's four reads beside its price, by its key (plan 4a Task 4): `here` (the asset sheet), `book`,
       // `trades`, `funding` (a perpetual's) — each { status, data, at, message, freshAt }; dropped on leaving
