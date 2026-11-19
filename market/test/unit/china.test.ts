@@ -86,7 +86,7 @@ describe("the China source", () => {
     const { http } = net(rankRoutes());
     const { items } = answered(await chinaSource({ http, clock: () => SAT_15 }).rank("volume"));
     expect(items[0]).toEqual({
-      key: "cn:600519", kind: "ashare", name: "贵州茅台", base: "600519", currency: "CNY", price: 1392.05, changePct24h: 2.81,
+      key: "cn:600519", kind: "ashare", name: "贵州茅台", base: "600519", currency: "CNY", asset: "stocks", form: "spot", region: "cn", price: 1392.05, changePct24h: 2.81,
       turnoverCny: 21_610_000_000, quoteFrom: "Tencent", tabs: ["china"],
       at: [{ venue: "china", venueName: "Tencent", symbol: "600519", connected: false, canTrade: false, public: true, price: 1392.05, quoteFrom: "Tencent" }],
     });
@@ -238,7 +238,7 @@ describe("the China source", () => {
     const items = answered(await chinaSource({ http, clock: () => SAT_15 }).search("茅台"));
     expect(sent[0]).toBe(searchUrl("茅台"));
     expect(sent[1]).toBe("https://qt.gtimg.cn/q=marketStat,sh000001,sh600519");
-    expect(items).toEqual([{ key: "cn:600519", kind: "ashare", name: "贵州茅台", base: "600519", currency: "CNY", price: 1392.05, changePct24h: 2.81,
+    expect(items).toEqual([{ key: "cn:600519", kind: "ashare", name: "贵州茅台", base: "600519", currency: "CNY", asset: "stocks", form: "spot", region: "cn", price: 1392.05, changePct24h: 2.81,
       turnoverCny: 8_257_380_000, quoteFrom: "Tencent", tabs: ["china"],
       at: [{ venue: "china", venueName: "Tencent", symbol: "600519", connected: false, canTrade: false, public: true, price: 1392.05, quoteFrom: "Tencent" }] }]);
 

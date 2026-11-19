@@ -82,7 +82,7 @@
  * until the open; the row carries the session of its first connected venue that says one, so the page can say "Closed" from it.
  */
 import { isRefusal, type Refusal } from "../../core/errors.ts";
-import { isExcludedCategory, isIpoCategory, isRwaMarket, perpCategoryTab, TABS, type TabId } from "./categories.ts";
+import { classOf, isExcludedCategory, isIpoCategory, isRwaMarket, perpCategoryTab, TABS, type AssetId, type FormId, type RegionId, type TabId } from "./categories.ts";
 import { normalBase, scopeOf, type CompareMissing, type PlaceRule } from "./compare.ts";
 import { iconOf } from "./icons.ts";
 import { impliedUsd, PER_SHARE, PRE_IPO_CATEGORY, PRE_IPO_GROUP, PRE_IPO_PER_POINT } from "./preipo.ts";
@@ -244,6 +244,11 @@ export interface ExploreItem {
   eventVolumeUsd24h?: number | undefined;
   /** the venue's own words */
   category?: string | undefined;
+  /** what the row is (categories.ts classOf): the underlying it stands for, where the row says one; how it is held; and, for a share or an
+   * index, the market it is listed in */
+  asset?: AssetId | undefined;
+  form: FormId;
+  region?: RegionId | undefined;
   closeTime?: string | undefined;
   /** an event whose `closeTime` has passed (see the top of this file: a Polymarket market may still trade then) */
   pastEnd?: boolean | undefined;
@@ -275,6 +280,9 @@ export interface ExploreItem {
 }
 
 export type Mover = ExploreItem & { changePct24h: number; volumeUsd24h: number };
+
+/** a row as it is made, before it says what it is (classOf, where the rows are gathered) */
+type Unclassified = Omit<ExploreItem, "asset" | "form" | "region">;
 
 export interface ExploreMissing extends CompareMissing {
   /** the venue is one the owner connected (false: a public source) */
@@ -676,7 +684,7 @@ const displayLabel = (label: string): string => (/^yes$/i.test(label) ? "Yes" : 
  * the median guard go to `aside`. A paper account's line is a place to rehearse, not a price: the row's price, change, volume, funding and
  * session come from the real venues; only a row no real venue lists takes its price from the paper line, says so (`paper`) and carries no
  * volume */
-function rowOf(key: string, kind: ExploreKind, venues: Map<string, Got[]>, aside: ExploreMissing[], now: number): ExploreItem | undefined {
+function rowOf(key: string, kind: ExploreKind, venues: Map<string, Got[]>, aside: ExploreMissing[], now: number): Unclassified | undefined {
   const rank = (l: Got[]): number => (l[0]!.r.connected ? (l[0]!.r.paper ? 1 : 2) : 0);
   const all = [...venues.values()].sort((a, b) => rank(b) - rank(a));
   if (kind === "event") return eventRow(key, all, now);
@@ -716,7 +724,7 @@ function rowOf(key: string, kind: ExploreKind, venues: Map<string, Got[]>, aside
   // a stock's session: its first connected venue's that says one (the order its lines are in)
   const sessioned = entries.find((e) => e.r.connected && sessionOf(e.m) !== undefined);
   const named = [...entries, ...papers].find((e) => e.m.name && !e.m.name.includes(" / ") && e.m.name.toUpperCase() !== e.m.symbol.toUpperCase());
-  const name = kind === "coin" ? base : kind === "perp" ? `${base} perpetual` : (named?.m.name ?? base);
+  const name = kind === "coin" ? base : kind === "perp" ? `${base} perp` : (named?.m.name ?? base);
   const category = [...entries, ...papers].map((e) => e.m.category).find((c): c is string => typeof c === "string" && c !== "");
   const underlying = kind === "perp" ? perpCategoryTab(category) : undefined;
   const issued = kind === "rwa" ? entries.find((e) => typeof e.m.issuer === "string" && e.m.issuer !== "") : undefined;
@@ -753,7 +761,7 @@ function impliedOf(m: Market): { usd: number; unit: string } | undefined {
 /** a pre-IPO company's row (see the top of this file): one line per venue, each with the venue's own contract price and the valuation it
  * implies in the venue's own unit; the median guard on the implied valuation; the row's `implied.usd` the median of the venues', its `price`
  * that median in the $1-per-$1,000,000,000 convention. The row is Pre-IPO, not Perps */
-function preIpoRow(key: string, every: Got[], aside: ExploreMissing[]): ExploreItem | undefined {
+function preIpoRow(key: string, every: Got[], aside: ExploreMissing[]): Unclassified | undefined {
   // a paper account's contract is a line to rehearse on, not a valuation: it joins a company the real venues price, and makes no row
   const papers = every.filter((e) => e.r.paper);
   let entries = every.filter((e) => !e.r.paper && (impliedOf(e.m) !== undefined || priceOf(e.m) === undefined));
@@ -806,7 +814,7 @@ function preIpoRow(key: string, every: Got[], aside: ExploreMissing[]): ExploreI
 /** an event's row: its legs at every venue folded into its outcomes, YES and NO first. A `pm:`, `kalshi:` or `pmus:` row is one market at
  * one exchange, so a venue the owner connected that lists it trades it already: the public listing of it is left out. Past its close the row
  * and its legs say so (`pastEnd`), and a Kalshi leg is closed (see the top of this file) */
-function eventRow(key: string, every: Got[][], now: number): ExploreItem | undefined {
+function eventRow(key: string, every: Got[][], now: number): Unclassified | undefined {
   const order = every.some((l) => l[0]!.r.connected) ? every.filter((l) => l[0]!.r.connected) : every;
   const outcomes = new Map<string, ExploreOutcome>();
   let changeFrom: { venue: string; venueName: string } | undefined;
@@ -874,7 +882,7 @@ function eventRow(key: string, every: Got[][], now: number): ExploreItem | undef
 }
 
 /** a row matches a query by its own words or by any of its markets' symbols and names at any venue */
-const matches = (i: ExploreItem, words: string[], q: string): boolean => [i.name, i.base, i.category, i.event?.title, ...words].some((f) => typeof f === "string" && f.toLowerCase().includes(q));
+const matches = (i: Unclassified, words: string[], q: string): boolean => [i.name, i.base, i.category, i.event?.title, ...words].some((f) => typeof f === "string" && f.toLowerCase().includes(q));
 
 /** the busier first; rows that trade the same (or report no volume) keep the order they came in, which is each source's own */
 const byVolume = (a: ExploreItem, b: ExploreItem): number => volumeOf(b) - volumeOf(a);
@@ -962,7 +970,7 @@ export async function exploreAcross(sources: ExploreSources, opts: ExploreOption
     // its logo: an event's is the venue's own picture where a listing carried one (live/icons.ts)
     const image = row.kind === "event" ? [...row.venues.values()].flat().map((g) => (g.m as Listing).image).find((x): x is string => typeof x === "string" && x !== "") : undefined;
     const icon = iconOf(item, image);
-    made.push(icon ? { ...item, icon } : item);
+    made.push({ ...item, ...classOf(item), ...(icon ? { icon } : {}) });
     missing.push(...aside);
   }
   // Predictions is a few of the busiest when nothing is searched for: the other event rows are not shown anywhere. An event under an

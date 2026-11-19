@@ -1,0 +1,11 @@
+{
+  "read": "2026-11-19",
+  "from": "not read from the network: no saved copy of trade.xyz's perpCategories was in the repository, so these are the xyz: stocks and indices coins the repository's own tests already pair with a category (market/test/unit/live-trade-xyz.test.ts, live-explore.test.ts, live-public-markets-fixtures.ts; account/test/unit/live-hyperliquid-trade.test.ts)",
+  "coins": [
+    ["xyz:HOOD", "stocks"],
+    ["xyz:NVDA", "stocks"],
+    ["xyz:SPCX", "stocks"],
+    ["xyz:TSLA", "stocks"],
+    ["xyz:XYZ100", "indices"]
+  ]
+}

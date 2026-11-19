@@ -49,7 +49,7 @@ export function fakeSource(o: { id?: string } = {}): PublicSource {
 
 /** one A share as China's search finds it */
 const hit: ExploreItem = {
-  key: "cn:600519", kind: "ashare", name: "贵州茅台", base: "600519", currency: "CNY", price: 1500, quoteFrom: "Tencent", tabs: ["china"],
+  key: "cn:600519", kind: "ashare", name: "贵州茅台", base: "600519", currency: "CNY", asset: "stocks", form: "spot", region: "cn", price: 1500, quoteFrom: "Tencent", tabs: ["china"],
   at: [{ venue: "china", venueName: "Tencent", symbol: "600519", connected: false, canTrade: false, public: true, price: 1500, quoteFrom: "Tencent" }],
 } as ExploreItem;
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { categoryOf, isExcludedCategory, isIpoCategory, KALSHI_SERIES, perpCategoryTab, roleOfCategory, TABS, type TabId } from "../../src/portfolio/live/categories.ts";
+import { categoryOf, classOf, isExcludedCategory, isIpoCategory, KALSHI_SERIES, perpCategoryTab, roleOfCategory, TABS, type TabId } from "../../src/portfolio/live/categories.ts";
+import { CASES } from "../../../market/test/unit/classify-cases.ts";
 
 /** The Markets screen's tabs, the table of venues' category words, and the Kalshi series the public read is made of. */
 
@@ -57,4 +58,9 @@ describe("the Kalshi series", () => {
     // a series ticker is the series root: KXIPOANTHROPIC-DATE (the event) answers nothing
     expect(KALSHI_SERIES.every((s) => !s.ticker.includes("-"))).toBe(true);
   });
+});
+
+describe("classOf, the account's copy", () => {
+  // the market's case table: one table proves both copies
+  it.each(CASES)("$name", ({ item, want }) => expect(classOf(item)).toEqual(want));
 });

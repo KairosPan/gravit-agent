@@ -144,8 +144,11 @@ describe("one row for one thing", () => {
   it("keeps a perpetual apart from the coin, by its base, with its funding where the venue says", async () => {
     const x = trader({ markets: [mk("ETH/USDT", "spot", "ETH", "USDT", { price: 3_000, volumeUsd24h: 5e8 }), mk("ETH/USDT:USDT", "perp", "ETH", "USDT", { price: 3_001, volumeUsd24h: 9e8, fundingRate: 0.0001, nextFundingAt: "2026-10-05T16:00:00.000Z" })] });
     const out = await exploreAcross({ connected: [venue("okx", "OKX", x)] }, { clock });
-    expect(out.items.find((i) => i.key === "perp:ETH")).toMatchObject({ kind: "perp", name: "ETH perpetual", fundingRate: 0.0001, nextFundingAt: "2026-10-05T16:00:00.000Z", tabs: expect.arrayContaining(["perps"]) });
+    expect(out.items.find((i) => i.key === "perp:ETH")).toMatchObject({ kind: "perp", name: "ETH perp", fundingRate: 0.0001, nextFundingAt: "2026-10-05T16:00:00.000Z", tabs: expect.arrayContaining(["perps"]) });
     expect(out.items.find((i) => i.key === "coin:ETH")?.at[0]?.symbol).toBe("ETH/USDT");
+    // every row says what it is (categories.ts classOf): a perp with no category names no asset
+    const said = (key: string) => { const i = out.items.find((x) => x.key === key)!; return [i.asset, i.form, i.region]; };
+    expect([said("coin:ETH"), said("perp:ETH")]).toEqual([["crypto", "spot", undefined], [undefined, "perp", undefined]]);
   });
 
   it("merges stocks by ticker and keeps a Stock Token apart from the share it stands for", async () => {

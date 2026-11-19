@@ -100,7 +100,7 @@ export function cnKeeper<T>(now: () => number, ttl: (key: string) => number) {
 /** one share as a China row: view-only, in CNY, in the China tab alone */
 function rowOf(r: { symbol: string; name: string; price: number | null; changePct: number | null; turnover: number | null }): ExploreItem {
   return {
-    key: `cn:${r.symbol}`, kind: "ashare", name: r.name, base: r.symbol, currency: "CNY",
+    key: `cn:${r.symbol}`, kind: "ashare", name: r.name, base: r.symbol, currency: "CNY", asset: "stocks", form: "spot", region: "cn",
     ...(r.price !== null ? { price: r.price } : {}),
     ...(r.changePct !== null ? { changePct24h: r.changePct } : {}),
     ...(r.turnover !== null ? { turnoverCny: r.turnover } : {}),

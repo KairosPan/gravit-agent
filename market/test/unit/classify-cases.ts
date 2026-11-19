@@ -1,0 +1,33 @@
+/** THE CASE TABLE for categories.ts classOf: one case per row of the markets-by-underlying spec's §5.1 and per rule of its §5.1.1. Both
+ * copies of the classifier are proved by it: the market's (live-classify.test.ts) and the account's (account/test/unit/live-categories.test.ts).
+ * A row's `category` is the one word categoryOf chose (a Polymarket tag set reaches the classifier only through it), so a case gives
+ * `category` as rows carry it. */
+import type { classOf, Classified } from "../../src/live/categories.ts";
+
+export const CASES: Array<{ name: string; item: Parameters<typeof classOf>[0]; want: Classified }> = [
+  { name: "coin", item: { key: "coin:BTC", kind: "coin", base: "BTC" }, want: { asset: "crypto", form: "spot" } },
+  { name: "native Hyperliquid perp", item: { key: "perp:BTC", kind: "perp", base: "BTC", category: "crypto" }, want: { asset: "crypto", form: "perp" } },
+  { name: "xyz equity perp", item: { key: "perp:xyz:NVDA", kind: "perp", base: "xyz:NVDA", category: "stocks" }, want: { asset: "stocks", form: "perp", region: "us" } },
+  { name: "xyz index perp, capitalised", item: { key: "perp:xyz:SP500", kind: "perp", base: "xyz:SP500", category: "Indices" }, want: { asset: "indices", form: "perp", region: "us" } },
+  { name: "xyz commodity perp", item: { key: "perp:xyz:GOLD", kind: "perp", base: "xyz:GOLD", category: "commodities" }, want: { asset: "commodities", form: "perp" } },
+  { name: "xyz fx perp", item: { key: "perp:xyz:EUR", kind: "perp", base: "xyz:EUR", category: "fx" }, want: { asset: "fx", form: "perp" } },
+  { name: "raw preipo perp", item: { key: "perp:xyz:SPACEX", kind: "perp", base: "xyz:SPACEX", category: "preipo" }, want: { asset: "preipo", form: "perp" } },
+  { name: "grouped pre-IPO", item: { key: "preipo:anthropic", kind: "perp", base: "ANTHROPIC", category: "Pre-IPO" }, want: { asset: "preipo", form: "perp" } },
+  { name: "perp, unknown category", item: { key: "perp:io:ABC", kind: "perp", base: "io:ABC", category: "memes" }, want: { form: "perp" } },
+  { name: "perp, no category", item: { key: "perp:xyz:ZZZ", kind: "perp", base: "xyz:ZZZ" }, want: { form: "perp" } },
+  { name: "stock", item: { key: "stock:AAPL", kind: "stock", base: "AAPL" }, want: { asset: "stocks", form: "spot", region: "us" } },
+  { name: "rwa", item: { key: "rwa:NVDAX", kind: "rwa", base: "NVDAX" }, want: { asset: "stocks", form: "token", region: "us" } },
+  { name: "ashare", item: { key: "cn:600519", kind: "ashare", base: "600519" }, want: { asset: "stocks", form: "spot", region: "cn" } },
+  { name: "IPO event", item: { key: "kalshi:KXIPOOPENAI-26-Q1", kind: "event", category: "IPOs", event: { id: "KXIPOOPENAI-26" } }, want: { asset: "preipo", form: "event" } },
+  { name: "Kalshi KXBTCD", item: { key: "kalshi:KXBTCD-26NOV1917-T95000", kind: "event", category: "Crypto", event: { id: "KXBTCD-26NOV1917" } }, want: { asset: "crypto", form: "event" } },
+  { name: "Kalshi KXBTCD, no event id (a connected Kalshi row)", item: { key: "kalshi:KXBTCD-26NOV1917-T95000", kind: "event", category: "Financials" }, want: { asset: "crypto", form: "event" } },
+  { name: "Kalshi KXINX", item: { key: "kalshi:KXINX-26NOV19H1600-B6500", kind: "event", category: "Financials", event: { id: "KXINX-26NOV19H1600" } }, want: { asset: "indices", form: "event", region: "us" } },
+  { name: "Kalshi KXNASDAQ100", item: { key: "kalshi:KXNASDAQ100-26NOV19H1600-B21000", kind: "event", category: "Financials", event: { id: "KXNASDAQ100-26NOV19H1600" } }, want: { asset: "indices", form: "event", region: "us" } },
+  { name: "Kalshi KXFEDDECISION", item: { key: "kalshi:KXFEDDECISION-26DEC-H0", kind: "event", category: "Economics", event: { id: "KXFEDDECISION-26DEC" } }, want: { asset: "macro", form: "event" } },
+  { name: "Polymarket crypto prices", item: { key: `pm:0x${"ab".repeat(32)}`, kind: "event", category: "Crypto Prices" }, want: { asset: "crypto", form: "event" } },
+  { name: "Polymarket bitcoin", item: { key: `pm:0x${"ac".repeat(32)}`, kind: "event", category: "Bitcoin" }, want: { asset: "crypto", form: "event" } },
+  { name: "Polymarket indicies (sic)", item: { key: `pm:0x${"ad".repeat(32)}`, kind: "event", category: "Indicies" }, want: { asset: "indices", form: "event", region: "us" } },
+  { name: "Polymarket oil", item: { key: `pm:0x${"ae".repeat(32)}`, kind: "event", category: "Oil" }, want: { asset: "commodities", form: "event" } },
+  { name: "Polymarket politics", item: { key: `pm:0x${"af".repeat(32)}`, kind: "event", category: "Politics" }, want: { asset: "macro", form: "event" } },
+  { name: "event, no category", item: { key: "pmus:fed-cut", kind: "event" }, want: { asset: "macro", form: "event" } },
+];

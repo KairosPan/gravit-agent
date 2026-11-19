@@ -65,6 +65,68 @@ export function perpCategoryTab(category?: string): TabId | undefined {
   return ["crypto", "stocks", "indices", "commodities", "fx"].includes(word) ? word as TabId : undefined;
 }
 
+/** WHAT A ROW IS, three ways (classOf): the underlying it stands for (its asset), how it is held (its form) and, for shares and indices,
+ * the market they are listed in (its region). An asset the row does not say — a perpetual whose source gives no known category — is none,
+ * never a guess. In the order the screen shows them. */
+export type AssetId = "crypto" | "stocks" | "indices" | "commodities" | "fx" | "preipo" | "macro";
+export const ASSET_IDS: readonly AssetId[] = ["crypto", "stocks", "indices", "commodities", "fx", "preipo", "macro"];
+export type FormId = "spot" | "perp" | "token" | "event";
+export const FORM_IDS: readonly FormId[] = ["spot", "perp", "token", "event"];
+export type RegionId = "us" | "cn";
+export const REGION_IDS: readonly RegionId[] = ["us", "cn"];
+
+/** the share and index perpetuals whose underlying is not listed in the US (a Japanese, Korean, Hong Kong or European share or index), by
+ * their upper-case base without its `xyz:` namespace: such a row carries no region. Judged from trade.xyz's stocks and indices coins
+ * (market/test/fixtures/xyz-equity-categories.json): none of them is */
+export const NON_US_UNDERLYINGS: ReadonlySet<string> = new Set<string>();
+
+export interface Classified {
+  asset?: AssetId | undefined;
+  form: FormId;
+  region?: RegionId | undefined;
+}
+
+/** an event's Kalshi series names its underlying where its category does not (KXBTCD is bitcoin, filed under Financials) */
+const CRYPTO_SERIES: ReadonlySet<string> = new Set(["KXBTCD"]);
+const INDEX_SERIES: ReadonlySet<string> = new Set(["KXINX", "KXNASDAQ100"]);
+const CRYPTO_WORDS: ReadonlySet<string> = new Set(["crypto", "crypto prices", "bitcoin", "ethereum"]);
+const INDEX_WORDS: ReadonlySet<string> = new Set(["indices", "indicies"]);
+const COMMODITY_WORDS: ReadonlySet<string> = new Set(["commodities", "oil", "gold"]);
+
+/** a row's asset, form and region, from what the row already carries: its kind, key, base, category and event (structural, so this file
+ * imports nothing from explore.ts) */
+export function classOf(i: { key: string; kind: string; base?: string | undefined; category?: string | undefined; event?: { id: string } | undefined }): Classified {
+  switch (i.kind) {
+    case "coin":
+      return { asset: "crypto", form: "spot" };
+    case "stock":
+      return { asset: "stocks", form: "spot", region: "us" };
+    case "rwa":
+      return { asset: "stocks", form: "token", region: "us" };
+    case "ashare":
+      return { asset: "stocks", form: "spot", region: "cn" };
+    case "perp": {
+      const asset = i.key.startsWith("preipo:") ? "preipo" : perpCategoryTab(i.category);
+      if (asset === undefined) return { form: "perp" };
+      if (asset !== "stocks" && asset !== "indices") return { asset: asset as AssetId, form: "perp" };
+      const base = String(i.base ?? "");
+      const bare = base.slice(base.indexOf(":") + 1).toUpperCase();
+      return { asset, form: "perp", ...(NON_US_UNDERLYINGS.has(bare) ? {} : { region: "us" as const }) };
+    }
+    case "event": {
+      const word = typeof i.category === "string" ? normalWords(i.category) : "";
+      const series = i.key.startsWith("kalshi:") ? (i.event?.id ?? i.key.slice("kalshi:".length)).split("-")[0]!.toUpperCase() : "";
+      if (isIpoCategory([i.category])) return { asset: "preipo", form: "event" };
+      if (CRYPTO_SERIES.has(series) || CRYPTO_WORDS.has(word)) return { asset: "crypto", form: "event" };
+      if (INDEX_SERIES.has(series) || INDEX_WORDS.has(word)) return { asset: "indices", form: "event", region: "us" };
+      if (COMMODITY_WORDS.has(word)) return { asset: "commodities", form: "event" };
+      return { asset: "macro", form: "event" };
+    }
+    default:
+      return { form: "spot" };
+  }
+}
+
 /** what the table says of a word: shown as a row's category, the event left out, or the venue's plumbing */
 export type CategoryRole = "shown" | "excluded" | "plumbing";
 

@@ -505,7 +505,7 @@ describe("China in the market's reads", () => {
 
     // ---- the recording stand-in ---------------------------------------------------------------------------------------------------------
   const cnRow = (symbol: string, name: string, price: number): ExploreItem => ({
-    key: `cn:${symbol}`, kind: "ashare", name, base: symbol, currency: "CNY", price, quoteFrom: "Tencent", tabs: ["china"],
+    key: `cn:${symbol}`, kind: "ashare", name, base: symbol, currency: "CNY", asset: "stocks", form: "spot", region: "cn", price, quoteFrom: "Tencent", tabs: ["china"],
     at: [{ venue: "china", venueName: "Tencent", symbol, connected: false, canTrade: false, public: true, price, quoteFrom: "Tencent" }],
   });
   const LIVE: ChinaStatus = { state: "live", said: "Tencent · answering", at: "2026-11-02T02:40:00.000Z" };
@@ -905,5 +905,45 @@ describe("the market's headline read, GET /api/news", () => {
     const r = await fetch(`${srv.url}/api/news?symbols=INTC`);
     expect(r.status).toBe(409);
     expect(((await r.json()) as { refusal: { code: string } }).refusal.code).toBe("E_MARKET_UNKNOWN_SOURCE");
+  });
+});
+
+describe("the old params' answers, pinned before markets-by-underlying", () => {
+  /** one fixed stand-in source set: a Hyperliquid perp, two trade.xyz perps, a Cboe stock, a Robinhood token, a Kalshi and a Polymarket
+   * event, and a pre-IPO company; names are not pinned (the perp rows are renamed by G7), only each row's key and tabs */
+  const PM = `0x${"ab".repeat(32)}`;
+  const later = new Date(Date.now() + 30 * 86_400_000).toISOString();
+  const at = (id: string, kind: PublicSource["kind"], rows: Listing[], connectTo = id): PublicSource => ({
+    ...fakeSource({ id }), kind, connectTo, connector: `live:exchange:${connectTo}`, listings: async () => rows.map((r) => ({ ...r })),
+  });
+  const SOURCES = (): PublicSource[] => [
+    at("hyperliquid", "exchange", [listing("BTC", 62_000, { kind: "perp", base: "BTC", quote: "USDC", category: "crypto" })]),
+    at("trade-xyz", "exchange", [
+      listing("xyz:NVDA", 180, { kind: "perp", base: "xyz:NVDA", quote: "USDC", category: "stocks" }),
+      listing("xyz:SP500", 6_500, { kind: "perp", base: "xyz:SP500", quote: "USDC", category: "indices" }),
+    ]),
+    at("cboe", "stocks", [listing("NVDA", 181, { kind: "stock", base: "NVDA", quote: "USD" })]),
+    at("robinhood-stock-tokens", "tokens", [listing("NVDA", 181, { kind: "token", base: "NVDA", quote: "USD" })]),
+    at("kalshi", "events", [listing("KXFEDDECISION-26DEC-H0:YES", 0.9, { kind: "event", base: "YES", quote: "USD", outcome: "Yes", category: "Economics", closeTime: later, group: { id: "KXFEDDECISION-26DEC-H0", title: "Fed holds in December?" } })]),
+    at("polymarket", "events", [listing(`${PM}:Yes`, 0.4, { kind: "event", base: "Yes", quote: "USDC", outcome: "Yes", category: "Crypto", closeTime: later, group: { id: PM, title: "Bitcoin above 100k?" } })]),
+    at("okx-preipo", "exchange", [listing("ANTHROPIC/USDT:USDT", 204, { kind: "perp", base: "ANTHROPIC", category: "Pre-IPO", group: { id: "preipo:anthropic", title: "Anthropic" }, implied: { perPoint: 1e10, unit: "OKX's unit", usd: 2_040_000_000_000 } })], "okx"),
+  ];
+  const keysAndTabs = (body: Record<string, any>) => ({ items: body.items.map((i: ExploreItem) => [i.key, i.tabs]), tabs: body.tabs });
+
+  const ALL_TABS = [{ id: "all", label: "All", count: 8 }, { id: "crypto", label: "Crypto", count: 1 }, { id: "stocks", label: "Stocks", count: 2 }, { id: "indices", label: "Indices", count: 1 }, { id: "rwas", label: "RWAs", count: 1 }, { id: "perps", label: "Perps", count: 3 }, { id: "preipo", label: "Pre-IPO", count: 1 }, { id: "predictions", label: "Predictions", count: 2 }];
+  const PINNED: Array<[string, { items: Array<[string, string[]]>; tabs: Array<{ id: string; label: string; count: number }> }]> = [
+    ["tab=predictions", { items: [["kalshi:KXFEDDECISION-26DEC-H0", ["all", "predictions"]], [`pm:${PM}`, ["all", "predictions"]]], tabs: ALL_TABS }],
+    ["tab=perps&limit=5", { items: [["perp:BTC", ["all", "perps", "crypto"]], ["perp:xyz:NVDA", ["all", "perps", "stocks"]], ["perp:xyz:SP500", ["all", "perps", "indices"]]], tabs: ALL_TABS }],
+    ["scope=xyz&tab=stocks", { items: [["perp:xyz:NVDA", ["all", "perps", "stocks"]]], tabs: [{ id: "all", label: "All", count: 2 }, { id: "stocks", label: "Stocks", count: 1 }, { id: "indices", label: "Indices", count: 1 }, { id: "perps", label: "Perps", count: 2 }] }],
+    ["scope=more&source=cboe", { items: [["stock:NVDA", ["all", "stocks"]]], tabs: [{ id: "all", label: "All", count: 1 }, { id: "stocks", label: "Stocks", count: 1 }] }],
+    ["q=nv", { items: [["perp:xyz:NVDA", ["all", "perps", "stocks"]], ["stock:NVDA", ["all", "stocks"]], ["rwa:NVDA", ["all", "rwas"]]], tabs: [{ id: "all", label: "All", count: 3 }, { id: "stocks", label: "Stocks", count: 2 }, { id: "rwas", label: "RWAs", count: 1 }, { id: "perps", label: "Perps", count: 1 }] }],
+    ["key=stock:NVDA", { items: [["stock:NVDA", ["all", "stocks"]]], tabs: [{ id: "all", label: "All", count: 1 }, { id: "stocks", label: "Stocks", count: 1 }] }],
+  ];
+
+  it.each(PINNED)("%s", async (query, want) => {
+    const { get } = await market({ sources: SOURCES() });
+    const got = await get(`/api/explore?${query}`);
+    expect(got.status).toBe(200);
+    expect(keysAndTabs(got.body)).toEqual(want);
   });
 });
