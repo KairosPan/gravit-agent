@@ -42,6 +42,39 @@ describe("connected Markets scopes", () => {
     expect(markets).toHaveBeenCalledWith("", "more", "okx");
   });
 
+  it("keeps the old single-source rule on the real venue ids", async () => {
+    const preipo: Market = { ...native, symbol: "ANTH/USDC:USDC", base: "ANTH", category: "Pre-IPO", group: { id: "preipo:anthropic", title: "Anthropic" }, implied: { perPoint: 1e9, unit: "USD billions" } };
+    const okx: ExploreVenue[] = [{ id: "okx", name: "OKX", connector: "live:exchange:okx", trader: { can: true, markets: async () => [spot, native, preipo] } as unknown as LiveTrader }];
+    for (const scope of ["more", undefined] as const) {
+      const r = await exploreAcross({ connected: scopedExploreVenues(okx, scope, [source("okx", "live:exchange:okx")]) });
+      expect(r.items.map((i) => i.key)).toEqual(["coin:HYPE"]);
+    }
+    const trade: ExploreVenue[] = [{ id: "hyperliquid", name: "HL", connector: "live:hyperliquid-trade", trader: { can: true, markets: async () => [native, xyz, spot] } as unknown as LiveTrader }];
+    const hl = await exploreAcross({ connected: scopedExploreVenues(trade, undefined, [source("hyperliquid", "live:hyperliquid-trade")]) });
+    expect(hl.items.map((i) => i.key)).toEqual(["perp:BTC"]);
+    const byAddress: ExploreVenue[] = [{ id: "hyperliquid", name: "HL", connector: "live:hyperliquid", trader: { can: true, markets: async () => [native, xyz] } as unknown as LiveTrader }];
+    expect(scopedExploreVenues(byAddress, undefined, [source("hyperliquid", "live:hyperliquid-trade")])).toEqual([]);
+  });
+
+  it("counts a connected venue whose id is listed as that source's on a question by underlying", async () => {
+    const markets = vi.fn(async () => [native, xyz]);
+    const venues: ExploreVenue[] = [{ id: "hyperliquid", name: "HL", connector: "live:hyperliquid", trader: { can: true, markets } as unknown as LiveTrader }];
+    const listed = [source("hyperliquid", "live:hyperliquid-trade"), source("hyperliquid-preipo", "live:hyperliquid-trade")];
+    const r = await exploreAcross({ connected: scopedExploreVenues(venues, undefined, listed, true) });
+    expect(r.items.map((i) => i.key).sort()).toEqual(["perp:BTC", "perp:xyz:NVDA"]);
+    expect(markets).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks a venue other than paper once, whatever number of listed sources it speaks for", async () => {
+    const preipo: Market = { ...native, symbol: "ANTH/USDC:USDC", base: "ANTH", category: "Pre-IPO", group: { id: "preipo:anthropic", title: "Anthropic" }, implied: { perPoint: 1e9, unit: "USD billions" } };
+    const markets = vi.fn(async () => [spot, preipo]);
+    const venues: ExploreVenue[] = [{ id: "okx-key", name: "OKX", connector: "live:exchange:okx", trader: { can: true, markets } as unknown as LiveTrader }];
+    const r = await exploreAcross({ connected: scopedExploreVenues(venues, "more", [source("okx", "live:exchange:okx"), source("okx-preipo", "live:exchange:okx")], true) });
+    expect(markets).toHaveBeenCalledTimes(1);
+    expect(markets).toHaveBeenCalledWith("", "more");
+    expect(r.items.map((i) => i.key).sort()).toEqual(["coin:HYPE", "preipo:anthropic"]);
+  });
+
   it("keeps the venues and products of any listed source", async () => {
     const event = (symbol: string): Market => ({ ...spot, symbol, base: symbol, kind: "event" });
     const kalshiMarkets = vi.fn(async () => [event("KXFED-26DEC")]);

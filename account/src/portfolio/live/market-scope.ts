@@ -42,31 +42,29 @@ function joined(got: Array<Market[] | Refusal>, keep: (m: Market) => boolean): M
 }
 
 /** THE VENUES A MARKETS QUESTION READS, scoped and narrowed to a list of sources before their stats and the limit: a venue is kept when it is
- * paper, its id is a listed source's, or its connection is one (a MetaMask connection is the wallet's); a line counts when its venue's id
- * is listed or it is one of a listed source's (marketInSource). The trader seam takes one source, so a venue is asked once per listed source
- * it speaks for (paper: every one) and the answers joined */
-export function scopedExploreVenues(venues: ExploreVenue[], scope?: MarketScope, sources: readonly PublicSource[] = []): ExploreVenue[] {
+ * paper or its connection is a listed source's (a MetaMask connection is the wallet's), and a line when it is one of a listed source's
+ * (marketInSource). `byClass` (a question by underlying: an asset, a form, a region, or two or more sources) adds the main-source rule of
+ * the spec's §5.2: a venue whose id is a listed source's is kept with every line in scope. An old question (no class, one source at most)
+ * never takes that arm — a connected venue's id is its connector's venue name, the very source id, and it would widen today's answers.
+ * The trader seam takes one source, so a paper venue is asked once per listed source and the answers joined; any other venue once */
+export function scopedExploreVenues(venues: ExploreVenue[], scope?: MarketScope, sources: readonly PublicSource[] = [], byClass = false): ExploreVenue[] {
   const listed = sources.length > 0;
   if (!scope && !listed) return venues;
   return venues.flatMap((v) => {
     const hl = /^live:hyperliquid(?:-trade|-paper)?$/.test(v.connector ?? "");
     const paper = v.connector === "live:paper";
-    const byId = sources.some((s) => s.id === v.id);
+    const byId = byClass && sources.some((s) => s.id === v.id);
     const mine = paper ? sources : sources.filter((s) => connects(s, v.connector));
     if (listed && !paper && !byId && !mine.length) return [];
     if (scope && !hl && !paper && scope !== "more") return [];
     if (!listed && !hl && !paper) return [v];
     const keep = (m: Market): boolean => (!scope || paper || !hl || marketInScope(m, scope)) && (!listed || byId || sources.some((s) => marketInSource(m, s)));
-    const asked = mine.map((s) => s.id);
+    // a venue other than paper reads its own listings whichever source names it: asked once, with the source when only one does
+    const asked: Array<string | undefined> = paper ? mine.map((s) => s.id) : mine.length === 1 ? [mine[0]!.id] : [];
+    if (!asked.length) asked.push(undefined);
     const events = mine.filter((s) => s.kind === "events");
     const trader = Object.assign(Object.create(v.trader) as LiveTrader, {
-      markets: async (q: string) => {
-        if (!asked.length) {
-          const got = await v.trader.markets(q, scope);
-          return isRefusal(got) ? got : got.filter(keep);
-        }
-        return joined(await Promise.all(asked.map((id) => v.trader.markets(q, scope, id))), keep);
-      },
+      markets: async (q: string) => joined(await Promise.all(asked.map((id) => (id === undefined ? v.trader.markets(q, scope) : v.trader.markets(q, scope, id)))), keep),
       ...(listed ? {
         events: events.length && v.trader.events ? async (o: Parameters<NonNullable<LiveTrader["events"]>>[0]) => {
           const ids = paper ? events.map((s) => s.id) : [undefined];

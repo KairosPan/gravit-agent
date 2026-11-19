@@ -1076,7 +1076,9 @@ export class PortfolioService {
     }
     // China A is the market's: nothing connected here is listed in cn, so the question is answered with no rows before any venue is read
     if (region === "cn") return { asOf: new Date(this.realNow()).toISOString(), tabs: [], items: [], movers: [], closing: [], mostTraded: [], missing: [], notes: [] };
-    const connected = scopedExploreVenues(this.exploreVenues(), scope, selected);
+    // by underlying (a class, or two or more sources): a connected venue whose id is a listed source's counts as that source's (spec §5.2)
+    const byClass = asset !== undefined || form !== undefined || region !== undefined || sources.length > 1;
+    const connected = scopedExploreVenues(this.exploreVenues(), scope, selected, byClass);
     return this.marketReads.get(`connected-explore|${scope ?? ""}|${sources.join(",")}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}|${asset ?? ""}|${form ?? ""}|${region ?? ""}`, 30_000, async (): Promise<Exploration | Refusal> => {
       const { placed, serves } = await this.placedServing(connected);
       return exploreAcross({ connected: placed, public: [] }, {
