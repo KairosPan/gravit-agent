@@ -11,7 +11,7 @@ const bytesOf = (o: unknown) => new TextEncoder().encode(JSON.stringify(o));
 const upstream = (o: unknown, status = 200): IfindAnswer => ({ kind: "upstream", status, contentType: "application/json", bytes: bytesOf(o) });
 
 // ---- a picker that records what it was asked and answers from a script; a clock the test moves ---------------------------------------
-type Step = { answer: IfindAnswer; asked?: number } | IfindAnswer;
+type Step = { answer: IfindAnswer; asked?: number } | IfindAnswer | Error;
 function rig(script: Step[] = [], o: { perDay?: number; configured?: boolean } = {}) {
   const clock = { t: Date.UTC(2026, 10, 19, 5, 0, 0) };
   const calls: Array<{ searchstring: string; searchtype: string; deadlineMs: number }> = [];
@@ -22,6 +22,7 @@ function rig(script: Step[] = [], o: { perDay?: number; configured?: boolean } =
       calls.push({ searchstring, searchtype, deadlineMs });
       if (state.hold) await new Promise<void>((r) => gates.push(r));
       const next = script.shift() ?? { answer: upstream(SHAPE), asked: 1 };
+      if (next instanceof Error) throw next;
       return "answer" in next ? { answer: next.answer, asked: next.asked ?? 1 } : { answer: next, asked: next.kind === "upstream" ? 1 : 0 };
     },
   };
@@ -47,6 +48,18 @@ describe("tableOf", () => {
     expect(t.returned).toBe(t.rowCount);
     // exactly 200 characters is not cut
     expect(tableOf({ errorcode: 0, tables: [{ table: { a: ["y".repeat(200)] } }] }, 50)).toMatchObject({ rows: [["y".repeat(200)]], truncated: false });
+  });
+
+  it("passes an array or object cell as its JSON, cut like a string; numbers, booleans and null as they are", () => {
+    const t = tableOf({ errorcode: 0, tables: [{ table: { a: [["概念A", "概念B"], { k: 1 }, true, null, 3] } }] }, 50)!;
+    expect(t.rows).toEqual([['["概念A","概念B"]'], ['{"k":1}'], [true], [null], [3]]);
+    expect(t.truncated).toBe(false);
+    const long = tableOf({ errorcode: 0, tables: [{ table: { a: [Array.from({ length: 100 }, () => "概念")] } }] }, 50)!;
+    const cell = long.rows[0]![0] as string;
+    expect(typeof cell).toBe("string");
+    expect([...cell].length).toBe(200);
+    expect(cell.endsWith("…")).toBe(true);
+    expect(long.truncated).toBe(true);
   });
 
   it("passes cell values as they come: numbers as strings, ranks, nulls", () => {
@@ -167,9 +180,17 @@ describe("createWencai: words", () => {
     expect(a.message).not.toMatch(/https?:|51ifind|token/i);
   });
 
-  it.each([-1302, -1301])("answers credential for an upstream errorcode %i", async (errorcode) => {
+  it.each([-1010, -1011, -1300, -1301, -1302, -1303])("answers credential for an upstream errorcode %i", async (errorcode) => {
     const r = rig([upstream({ errorcode, errmsg: "x" })]);
     expect(refused(await r.w.ask({ question: "q" })).word).toBe("credential");
+  });
+
+  it("reads the errorcode before the HTTP status: -1302 on a 401 is credential, a 401 without one stays upstream", async () => {
+    const r = rig([upstream({ errorcode: -1302, errmsg: "x" }, 401), upstream({ errorcode: -4001, errmsg: "x" }, 401)]);
+    expect(refused(await r.w.ask({ question: "q" })).word).toBe("credential");
+    const b = refused(await r.w.ask({ question: "q" }));
+    expect(b.word).toBe("upstream");
+    expect(b.detail).toEqual({ errorcode: null, errmsg: "HTTP 401" });
   });
 
   it("answers upstream with iFinD's code and errmsg as detail", async () => {
@@ -236,6 +257,44 @@ describe("createWencai: the budget", () => {
     await r.w.ask({ question: "q1" });
     expect(r.w.budget().used).toBe(2);
     await r.w.ask({ question: "q2" });
+    expect(r.w.budget().used).toBe(2);
+  });
+
+  it("holds the cap under concurrent asks: picks in flight count against it", async () => {
+    const r = rig([], { perDay: 2 });
+    r.state.hold = true;
+    const a = r.w.ask({ question: "q1" }), b = r.w.ask({ question: "q2" });
+    const c = refused(await r.w.ask({ question: "q3" }));
+    expect(c.word).toBe("budget");
+    expect(c.message).toContain("0 of 2");
+    expect(c.message).toContain("2 in flight");
+    expect(r.calls).toHaveLength(2);
+    expect(r.w.budget().used).toBe(0);
+    r.gates.splice(0).forEach((g) => g());
+    const [x, y] = await Promise.all([a, b]);
+    ok(x);
+    ok(y);
+    expect(r.w.budget().used).toBe(2);
+    expect(r.calls).toHaveLength(2);
+  });
+
+  it("names when a call frees while one is spent and one is in flight", async () => {
+    const r = rig([], { perDay: 2 });
+    const first = r.clock.t;
+    ok(await r.w.ask({ question: "q1" }));
+    r.state.hold = true;
+    const b = r.w.ask({ question: "q2" });
+    const c = refused(await r.w.ask({ question: "q3" }));
+    expect(c.message).toBe(`1 of 2 问财 calls spent in the last 24 hours and 1 in flight; the next one frees at ${new Date(first + WENCAI_WINDOW_MS).toISOString()}`);
+    r.gates.splice(0).forEach((g) => g());
+    ok(await b);
+  });
+
+  it("counts one call for a picker that throws, and frees its place in flight", async () => {
+    const r = rig([new Error("boom")], { perDay: 2 });
+    await expect(r.w.ask({ question: "q" })).rejects.toThrow("boom");
+    expect(r.w.budget().used).toBe(1);
+    ok(await r.w.ask({ question: "q2" }));
     expect(r.w.budget().used).toBe(2);
   });
 

@@ -1,8 +1,9 @@
 // POST /api/cn/wencai over a stub CnWencai: the route's status table, header, fence and pass-through; the client's own rules are cn-wencai's tests
-import { describe, expect, it } from "vitest";
-import type { CnIfind } from "../../src/live/cn-ifind.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createIfind, type CnIfind } from "../../src/live/cn-ifind.ts";
+import type { CnHttp, CnReply } from "../../src/live/cn-http.ts";
 import type { CnRelay } from "../../src/live/cn-relay.ts";
-import type { CnWencai, WencaiAnswer, WencaiOk, WencaiWord } from "../../src/live/cn-wencai.ts";
+import { createWencai, type CnWencai, type WencaiAnswer, type WencaiOk, type WencaiWord } from "../../src/live/cn-wencai.ts";
 import { createMarketCore } from "../../src/core.ts";
 import { mountCn } from "../../src/routes-cn.ts";
 import { startMarketServer } from "../../src/server.ts";
@@ -108,5 +109,71 @@ describe("POST /api/cn/wencai", () => {
       expect(asked).toEqual([query]);
       expect(s.seen).toEqual([]);
     } finally { await srv.close(); }
+  });
+});
+
+// The real iFinD client and the real 问财 client behind the real route, over a scripted iFinD: the synthetic tokens reach iFinD's door and
+// nothing the route answers or logs
+describe("POST /api/cn/wencai end to end: the token stays inside", () => {
+  const RT = "synthetic-refresh-token-6f1c", AT = "synthetic-access-token-9b2e";
+  const json = (o: unknown, status = 200): CnReply => ({ status, bytes: new TextEncoder().encode(JSON.stringify(o)), contentType: "application/json" });
+  const SHAPE = { errorcode: 0, tables: [{ table: { "股票代码": ["002242.SZ"], "区间涨跌幅:前复权[20260928-20261118]": [202.13] } }] };
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  async function through(env: Record<string, string>, script: CnReply[]) {
+    const sent: string[] = [];
+    const http: CnHttp = async (url, init) => {
+      sent.push(JSON.stringify(init.headers ?? {}));
+      const next = script.shift();
+      if (!next) throw new Error("script exhausted");
+      return next;
+    };
+    const ifind = createIfind({ env: () => env, http });
+    const wencai = createWencai({ picker: ifind, configured: () => ifind.configured(), perDay: 5 });
+    const relay: CnRelay = async () => ({ kind: "refused", word: "unreachable" });
+    const core = createMarketCore({ cn: { relay, ifind, wencai } });
+    const logged = [vi.spyOn(console, "error"), vi.spyOn(console, "log"), vi.spyOn(console, "warn")];
+    const srv = await startMarketServer({ port: 0, mount: (app) => { mountCn(app, core); }, close: () => core.close() });
+    try {
+      const r = await post(srv.url, JSON.stringify({ question: "2026年11月18日涨跌幅从大到小排名前5" }));
+      const text = await r.text();
+      const heads: string[] = [];
+      r.headers.forEach((v, k) => heads.push(`${k}: ${v}`));
+      const logs = logged.flatMap((s) => s.mock.calls.map((c) => c.map((x) => (x instanceof Error ? `${x.message}${x.stack}` : String(x))).join(" ")));
+      return { status: r.status, body: JSON.parse(text) as Record<string, unknown>, text, heads, logs, sent };
+    } finally { await srv.close(); }
+  }
+  const clean = (o: { text: string; heads: string[]; logs: string[] }) => {
+    for (const where of [o.text, ...o.heads, ...o.logs]) { expect(where).not.toContain(RT); expect(where).not.toContain(AT); }
+  };
+
+  it("answers ok without either token", async () => {
+    const o = await through({ IFIND_REFRESH_TOKEN: RT }, [json({ errorcode: 0, data: { access_token: AT } }), json(SHAPE)]);
+    expect(o.status).toBe(200);
+    expect(o.body).toMatchObject({ ok: true, columns: ["股票代码", "区间涨跌幅:前复权[20260928-20261118]"], rows: [["002242.SZ", 202.13]] });
+    // the tokens did reach iFinD's door, so their absence below is not for want of use
+    expect(o.sent.join(" ")).toContain(RT);
+    expect(o.sent.join(" ")).toContain(AT);
+    clean(o);
+  });
+
+  it("refuses upstream (errorcode -4001) without either token", async () => {
+    const o = await through({ IFIND_REFRESH_TOKEN: RT }, [json({ errorcode: 0, data: { access_token: AT } }), json({ errorcode: -4001, errmsg: "no data." })]);
+    expect(o.status).toBe(502);
+    expect(o.body).toMatchObject({ ok: false, wencai: "upstream", detail: { errorcode: -4001, errmsg: "no data." } });
+    clean(o);
+  });
+
+  it("refuses credential without either token: a refused exchange, and a refused access token", async () => {
+    const a = await through({ IFIND_REFRESH_TOKEN: RT }, [json({ errorcode: -1301, errmsg: "refresh_token is invalid" })]);
+    expect(a.status).toBe(502);
+    expect(a.body).toMatchObject({ ok: false, wencai: "credential" });
+    expect(a.sent.join(" ")).toContain(RT);
+    clean(a);
+    const b = await through({ IFIND_ACCESS_TOKEN: AT }, [json({ errorcode: -1302, errmsg: "access_token is invalid" }, 401)]);
+    expect(b.status).toBe(502);
+    expect(b.body).toMatchObject({ ok: false, wencai: "credential" });
+    expect(b.sent.join(" ")).toContain(AT);
+    clean(b);
   });
 });

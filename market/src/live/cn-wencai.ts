@@ -25,7 +25,9 @@ export interface CnWencai {
   enabled(): boolean;
 }
 
-const CREDENTIAL_CODES = new Set([-1301, -1302]);
+/** QuantAPI errorcodes that mean the access token, not the question, was refused: Lunhui's set (face/plugins/lunhui/lib/wencai.mjs),
+ * copied, since the market imports nothing from face/ */
+const CREDENTIAL_CODES = new Set([-1010, -1011, -1300, -1301, -1302, -1303]);
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const MESSAGES = {
   question: `question: 1 to ${WENCAI_QUESTION_MAX} characters after trimming, with no control characters (a newline among them)`,
@@ -47,7 +49,7 @@ function cut(s: string, max: number): string {
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** iFinD's first table (one array per column) as columns and rows in column order, the first `limit` rows; null when the reply is not
- * `{errorcode: 0, tables: [...]}`. A short column is filled with null; a long string cell is cut. */
+ * `{errorcode: 0, tables: [...]}`. A short column is filled with null; an array or object cell becomes its JSON; a long string is cut. */
 export function tableOf(reply: unknown, limit: number): WencaiTable | null {
   if (!isRecord(reply) || reply.errorcode !== 0 || !Array.isArray(reply.tables)) return null;
   const first = reply.tables[0];
@@ -60,8 +62,10 @@ export function tableOf(reply: unknown, limit: number): WencaiTable | null {
   const rows: unknown[][] = [];
   for (let i = 0; i < returned; i++) {
     rows.push(values.map((v) => {
-      const cell = i < v.length ? v[i] : null;
-      if (typeof cell !== "string") return cell === undefined ? null : cell;
+      const raw = i < v.length ? v[i] : null;
+      if (raw === undefined || raw === null) return null;
+      const cell = typeof raw === "object" ? JSON.stringify(raw) : raw;
+      if (typeof cell !== "string") return cell;
       const c = cut(cell, WENCAI_CELL_MAX);
       if (c !== cell) cutAny = true;
       return c;
@@ -94,6 +98,8 @@ export function createWencai(o: { picker: IfindPicker; configured: () => boolean
   const cap = o.perDay;
   /** the times of the counted smart_stock_picking calls inside the window, oldest first */
   const calls: number[] = [];
+  /** picks asked and not yet answered: each holds a place under the cap until its own calls are counted */
+  let pending = 0;
   const kept = new Map<string, { at: number; body: WencaiOk }>();
   const flights = new Map<string, Promise<WencaiAnswer>>();
 
@@ -114,20 +120,34 @@ export function createWencai(o: { picker: IfindPicker; configured: () => boolean
 
   const read = async (question: string, type: WencaiType, limit: number): Promise<WencaiAnswer> => {
     const b = budget();
-    if (b.used >= cap) {
-      // the call whose leaving brings the count under the cap
-      const frees = new Date(calls[b.used - cap]! + WENCAI_WINDOW_MS).toISOString();
-      return refuse("budget", `${b.used} of ${cap} 问财 calls spent in the last 24 hours; the next one frees at ${frees}`);
+    if (b.used + pending >= cap) {
+      // the counted call whose leaving brings the count, those in flight with it (one each), under the cap
+      const over = b.used + pending - cap;
+      const flying = pending > 0 ? ` and ${pending} in flight` : "";
+      const next = over < b.used ? `the next one frees at ${new Date(calls[over]! + WENCAI_WINDOW_MS).toISOString()}` : "ask again once those in flight have answered";
+      return refuse("budget", `${b.used} of ${cap} 问财 calls spent in the last 24 hours${flying}; ${next}`);
     }
-    const { answer, asked } = await o.picker.pick(question, type, WENCAI_DEADLINE_MS);
+    pending++;
+    let picked: Awaited<ReturnType<IfindPicker["pick"]>>;
+    try {
+      picked = await o.picker.pick(question, type, WENCAI_DEADLINE_MS);
+    } catch (e) {
+      // the request may have reached iFinD: count one call for it
+      calls.push(now());
+      throw e;
+    } finally {
+      pending--;
+    }
+    const { answer, asked } = picked;
     const at = now();
     for (let i = 0; i < asked; i++) calls.push(at);
     if (answer.kind === "refused") return refuse(answer.word, MESSAGES[answer.word]);
-    if (answer.status !== 200) return upstreamError(null, `HTTP ${answer.status}`);
     const reply = parse(answer.bytes);
-    if (!isRecord(reply)) return upstreamError(null, "the reply was not JSON");
-    const code = reply.errorcode;
+    const code = isRecord(reply) ? reply.errorcode : undefined;
+    // the code before the status: a refused token is credential whatever HTTP status carried it
     if (typeof code === "number" && CREDENTIAL_CODES.has(code)) return refuse("credential", MESSAGES.credential);
+    if (answer.status !== 200) return upstreamError(null, `HTTP ${answer.status}`);
+    if (!isRecord(reply)) return upstreamError(null, "the reply was not JSON");
     const table = tableOf(reply, limit);
     if (!table) {
       const errmsg = typeof reply.errmsg === "string" && reply.errmsg ? reply.errmsg : code === 0 ? "the reply held no tables" : "";
