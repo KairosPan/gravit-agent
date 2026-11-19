@@ -838,3 +838,79 @@ describe("what did not answer", () => {
     expect(asked).toEqual(["loadMarkets"]);
   });
 });
+
+describe("by underlying", () => {
+  const hlPerp = (base: string, category: string, volumeUsd24h: number, extra: Partial<Listing> = {}): Listing =>
+    mk(`${base}/USDC:USDC`, "perp", base, "USDC", { price: 10, volumeUsd24h, changePct24h: 1, category, types: [], ...extra });
+  const hl = (listings: Listing[]) => pub("hyperliquid", "Hyperliquid", { listings, connectTo: "hyperliquid", connector: "live:hyperliquid" });
+
+  it("filters by asset, form and region before the cut", async () => {
+    const crypto = Array.from({ length: 250 }, (_, i) => hlPerp(`C${i}`, "crypto", 1e9 - i));
+    const stocks = ["xyz:NVDA", "xyz:TSLA", "xyz:AAPL"].map((b) => hlPerp(b, "stocks", 1));
+    const out = await exploreAcross({ public: [hl([...crypto, ...stocks])] }, { clock, asset: "stocks", limit: 200, perSource: 300 });
+    expect(out.items.map((i) => i.key).sort()).toEqual(["perp:xyz:AAPL", "perp:xyz:NVDA", "perp:xyz:TSLA"]);
+    expect(out.items.every((i) => i.asset === "stocks" && i.form === "perp" && i.region === "us")).toBe(true);
+    const both = await exploreAcross({ public: [hl([...crypto, ...stocks])] }, { clock, asset: "stocks", form: "spot", region: "us", limit: 200, perSource: 300 });
+    expect(both.items).toEqual([]);
+  });
+
+  it("filters before the movers and most traded", async () => {
+    const rows = [hlPerp("BTC", "crypto", 9e9, { changePct24h: 9 }), hlPerp("ETH", "crypto", 8e9, { changePct24h: -8 }), hlPerp("EUR", "fx", 2e7, { changePct24h: 0.4 }), hlPerp("JPY", "fx", 1e7, { changePct24h: -0.6 })];
+    const out = await exploreAcross({ public: [hl(rows)] }, { clock, asset: "fx", moversMinUsd: 0 });
+    expect(out.movers.map((i) => i.key)).toEqual(["perp:JPY", "perp:EUR"]);
+    expect(out.mostTraded.map((i) => i.key)).toEqual(["perp:EUR", "perp:JPY"]);
+    expect(out.tabs.map((t) => [t.id, t.count])).toEqual([["all", 2], ["fx", 2], ["perps", 2]]);
+  });
+
+  const btcAndFed = () => {
+    const btc = Array.from({ length: 15 }, (_, i) => kalshi(`KXBTCD-26OCT06-T${90_000 + i}`, `Bitcoin above ${90_000 + i}?`, 0.5, { contracts24h: 40_000 - i * 1_000, closeTime: iso(NOW + 30 * HOUR), category: "Financials", types: [] })).flat();
+    const fed = Array.from({ length: 15 }, (_, i) => kalshi(`KXFEDDECISION-26DEC-H${i}`, `Fed decision ${i}?`, 0.5, { contracts24h: 60_000 - i * 1_000, closeTime: iso(NOW + 30 * HOUR), category: "Economics", types: [] })).flat();
+    return pub("kalshi", "Kalshi", { kind: "events", connectTo: "kalshi", connector: "live:kalshi", listings: [...btc, ...fed] });
+  };
+
+  it("curates each asset's own events after the filter", async () => {
+    const crypto = await exploreAcross({ public: [btcAndFed()] }, { clock, asset: "crypto", limit: 200 });
+    expect(crypto.items).toHaveLength(PREDICTIONS_MAX);
+    expect(crypto.items.every((i) => i.key.startsWith("kalshi:KXBTCD"))).toBe(true);
+    const macro = await exploreAcross({ public: [btcAndFed()] }, { clock, asset: "macro", limit: 200 });
+    expect(macro.items).toHaveLength(PREDICTIONS_MAX);
+    expect(macro.items.every((i) => i.key.startsWith("kalshi:KXFEDDECISION"))).toBe(true);
+    // the old navigation is unchanged: twelve of the thirty, the Fed's busier ones first
+    const old = await exploreAcross({ public: [btcAndFed()] }, { clock, tab: "predictions", limit: 200 });
+    expect(old.items).toHaveLength(PREDICTIONS_MAX);
+    expect(old.items.every((i) => i.key.startsWith("kalshi:KXFEDDECISION"))).toBe(true);
+  });
+
+  it("keeps the IPO questions on Pre-IPO only", async () => {
+    const company = pub("okx-preipo", "OKX", { connectTo: "okx", connector: "live:exchange:okx", listings: [mk("OPENAI/USDT:USDT", "perp", "OPENAI", "USDT", { price: 80, volumeUsd24h: 400_000, category: "Pre-IPO", group: { id: "preipo:openai", title: "OpenAI" }, implied: { perPoint: 1e10, unit: "OKX's unit", usd: 800_000_000_000 }, types: [] })] });
+    const ipo = Array.from({ length: 2 }, (_, i) => kalshi(`KXIPOOPENAI-26DEC-${i}`, `OpenAI IPO by Dec ${i}?`, 0.2, { contracts24h: 100 + i, closeTime: iso(NOW + 50 * 24 * HOUR), category: "IPOs", types: [] })).flat();
+    const fed = kalshi("KXFEDDECISION-26DEC-H0", "Fed holds?", 0.9, { contracts24h: 90_000, closeTime: iso(NOW + 30 * HOUR), category: "Economics", types: [] });
+    const k = pub("kalshi", "Kalshi", { kind: "events", connectTo: "kalshi", connector: "live:kalshi", listings: [...ipo, ...fed] });
+    const pre = await exploreAcross({ public: [company, k] }, { clock, asset: "preipo" });
+    expect(pre.items.map((i) => i.key).sort()).toEqual(["kalshi:KXIPOOPENAI-26DEC-0", "kalshi:KXIPOOPENAI-26DEC-1", "preipo:openai"]);
+    const macro = await exploreAcross({ public: [company, k] }, { clock, asset: "macro" });
+    expect(macro.items.map((i) => i.key)).toEqual(["kalshi:KXFEDDECISION-26DEC-H0"]);
+  });
+
+  it("orders events by the sort asked: volume, then the absolute change in cents", async () => {
+    const ev = (n: number, change24h: number, contracts24h: number) => kalshi(`KXFED-27APR-T${n}`, `Fed above ${n}?`, 0.5, { change24h, contracts24h, closeTime: iso(NOW + 30 * HOUR), category: "Economics", types: [] });
+    const k = pub("kalshi", "Kalshi", { kind: "events", connectTo: "kalshi", connector: "live:kalshi", listings: [...ev(1, 0.01, 3_000), ...ev(2, 0.05, 1_000), ...ev(3, -0.09, 2_000)] });
+    const byVolume = await exploreAcross({ public: [k] }, { clock, asset: "macro" });
+    expect(byVolume.items.map((i) => i.key)).toEqual(["kalshi:KXFED-27APR-T1", "kalshi:KXFED-27APR-T3", "kalshi:KXFED-27APR-T2"]);
+    const movers = await exploreAcross({ public: [k] }, { clock, asset: "macro", sort: "movers" });
+    expect(movers.items.map((i) => i.change24h)).toEqual([-0.09, 0.05, 0.01]);
+  });
+
+  it("answers today's rows with none of the three", async () => {
+    const rows = [hlPerp("BTC", "crypto", 9e9, { changePct24h: 2 }), hlPerp("EUR", "fx", 2e7, { changePct24h: 0.4 })];
+    const sources = () => ({ public: [hl(rows), btcAndFed()] });
+    const plain = await exploreAcross(sources(), { clock });
+    const undef = await exploreAcross(sources(), { clock, asset: undefined, form: undefined, region: undefined });
+    expect(undef).toEqual(plain);
+    expect(plain.items.filter((i) => i.kind === "event")).toHaveLength(PREDICTIONS_MAX);
+    expect(plain.items.filter((i) => i.kind !== "event").map((i) => i.key)).toEqual(["perp:BTC", "perp:EUR"]);
+    // sort=movers on today's params orders events as before (they carry no percent change): by volume after every move
+    const movers = await exploreAcross(sources(), { clock, sort: "movers" });
+    expect(movers.items.slice(0, 2).map((i) => i.key)).toEqual(["perp:BTC", "perp:EUR"]);
+  });
+});

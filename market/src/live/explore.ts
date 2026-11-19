@@ -131,6 +131,13 @@ export interface ExploreOptions {
   tab?: TabId | undefined;
   /** `items` by volume (the default; the curated Predictions keep their own order), by the size of the 24-hour change, or by how soon they close */
   sort?: ExploreSort | undefined;
+  /** BY UNDERLYING (categories.ts classOf): only the rows whose asset, form and region are each one given, kept before anything is made of
+   * the rows — the curated events, the tabs, the movers, what closes soon, what trades most and the cut to `limit` — so a narrow class is
+   * never cut away by a busier one. With any of the three, `items` are in the order asked (volume by default), an event's move being the
+   * size of its 24-hour change in cents; with none, every answer is as without them */
+  asset?: AssetId | undefined;
+  form?: FormId | undefined;
+  region?: RegionId | undefined;
   /** at most this many rows in `items` (60) */
   limit?: number | undefined;
   /** how long each source has for all of its calls, in milliseconds (4000) */
@@ -892,6 +899,9 @@ const matches = (i: Unclassified, words: string[], q: string): boolean => [i.nam
 const byVolume = (a: ExploreItem, b: ExploreItem): number => volumeOf(b) - volumeOf(a);
 const size = (i: ExploreItem): number => (fin(i.changePct24h) !== undefined ? Math.abs(i.changePct24h!) : -1);
 const byMove = (a: ExploreItem, b: ExploreItem): number => size(b) - size(a) || byVolume(a, b);
+/** by underlying (ExploreOptions.asset, form, region): an event's move is the size of its 24-hour change in cents, a dollar row's its percent */
+const moveOf = (i: ExploreItem): number => (i.kind !== "event" ? size(i) : fin(i.change24h) !== undefined ? Math.abs(i.change24h!) * 100 : -1);
+const byClassMove = (a: ExploreItem, b: ExploreItem): number => moveOf(b) - moveOf(a) || byVolume(a, b);
 function byClose(now: number): (a: ExploreItem, b: ExploreItem) => number {
   const at = (i: ExploreItem) => {
     const t = closeMs(i);
@@ -964,7 +974,7 @@ export async function exploreAcross(sources: ExploreSources, opts: ExploreOption
     row.words.push(g.m.symbol, g.m.name, String(g.m.base ?? ""));
     rows.set(key, row);
   }
-  const made: ExploreItem[] = [];
+  let made: ExploreItem[] = [];
   for (const [key, row] of rows) {
     // one row asked for by its key: no other is made, nor said to have a price set aside
     if (only && key !== only) continue;
@@ -977,6 +987,9 @@ export async function exploreAcross(sources: ExploreSources, opts: ExploreOption
     made.push({ ...item, ...classOf(item), ...(icon ? { icon } : {}) });
     missing.push(...aside);
   }
+  // by underlying: only the rows of the class asked for, before anything is made of them
+  const byClass = opts.asset !== undefined || opts.form !== undefined || opts.region !== undefined;
+  if (byClass) made = made.filter((i) => (opts.asset === undefined || i.asset === opts.asset) && (opts.form === undefined || i.form === opts.form) && (opts.region === undefined || i.region === opts.region));
   // Predictions is a few of the busiest when nothing is searched for: the other event rows are not shown anywhere. An event under an
   // excluded category (sports, weather, entertainment, what someone says — categories.ts) is not one of the few, whatever venue lists it,
   // connected or not: the owner asked for a few hot markets, not every bet. A search still finds it, and a position in it is still a position.
@@ -1001,9 +1014,9 @@ export async function exploreAcross(sources: ExploreSources, opts: ExploreOption
 
   // All holds every row (each row's tabs start with it), so every tab's count is the rows that carry it
   const tabs = TABS.map((t) => ({ id: t.id, label: t.label, count: all.filter((i) => i.tabs.includes(t.id)).length })).filter((t) => t.count > 0);
-  const sorter = opts.sort === "movers" ? byMove : opts.sort === "closing" ? byClose(now) : byVolume;
-  // the curated Predictions list keeps its own order (the venues in turn, then the IPO questions), unless a sort is asked for
-  const chosen = opts.tab === "predictions" && curated && !opts.sort ? curated : (opts.tab && opts.tab !== "all" ? all.filter((i) => i.tabs.includes(opts.tab!)) : all).sort(sorter);
+  const sorter = opts.sort === "movers" ? (byClass ? byClassMove : byMove) : opts.sort === "closing" ? byClose(now) : byVolume;
+  // the curated Predictions list keeps its own order (the venues in turn, then the IPO questions), unless a sort is asked for or a class is
+  const chosen = opts.tab === "predictions" && curated && !opts.sort && !byClass ? curated : (opts.tab && opts.tab !== "all" ? all.filter((i) => i.tabs.includes(opts.tab!)) : all).sort(sorter);
   // A search lists the rows that ARE what was typed first — whose base (a row with none: whose name) is the search, whole, without regard
   // to case — before the cut to `limit`, and the rest after them in the order asked for. The sources match a search by the start of a
   // name and this file by any part of one, so a short name is matched by every busier market that starts with it: Threshold's T would

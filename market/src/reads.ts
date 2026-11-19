@@ -4,7 +4,8 @@
  * and China alone: the market keeps no venue connected (a connected venue's own reads are the account's, /api/account/connected/…), no
  * list of where the user can connect, and no market-down hold (the market never sees itself down).
  *
- *   GET  /api/explore   ?scope= &source= &tab= &q= &key= &sort= &limit=  Exploration
+ *   GET  /api/explore   ?scope= &source= &tab= &q= &key= &sort= &limit=  Exploration; or by underlying, ?asset= &form= &region= with
+ *                       &source=<id>,<id>… (never beside scope or tab), region=cn being the China read
  *   GET  /api/quotes    ?pairs=<venue>|<symbol>,… (or ?pair= each)  {quotes: [{venue, symbol, market? | refusal?}]}: A shares only
  *   GET  /api/candles   ?venue= &symbol= &interval= &range= &since= &before= &limit=   CandlesView, or an A share's ChinaHistory
  *   GET  /api/book      ?venue= &symbol= &depth=                  BookView
@@ -17,7 +18,7 @@ import type express from "express";
 import { isRefusal, type Refusal } from "./core/errors.ts";
 import { no } from "./refuse.ts";
 import type { MarketCore } from "./core.ts";
-import { TABS, type TabId } from "./live/categories.ts";
+import { ASSET_IDS, FORM_IDS, REGION_IDS, TABS, type AssetId, type FormId, type RegionId, type TabId } from "./live/categories.ts";
 import { CHINA_ID, CHINA_NAME, CHINA_NOTE, type ChinaHistory, type ChinaMarket } from "./live/china.ts";
 import type { ChinaRange } from "./live/cn-history.ts";
 import { RANK_ROWS } from "./live/cn-rank.ts";
@@ -31,7 +32,8 @@ import { PUBLIC_KEEP_MS, thrownBy } from "./read-cache.ts";
 import { wrap } from "./routes-cn.ts";
 
 export interface MarketReads {
-  explore(o: { scope?: string | undefined; source?: string | undefined; tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined }): Promise<Exploration | Refusal>;
+  /** `source` is one source's id or a comma list of them; `asset`, `form` and `region` (categories.ts) ask by underlying */
+  explore(o: { scope?: string | undefined; source?: string | undefined; tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined; asset?: string | undefined; form?: string | undefined; region?: string | undefined }): Promise<Exploration | Refusal>;
   quotes(pairs: Array<{ venue: string; symbol: string }>): Promise<Array<{ venue: string; symbol: string; market?: Market; refusal?: Refusal }> | Refusal>;
   candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; since?: string | number | undefined; limit?: string | number | undefined }): Promise<CandlesView | ChinaHistory | Refusal>;
   book(venue: string, symbol: string, depth?: number): Promise<BookView | Refusal>;
@@ -200,6 +202,32 @@ function within<T>(ms: number, p: Promise<T | Refusal>, venue: string, name: str
 /** a venue named that is no public source: Markets names each source by its id */
 const notPublic = (id: string): Refusal => no("E_MARKET_UNKNOWN_SOURCE", { venue: id, message: `"${id.slice(0, 40)}" is not a public market source: Markets names each source by its id` });
 
+/** THE TWO WAYS TO ASK explore: the old navigation (a scope, a tab) or by underlying (an asset, a form, a region, a list of sources) —
+ * never both in one question. The route answers it 400, a malformed question; the read, a refusal in the same words */
+export const MIXED_NAVIGATION = "scope and tab are not asked beside asset, form, region or a list of sources: ask one way or the other";
+export function mixesNavigation(o: { scope?: string | undefined; tab?: string | undefined; asset?: string | undefined; form?: string | undefined; region?: string | undefined; source?: string | undefined }): boolean {
+  const has = (v: string | undefined) => (v ?? "").trim() !== "";
+  return (has(o.scope) || has(o.tab)) && (has(o.asset) || has(o.form) || has(o.region) || (o.source ?? "").split(",").length > 1);
+}
+
+/** the most sources one list names, and the most characters it is */
+export const SOURCE_LIST_MOST = 12;
+export const SOURCE_LIST_CHARS = 400;
+
+/** a list of sources as explore takes it: ids between commas, each trimmed, a duplicate dropped; an empty one between two commas, more
+ * than SOURCE_LIST_MOST, a longer list or a longer id is refused, never cut. Whether each id is a source is the read's to say */
+export function sourceList(raw: string | undefined): string[] | Refusal {
+  const text = (raw ?? "").trim();
+  if (!text) return [];
+  if (text.length > SOURCE_LIST_CHARS) return no("E_MARKET_BAD_REQUEST", { message: `a list of sources is at most ${SOURCE_LIST_CHARS} characters` });
+  const parts = text.split(",").map((x) => x.trim());
+  if (parts.some((x) => !x)) return no("E_MARKET_BAD_REQUEST", { message: "a list of sources names a source's id between each two commas" });
+  const ids = [...new Set(parts)];
+  if (ids.length > SOURCE_LIST_MOST) return no("E_MARKET_BAD_REQUEST", { message: `a list of sources names at most ${SOURCE_LIST_MOST}` });
+  if (ids.some((id) => id.length > 80)) return no("E_MARKET_BAD_REQUEST", { message: "a public source ID is at most 80 characters" });
+  return ids;
+}
+
 export function marketReads(core: MarketCore): MarketReads {
   const cache = core.cache;
   const now = () => core.now();
@@ -245,12 +273,23 @@ export function marketReads(core: MarketCore): MarketReads {
     async explore(o = {}) {
       const scope = o.scope?.trim() || undefined;
       if (scope !== undefined && !["hyperliquid", "xyz", "more"].includes(scope)) return no("E_MARKET_BAD_REQUEST", { message: "a market scope is hyperliquid, xyz or more" });
-      const source = o.source?.trim() || undefined;
-      if (source && source.length > 80) return no("E_MARKET_BAD_REQUEST", { message: "a public source ID is at most 80 characters" });
-      if (source && (scope === "hyperliquid" || scope === "xyz")) return no("E_MARKET_BAD_REQUEST", { message: "a source is selected only in more markets or without a scope" });
-      if (source && (!core.source(source) || (scope === "more" && ["hyperliquid", "trade-xyz"].includes(source)))) return no("E_MARKET_BAD_REQUEST", { message: "the source is not available in this market scope" });
+      const ids = sourceList(o.source);
+      if (isRefusal(ids)) return ids;
+      if (ids.length && (scope === "hyperliquid" || scope === "xyz")) return no("E_MARKET_BAD_REQUEST", { message: "a source is selected only in more markets or without a scope" });
+      const unknown = ids.find((id) => !core.source(id));
+      if (unknown !== undefined) return no("E_MARKET_BAD_REQUEST", { message: `"${unknown.slice(0, 40)}" is not a public source in this market scope` });
+      if (scope === "more" && ids.some((id) => ["hyperliquid", "trade-xyz"].includes(id))) return no("E_MARKET_BAD_REQUEST", { message: "the source is not available in this market scope" });
       const tab = o.tab?.trim() || undefined;
       if (tab !== undefined && !TABS.some((t) => t.id === tab)) return no("E_MARKET_BAD_REQUEST", { message: `a tab is one of ${TABS.map((t) => t.id).join(", ")}` });
+      // BY UNDERLYING: an asset, a form, a region, each one of its ids (categories.ts)
+      const asset = o.asset?.trim() || undefined;
+      if (asset !== undefined && !ASSET_IDS.includes(asset as AssetId)) return no("E_MARKET_BAD_REQUEST", { message: `an asset is one of ${ASSET_IDS.join(", ")}` });
+      const form = o.form?.trim() || undefined;
+      if (form !== undefined && !FORM_IDS.includes(form as FormId)) return no("E_MARKET_BAD_REQUEST", { message: `a form is one of ${FORM_IDS.join(", ")}` });
+      const region = o.region?.trim() || undefined;
+      if (region !== undefined && !REGION_IDS.includes(region as RegionId)) return no("E_MARKET_BAD_REQUEST", { message: `a region is one of ${REGION_IDS.join(", ")}` });
+      if (mixesNavigation({ scope, tab, asset, form, region, source: ids.join(",") })) return no("E_MARKET_BAD_REQUEST", { message: MIXED_NAVIGATION });
+      const byClass = asset !== undefined || form !== undefined || region !== undefined;
       const sort = o.sort?.trim() || undefined;
       if (sort !== undefined && !EXPLORE_SORTS.includes(sort as ExploreSort)) return no("E_MARKET_BAD_REQUEST", { message: `markets are sorted by ${EXPLORE_SORTS.join(", ")}` });
       const q = (o.q ?? "").trim();
@@ -261,16 +300,24 @@ export function marketReads(core: MarketCore): MarketReads {
       if (!(limit >= 1 && limit <= 200)) return no("E_MARKET_BAD_REQUEST", { message: "a limit is 1 to 200 markets" });
       // CHINA is its own tab, asked of its own source (which keeps its reads): never kept here, never in All
       if (tab === "china") {
-        if (source) return no("E_MARKET_BAD_REQUEST", { message: "China is not part of a selected public source" });
+        if (ids.length) return no("E_MARKET_BAD_REQUEST", { message: "China is not part of a selected public source" });
         if (scope && scope !== "more") return no("E_MARKET_BAD_REQUEST", { message: "China is in more markets" });
         return exploreChina(q, sort, limit);
       }
+      // CHINA BY UNDERLYING: China A's shares are region cn, spot stocks — China's read; nothing else is listed in cn
+      if (region === "cn") {
+        if (ids.length) return no("E_MARKET_BAD_REQUEST", { message: "China is not part of a selected public source" });
+        if ((asset ?? "stocks") === "stocks" && (form ?? "spot") === "spot") return exploreChina(q, sort, limit);
+        return { asOf: new Date(now()).toISOString(), tabs: [], items: [], movers: [], closing: [], mostTraded: [], missing: [], notes: [] };
+      }
       // a search on All asks China too, beside the other sources and within their budget; no other tab ever asks it
-      const china = !source && (!scope || scope === "more") && q && !key && (tab === undefined || tab === "all") ? core.china : undefined;
+      const china = !ids.length && !byClass && (!scope || scope === "more") && q && !key && (tab === undefined || tab === "all") ? core.china : undefined;
+      // trade.xyz's own lines are its own: a legacy xyz: line at hyperliquid-preipo is left out wherever trade.xyz is read beside it
+      const strip = scope === "more" || (ids.includes("hyperliquid-preipo") && ids.includes("trade-xyz"));
       const pub = core.sources()
-        .filter((s) => !source || s.id === source)
+        .filter((s) => !ids.length || ids.includes(s.id))
         .filter((s) => scope === "hyperliquid" ? s.id === "hyperliquid" : scope === "xyz" ? s.id === "trade-xyz" : scope === "more" ? s.id !== "hyperliquid" && s.id !== "trade-xyz" : true)
-        .map((s) => scope === "more" && s.id === "hyperliquid-preipo" ? {
+        .map((s) => strip && s.id === "hyperliquid-preipo" ? {
           ...s,
           // The legacy source still resolves saved xyz: paths on an explicit query; those belong only to trade.xyz in scoped browsing.
           listings: async (ask: Parameters<PublicSource["listings"]>[0]) => {
@@ -280,9 +327,13 @@ export function marketReads(core: MarketCore): MarketReads {
         } : s);
       // the key exactly as asked (a row's key is not a search: kalshi:KXFED and kalshi:kxfed are not one row), written so that no `|` in it
       // reads as the next part of the question
-      return cache.get(`explore|${scope ?? ""}|${source ?? ""}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async (): Promise<Exploration | Refusal> => {
+      return cache.get(`explore|${scope ?? ""}|${ids.join(",")}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}|${asset ?? ""}|${form ?? ""}|${region ?? ""}`, 30_000, async (): Promise<Exploration | Refusal> => {
         const [explored, hits] = await Promise.all([
-          exploreAcross({ connected: [], public: pub }, { q, ...(key ? { key } : {}), limit, ...(source || scope === "hyperliquid" || scope === "xyz" ? { perSource: 200 } : {}), clock: now, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) }),
+          exploreAcross({ connected: [], public: pub }, {
+            q, ...(key ? { key } : {}), limit, ...(ids.length || scope === "hyperliquid" || scope === "xyz" ? { perSource: 200 } : {}), clock: now,
+            ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}),
+            ...(asset ? { asset: asset as AssetId } : {}), ...(form ? { form: form as FormId } : {}), ...(region ? { region: region as RegionId } : {}),
+          }),
           china ? within(CHINA_SEARCH_WAIT_MS, china.search(q), CHINA_ID, CHINA_NAME) : undefined,
         ]);
         if (hits === undefined) return explored;
@@ -449,12 +500,13 @@ export function mountReads(app: express.Express, _core: MarketCore, reads: Marke
 
   // MARKETS: what there is to trade, keyless ("Connect to trade"). A limit is a plain count of markets (digits), nothing a number parser
   // would also take. A key and a source ID are read past their respective limits, so a longer value is refused rather than cut into
-  // another registered identity.
+  // another registered identity. The old navigation beside the new is a malformed question.
   app.get("/api/explore", wrap(async (req, res) => {
-    const q = strings(req, res, { scope: 20, source: 81, tab: 20, q: 80, key: 240, sort: 20, limit: 6 });
+    const q = strings(req, res, { scope: 20, source: SOURCE_LIST_CHARS + 1, tab: 20, q: 80, key: 240, sort: 20, limit: 6, asset: 20, form: 20, region: 20 });
     if (!q) return;
     if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of markets, 1 to 200, in digits");
-    answerOf(res, await reads.explore({ scope: q.scope, source: q.source, tab: q.tab, q: q.q, key: q.key, sort: q.sort, ...(q.limit ? { limit: Number(q.limit) } : {}) }));
+    if (mixesNavigation(q)) return void bad(res, MIXED_NAVIGATION);
+    answerOf(res, await reads.explore({ scope: q.scope, source: q.source, tab: q.tab, q: q.q, key: q.key, sort: q.sort, ...(q.limit ? { limit: Number(q.limit) } : {}), asset: q.asset, form: q.form, region: q.region }));
   }));
 
   // a fresh price for each of up to twelve markets: ?pairs=china|600519,okx|BTC/USDT (or one ?pair= each). How many is the read's rule,

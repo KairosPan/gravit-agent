@@ -947,3 +947,157 @@ describe("the old params' answers, pinned before markets-by-underlying", () => {
     expect(keysAndTabs(got.body)).toEqual(want);
   });
 });
+
+describe("explore by underlying", () => {
+  /** a stand-in source that records each listings ask and answers its rows whatever the limit (as a one-call universe read does) */
+  const src = (id: string, rows: Listing[], kind: PublicSource["kind"] = "exchange", asked: Array<[string, number]> = []): PublicSource => ({
+    ...fakeSource({ id }), kind, listings: async ({ limit }) => { asked.push([id, limit]); return rows.map((r) => ({ ...r })); },
+  });
+  const perp = (base: string, category: string, volumeUsd24h: number, extra: Partial<Listing> = {}): Listing =>
+    listing(`${base}-PERP`, 10, { kind: "perp", base, quote: "USDC", category, volumeUsd24h, ...extra });
+  const keys = (body: Record<string, any>) => body.items.map((i: ExploreItem) => i.key);
+
+  it("reads only the listed sources, raised to 200 each", async () => {
+    const asked: Array<[string, number]> = [];
+    const { get } = await market({ sources: ["hyperliquid-preipo", "trade-xyz", "kalshi", "okx"].map((id) => src(id, [], "exchange", asked)) });
+    const got = await get("/api/explore?source=hyperliquid-preipo,trade-xyz");
+    expect(got.status).toBe(200);
+    expect(asked).toEqual([["hyperliquid-preipo", 200], ["trade-xyz", 200]]);
+  });
+
+  it("reads every source at 40 with no source", async () => {
+    const asked: Array<[string, number]> = [];
+    const { get } = await market({ sources: ["hyperliquid", "kalshi", "okx"].map((id) => src(id, [], "exchange", asked)) });
+    expect((await get("/api/explore?asset=crypto")).status).toBe(200);
+    expect(asked).toEqual([["hyperliquid", 40], ["kalshi", 40], ["okx", 40]]);
+  });
+
+  it("returns a narrow class past a 200-row source", async () => {
+    const rows = [...Array.from({ length: 260 }, (_, i) => perp(`C${i}`, "crypto", 1e9 - i)), perp("EUR", "fx", 1), perp("JPY", "fx", 2)];
+    const { get } = await market({ sources: [src("hyperliquid", rows)] });
+    const got = await get("/api/explore?asset=fx&limit=200");
+    expect(got.status).toBe(200);
+    expect(keys(got.body)).toEqual(["perp:JPY", "perp:EUR"]);
+  });
+
+  it("strips xyz: listings from hyperliquid-preipo when trade-xyz is listed too", async () => {
+    const pre = (symbol: string, slug: string, title: string): Listing =>
+      listing(symbol, 100, { kind: "perp", base: symbol, quote: "USDC", category: "Pre-IPO", group: { id: `preipo:${slug}`, title }, implied: { perPoint: 1e9, unit: "a $1B unit", usd: 100e9 } });
+    const legacy = src("hyperliquid-preipo", [pre("xyz:SPACEX", "spacex", "SpaceX"), pre("vntl:OPENAI", "openai", "OpenAI")]);
+    const xyz = src("trade-xyz", [pre("xyz:SPACEX", "spacex", "SpaceX")]);
+    const { get } = await market({ sources: [legacy, xyz] });
+    const got = await get("/api/explore?source=hyperliquid-preipo,trade-xyz&asset=preipo");
+    const lines = Object.fromEntries(got.body.items.map((i: ExploreItem) => [i.key, i.at.map((a) => [a.venue, a.symbol])]));
+    expect(lines).toEqual({ "preipo:spacex": [["trade-xyz", "xyz:SPACEX"]], "preipo:openai": [["hyperliquid-preipo", "vntl:OPENAI"]] });
+    // hyperliquid-preipo alone keeps its legacy line, as before
+    const alone = await get("/api/explore?source=hyperliquid-preipo&asset=preipo");
+    expect(keys(alone.body).sort()).toEqual(["preipo:openai", "preipo:spacex"]);
+  });
+
+  it("is the China read for asset=stocks&region=cn", async () => {
+    const read: ChinaRead = { sort: "volume", total: 5577, asOf: "2026-11-19T07:00:00.000Z", session: { phase: "closed", lastSession: "2026-11-18" } as ChinaRead["session"], status: { state: "live", said: "Tencent · answering" } as ChinaStatus };
+    const row = (await fakeChina().search("600519")) as ExploreItem[];
+    const ranks: string[] = [];
+    const china = { ...fakeChina(), rank: async (sort: "volume" | "movers") => { ranks.push(sort); return { items: row, read: { ...read, sort } }; } };
+    const reads = marketReads(createMarketCore({ sources: [fakeSource({ id: "okx" })], china }));
+    for (const query of [{ asset: "stocks", region: "cn" }, { region: "cn" }, { asset: "stocks", form: "spot", region: "cn" }]) {
+      const got = await reads.explore(query);
+      if (isRefusal(got)) throw new Error(got.message);
+      expect(got.items.map((i) => i.key)).toEqual(["cn:600519"]);
+      expect(got.tabs).toEqual([{ id: "china", label: "China", count: 5577 }]);
+      expect(got.china?.total).toBe(5577);
+    }
+    expect(ranks).toEqual(["volume", "volume", "volume"]);
+    expect(await reads.explore({ asset: "stocks", region: "cn", sort: "closing" })).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "China is sorted by volume or movers" });
+  });
+
+  it("answers no rows for region=cn with another asset", async () => {
+    const { get } = await market({ sources: [src("hyperliquid", [perp("BTC", "crypto", 1e9)])] });
+    for (const query of ["asset=crypto&region=cn", "asset=stocks&form=perp&region=cn"]) {
+      const got = await get(`/api/explore?${query}`);
+      expect(got.status, query).toBe(200);
+      expect([got.body.items, got.body.tabs, got.body.movers, got.body.mostTraded]).toEqual([[], [], [], []]);
+    }
+  });
+
+  it("refuses a source with region=cn", async () => {
+    const { get } = await market({ sources: [src("cboe", [])] });
+    const got = await get("/api/explore?source=cboe&asset=stocks&region=cn");
+    expect(got.status).toBe(409);
+    expect(got.body.refusal).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "China is not part of a selected public source" });
+  });
+
+  it("refuses mixing the old navigation with the new", async () => {
+    const asked: Array<[string, number]> = [];
+    const { get } = await market({ sources: ["kalshi", "polymarket"].map((id) => src(id, [], "events", asked)) });
+    for (const query of ["tab=perps&asset=crypto", "scope=xyz&form=perp", "source=kalshi,polymarket&scope=more", "tab=china&region=cn"]) {
+      const got = await get(`/api/explore?${query}`);
+      expect(got.status, query).toBe(400);
+      expect(got.body.error).toContain("ask one way or the other");
+    }
+    expect(asked).toEqual([]);
+    // the read says the same as a refusal
+    const reads = marketReads(createMarketCore({ sources: [src("kalshi", [])] }));
+    expect(await reads.explore({ tab: "perps", asset: "crypto" })).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: expect.stringContaining("ask one way or the other") });
+  });
+
+  it("validates the source list id by id", async () => {
+    const asked: Array<[string, number]> = [];
+    const ids = ["kalshi", "polymarket", ...Array.from({ length: 11 }, (_, i) => `s${i}`)];
+    const { get } = await market({ sources: ids.map((id) => src(id, [], "events", asked)) });
+    const nope = await get("/api/explore?source=kalshi,nope");
+    expect(nope.status).toBe(409);
+    expect(nope.body.refusal).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: expect.stringContaining('"nope"') });
+    expect((await get("/api/explore?source=kalshi,,polymarket")).status).toBe(409);
+    expect((await get("/api/explore?source=kalshi,polymarket,")).status).toBe(409);
+    expect(asked).toEqual([]);
+    expect((await get(`/api/explore?source=${encodeURIComponent("kalshi, polymarket")}`)).status).toBe(200);
+    expect(asked.map(([id]) => id)).toEqual(["kalshi", "polymarket"]);
+    // a duplicate is dropped: kalshi asked once (a fresh market, so no listing is already kept)
+    const once: Array<[string, number]> = [];
+    const fresh = await market({ sources: ids.map((id) => src(id, [], "events", once)) });
+    expect((await fresh.get("/api/explore?source=kalshi,kalshi&asset=macro")).status).toBe(200);
+    expect(once).toEqual([["kalshi", 200]]);
+    asked.length = 0;
+    const thirteen = await get(`/api/explore?source=${ids.join(",")}`);
+    expect(thirteen.status).toBe(409);
+    expect(thirteen.body.refusal.message).toContain("at most 12");
+    const long = await get(`/api/explore?source=kalshi,${"x".repeat(395)}`);
+    expect(`kalshi,${"x".repeat(395)}`).toHaveLength(402);
+    expect(long.status).toBe(409);
+    expect(long.body.refusal.message).toContain("400 characters");
+    expect(asked).toEqual([]);
+  });
+
+  it("refuses an unknown asset, form or region", async () => {
+    const { get } = await market();
+    for (const [query, words] of [["asset=bonds", "crypto, stocks, indices, commodities, fx, preipo, macro"], ["form=option", "spot, perp, token, event"], ["region=hk", "us, cn"]]) {
+      const got = await get(`/api/explore?${query}`);
+      expect(got.status, query).toBe(409);
+      expect(got.body.refusal).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: expect.stringContaining(words!) });
+    }
+  });
+
+  it("keeps the new params apart in the 30-second keep", async () => {
+    const asked: Array<[string, number]> = [];
+    const { get } = await market({ sources: [src("hyperliquid", [perp("BTC", "crypto", 1e9), perp("EUR", "fx", 1e7)], "exchange", asked)] });
+    const crypto = await get("/api/explore?asset=crypto");
+    const fx = await get("/api/explore?asset=fx");
+    expect([keys(crypto.body), keys(fx.body)]).toEqual([["perp:BTC"], ["perp:EUR"]]);
+    expect(keys((await get("/api/explore?form=perp")).body)).toEqual(["perp:BTC", "perp:EUR"]);
+    expect(keys((await get("/api/explore?asset=crypto")).body)).toEqual(["perp:BTC"]);
+  });
+
+  it("searches as today with q and no new params", async () => {
+    const china = fakeChina();
+    const search = vi.fn(china.search);
+    const reads = marketReads(createMarketCore({ sources: [fakeSource({ id: "okx" })], china: { ...china, search } }));
+    const today = await reads.explore({ q: "600519" });
+    expect(isRefusal(today) ? today : today.items.map((i) => i.key)).toEqual(["cn:600519"]);
+    expect(search).toHaveBeenCalledOnce();
+    // with a new param the search is the dollar rows' alone
+    const crypto = await reads.explore({ q: "600519", asset: "crypto" });
+    expect(isRefusal(crypto) ? crypto : crypto.items).toEqual([]);
+    expect(search).toHaveBeenCalledOnce();
+  });
+});
