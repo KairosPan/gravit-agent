@@ -1,5 +1,7 @@
 /** market:mcp (src/mcp.ts): the market's own stdio MCP server, gravit's market reads — spawned as the face's mcp-market row would spawn
  * it, over an in-process market holding a fake public source, a fake China, the fake AKShare sidecar and a 问财 client over a fake picker. */
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -103,7 +105,7 @@ describe("market:mcp", () => {
 
   it("market_explore accepts and forwards an exact public source, including the reader's validation", async () => {
     const { tools } = await client.listTools();
-    expect(tools.find((t) => t.name === "market_explore")!.inputSchema.properties!.source).toMatchObject({ type: "string", maxLength: 80 });
+    expect(tools.find((t) => t.name === "market_explore")!.inputSchema.properties!.source).toMatchObject({ type: "string", maxLength: 400 });
     const selected = await client.callTool({ name: "market_explore", arguments: { scope: "more", source: "fake" } });
     expect(selected.isError).toBeFalsy();
     expect(body(selected).items.length).toBeGreaterThan(0);
@@ -113,8 +115,42 @@ describe("market:mcp", () => {
       expect(refused.isError).toBe(true);
       expect(body(refused).code).toBe("E_MARKET_BAD_REQUEST");
     }
-    const long = await client.callTool({ name: "market_explore", arguments: { source: "x".repeat(81) } });
+    const long = await client.callTool({ name: "market_explore", arguments: { source: "x".repeat(401) } });
     expect(long.isError).toBe(true);
+  });
+
+  it("market_explore forwards asset, form, region and a source list", async () => {
+    const seen: string[] = [];
+    const stand = createServer((req, res) => {
+      seen.push(req.url ?? "");
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, items: [] }));
+    });
+    await new Promise<void>((r) => stand.listen(0, "127.0.0.1", r));
+    const c = await seat(`http://127.0.0.1:${(stand.address() as AddressInfo).port}`);
+    try {
+      const r = await c.callTool({ name: "market_explore", arguments: { asset: "indices", form: "perp", region: "us", source: "trade-xyz,kalshi" } });
+      expect(r.isError).toBeFalsy();
+      expect(seen).toEqual(["/api/explore?asset=indices&form=perp&region=us&source=trade-xyz%2Ckalshi&limit=30"]);
+    } finally {
+      await c.close();
+      await new Promise((r) => stand.close(r));
+    }
+  });
+
+  it("market_explore passes a mixing refusal through as the market's words", async () => {
+    const stand = createServer((_req, res) => {
+      res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ ok: false, error: "asset cannot be mixed with tab" }));
+    });
+    await new Promise<void>((r) => stand.listen(0, "127.0.0.1", r));
+    const c = await seat(`http://127.0.0.1:${(stand.address() as AddressInfo).port}`);
+    try {
+      const r = await c.callTool({ name: "market_explore", arguments: { asset: "stocks", tab: "crypto" } });
+      expect(r.isError).toBe(true);
+      expect(body(r)).toEqual({ ok: false, error: "asset cannot be mixed with tab" });
+    } finally {
+      await c.close();
+      await new Promise((r) => stand.close(r));
+    }
   });
 
   it("market_candles answers a public source's history", async () => {
