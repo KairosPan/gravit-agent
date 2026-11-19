@@ -13,13 +13,18 @@ describe("classOf", () => {
   it.each(CASES)("$name", ({ item, want }) => expect(classOf(item)).toEqual(want));
 
   it("a non-US underlying named in NON_US_UNDERLYINGS has no region; every other trade.xyz equity or index is us", () => {
-    // the judged list: no fixture coin is plainly non-US
-    expect([...NON_US_UNDERLYINGS]).toEqual([]);
-    expect(XYZ.coins.length).toBeGreaterThan(0);
+    // the judged list: the fixture coins with no US listing (an ADR or a US-listed ETF is US)
+    const judged = ["CAMBRICON", "CXMT", "GIGADEV", "HYUNDAI", "IBIDEN", "JIO", "KIOXIA", "MINIMAX", "RELIANCE", "SHEIN", "SKHX", "SKHY", "SMSN", "SOFTBANK", "UNITREE", "ZHIPU", "JP225", "KR200", "NIFTY"];
+    expect([...NON_US_UNDERLYINGS].sort()).toEqual([...judged].sort());
+    expect(XYZ.read).toBe("2026-11-19");
+    expect(XYZ.coins).toHaveLength(112);
+    const bases = XYZ.coins.map(([coin]) => coin.slice(coin.indexOf(":") + 1).toUpperCase());
+    // every judged name is one of the read's coins, so the list names nothing the read did not
+    expect(judged.filter((b) => !bases.includes(b))).toEqual([]);
     for (const [coin, category] of XYZ.coins) {
       const base = coin.slice(coin.indexOf(":") + 1).toUpperCase();
       const got = classOf({ key: `perp:${coin}`, kind: "perp", base: coin, category });
-      expect([coin, got.region], coin).toEqual([coin, NON_US_UNDERLYINGS.has(base) ? undefined : "us"]);
+      expect([coin, got.asset, got.region], coin).toEqual([coin, category, judged.includes(base) ? undefined : "us"]);
     }
   });
 });

@@ -75,10 +75,14 @@ export const FORM_IDS: readonly FormId[] = ["spot", "perp", "token", "event"];
 export type RegionId = "us" | "cn";
 export const REGION_IDS: readonly RegionId[] = ["us", "cn"];
 
-/** the share and index perpetuals whose underlying is not listed in the US (a Japanese, Korean, Hong Kong or European share or index), by
- * their upper-case base without its `xyz:` namespace: such a row carries no region. Judged from trade.xyz's stocks and indices coins
- * (market/test/fixtures/xyz-equity-categories.json): none of them is */
-export const NON_US_UNDERLYINGS: ReadonlySet<string> = new Set<string>();
+/** the share and index perpetuals whose underlying has no US listing (an ADR or a US-listed ETF counts as US: BABA, TSM, ASML, EWJ), by
+ * their upper-case base without its `xyz:` namespace: such a row carries no region. Judged from trade.xyz's 112 stocks and indices coins in
+ * Hyperliquid's perpCategories, read once on 2026-11-19 (market/test/fixtures/xyz-equity-categories.json); a private company counts only
+ * when it is not American. Korean, Japanese, Chinese and Indian shares, then the three indices */
+export const NON_US_UNDERLYINGS: ReadonlySet<string> = new Set<string>([
+  "CAMBRICON", "CXMT", "GIGADEV", "HYUNDAI", "IBIDEN", "JIO", "KIOXIA", "MINIMAX", "RELIANCE", "SHEIN", "SKHX", "SKHY", "SMSN", "SOFTBANK", "UNITREE", "ZHIPU",
+  "JP225", "KR200", "NIFTY",
+]);
 
 export interface Classified {
   asset?: AssetId | undefined;
@@ -106,9 +110,10 @@ export function classOf(i: { key: string; kind: string; base?: string | undefine
     case "ashare":
       return { asset: "stocks", form: "spot", region: "cn" };
     case "perp": {
-      const asset = i.key.startsWith("preipo:") ? "preipo" : perpCategoryTab(i.category);
+      const tab = i.key.startsWith("preipo:") ? "preipo" : perpCategoryTab(i.category);
+      const asset = ASSET_IDS.find((id) => id === tab);
       if (asset === undefined) return { form: "perp" };
-      if (asset !== "stocks" && asset !== "indices") return { asset: asset as AssetId, form: "perp" };
+      if (asset !== "stocks" && asset !== "indices") return { asset, form: "perp" };
       const base = String(i.base ?? "");
       const bare = base.slice(base.indexOf(":") + 1).toUpperCase();
       return { asset, form: "perp", ...(NON_US_UNDERLYINGS.has(bare) ? {} : { region: "us" as const }) };
