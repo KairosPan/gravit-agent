@@ -33,16 +33,16 @@ const SEAT_READS = [
   "live_positions", "live_markets",
 ] as const;
 
-/** What the conversation may see, in this order: file reads and search, the market's four keyless reads (never
- * `market_akshare`) and the seat's reads, each under whatever server name the operator mounts it (`mcp__*__<raw>`,
- * expanded by plugins/bot.js), then the memory's seven tools (src/memory-row.ts `MEMORY_TOOLS`, in the row's order)
- * named WITH their server, `mcp__memory__<raw>` (`MEMORY_TOOL_PREFIX`): the section's gate already needs that exact
- * server name (src/protocols.ts `MEMORY_PROBE`), so a wildcard would buy nothing, and it would let another server's
- * tool named `memory_…` through this mask. plugins/bot.js admits an exact name when the tree has it. Frozen, and
- * pinned name for name by tests/router-preset.test.ts. */
+/** What the conversation may see, in this order: file reads and search, the market's four keyless reads and 问财
+ * (`market_wencai`; never `market_akshare`) and the seat's reads, each under whatever server name the operator
+ * mounts it (`mcp__*__<raw>`, expanded by plugins/bot.js), then the memory's seven tools (src/memory-row.ts
+ * `MEMORY_TOOLS`, in the row's order) named WITH their server, `mcp__memory__<raw>` (`MEMORY_TOOL_PREFIX`): the
+ * section's gate already needs that exact server name (src/protocols.ts `MEMORY_PROBE`), so a wildcard would buy
+ * nothing, and it would let another server's tool named `memory_…` through this mask. plugins/bot.js admits an exact
+ * name when the tree has it. Frozen, and pinned name for name by tests/router-preset.test.ts. */
 export const ROUTER_ALLOW: readonly string[] = Object.freeze([
   "read", "grep", "glob",
-  "mcp__*__market_explore", "mcp__*__market_quotes", "mcp__*__market_candles", "mcp__*__market_book",
+  "mcp__*__market_explore", "mcp__*__market_quotes", "mcp__*__market_candles", "mcp__*__market_book", "mcp__*__market_wencai",
   ...SEAT_READS.map((raw) => `mcp__*__portfolio_${raw}`),
   ...MEMORY_TOOLS.map((raw) => `${MEMORY_TOOL_PREFIX}${raw}`),
 ]);

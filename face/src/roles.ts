@@ -29,11 +29,12 @@
  * A role never carries what a delegated child cannot use or must not hold: a tool that needs
  * a human, the open web, delegation, the cycle's goal and todo bookkeeping, the reserved PTC
  * transport `run_code`, the account and order tools under any server name, the AKShare tools
- * (`mcp__akshare__*` and the market's `market_akshare`, refused under any server name; the `NEVER`
- * table, with the reason for each). The open web has one exception, {@link WEB_ROLE_IDS}: the
- * source reader (analogs spec §6.5) carries `web_search` and nothing beside it, so the open web
- * never shares a session with another tool; `web_fetch` is in no role's `allow`, the source
- * reader's included - the face gives its children `web_fetch` itself (src/source-reader.ts).
+ * (`mcp__akshare__*` and the market's `market_akshare`) and the market's iFinD 问财 tool
+ * (`market_wencai`), each refused under any server name (the `NEVER` table, with the reason
+ * for each). The open web has one exception, {@link WEB_ROLE_IDS}: the source reader (analogs
+ * spec §6.5) carries `web_search` and nothing beside it, so the open web never shares a session
+ * with another tool; `web_fetch` is in no role's `allow`, the source reader's included - the
+ * face gives its children `web_fetch` itself (src/source-reader.ts).
  * The job tools are a bash role's own: a
  * command that outruns the executor's default timeout moves to a background job the child
  * owns, which it reads with `job_output` and stops with `job_kill`, and which is cancelled
@@ -115,6 +116,9 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
   { what: "an AKShare tool",
     because: "the AKShare tools carry no point-in-time guard and are never evidence; the evidence is forward paper trading at the Account",
     names: [], prefixes: ["mcp__akshare__"], rawNames: ["portfolio_akshare", "market_akshare"] },
+  { what: "an iFinD 问财 tool",
+    because: "问财's answers carry no point-in-time guard and are never evidence; the evidence is forward paper trading at the Account",
+    names: [], prefixes: [], rawNames: ["market_wencai"] },
   { what: "an account or order tool",
     because: "orders go through the Account seat alone, behind its one gate (the face's per-order card); the seat is gravit's, and a role has no reason to read the account",
     names: [], prefixes: ["mcp__account__"],

@@ -43,7 +43,7 @@ test("the allow list holds no shell, no file write and no seat write; only the m
   }
   assert.deepEqual([...ROUTER_ALLOW], [
     "read", "grep", "glob",
-    "mcp__*__market_explore", "mcp__*__market_quotes", "mcp__*__market_candles", "mcp__*__market_book",
+    "mcp__*__market_explore", "mcp__*__market_quotes", "mcp__*__market_candles", "mcp__*__market_book", "mcp__*__market_wencai",
     ...["overview", "read", "markets", "quote", "account", "statement", "holdings", "history", "asset", "venues", "live_positions", "live_markets"]
       .map((raw) => `mcp__*__portfolio_${raw}`),
     "mcp__memory__memory_recall", "mcp__memory__memory_record", "mcp__memory__memory_amend", "mcp__memory__memory_propose",

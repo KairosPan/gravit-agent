@@ -91,15 +91,15 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     assert.deepEqual(audit.uncovered, [], "the seat is covered");
     for (const read of ["portfolio_account", "portfolio_holdings", "portfolio_wait", "portfolio_live_preview", "portfolio_live_candles", "portfolio_live_book"]) assert.ok(seatNames.includes(`${SEAT_TOOL_PREFIX}${read}`), read);
     for (const moved of ["portfolio_explore", "portfolio_candles", "portfolio_book", "portfolio_akshare"]) assert.equal(seatNames.includes(`${SEAT_TOOL_PREFIX}${moved}`), false, `${moved} left the seat`);
-    /* The market row (src/market-row.ts) mounts beside the seat from the repo's market/: its five keyless reads, none carded,
+    /* The market row (src/market-row.ts) mounts beside the seat from the repo's market/: its six reads, none carded,
      * pointed at the stand-in's own market (step 4b reads it). */
     let marketNames: string[] = [];
     while (Date.now() < deadline) {
       marketNames = tools.schemas().map((schema) => schema.name).filter((name) => name.startsWith(MARKET_TOOL_PREFIX)).sort();
-      if (marketNames.length >= 5) break;
+      if (marketNames.length >= 6) break;
       await sleep(500);
     }
-    assert.deepEqual(marketNames, ["akshare", "book", "candles", "explore", "quotes"].map((raw) => `${MARKET_TOOL_PREFIX}market_${raw}`), "the market row's five tools");
+    assert.deepEqual(marketNames, ["akshare", "book", "candles", "explore", "quotes", "wencai"].map((raw) => `${MARKET_TOOL_PREFIX}market_${raw}`), "the market row's six tools");
     assert.deepEqual(auditOrderTools(tools.schemas()).gated.filter((name) => name.startsWith(MARKET_TOOL_PREFIX)), [], "no market read is carded");
 
     /* 3. A real session with an open turn, and the outermost answerer, as the

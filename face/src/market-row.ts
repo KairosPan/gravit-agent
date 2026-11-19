@@ -2,12 +2,13 @@
  * own reads - the market service in the repo's `market/` (127.0.0.1:4821),
  * through its MCP server `market/src/mcp.ts` (`npm run market:mcp`, stdio).
  *
- * The market holds no key and no wallet, and its server holds no state: five
- * keyless reads, `market_explore`, `market_quotes`, `market_candles`,
- * `market_book` and `market_akshare` (AKShare for A shares), each marked
- * read-only. Under the server name `market` they are `mcp__market__…`, which is
- * not under the seat's prefix, so Gate 2 never cards one (src/orders.ts). What
- * the owner connected, and every write, stays the seat's (src/account-seat.ts).
+ * The market holds no wallet, and its server holds no state and no key: six
+ * reads, `market_explore`, `market_quotes`, `market_candles`, `market_book`,
+ * `market_akshare` (AKShare for A shares) and `market_wencai` (iFinD 问财, whose
+ * token the market alone holds), each marked read-only. Under the server name
+ * `market` they are `mcp__market__…`, which is not under the seat's prefix, so
+ * Gate 2 never cards one (src/orders.ts). What the owner connected, and every
+ * write, stays the seat's (src/account-seat.ts).
  *
  * The face spawns it from the repo's `market/` (`npm ci` there;
  * `FACE_MARKET_DIR` names another install) and points it at the market the

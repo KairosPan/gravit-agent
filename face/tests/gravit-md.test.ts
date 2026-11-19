@@ -44,6 +44,7 @@ test("GRAVIT.md reaches AKShare through the market row, not the seat", () => {
   const text = readFileSync(GRAVIT_MD, "utf8");
   assert.ok(Buffer.byteLength(text, "utf8") <= 4650);
   assert.match(text, /mcp__market__market_akshare/);
+  assert.match(text, /mcp__market__market_wencai/);
   assert.equal(text.includes("portfolio_akshare"), false);
   assert.match(text, /akshare_discover/);
   assert.equal(text.includes("mcp__akshare__"), false);

@@ -72,6 +72,11 @@ test("DESK_ALLOW names no order, approval, goal, delegation or A-share tool", ()
     assert.ok(DESK_ALLOW.every((name) => !name.includes(banned)), banned);
 });
 
+/* 问财 (market_wencai) is gravit's conversation's and its workers': the desk's mask admits it under no server name. */
+test("the desk holds no 问财 tool", () => {
+  assert.ok(DESK_ALLOW.every((name) => !name.endsWith("market_wencai")));
+});
+
 /* The plan's Global Constraints list, verbatim and in its order. Every name reaches every unattended desk
  * turn, and the desk reads text it does not control, so the list is pinned name for name: a shell (`bash`,
  * or the `job_*` tools that serve its background jobs) beside readable key files and an open network would

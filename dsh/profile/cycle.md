@@ -17,9 +17,9 @@ any wording, update_goal with action resume re-arms it. The face's Stop during a
 it; a paused goal is the operator's: ask them to type /goal resume.
 
 Steps 2 to 5 — work in rounds. Write THESIS.md and set status researching. The evidence is
-the market's reads through `mcp__market__market_*`, AKShare for A shares (`market_akshare`),
-the Account's own positions, statement and history through the seat
-(`mcp__account__portfolio_*`), and a forward paper trade placed on the
+the market's reads through `mcp__market__market_*`, 问财 (`market_wencai`) and AKShare
+(`market_akshare`) for A shares, the Account's own positions, statement and history
+through the seat (`mcp__account__portfolio_*`), and a forward paper trade placed on the
 paper venue the operator granted — nothing is backtested, and no read is guarded against
 lookahead: a number you read today is today's. Read, trade on paper, wait for the fill and the
 statement, journal every result as a dated entry with the Account's own figures as returned and
