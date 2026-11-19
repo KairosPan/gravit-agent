@@ -13,6 +13,8 @@ export type IfindAnswer =
   | { kind: "upstream"; status: number; contentType?: string; bytes: Uint8Array }
   | { kind: "refused"; word: IfindWord };
 export interface CnIfind { configured(): boolean; ask(query: string): Promise<IfindAnswer> }
+/** The general ask under `ask`: any searchstring and searchtype, its own deadline; `asked` counts the smart_stock_picking calls made (0 when refused before any). */
+export interface IfindPicker { pick(searchstring: string, searchtype: string, deadlineMs: number): Promise<{ answer: IfindAnswer; asked: number }> }
 
 const BASE = `https://${IFIND_HOST}/api/v1`;
 
@@ -25,20 +27,23 @@ function parse(bytes: Uint8Array): Record<string, any> | null {
   } catch { return null; }
 }
 
-export function createIfind(opts: { env: () => Record<string, string | undefined>; http: CnHttp; now?: () => number }): CnIfind {
+export function createIfind(opts: { env: () => Record<string, string | undefined>; http: CnHttp; now?: () => number }): CnIfind & IfindPicker {
   const now = opts.now ?? Date.now;
   let cached: { value: string; until: number } | null = null;
   const creds = () => { const e = opts.env(); return { direct: e.IFIND_ACCESS_TOKEN || "", refresh: e.IFIND_REFRESH_TOKEN || "" }; };
 
   return {
     configured() { const { direct, refresh } = creds(); return Boolean(direct || refresh); },
-    async ask(query) {
+    async ask(query) { return (await this.pick(query, "stock", IFIND_DEADLINE_MS)).answer; },
+    async pick(searchstring, searchtype, deadlineMs) {
       const { direct, refresh } = creds();
-      if (!direct && !refresh) return { kind: "refused", word: "unconfigured" };
+      if (!direct && !refresh) return { answer: { kind: "refused", word: "unconfigured" }, asked: 0 };
       const began = now();
+      let asked = 0;
       const call = async (path: string, headers: Record<string, string>, body: unknown) => {
-        const left = IFIND_DEADLINE_MS - (now() - began);
+        const left = deadlineMs - (now() - began);
         if (left <= 0) throw new Refusal("timeout");
+        if (path === "smart_stock_picking") asked++;
         try {
           return await opts.http(`${BASE}/${path}`, {
             timeoutMs: Math.max(1, left), maxBytes: IFIND_MAX_BYTES, body: JSON.stringify(body),
@@ -62,15 +67,15 @@ export function createIfind(opts: { env: () => Record<string, string | undefined
         let fromCache = !direct && cached !== null && cached.until > now();
         let token = direct || (fromCache ? cached!.value : await exchange());
         for (;;) {
-          const r = await call("smart_stock_picking", { access_token: token }, { searchstring: query, searchtype: "stock" });
+          const r = await call("smart_stock_picking", { access_token: token }, { searchstring, searchtype });
           const ok = r.status === 200 && parse(r.bytes)?.errorcode === 0;
-          if (ok || !fromCache) return { kind: "upstream", status: r.status, ...(r.contentType ? { contentType: r.contentType } : {}), bytes: r.bytes };
+          if (ok || !fromCache) return { answer: { kind: "upstream", status: r.status, ...(r.contentType ? { contentType: r.contentType } : {}), bytes: r.bytes }, asked };
           fromCache = false;
           cached = null;
           token = await exchange();
         }
       } catch (e) {
-        if (e instanceof Refusal) return { kind: "refused", word: e.word };
+        if (e instanceof Refusal) return { answer: { kind: "refused", word: e.word }, asked };
         throw e;
       }
     },
