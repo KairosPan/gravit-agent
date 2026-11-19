@@ -6,7 +6,8 @@
  *   npm run market:mcp                # this, over stdio; MARKET_URL overrides the base
  *
  * Tools, every one a read (readOnlyHint): market_explore (GET /api/explore) · market_quotes (GET /api/quotes) · market_candles
- * (GET /api/candles) · market_book (GET /api/book and GET /api/trades) · market_akshare (POST /api/akshare/call). What the owner has
+ * (GET /api/candles) · market_book (GET /api/book and GET /api/trades) · market_akshare (POST /api/akshare/call) · market_wencai (POST
+ * /api/cn/wencai: 问财 through the market's iFinD client, which holds the token; this process never sees it). What the owner has
  * connected, and the venues' own data there, is the account's seat (portfolio_account and its portfolio_live_* reads), not this server's.
  *
  * A market that does not answer is said in one sentence (MARKET_DOWN), never an HTTP code or a stack.
@@ -17,6 +18,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { AKSHARE_TOOLS } from "./live/akshare.ts";
+import { WENCAI_DEADLINE_MS, WENCAI_LIMIT_DEFAULT, WENCAI_LIMIT_MAX, WENCAI_PER_DAY_DEFAULT, WENCAI_QUESTION_MAX, WENCAI_TYPES } from "./live/cn-wencai.ts";
 
 const BASE = process.env.MARKET_URL ?? "http://127.0.0.1:4821";
 
@@ -143,6 +145,28 @@ server.registerTool(
     if (r.status === 404) return text({ ok: false, error: "this market has no AKShare sidecar (/api/akshare): restart it from this tree" }, true);
     if (b.ok === true) return { isError: b.isError === true, content: b.content ?? [] };
     if (typeof b.akshare === "string") return text({ ok: false, akshare: b.akshare, message: b.message }, true);
+    return text({ ok: false, error: b.error ?? `HTTP ${r.status}` }, true);
+  },
+);
+
+server.registerTool(
+  "market_wencai",
+  {
+    description: `问财 — iFinD's natural-language screener over iFinD's own data: one Chinese sentence in \`question\`, answered as one table that can span the whole A-share market (about 5,580 shares) or every fund (about 28,000) in one answer. Write the sentence as the columns and the ranking you want, every date written out — 「2026年9月28日至2026年11月18日区间涨跌幅从大到小排名前50」, never 今日 or 昨日 — and put the order and the count in the sentence: 问财 honours them (that sentence answers exactly 50 rows, largest first). \`type\`: \`stock\` (the default: A shares, Beijing listings included) or \`fund\` (funds), no other — a Hong Kong, US, index, bond or futures question comes back as A shares, so ask those of market_akshare. A sentence 问财 misreads is not refused: it comes back as a plausible table of another question, so check that the columns and the codes are what you asked before using the rows. The answer: {question, type, asOf, columns, rows (one array per row, in the columns' order), rowCount, returned, truncated, tables?, budget: {used, cap, resetsAt}}. Columns carry iFinD's adjustment and dates in their names (\`区间涨跌幅:前复权[20260928-20261118]\`, with its rank as \`排名\` "1/5584"); cells come as iFinD sends them, numbers sometimes as strings. \`truncated\` means the rows are not the whole answer: more matched than \`limit\` (default ${WENCAI_LIMIT_DEFAULT}, at most ${WENCAI_LIMIT_MAX}), or a long cell was cut. Each new question spends one call of the market's 问财 budget (${WENCAI_PER_DAY_DEFAULT} in any 24 hours unless the operator set another; \`budget\` says what is spent); the same question, type and limit asked again within a minute is answered from the kept answer and spends nothing, so write the sentence well once rather than trying variants. Live and unguarded, never evidence of a trade: \`asOf\` is when the market read it, and retrieval time is not exchange time. A refusal is {ok: false, wencai, message}: \`budget\` (spent; the message says when a call frees), \`bad-question\`, \`timeout\` (${WENCAI_DEADLINE_MS / 1000} s), \`upstream\` (问财's own error, in \`detail\`), \`off\` or \`unconfigured\` (no 问财 on this market); on \`credential\` iFinD refused the account's token — tell the operator the iFinD account needs renewing, and use market_akshare meanwhile. A read: nothing is ordered.`,
+    inputSchema: {
+      question: z.string().min(1).max(WENCAI_QUESTION_MAX).describe("one Chinese sentence, dates written out: 2026年9月28日至2026年11月18日区间涨跌幅从大到小排名前50"),
+      type: z.enum(WENCAI_TYPES).optional().describe("stock (A shares, the default) or fund"),
+      limit: z.number().int().min(1).max(WENCAI_LIMIT_MAX).optional().describe(`the most rows (default ${WENCAI_LIMIT_DEFAULT})`),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ question, type, limit }) => {
+    const r = await call("POST", "/api/cn/wencai", { question, ...(type ? { type } : {}), ...(limit !== undefined ? { limit } : {}) });
+    if (r === "down") return down();
+    if (r.status === 404) return text({ ok: false, error: "this market has no 问财 route (/api/cn/wencai): restart it from this tree" }, true);
+    const b = r.body as { ok?: boolean; wencai?: string; message?: string; detail?: unknown; error?: string };
+    if (b.ok === true && r.status === 200) return text(b);
+    if (typeof b.wencai === "string") return text({ ok: false, wencai: b.wencai, message: b.message, ...(b.detail !== undefined ? { detail: b.detail } : {}) }, true);
     return text({ ok: false, error: b.error ?? `HTTP ${r.status}` }, true);
   },
 );

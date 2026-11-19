@@ -1,11 +1,14 @@
 /** market:mcp (src/mcp.ts): the market's own stdio MCP server, gravit's keyless reads — spawned as the face's mcp-market row would spawn
- * it, over an in-process market holding a fake public source, a fake China and the fake AKShare sidecar. */
+ * it, over an in-process market holding a fake public source, a fake China, the fake AKShare sidecar and a 问财 client over a fake picker. */
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { createAkshare } from "../../src/live/akshare.ts";
+import type { CnIfind, IfindPicker } from "../../src/live/cn-ifind.ts";
+import type { CnRelay } from "../../src/live/cn-relay.ts";
+import { createWencai } from "../../src/live/cn-wencai.ts";
 import { createMarketCore } from "../../src/core.ts";
 import { mountProtocol } from "../../src/protocol.ts";
 import { mountCn } from "../../src/routes-cn.ts";
@@ -26,11 +29,30 @@ async function seat(url: string): Promise<Client> {
   return c;
 }
 
+// the 2026-11-19 shape of a smart_stock_picking reply: one table, one array per column
+const COL = "区间涨跌幅:前复权[20260928-20261118]";
+const SHAPE = { errorcode: 0, tables: [{ table: { "股票代码": ["002242.SZ", "301313.SZ"], "股票简称": ["九阳股份", "x"], [COL]: [202.13, 112.8] } }] };
+/** what the fake picker was asked: a question refused by the tool's own schema never reaches it */
+const picked: Array<{ searchstring: string; searchtype: string }> = [];
+const picker: IfindPicker = {
+  async pick(searchstring, searchtype) {
+    picked.push({ searchstring, searchtype });
+    return { answer: { kind: "upstream", status: 200, contentType: "application/json", bytes: new TextEncoder().encode(JSON.stringify(SHAPE)) }, asked: 1 };
+  },
+};
+const relay: CnRelay = async () => ({ kind: "refused", word: "unreachable" });
+const ifind: CnIfind = { configured: () => true, ask: async () => ({ kind: "refused", word: "unreachable" }) };
+
 let srv: MarketServerHandle;
 let client: Client;
 
 beforeAll(async () => {
-  const core = createMarketCore({ sources: [fakeSource()], china: fakeChina(), akshare: createAkshare({ command: process.execPath, args: [FIXTURE] }) });
+  const core = createMarketCore({
+    sources: [fakeSource()],
+    china: fakeChina(),
+    akshare: createAkshare({ command: process.execPath, args: [FIXTURE] }),
+    cn: { relay, ifind, wencai: createWencai({ picker, configured: () => true, perDay: 2 }) },
+  });
   let endStream: (() => void) | undefined;
   srv = await startMarketServer({
     port: 0,
@@ -54,9 +76,9 @@ afterAll(async () => {
 });
 
 describe("market:mcp", () => {
-  it("lists five read tools", async () => {
+  it("lists six read tools", async () => {
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(["market_akshare", "market_book", "market_candles", "market_explore", "market_quotes"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["market_akshare", "market_book", "market_candles", "market_explore", "market_quotes", "market_wencai"]);
     for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(true);
     // the market's words: no connected venue, no "Account" for the market
     for (const t of tools) expect(t.description ?? "").not.toMatch(/the Account|connected venue|venue the owner connected/);
@@ -141,6 +163,69 @@ describe("market:mcp", () => {
     expect(body(fails)).toEqual({ error: "upstream refused" });
   });
 
+  it("market_wencai says what 问财 is for, and takes stock or fund, a question of 1 to 300 characters and a limit of 1 to 200", async () => {
+    const { tools } = await client.listTools();
+    const t = tools.find((x) => x.name === "market_wencai")!;
+    const d = t.description ?? "";
+    for (const word of ["`stock`", "`fund`", "market_akshare", "今日", "从大到小排名前50", "truncated", "credential"]) expect(d).toContain(word);
+    expect(d).toMatch(/never evidence of a trade/);
+    expect(t.inputSchema.required).toEqual(["question"]);
+    expect(t.inputSchema.properties).toMatchObject({
+      question: { type: "string", minLength: 1, maxLength: 300 },
+      type: { enum: ["stock", "fund"] },
+      limit: { type: "integer", minimum: 1, maximum: 200 },
+    });
+  });
+
+  it("market_wencai answers a question as columns and rows, and spends one of the budget", async () => {
+    const r = await client.callTool({ name: "market_wencai", arguments: { question: "2026年9月28日至2026年11月18日区间涨跌幅从大到小排名前50" } });
+    expect(r.isError).toBeFalsy();
+    const b = body(r);
+    expect(b).toMatchObject({ ok: true, type: "stock", columns: ["股票代码", "股票简称", COL], rows: [["002242.SZ", "九阳股份", 202.13], ["301313.SZ", "x", 112.8]], rowCount: 2, returned: 2, truncated: false });
+    expect(b.budget).toMatchObject({ used: 1, cap: 2 });
+    expect(picked).toEqual([{ searchstring: "2026年9月28日至2026年11月18日区间涨跌幅从大到小排名前50", searchtype: "stock" }]);
+    // limit reaches the route
+    const one = await client.callTool({ name: "market_wencai", arguments: { question: "规模大于100亿的股票型基金", type: "fund", limit: 1 } });
+    expect(body(one)).toMatchObject({ ok: true, type: "fund", returned: 1, rowCount: 2, truncated: true, budget: { used: 2 } });
+  });
+
+  it("market_wencai refuses another type, a long question and a bad limit by its schema, before the market is asked", async () => {
+    const before = picked.length;
+    for (const args of [{ question: "腾讯控股", type: "hkstock" }, { question: "x".repeat(301) }, { question: "" }, { question: "q", limit: 0 }, { question: "q", limit: 201 }, { question: "q", limit: 1.5 }]) {
+      const r = await client.callTool({ name: "market_wencai", arguments: args });
+      expect(r.isError, JSON.stringify(args).slice(0, 60)).toBe(true);
+      expect((r.content as Text[])[0]!.text).toMatch(/Input validation error/);
+    }
+    expect(picked.length).toBe(before);
+  });
+
+  it("market_wencai answers a kept question free, and passes the budget's refusal on with its word", async () => {
+    const again = await client.callTool({ name: "market_wencai", arguments: { question: "2026年9月28日至2026年11月18日区间涨跌幅从大到小排名前50" } });
+    expect(again.isError).toBeFalsy();
+    expect(body(again).budget.used).toBe(2);
+    const n = picked.length;
+    const r = await client.callTool({ name: "market_wencai", arguments: { question: "第三个问题" } });
+    expect(r.isError).toBe(true);
+    const b = body(r);
+    expect(b).toMatchObject({ ok: false, wencai: "budget" });
+    expect(b.message).toMatch(/2 of 2 问财 calls spent/);
+    expect(picked.length).toBe(n);
+  });
+
+  it("market_wencai over a market without the route says to restart it", async () => {
+    const bare = createMarketCore({});
+    const old = await startMarketServer({ port: 0, mount: () => {}, close: () => bare.close() });
+    const c = await seat(old.url);
+    try {
+      const r = await c.callTool({ name: "market_wencai", arguments: { question: "q" } });
+      expect(r.isError).toBe(true);
+      expect(body(r)).toEqual({ ok: false, error: "this market has no 问财 route (/api/cn/wencai): restart it from this tree" });
+    } finally {
+      await c.close();
+      await old.close();
+    }
+  });
+
   it("a market not answering says so in plain words", async () => {
     const down = await seat("http://127.0.0.1:9");
     try {
@@ -150,6 +235,7 @@ describe("market:mcp", () => {
         ["market_candles", { venue: "fake", symbol: "BTC/USDT" }],
         ["market_book", { venue: "fake", symbol: "BTC/USDT" }],
         ["market_akshare", { tool: "akshare_discover" }],
+        ["market_wencai", { question: "q" }],
       ] as const) {
         const r = await down.callTool({ name, arguments: args });
         expect(r.isError, name).toBe(true);
