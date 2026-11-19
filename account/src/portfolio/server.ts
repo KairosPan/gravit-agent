@@ -173,7 +173,7 @@ import { STABLES } from "./live/types.ts";
 import { parseEventSymbol } from "./events.ts";
 import { sessionFrom } from "./openness.ts";
 import type { OrderPlan } from "./router.ts";
-import { isPending, loadOpenness, PortfolioService } from "./service.ts";
+import { isPending, loadOpenness, MIXED_NAVIGATION, mixesNavigation, PortfolioService, SOURCE_LIST_CHARS } from "./service.ts";
 import { defaultHome } from "./home.ts";
 import { pairingCode } from "./account/pairing.ts";
 import type { Side } from "./venues.ts";
@@ -730,13 +730,14 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   // by name (409 E_WALLET_NOT_CONNECTED): its public data is the market's
   app.get("/api/account/connected/explore", wrap(async (req, res) => {
     if (!mounted(res)) return;
-    const q = strings(req, res, { scope: 20, source: 81, tab: 20, q: 80, key: 240, sort: 20, limit: 6 });
+    const q = strings(req, res, { scope: 20, source: SOURCE_LIST_CHARS + 1, tab: 20, q: 80, key: 240, sort: 20, limit: 6, asset: 20, form: 20, region: 20 });
     if (!q) return;
     if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of markets, 1 to 200, in digits");
+    if (mixesNavigation(q)) return void bad(res, MIXED_NAVIGATION);
     // The server may begin listening before the link's first registry answer. Give an exact-source question a bounded chance to
     // resolve that registry instead of incorrectly declaring a known source unknown during a cold start.
     if (q.source && opts.market && !opts.market.sources().length && !(await opts.market.ready(3_000))) return answerOf(res, marketDown());
-    answerOf(res, await svc.connectedExplore({ scope: q.scope, source: q.source, tab: q.tab, q: q.q, key: q.key, sort: q.sort, ...(q.limit ? { limit: Number(q.limit) } : {}) }));
+    answerOf(res, await svc.connectedExplore({ scope: q.scope, source: q.source, tab: q.tab, q: q.q, key: q.key, sort: q.sort, ...(q.limit ? { limit: Number(q.limit) } : {}), asset: q.asset, form: q.form, region: q.region }));
   }));
   app.get("/api/account/connected/quotes", wrap(async (req, res) => {
     if (!mounted(res)) return;

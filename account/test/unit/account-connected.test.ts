@@ -90,6 +90,77 @@ describe("a connected venue's own reads (GET /api/account/connected/…)", () =>
     } finally { await srv.close(); }
   });
 
+  it("explores by asset, form and region on the connected half", async () => {
+    const perp = (base: string, category: string): Listing => ({ ...btc, symbol: `${base}/USDC:USDC`, base, quote: "USDC", kind: "perp", category, name: `${base} perp` }) as Listing;
+    const perps: PublicSource = { ...fake, id: "perps", listings: async () => [perp("BTC", "crypto"), perp("EUR", "fx")] };
+    const { srv, get } = await boot([perps]);
+    try {
+      const fx = await get("/api/account/connected/explore?asset=fx");
+      expect(fx.status).toBe(200);
+      expect(fx.body.items.map((i: { key: string }) => i.key)).toEqual(["perp:EUR"]);
+      expect(fx.body.items[0]).toMatchObject({ asset: "fx", form: "perp" });
+      expect((await get("/api/account/connected/explore?form=perp")).body.items.map((i: { key: string }) => i.key).sort()).toEqual(["perp:BTC", "perp:EUR"]);
+      for (const q of ["asset=bonds", "form=future", "region=eu"]) expect((await get(`/api/account/connected/explore?${q}`)).status).toBe(409);
+    } finally { await srv.close(); }
+  });
+
+  it("answers no rows for region=cn", async () => {
+    const { srv, get } = await boot();
+    try {
+      const r = await get("/api/account/connected/explore?asset=stocks&region=cn");
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ ok: true, items: [], tabs: [], movers: [], closing: [], mostTraded: [], missing: [] });
+    } finally { await srv.close(); }
+  });
+
+  it("validates the source list id by id", async () => {
+    const second: PublicSource = { ...fake, id: "second", listings: async () => [{ ...btc, symbol: "ETH/USDT", base: "ETH" }] };
+    const { srv, get } = await boot([fake, second]);
+    try {
+      const nope = await get("/api/account/connected/explore?source=fake,nope");
+      expect(nope.status).toBe(409);
+      expect(nope.body.refusal.message).toContain('"nope"');
+      const thirteen = Array.from({ length: 13 }, (_, i) => `s${i}`).join(",");
+      expect((await get(`/api/account/connected/explore?source=${thirteen}`)).status).toBe(409);
+      for (const q of ["fake,,second", "fake,second,", `${"a".repeat(81)},fake`, `fake,${"b,".repeat(200)}c`]) expect((await get(`/api/account/connected/explore?source=${q}`)).status).toBe(409);
+      const once = await get("/api/account/connected/explore?source=fake,fake");
+      expect(once.status).toBe(200);
+      expect(once.body.items.map((i: { key: string }) => i.key)).toEqual(["coin:BTC"]);
+      const both = await get("/api/account/connected/explore?source=fake, second");
+      expect(both.body.items.map((i: { key: string }) => i.key).sort()).toEqual(["coin:BTC", "coin:ETH"]);
+      expect((await get("/api/account/connected/explore?scope=more&source=fake,second")).status).toBe(400);
+    } finally { await srv.close(); }
+  });
+
+  it("refuses mixing the old navigation with the new", async () => {
+    const { srv, get } = await boot();
+    try {
+      for (const q of ["tab=perps&asset=crypto", "scope=more&form=spot", "tab=all&region=us"]) {
+        const r = await get(`/api/account/connected/explore?${q}`);
+        expect(r.status).toBe(400);
+        expect(r.body.error ?? r.body.message ?? JSON.stringify(r.body)).toContain("one way or the other");
+      }
+      // one source beside a scope is the old navigation, and a duplicated one is still one
+      expect((await get("/api/account/connected/explore?scope=more&source=fake,fake")).status).toBe(200);
+    } finally { await srv.close(); }
+  });
+
+  it("keeps the new params apart in its 30-second keep", async () => {
+    const perp = (base: string, category: string): Listing => ({ ...btc, symbol: `${base}/USDC:USDC`, base, quote: "USDC", kind: "perp", category, name: `${base} perp` }) as Listing;
+    const perps: PublicSource = { ...fake, id: "perps", listings: async () => [perp("BTC", "crypto"), perp("EUR", "fx")] };
+    const { srv, get } = await boot([perps, fake]);
+    try {
+      const keys = async (q: string) => (await get(`/api/account/connected/explore?${q}`)).body.items.map((i: { key: string }) => i.key).sort();
+      expect(await keys("asset=fx")).toEqual(["perp:EUR"]);
+      expect(await keys("asset=crypto&form=perp")).toEqual(["perp:BTC"]);
+      expect(await keys("asset=crypto&form=spot")).toEqual(["coin:BTC"]);
+      expect(await keys("asset=crypto&form=spot&region=us")).toEqual([]);
+      expect(await keys("asset=crypto&source=fake")).toEqual(["coin:BTC"]);
+      expect(await keys("asset=crypto&source=perps,fake")).toEqual(["coin:BTC", "perp:BTC"]);
+      expect(await keys("asset=fx")).toEqual(["perp:EUR"]);
+    } finally { await srv.close(); }
+  });
+
   it("waits for the first source registry on a cold exact-source request", async () => {
     let sources: PublicSource[] = [];
     const ready = vi.fn(async () => { sources = [fake]; return true; });

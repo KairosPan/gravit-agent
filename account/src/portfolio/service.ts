@@ -63,7 +63,7 @@ import type { LiveEarn } from "./account/live-earn.ts";
 import type { Payment } from "./account/payments.ts";
 import { exploreAcross, type Exploration, type ExploreSort, type ExploreVenue } from "./live/explore.ts";
 import { BOOK_TOP, CHINA_ID, holdBackMs, KEEP_MS as LISTING_KEEP_MS, type HubTick, type MarketHub, type Price, type PublicSource } from "./market/shapes.ts";
-import { TABS, type TabId } from "./live/categories.ts";
+import { ASSET_IDS, FORM_IDS, REGION_IDS, TABS, type AssetId, type FormId, type RegionId, type TabId } from "./live/categories.ts";
 import { CHAIN_BY_ID, CHAINS, type ChainName } from "./live/chain.ts";
 import { mountPayees, type PayeeWorld } from "./account/payees.ts";
 import { doorOf, EXCHANGES } from "./account/doors.ts";
@@ -189,7 +189,37 @@ export interface ServiceOptions {
 /** the kept reads that list the venues connected: forgotten whenever a venue is connected or unplugged, or an agent's wallet added */
 const VENUE_SET_READS = ["connected-explore", "compare"] as const;
 /** a Markets question (explore, connectedExplore) */
-type ExploreAsk = { scope?: string | undefined; source?: string | undefined; tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined };
+type ExploreAsk = { scope?: string | undefined; source?: string | undefined; tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined; asset?: string | undefined; form?: string | undefined; region?: string | undefined };
+
+/** THE TWO WAYS TO ASK a Markets question: the old navigation (a scope, a tab) or by underlying (an asset, a form, a region, a list of two
+ * or more sources) — never both in one question. The route answers it 400, a malformed question; exploreAsk, a refusal in the same words */
+export const MIXED_NAVIGATION = "scope and tab are not asked beside asset, form, region or a list of sources: ask one way or the other";
+/** the most sources one list names, and the most characters it is */
+export const SOURCE_LIST_MOST = 12;
+export const SOURCE_LIST_CHARS = 400;
+
+/** a list of sources as a Markets question takes it: ids between commas, each trimmed, a duplicate dropped; an empty one between two
+ * commas, more than SOURCE_LIST_MOST, a longer list or a longer id is refused, never cut. Whether each id is a source is exploreAsk's caller's
+ * to say */
+export function sourceList(raw: string | undefined): string[] | Refusal {
+  const text = (raw ?? "").trim();
+  if (!text) return [];
+  if (text.length > SOURCE_LIST_CHARS) return no("E_ACCOUNT_BAD_ACTION", { message: `a list of sources is at most ${SOURCE_LIST_CHARS} characters` });
+  const parts = text.split(",").map((x) => x.trim());
+  if (parts.some((x) => !x)) return no("E_ACCOUNT_BAD_ACTION", { message: "a list of sources names a source's id between each two commas" });
+  const ids = [...new Set(parts)];
+  if (ids.length > SOURCE_LIST_MOST) return no("E_ACCOUNT_BAD_ACTION", { message: `a list of sources names at most ${SOURCE_LIST_MOST}` });
+  if (ids.some((id) => id.length > 80)) return no("E_ACCOUNT_BAD_ACTION", { message: "a source id is at most 80 characters" });
+  return ids;
+}
+
+/** a question that asks both ways (MIXED_NAVIGATION): a scope or a tab beside an asset, a form, a region or a list that names two or more
+ * sources once its duplicates are dropped. A list that is no list (sourceList refuses it) mixes nothing: its own refusal says why */
+export function mixesNavigation(o: { scope?: string | undefined; tab?: string | undefined; asset?: string | undefined; form?: string | undefined; region?: string | undefined; source?: string | undefined }): boolean {
+  const has = (v: string | undefined) => (v ?? "").trim() !== "";
+  const ids = sourceList(o.source);
+  return (has(o.scope) || has(o.tab)) && (has(o.asset) || has(o.form) || has(o.region) || (!isRefusal(ids) && ids.length > 1));
+}
 const noPrice: Price = () => Promise.resolve(undefined);
 
 /** one slice of an order (or any step an agent flies): where, what, and the agent's words for it */
@@ -968,15 +998,23 @@ export class PortfolioService {
 
   /** a Markets question's checks (connectedExplore's): the tab, the sort, the search, the row's key and the limit, each in the account's
    * words */
-  private exploreAsk(o: ExploreAsk): { scope: MarketScope | undefined; source: string | undefined; tab: string | undefined; sort: string | undefined; q: string; key: string; limit: number } | Refusal {
+  private exploreAsk(o: ExploreAsk): { scope: MarketScope | undefined; sources: string[]; tab: string | undefined; sort: string | undefined; q: string; key: string; limit: number; asset?: AssetId; form?: FormId; region?: RegionId } | Refusal {
     if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
     const scope = o.scope?.trim() || undefined;
     if (scope !== undefined && scope !== "hyperliquid" && scope !== "xyz" && scope !== "more") return no("E_ACCOUNT_BAD_ACTION", { message: "a market scope is hyperliquid, xyz or more" });
-    const source = o.source?.trim() || undefined;
-    if (source && source.length > 80) return no("E_ACCOUNT_BAD_ACTION", { message: "a source id is at most 80 characters" });
-    if (source && (scope === "hyperliquid" || scope === "xyz")) return no("E_ACCOUNT_BAD_ACTION", { message: "a source is selected only in more markets or without a scope" });
+    const sources = sourceList(o.source);
+    if (isRefusal(sources)) return sources;
+    if (sources.length && (scope === "hyperliquid" || scope === "xyz")) return no("E_ACCOUNT_BAD_ACTION", { message: "a source is selected only in more markets or without a scope" });
     const tab = o.tab?.trim() || undefined;
     if (tab !== undefined && !TABS.some((t) => t.id === tab)) return no("E_ACCOUNT_BAD_ACTION", { message: `a tab is one of ${TABS.map((t) => t.id).join(", ")}` });
+    // BY UNDERLYING: an asset, a form, a region, each one of its ids (categories.ts)
+    const asset = o.asset?.trim() || undefined;
+    if (asset !== undefined && !ASSET_IDS.includes(asset as AssetId)) return no("E_ACCOUNT_BAD_ACTION", { message: `an asset is one of ${ASSET_IDS.join(", ")}` });
+    const form = o.form?.trim() || undefined;
+    if (form !== undefined && !FORM_IDS.includes(form as FormId)) return no("E_ACCOUNT_BAD_ACTION", { message: `a form is one of ${FORM_IDS.join(", ")}` });
+    const region = o.region?.trim() || undefined;
+    if (region !== undefined && !REGION_IDS.includes(region as RegionId)) return no("E_ACCOUNT_BAD_ACTION", { message: `a region is one of ${REGION_IDS.join(", ")}` });
+    if (mixesNavigation({ scope, tab, asset, form, region, source: sources.join(",") })) return no("E_ACCOUNT_BAD_ACTION", { message: MIXED_NAVIGATION });
     const sort = o.sort?.trim() || undefined;
     if (sort !== undefined && !EXPLORE_SORTS.includes(sort as ExploreSort)) return no("E_ACCOUNT_BAD_ACTION", { message: `markets are sorted by ${EXPLORE_SORTS.join(", ")}` });
     const q = (o.q ?? "").trim();
@@ -985,7 +1023,7 @@ export class PortfolioService {
     if (key.length > 200) return no("E_ACCOUNT_BAD_ACTION", { message: "a row's key is at most 200 characters" });
     const limit = o.limit === undefined ? 60 : Math.floor(o.limit);
     if (!(limit >= 1 && limit <= 200)) return no("E_ACCOUNT_BAD_ACTION", { message: "a limit is 1 to 200 markets" });
-    return { scope, source, tab, sort, q, key, limit };
+    return { scope, sources, tab, sort, q, key, limit, ...(asset ? { asset: asset as AssetId } : {}), ...(form ? { form: form as FormId } : {}), ...(region ? { region: region as RegionId } : {}) };
   }
 
   /** each connected venue with the connection it was made with: exploreAcross leaves out the public source that connection speaks for */
@@ -1026,14 +1064,25 @@ export class PortfolioService {
   async connectedExplore(o: ExploreAsk = {}): Promise<Exploration | Refusal> {
     const ask = this.exploreAsk(o);
     if (isRefusal(ask)) return ask;
-    const { scope, source, tab, sort, q, key, limit } = ask;
+    const { scope, sources, tab, sort, q, key, limit, asset, form, region } = ask;
     if (tab === "china") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "China is the market's: its explore answers it" });
-    const selected = source ? this.publicMarkets().find((s) => s.id === source) : undefined;
-    if (source && (!selected || (scope === "more" && ["hyperliquid", "trade-xyz"].includes(source)))) return no("E_ACCOUNT_BAD_ACTION", { message: "the source is not available in this market scope" });
+    const registry = this.publicMarkets();
+    const selected: PublicSource[] = [];
+    for (const id of sources) {
+      const s = registry.find((x) => x.id === id);
+      if (!s) return no("E_ACCOUNT_BAD_ACTION", { message: `"${id.slice(0, 40)}" is not a public source in this market scope` });
+      if (scope === "more" && ["hyperliquid", "trade-xyz"].includes(id)) return no("E_ACCOUNT_BAD_ACTION", { message: "the source is not available in this market scope" });
+      selected.push(s);
+    }
+    // China A is the market's: nothing connected here is listed in cn, so the question is answered with no rows before any venue is read
+    if (region === "cn") return { asOf: new Date(this.realNow()).toISOString(), tabs: [], items: [], movers: [], closing: [], mostTraded: [], missing: [], notes: [] };
     const connected = scopedExploreVenues(this.exploreVenues(), scope, selected);
-    return this.marketReads.get(`connected-explore|${scope ?? ""}|${source ?? ""}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async (): Promise<Exploration | Refusal> => {
+    return this.marketReads.get(`connected-explore|${scope ?? ""}|${sources.join(",")}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}|${asset ?? ""}|${form ?? ""}|${region ?? ""}`, 30_000, async (): Promise<Exploration | Refusal> => {
       const { placed, serves } = await this.placedServing(connected);
-      return exploreAcross({ connected: placed, public: [] }, { q, ...(key ? { key } : {}), limit, ...(source ? { perSource: 200 } : {}), clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) });
+      return exploreAcross({ connected: placed, public: [] }, {
+        q, ...(key ? { key } : {}), limit, ...(sources.length ? { perSource: 200 } : {}), clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}),
+        ...(asset ? { asset } : {}), ...(form ? { form } : {}), ...(region ? { region } : {}),
+      });
     });
   }
 

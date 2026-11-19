@@ -1,6 +1,6 @@
 /** Markets' three browsing scopes. Filter venues before reading them, and a Hyperliquid venue's contracts before the aggregator
  * requests their day figures or ranks them. The optional trader scope reaches the full namespace, beyond its small start-from list. */
-import { isRefusal } from "../../core/errors.ts";
+import { isRefusal, type Refusal } from "../../core/errors.ts";
 import type { PublicSource } from "../market/shapes.ts";
 import type { ExploreVenue } from "./explore.ts";
 import { PRE_IPO_CATEGORY } from "./preipo.ts";
@@ -30,24 +30,47 @@ export function marketInSource(m: Market, source: PublicSource): boolean {
   return m.kind === "spot" || m.kind === "crypto";
 }
 
-export function scopedExploreVenues(venues: ExploreVenue[], scope?: MarketScope, source?: PublicSource): ExploreVenue[] {
-  if (!scope && !source) return venues;
+/** a source's connection, or the wallet a MetaMask connection is */
+const connects = (s: PublicSource, connector: string | undefined): boolean => connector === s.connector || (s.connector === "live:wallet" && connector === "live:metamask");
+
+/** the answers of one trader asked once per listed source, joined: a symbol once, in the order asked; refused only when every one refused */
+function joined(got: Array<Market[] | Refusal>, keep: (m: Market) => boolean): Market[] | Refusal {
+  const answered = got.filter((g): g is Market[] => !isRefusal(g));
+  if (!answered.length) return got.find(isRefusal)!;
+  const seen = new Set<string>();
+  return answered.flat().filter((m) => keep(m) && !seen.has(m.symbol) && (seen.add(m.symbol), true));
+}
+
+/** THE VENUES A MARKETS QUESTION READS, scoped and narrowed to a list of sources before their stats and the limit: a venue is kept when it is
+ * paper, its id is a listed source's, or its connection is one (a MetaMask connection is the wallet's); a line counts when its venue's id
+ * is listed or it is one of a listed source's (marketInSource). The trader seam takes one source, so a venue is asked once per listed source
+ * it speaks for (paper: every one) and the answers joined */
+export function scopedExploreVenues(venues: ExploreVenue[], scope?: MarketScope, sources: readonly PublicSource[] = []): ExploreVenue[] {
+  const listed = sources.length > 0;
+  if (!scope && !listed) return venues;
   return venues.flatMap((v) => {
     const hl = /^live:hyperliquid(?:-trade|-paper)?$/.test(v.connector ?? "");
     const paper = v.connector === "live:paper";
-    if (source && !paper && v.connector !== source.connector && !(source.connector === "live:wallet" && v.connector === "live:metamask")) return [];
+    const byId = sources.some((s) => s.id === v.id);
+    const mine = paper ? sources : sources.filter((s) => connects(s, v.connector));
+    if (listed && !paper && !byId && !mine.length) return [];
     if (scope && !hl && !paper && scope !== "more") return [];
-    if (!source && !hl && !paper) return [v];
-    const keep = (m: Market): boolean => (!scope || paper || !hl || marketInScope(m, scope)) && (!source || marketInSource(m, source));
+    if (!listed && !hl && !paper) return [v];
+    const keep = (m: Market): boolean => (!scope || paper || !hl || marketInScope(m, scope)) && (!listed || byId || sources.some((s) => marketInSource(m, s)));
+    const asked = mine.map((s) => s.id);
+    const events = mine.filter((s) => s.kind === "events");
     const trader = Object.assign(Object.create(v.trader) as LiveTrader, {
       markets: async (q: string) => {
-        const got = source ? await v.trader.markets(q, scope, source.id) : await v.trader.markets(q, scope);
-        return isRefusal(got) ? got : got.filter(keep);
-      },
-      ...(source ? {
-        events: source.kind === "events" && v.trader.events ? async (o: Parameters<NonNullable<LiveTrader["events"]>>[0]) => {
-          const got = await v.trader.events!(o, paper ? source.id : undefined);
+        if (!asked.length) {
+          const got = await v.trader.markets(q, scope);
           return isRefusal(got) ? got : got.filter(keep);
+        }
+        return joined(await Promise.all(asked.map((id) => v.trader.markets(q, scope, id))), keep);
+      },
+      ...(listed ? {
+        events: events.length && v.trader.events ? async (o: Parameters<NonNullable<LiveTrader["events"]>>[0]) => {
+          const ids = paper ? events.map((s) => s.id) : [undefined];
+          return joined(await Promise.all(ids.map((id) => v.trader.events!(o, id))), keep);
         } : undefined,
       } : paper && scope && scope !== "more" ? { events: undefined } : {}),
       ...(v.trader.stats ? {

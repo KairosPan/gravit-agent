@@ -139,7 +139,7 @@ describe("a paper account: opened with paper money, its book in the home", () =>
       const paper = ok(await t.markets("", "more", id));
       expect(paper).toHaveLength(1);
       expect(paper[0]).toMatchObject({ symbol, kind: "token", category: "RWA", publicSource: id, issuer, eligibility: "the issuer's terms" });
-      const connected = scopedExploreVenues([{ id: "paper-rwa", name: "Paper", paper: true, connector: "live:paper", trader: t }], "more", tokens);
+      const connected = scopedExploreVenues([{ id: "paper-rwa", name: "Paper", paper: true, connector: "live:paper", trader: t }], "more", [tokens]);
       const publicRows = await exploreAcross({ public: [tokens], connected: [] }, { limit: 200 });
       const paperRows = await exploreAcross({ connected }, { limit: 200 });
       expect(paperRows.items.map((i) => [i.key, i.kind, i.tabs])).toEqual(publicRows.items.map((i) => [i.key, i.kind, i.tabs]));

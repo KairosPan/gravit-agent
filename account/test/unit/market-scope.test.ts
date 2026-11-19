@@ -22,15 +22,58 @@ describe("connected Markets scopes", () => {
       { id: "okx-key", name: "OKX", connector: "live:exchange:okx", trader: { can: true, markets, stats } as unknown as LiveTrader },
       { id: "kraken-key", name: "Kraken", connector: "live:exchange:kraken", trader: { can: true, markets: unrelated } as unknown as LiveTrader },
     ];
-    const ordinary = await exploreAcross({ connected: scopedExploreVenues(venues, "more", source("okx", "live:exchange:okx")) }, { limit: 1 });
+    const ordinary = await exploreAcross({ connected: scopedExploreVenues(venues, "more", [source("okx", "live:exchange:okx")]) }, { limit: 1 });
     expect(ordinary.items.map((i) => i.key)).toEqual(["coin:HYPE"]);
     expect(stats).toHaveBeenCalledWith([spot.symbol]);
     expect(unrelated).not.toHaveBeenCalled();
     expect(markets).toHaveBeenCalledWith("", "more", "okx");
     stats.mockClear();
-    const contracts = await exploreAcross({ connected: scopedExploreVenues(venues, "more", source("okx-preipo", "live:exchange:okx")) });
+    const contracts = await exploreAcross({ connected: scopedExploreVenues(venues, "more", [source("okx-preipo", "live:exchange:okx")]) });
     expect(contracts.items.map((i) => i.key)).toEqual(["preipo:anthropic"]);
     expect(stats).toHaveBeenCalledWith([preipo.symbol]);
+  });
+
+  it("is today's single-source scoping for a list of one", async () => {
+    const markets = vi.fn(async () => [native, spot]);
+    const venues: ExploreVenue[] = [{ id: "okx-key", name: "OKX", connector: "live:exchange:okx", trader: { can: true, markets } as unknown as LiveTrader }];
+    const one = await exploreAcross({ connected: scopedExploreVenues(venues, "more", [source("okx", "live:exchange:okx")]) });
+    expect(one.items.map((i) => i.key)).toEqual(["coin:HYPE"]);
+    expect(markets).toHaveBeenCalledTimes(1);
+    expect(markets).toHaveBeenCalledWith("", "more", "okx");
+  });
+
+  it("keeps the venues and products of any listed source", async () => {
+    const event = (symbol: string): Market => ({ ...spot, symbol, base: symbol, kind: "event" });
+    const kalshiMarkets = vi.fn(async () => [event("KXFED-26DEC")]);
+    const polyMarkets = vi.fn(async () => [event("will-the-fed-cut"), spot]);
+    const okxMarkets = vi.fn(async () => [spot]);
+    const venues: ExploreVenue[] = [
+      { id: "kalshi-key", name: "Kalshi", connector: "live:kalshi", trader: { can: true, markets: kalshiMarkets } as unknown as LiveTrader },
+      { id: "mm", name: "MetaMask", connector: "live:metamask", trader: { can: true, markets: polyMarkets } as unknown as LiveTrader },
+      { id: "okx-key", name: "OKX", connector: "live:exchange:okx", trader: { can: true, markets: okxMarkets } as unknown as LiveTrader },
+    ];
+    const listed = [source("kalshi", "live:kalshi", "events"), source("polymarket", "live:wallet", "events")];
+    const kept = scopedExploreVenues(venues, undefined, listed);
+    expect(kept.map((v) => v.id)).toEqual(["kalshi-key", "mm"]);
+    const got = await Promise.all(kept.map((v) => v.trader.markets("")));
+    expect(got.map((g) => (g as Market[]).map((m) => m.symbol))).toEqual([["KXFED-26DEC"], ["will-the-fed-cut"]]);
+    expect(kalshiMarkets).toHaveBeenCalledWith("", undefined, "kalshi");
+    expect(polyMarkets).toHaveBeenCalledWith("", undefined, "polymarket");
+    expect(okxMarkets).not.toHaveBeenCalled();
+  });
+
+  it("asks a paper trader once per listed source", async () => {
+    const event = (symbol: string, publicSource: string): Market => ({ ...spot, symbol, base: symbol, kind: "event", publicSource });
+    const markets = vi.fn(async (_q: string, _scope?: string, id?: string) => (id === "kalshi" ? [event("KXFED", "kalshi"), event("SHARED", "kalshi")] : [event("POLY", "polymarket"), event("SHARED", "kalshi")]));
+    const events = vi.fn(async (_o: unknown, id?: string) => (id === "kalshi" ? [event("KXFED", "kalshi")] : [event("POLY", "polymarket"), event("KXFED", "kalshi")]));
+    const venues: ExploreVenue[] = [{ id: "paper", name: "Paper", paper: true, connector: "live:paper", trader: { can: true, markets, events } as unknown as LiveTrader }];
+    const [v] = scopedExploreVenues(venues, undefined, [source("kalshi", "live:kalshi", "events"), source("polymarket", "live:wallet", "events")]);
+    const listed = (await v!.trader.markets("")) as Market[];
+    expect(markets.mock.calls.map((c) => c[2])).toEqual(["kalshi", "polymarket"]);
+    expect(listed.map((m) => m.symbol)).toEqual(["KXFED", "SHARED", "POLY"]);
+    const evs = (await v!.trader.events!({ limit: 10 })) as Market[];
+    expect(events.mock.calls.map((c) => c[1])).toEqual(["kalshi", "polymarket"]);
+    expect(evs.map((m) => m.symbol)).toEqual(["KXFED", "POLY"]);
   });
 
   it("uses token issuer metadata to keep a selected wallet product separate from other wallet markets", async () => {
@@ -40,7 +83,7 @@ describe("connected Markets scopes", () => {
     const events = vi.fn(async () => []);
     for (const connector of ["live:wallet", "live:metamask"]) {
       const venues: ExploreVenue[] = [{ id: "wallet", name: "Wallet", connector, trader: { can: true, markets, events } as unknown as LiveTrader }];
-      const r = await exploreAcross({ connected: scopedExploreVenues(venues, "more", source("robinhood-stock-tokens", "live:wallet", "tokens")) });
+      const r = await exploreAcross({ connected: scopedExploreVenues(venues, "more", [source("robinhood-stock-tokens", "live:wallet", "tokens")]) });
       expect(r.items.map((i) => i.key)).toEqual(["rwa:NVDA"]);
     }
     expect(events).not.toHaveBeenCalled();
@@ -50,12 +93,12 @@ describe("connected Markets scopes", () => {
     const markets = vi.fn(async () => [{ ...spot, publicSource: "okx" }, { ...native, publicSource: "other" }]);
     const events = vi.fn(async (_options: unknown, _source?: string) => []);
     const venues: ExploreVenue[] = [{ id: "paper", name: "Paper", paper: true, connector: "live:paper", trader: { can: true, markets, events } as unknown as LiveTrader }];
-    const r = await exploreAcross({ connected: scopedExploreVenues(venues, "more", source("okx", "live:exchange:okx")) });
+    const r = await exploreAcross({ connected: scopedExploreVenues(venues, "more", [source("okx", "live:exchange:okx")]) });
     expect(r.items.map((i) => i.key)).toEqual(["coin:HYPE"]);
     expect(r.items[0]?.at[0]).toMatchObject({ paper: true, publicSource: "okx" });
     expect(markets).toHaveBeenCalledWith("", "more", "okx");
     expect(events).not.toHaveBeenCalled();
-    await exploreAcross({ connected: scopedExploreVenues(venues, "more", source("kalshi", "live:kalshi", "events")) });
+    await exploreAcross({ connected: scopedExploreVenues(venues, "more", [source("kalshi", "live:kalshi", "events")]) });
     expect(events).toHaveBeenCalled();
     expect(events.mock.calls.every((call) => call[1] === "kalshi")).toBe(true);
   });
