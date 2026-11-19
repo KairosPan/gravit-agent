@@ -794,11 +794,12 @@ Since plan A2 (2026-11-03) the face composes a second project-owned MCP row, `mc
 (`src/market-row.ts`), right after the seat's: the market's own MCP server (`market/src/mcp.ts`,
 `npm run market:mcp`, stdio, server name `market`), spawned from the repo's `../market/` with this
 process's node and `market/`'s own `tsx`, against the market you run at `FACE_MARKET_URL`
-(default `http://127.0.0.1:4821`). Six keyless reads, each marked read-only and never carded
+(default `http://127.0.0.1:4821`). Six reads, each marked read-only and never carded
 (`mcp__market__` is not the seat's prefix): `market_explore` (what there is to trade, by tab or
 search), `market_quotes` (1–12 `venue|symbol` pairs; A shares by venue `china`),
-`market_candles`, `market_book` (the book and the latest trades), `market_akshare` and `market_wencai` (iFinD 问财,
-one natural-language question, `stock` or `fund` rows; the conversation and its workers hold it, the
+`market_candles`, `market_book` (the book and the latest trades) and `market_akshare`, the five
+keyless, and `market_wencai` (iFinD 问财 on the iFinD token the market alone holds, one
+natural-language question, `stock` or `fund` rows; the conversation and its workers hold it, the
 desk and the roles do not, and the market budgets its upstream calls per day). The market
 holds no key and no wallet; what the owner connected, and every write, stays the seat's — a
 connected venue's own bars and book are `portfolio_live_candles` and `portfolio_live_book`. A

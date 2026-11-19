@@ -82,7 +82,7 @@ test("effectiveApprovalPolicy: a runtime switch to danger-full-access disarms th
 /* --- the registry cross-check --------------------------------------------- */
 
 test("a market read raises no card, and the seat's two connected reads are reads", () => {
-  for (const name of ["mcp__market__market_book", "mcp__market__market_explore", "mcp__market__market_candles", "mcp__market__market_quotes", "mcp__market__market_akshare"]) {
+  for (const name of ["mcp__market__market_book", "mcp__market__market_explore", "mcp__market__market_candles", "mcp__market__market_quotes", "mcp__market__market_akshare", "mcp__market__market_wencai"]) {
     assert.equal(isOrderTool(name), false, name);
     assert.equal(orderApprovalDecision(name, "ask"), null, name);
   }
