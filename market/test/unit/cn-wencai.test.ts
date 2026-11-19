@@ -250,15 +250,20 @@ describe("createWencai: the keep", () => {
   it("answers the same ask within a minute from memory, with the first read's asOf and the current budget", async () => {
     const r = rig();
     const one = ok(await r.w.ask({ question: "q" }));
-    r.clock.t += WENCAI_KEEP_MS - 1;
+    expect(one.budget.used).toBe(1);
+    r.clock.t += 1_000;
+    // another question answered between the first read and the kept hit spends a second call
+    ok(await r.w.ask({ question: "other" }));
+    r.clock.t = Date.parse(one.asOf) + WENCAI_KEEP_MS - 1;
     const two = ok(await r.w.ask({ question: " q ", type: "stock" }));
-    expect(r.calls).toHaveLength(1);
+    expect(r.calls).toHaveLength(2);
     expect(two.asOf).toBe(one.asOf);
     expect(two.rows).toEqual(one.rows);
+    expect(two.budget.used).toBe(2);
     expect(two.budget).toEqual(r.w.budget());
     r.clock.t += 1;
     ok(await r.w.ask({ question: "q" }));
-    expect(r.calls).toHaveLength(2);
+    expect(r.calls).toHaveLength(3);
   });
 
   it("keys by type and limit as well as the question", async () => {
