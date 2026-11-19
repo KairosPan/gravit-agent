@@ -5,6 +5,7 @@ import { no } from "../../src/refuse.ts";
 import { mountCn } from "../../src/routes-cn.ts";
 import { startMarketServer, type MarketServerHandle } from "../../src/server.ts";
 import type { ChinaMarket, ChinaSource, ChinaStatus } from "../../src/live/china.ts";
+import type { CnWencai } from "../../src/live/cn-wencai.ts";
 import type { CnIfind } from "../../src/live/cn-ifind.ts";
 import { readLike, type Listing, type PublicSource } from "../../src/live/public-markets.ts";
 import type { MarketStats } from "../../src/live/trade.ts";
@@ -149,7 +150,16 @@ describe("the source protocol", () => {
     const { url } = await serve({ sources: [fake()], cn: { relay: async () => ({ kind: "refused", word: "unreachable" }), ifind } });
     const r = await fetch(`${url}/api/health`);
     const text = await r.text();
-    expect(JSON.parse(text)).toEqual({ ok: true, service: "market", sources: 1, china: false, akshare: false, ifind: true });
+    expect(JSON.parse(text)).toEqual({ ok: true, service: "market", sources: 1, china: false, akshare: false, ifind: true, wencai: false });
+    expect(text.toLowerCase()).not.toContain("token");
+  });
+
+  it("says on health whether 问财 answers", async () => {
+    const ifind: CnIfind = { configured: () => true, ask: async () => ({ kind: "refused", word: "unconfigured" }) };
+    const wencai: CnWencai = { ask: async () => ({ kind: "refused", word: "off", message: "m" }), budget: () => ({ used: 0, cap: 100, resetsAt: null }), enabled: () => true };
+    const { url } = await serve({ sources: [fake()], cn: { relay: async () => ({ kind: "refused", word: "unreachable" }), ifind, wencai } });
+    const text = await (await fetch(`${url}/api/health`)).text();
+    expect(JSON.parse(text)).toMatchObject({ ifind: true, wencai: true });
     expect(text.toLowerCase()).not.toContain("token");
   });
 });

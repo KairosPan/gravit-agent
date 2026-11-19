@@ -160,7 +160,7 @@ export interface ProtocolOptions {
 }
 
 export function mountProtocol(app: express.Express, core: MarketCore, o: ProtocolOptions = {}): void {
-  app.get("/api/health", (_req, res) => void res.json({ ok: true, service: "market", sources: core.sources().length, china: !!core.china, akshare: !!core.akshare, ifind: core.cn?.ifind.configured() ?? false }));
+  app.get("/api/health", (_req, res) => void res.json({ ok: true, service: "market", sources: core.sources().length, china: !!core.china, akshare: !!core.akshare, ifind: core.cn?.ifind.configured() ?? false, wencai: core.cn?.wencai?.enabled() ?? false }));
 
   // ---- the sources ---------------------------------------------------------------------------------------------------------------
   app.get("/api/sources", (_req, res) => void res.json({ ok: true, value: core.sources().map(described) }));

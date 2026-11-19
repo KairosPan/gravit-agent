@@ -5,17 +5,21 @@
  *
  *   GET  /api/cn/relay?url=        the relay (live/cn-relay.ts): Tencent's and Eastmoney's listed hosts, bytes unchanged · x-cn-relay
  *   POST /api/cn/ifind {query}     iFinD's one query (live/cn-ifind.ts) · x-cn-ifind
+ *   POST /api/cn/wencai {question, type?, limit?}   one 问财 question through iFinD (live/cn-wencai.ts): a table, or a refusal word · x-cn-wencai
  *   GET  /api/akshare/tools        the sidecar's tools (live/akshare.ts)
  *   POST /api/akshare/call {tool, arguments?}   one tool's answer, unchanged; a caller that goes away aborts the ask */
 import type express from "express";
 import { isRefusal } from "./core/errors.ts";
 import type { AkshareWord } from "./live/akshare.ts";
 import { IFIND_QUERY } from "./live/cn-ifind.ts";
+import type { WencaiWord } from "./live/cn-wencai.ts";
 import { RELAY_URL_MAX, relayTarget } from "./live/cn-relay.ts";
 import type { MarketCore } from "./core.ts";
 
 const RELAY_STATUS = { "not-listed": 403, timeout: 504, "too-large": 502, unreachable: 502, off: 503 } as const;
 const IFIND_STATUS = { unconfigured: 503, credential: 502, timeout: 504, "too-large": 502, unreachable: 502, "not-the-query": 400, off: 503 } as const;
+
+const WENCAI_STATUS = { "bad-question": 400, "bad-type": 400, off: 503, unconfigured: 503, budget: 429, credential: 502, timeout: 504, "too-large": 502, unreachable: 502, upstream: 502 } as const satisfies Record<WencaiWord, number>;
 
 const AKSHARE_STATUS = { off: 503, "unknown-tool": 400, "bad-arguments": 400, unavailable: 503, timeout: 504, "too-large": 502 } as const satisfies Record<AkshareWord, number>;
 
@@ -63,6 +67,16 @@ export function mountCn(app: express.Express, core: MarketCore, o: { cnQueueMs?:
     const a = await core.cn.ifind.ask(q);
     if (a.kind === "refused") return refuse(a.word);
     res.status(a.status).set("x-cn-ifind", "upstream").set("x-content-type-options", "nosniff").set("content-type", a.contentType ?? "application/octet-stream").send(Buffer.from(a.bytes));
+  }));
+  // 问财: one question, answered as a table. The client validates; the route hands it the body when that is a JSON object, else {}
+  app.post("/api/cn/wencai", wrap(async (req, res) => {
+    const refuse = (word: WencaiWord, message: string, detail?: unknown) => void res.status(WENCAI_STATUS[word]).set("x-cn-wencai", "refused").json({ ok: false, wencai: word, message, ...(detail ? { detail } : {}) });
+    const body = req.body as unknown;
+    const asked = typeof body === "object" && body !== null && !Array.isArray(body) ? body : {};
+    if (!core.cn?.wencai) return refuse("off", "this market runs no 问财");
+    const a = await core.cn.wencai.ask(asked);
+    if (a.kind === "refused") return refuse(a.word, a.message, a.detail);
+    res.status(200).set("x-cn-wencai", "upstream").json(a.body);
   }));
 
   // The AKShare sidecar: two reads, behind the fence, nothing written. The child's answer comes back unchanged; a refusal is the route's own

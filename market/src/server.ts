@@ -5,9 +5,9 @@
  *   npm run market                    → http://127.0.0.1:4821 · `--port <n>` listens elsewhere; MARKET_BIND widens the listener and
  *                                       MARKET_HOSTS (comma-separated `host:port`) names extra Host values answered as local
  *
- *   GET  /api/health                  {ok: true, service: "market", sources, china, akshare, ifind} (protocol.ts; no token named)
+ *   GET  /api/health                  {ok: true, service: "market", sources, china, akshare, ifind, wencai} (protocol.ts; no token named)
  *   the source protocol               protocol.ts: the sources, the hub, China and a price, for the account's adapters
- *   Lunhui's reach and AKShare        routes-cn.ts: /api/cn/relay, /api/cn/ifind, /api/akshare/tools, /api/akshare/call
+ *   Lunhui's reach and AKShare        routes-cn.ts: /api/cn/relay, /api/cn/ifind, /api/cn/wencai, /api/akshare/tools, /api/akshare/call
  *   the public reads                  reads.ts: /api/explore, /api/quotes, /api/candles, /api/book, /api/trades (for the face, plan A2)
  *   the stream                        follows.ts: GET /api/stream, POST /api/stream/markets (a followed market's quote, book and trades)
  *
@@ -161,6 +161,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   });
   console.log(`market at ${srv.url} · keyless public data · Ctrl-C to stop`);
   console.log(`Lunhui's reach: /api/cn/relay (Tencent, Eastmoney) · ${core.cn?.ifind.configured() ? "iFinD configured" : "iFinD not configured (IFIND_REFRESH_TOKEN or IFIND_ACCESS_TOKEN in this process's environment)"}`);
+  console.log(`问财: ${core.cn?.wencai?.enabled() ? `/api/cn/wencai · ${core.cn.wencai.budget().cap} a day` : "off (MARKET_WENCAI_PER_DAY=0, or iFinD not configured)"}`);
   console.log(`AKShare: ${akshareCommand()} · started on first use (/api/akshare/tools, /api/akshare/call)`);
   const stop = () => srv.close().then(() => process.exit(0));
   process.on("SIGINT", stop);

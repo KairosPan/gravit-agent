@@ -6,6 +6,7 @@ import { createAkshare, akshareCommand, type Akshare } from "./live/akshare.ts";
 import { chinaSource, type ChinaSource } from "./live/china.ts";
 import { cnHosts, realCnHttp } from "./live/cn-http.ts";
 import { createIfind, IFIND_HOST, type CnIfind } from "./live/cn-ifind.ts";
+import { createWencai, wencaiPerDay, type CnWencai } from "./live/cn-wencai.ts";
 import { createCnRelay, type CnRelay } from "./live/cn-relay.ts";
 import { historyKeep, pageWeight } from "./live/history.ts";
 import { nasdaqNews, type NewsSource } from "./live/news.ts";
@@ -26,7 +27,7 @@ export interface MarketCoreOptions {
   /** a coin's price in dollars (absent: none, every asset undefined) */
   price?: Price | undefined;
   /** Lunhui's reach behind /api/cn/* (absent: both routes answer `off`) */
-  cn?: { relay: CnRelay; ifind: CnIfind } | undefined;
+  cn?: { relay: CnRelay; ifind: CnIfind; wencai?: CnWencai } | undefined;
   /** the AKShare sidecar behind /api/akshare/* (absent: both routes answer `off`) */
   akshare?: Akshare | undefined;
   clock?: (() => number) | undefined;
@@ -109,13 +110,14 @@ export function realMarketCore(): MarketCore {
   const sources = publicSources();
   const feeds = sources.flatMap((x) => (x.feed ? [x.feed] : []));
   const hub = joinHubs(new StreamHub({ answers: (v) => restAnswers(cache, v) }), ...feeds);
+  const ifind = createIfind({ env: () => process.env, http: cnHosts(realCnHttp, [IFIND_HOST]) });
   return coreOver(cache, {
     sources,
     hub,
     china: chinaSource(),
     news: nasdaqNews(),
     price: publicPrices(),
-    cn: { relay: createCnRelay(realCnHttp), ifind: createIfind({ env: () => process.env, http: cnHosts(realCnHttp, [IFIND_HOST]) }) },
+    cn: { relay: createCnRelay(realCnHttp), ifind, wencai: createWencai({ picker: ifind, configured: () => ifind.configured(), perDay: wencaiPerDay(process.env) }) },
     akshare: createAkshare({ command: akshareCommand() }),
   });
 }
