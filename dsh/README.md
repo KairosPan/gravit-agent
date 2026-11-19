@@ -21,7 +21,7 @@ deferring. Every style-gravit SKILL.md carries that scope header at the top.
 
 There is no Python side and no server of this repo's to mount: the face composes its own MCP
 rows (the Account seat `mcp-account`, the market's `mcp-market`, whose `market_akshare` is
-AKShare, and the memory's `mcp-memory`) on every boot — the memory's not on a scratch harness home
+AKShare and `market_wencai` iFinD 问财, and the memory's `mcp-memory`) on every boot — the memory's not on a scratch harness home
 that names no memory home (`FACE_MEMORY_HOME` or `GRAVIT_MEMORY_HOME`) — and the operator adds two
 rows of their own. The memory's home is the operator's to make, outside the repository
 (`face/README.md` "The memory").

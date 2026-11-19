@@ -76,7 +76,7 @@ export { DESK_PRESET };
  * fence (src/desk-session.ts) refuses a desk turn while an instruction file sits there. Absent by design:
  * the shell and its background-job tools (NO SHELL, in the header), every order and account tool, the
  * question tool, goals, delegation (`subagent*`, `send_message`, `interrupt_agent`, `list_agents`,
- * `workflow`, `ralph`, the room's `dispatch`, every `agent_<bin>`), the AKShare tools, and the bed-backed
+ * `workflow`, `ralph`, the room's `dispatch`, every `agent_<bin>`), the AKShare tools, `market_wencai`, and the bed-backed
  * reads (`market_snapshot`, `screen`, `breadth`). Frozen, and pinned name for name by
  * tests/desk-preset.test.ts: whatever is added here reaches every unattended desk turn. */
 export const DESK_ALLOW: readonly string[] = Object.freeze([

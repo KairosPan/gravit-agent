@@ -25,7 +25,7 @@
  *   fails in the seat's own words;
  * - it sets no `instructions`, so no prompt section; its 34 schemas enter the
  *   tool block of every request (DEVELOPMENT.md §4.3 prices them);
- * - the market's public reads (explore, quotes, candles, book, AKShare) are
+ * - the market's public reads (explore, quotes, candles, book, AKShare, 问财) are
  *   not the seat's since plan A2: they are the `mcp-market` row's
  *   (src/market-row.ts); the seat keeps a connected venue's own bars and book,
  *   `portfolio_live_candles` and `portfolio_live_book`;
