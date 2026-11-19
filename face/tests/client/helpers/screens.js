@@ -486,6 +486,35 @@ export function namedStates() {
     // the command that makes the home; a read that failed with nothing kept; one that failed over what it kept, with two
     // proposals waiting; its Lessons tab (memory screen plan Task 3); and its Decisions, Waiting and Health tabs (Task 4)
     ...memoryPageStates(),
+    // Markets by underlying (plan 2026-11-19 Task 8): each filter's popover open, the chips, the empty filtered tab, a search
+    // naming each result's class
+    ...marketsByUnderlyingStates(),
+  ];
+}
+
+// Markets by underlying (spec 2026-11-19 G1-G8): Stocks with Region's popover open (piece 2's regions greyed); Macro & events with
+// Form's open (the forms its sources lack none here, Options piece 3); Crypto with Spot set (so All sources), both chips and
+// Source's popover open over the registry's names; Crypto on Perp whose read answered nothing (Back to the main sources); a
+// search from Stocks naming each result's class, Back to Stocks
+function marketsByUnderlyingStates() {
+  const fx = name => JSON.parse(readFileSync(new URL(`../../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
+  const on = R.nav(emptyState(), { screen: 'markets', id: null });
+  const tab = id => R.setMarketsTab(on, id);
+  const registry = { ok: true, value: [{ id: 'hyperliquid', name: 'Hyperliquid' }, { id: 'coinbase', name: 'Coinbase' }, { id: 'kraken', name: 'Kraken' }, { id: 'okx', name: 'OKX' },
+    { id: 'kalshi', name: 'Kalshi' }, { id: 'polymarket', name: 'Polymarket' }] };
+  const coins = { ...fx('explore-all'), items: fx('explore-all').items.filter(i => i.kind === 'coin') };
+  const spot = R.setMarketsForm(R.marketSourcesLoaded(tab('crypto'), { data: registry, at: NOW }), 'spot');
+  const empty = { ...fx('explore-all'), items: [], movers: [], closing: [], mostTraded: [] };
+  const all = fx('explore-all');
+  const results = { ...all, items: [{ ...all.items.find(i => i.key === 'stock:NVDA'), asset: 'stocks', form: 'spot', region: 'us' },
+    { ...all.items.find(i => i.key === 'perp:BTC'), asset: 'crypto', form: 'perp', region: null },
+    { ...fx('explore-predictions').items[0], asset: 'macro', form: 'event', region: null }] };
+  return [
+    ['markets-region-open', R.openMarketsFilter(exploreFor(tab('stocks'), empty), 'region')],
+    ['markets-form-open', R.openMarketsFilter(exploreFor(tab('macro'), fx('explore-predictions')), 'form')],
+    ['markets-source-open', R.openMarketsFilter(exploreFor(spot, coins), 'source')],
+    ['markets-filters-empty', exploreFor(R.setMarketsForm(tab('crypto'), 'perp'), empty)],
+    ['markets-search-class', R.resultsLoaded(R.setMarketsQuery(tab('stocks'), 'n'), { data: results, at: NOW })],
   ];
 }
 

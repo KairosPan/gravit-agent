@@ -202,7 +202,7 @@ test('rowsOf: the fixture rows, and two cn rows on the Watchlist; source words; 
   const rows = [...rowsOf(m), ...rowsOf(listed).filter(r => r.source === 'face')];
   assert.deepEqual(rowsOf(m).map(r => r.id), rowsOf(listed).filter(r => r.source === 'account').map(r => r.id), "a tab's rows are its read's: no cn star there");
   assert.deepEqual(rows.find(r => r.id === 'perp:BTC'), {
-    id: 'perp:BTC', source: 'account', kind: 'perp', name: 'BTC perpetual', tile: 'BTC', sub: 'BTC · Perpetual',
+    id: 'perp:BTC', source: 'account', kind: 'perp', name: 'BTC perpetual', tile: 'BTC', sub: 'BTC · Perp',
     priced: { price: 62498.8, unit: 'usd', changePct: 2.3, change24h: 1404.9, volume: 4121786065, volumeUnit: 'usd', implied: null }, price: 62498.8,
     live: null, sourceWord: 'Stand-in Exchange', closeTime: null, pastEnd: false, paper: false, watched: false, atAccount: false,
     legs: [{ venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', connected: true, paper: false, canTrade: true, public: false, connectTo: '', connector: '', price: 62498.8, bid: 62495.6, ask: 62501.9, best: true }],
@@ -222,7 +222,7 @@ test('rowsOf: the fixture rows, and two cn rows on the Watchlist; source words; 
   assert.deepEqual(rows.filter(r => r.watched).map(r => r.id), ['coin:BTC', 'cn:600519', 'cn:000001']);
   // the Account's own words for where each price is from, the face's provider for the cn rows; the second line of each
   assert.deepEqual(['stock:NVDA', 'coin:BTC', 'coin:LINK', 'cn:000001'].map(id => byId[id].sourceWord), ['Stand-in Broker', 'Stand-in Exchange', 'Stand-in Public Exchange', 'Tencent']);
-  assert.deepEqual(['stock:NVDA', 'coin:BTC', 'perp:ETH', 'cn:000001'].map(id => byId[id].sub), ['Stand-in Broker', 'BTC', 'ETH · Perpetual', '000001 · SZ']);
+  assert.deepEqual(['stock:NVDA', 'coin:BTC', 'perp:ETH', 'cn:000001'].map(id => byId[id].sub), ['Stand-in Broker', 'BTC', 'ETH · Perp', '000001 · SZ']);
   for (const r of rows) for (const word of [r.sub, r.sourceWord]) assert.doesNotMatch(word, CJK, word);
   assert.deepEqual(byId['cn:000001'].priced, { price: null, unit: 'cny', changePct: null, change24h: null, volume: null, volumeUnit: 'shares', implied: null });
   assert.equal(byId['cn:000001'].quote, null);
@@ -256,7 +256,7 @@ test('rowsOf: the fixture rows, and two cn rows on the Watchlist; source words; 
   const anthropic = { key: 'preipo:anthropic', kind: 'perp', name: 'Anthropic', base: 'ANTHROPIC', price: 182.5, implied: { usd: 183e9, unit: 'valuation' }, category: 'Pre-IPO', tabs: ['all', 'preipo'], at: [] };
   const openai = { ...anthropic, key: 'preipo:openai', name: 'OpenAI', base: 'OPENAI', implied: undefined };
   const pre = rowsOf(markets({ explore: { all: read({ ...fx('explore-all'), items: [anthropic, openai, itemOf(fx('explore-all'), 'perp:BTC')] }) } }));
-  assert.deepEqual(pre.map(r => [r.id, r.sub]), [['perp:BTC', 'BTC · Perpetual'], ['preipo:anthropic', 'Pre-IPO · Perpetual'], ['preipo:openai', 'Pre-IPO · Perpetual']]);
+  assert.deepEqual(pre.map(r => [r.id, r.sub]), [['perp:BTC', 'BTC · Perp'], ['preipo:anthropic', 'Pre-IPO · Perp'], ['preipo:openai', 'Pre-IPO · Perp']]);
 
   // while searching, the Account's rows are its search's and the cn rows its hits alone, never the whole cn watchlist
   const searching = {

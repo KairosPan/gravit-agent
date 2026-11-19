@@ -10,7 +10,7 @@ import { renderMarketsScreen, marketPage, mkAv } from '../../client/js/render/ma
 import { candlesSvg } from '../../client/js/render/chart.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { rowsOf, CANDLE_RANGES } from '../../client/js/host/market-view.js';
+import { rowsOf, CANDLE_RANGES, exploreQueryOf } from '../../client/js/host/market-view.js';
 import { fmtClock, fmtDate, sameDay } from '../../client/js/time.js';
 import { createStore } from '../../client/js/store.js';
 import { startMarkets } from '../../client/js/host/markets.js';
@@ -64,12 +64,17 @@ const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members
 function screen({
   route = { screen: 'markets', id: null }, all = fx('explore-all'), predictions = null, tab = null, sort = null, q = '', results = null,
   cn = [], quotes = {}, connection = 'polling', status = null, watch = [], asked = {}, live = [], candles = null, account = false,
-  conversations = [], watchError = null, role = null, here, scope = 'more',
+  conversations = [], watchError = null, role = null, here, source = null,
 } = {}) {
-  let s = R.nav(emptyState(), route);
-  s = { ...s, markets: { ...s.markets, scope } };
-  if (all) s = R.exploreLoaded(s, { tab: 'all', data: all, at: NOW });
-  if (predictions) s = R.exploreLoaded(s, { tab: 'predictions', data: predictions, at: NOW });
+  // the tab on screen (Crypto unless one is given) and, when given, its Source; `all` is the Watchlist's unscoped read and the
+  // tab's own read for its query, `predictions` Macro & events' (market-view.js exploreQueryOf: a read is drawn for its query)
+  const shown = tab ?? 'crypto';
+  let s = R.setMarketsTab(R.nav(emptyState(), route), shown);
+  if (source) s = R.setMarketsSource(s, source);
+  if (all) s = R.exploreLoaded(s, { tab: 'watchlist', data: all, at: NOW, query: exploreQueryOf({ ...s.markets, tab: 'watchlist' }) });
+  if (predictions && shown !== 'macro') s = R.exploreLoaded(s, { tab: 'macro', data: predictions, at: NOW, query: exploreQueryOf({ ...s.markets, tab: 'macro', source: 'main', form: '' }) });
+  const own = shown === 'macro' && predictions ? predictions : all;
+  if (own && shown !== 'watchlist') s = R.exploreLoaded(s, { tab: shown, data: own, at: NOW, query: exploreQueryOf(s.markets) });
   s = R.accountWatchLoaded(s, { items: watch, error: null });
   s = R.watchlistLoaded(s, { items: cn, error: watchError });
   for (const [faceId, key] of Object.entries(asked)) s = R.askedOfAccount(s, { faceId, key });
@@ -87,7 +92,6 @@ function screen({
   // reads; `here` another body, or null for none landed
   const sheet = here !== undefined ? here : account && route.id ? assetSheet(route.id) : null;
   if (sheet) s = R.depthLoaded(s, { id: route.id, part: 'here', data: sheet, at: NOW });
-  if (tab) s = R.setMarketsTab(s, tab);
   if (q) s = R.setMarketsQuery(s, q);
   if (results) s = R.resultsLoaded(s, { data: results, at: NOW });
   if (sort) s = R.setMarketsSort(s, sort);
@@ -108,7 +112,7 @@ const linesOf = sec => sec.split('<div class="mk-line">').slice(1);
 // a statement line's time as the screen says it: the clock today, the day and the clock before it
 const stamp = at => { const t = Date.parse(at); return sameDay(t, NOW) ? fmtClock(t) : `${fmtDate(t)} ${fmtClock(t)}`; };
 
-test('the table: the Account tabs, rows with source words, cents for an event, contracts for Kalshi, Closed past end', () => {
+test('the table: the tabs, rows with source words, cents for an event, contracts for Kalshi, Closed past end', () => {
   const { s, html } = screen({
     all: withEvents(),
     // the latest quote at NVDA's broker: its price leads the row; its own 24 hours and volume do not
@@ -117,11 +121,11 @@ test('the table: the Account tabs, rows with source words, cents for an event, c
   assert.match(html, /^<main class="main mkts">/);
   assert.match(html, /<h1 class="head-title">Markets<\/h1>/);
   assert.match(html, /id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery" value=""/);
-  // More's categories carry only its own counts; Watching and Desk are separate global controls.
-  const tabs = [...html.matchAll(/<button type="button" class="mk-category" data-action="mkCategory" data-scope="more" data-value="([^"]+)" aria-pressed="(true|false)">([^<]+)<\/button>/g)].map(m => [m[1], m[2], m[3]]);
+  // the tabs: the Watchlist's star, then the seven classes, Crypto pressed, no counts
+  const tabs = [...html.matchAll(/<button type="button" class="mk-tab" data-action="mkTab" data-value="([^"]+)" aria-pressed="(true|false)">([^<]+)<\/button>/g)].map(m => [m[1], m[2], m[3]]);
   assert.deepEqual(tabs, [
-    ['all', 'true', 'All · 30'], ['crypto', 'false', 'Crypto · 6'], ['stocks', 'false', 'Stocks · 4'], ['rwas', 'false', 'RWAs · 4'],
-    ['perps', 'false', 'Perps · 6'], ['preipo', 'false', 'Pre-IPO · 1'], ['predictions', 'false', 'Predictions · 9'], ['china', 'false', 'China'],
+    ['crypto', 'true', 'Crypto'], ['stocks', 'false', 'Stocks'], ['indices', 'false', 'Indices'], ['commodities', 'false', 'Commodities'],
+    ['fx', 'false', 'FX'], ['preipo', 'false', 'Pre-IPO'], ['macro', 'false', 'Macro &amp; events'],
   ]);
   assert.match(html, /<th scope="col" class="r">Price<\/th><th scope="col" class="r mk-c-chg">24h<\/th><th scope="col" class="r mk-c-vol">Volume<\/th><th scope="col" class="r mk-c-st">Source<\/th>/);
   // every row of the tab, each by its key, in the view's order: Most traded, the events' smaller volumes last
@@ -142,7 +146,7 @@ test('the table: the Account tabs, rows with source words, cents for an event, c
   // a coin only a paper account trades says so; its price to its own precision
   assert.match(rowOf(html, 'coin:DOGE'), /<span class="mk-sub">DOGE <span class="mk-tag">Paper<\/span><\/span>/);
   assert.deepEqual(cells(rowOf(html, 'coin:DOGE')).slice(2).map(text), ['$0.1214', '▲up 12.40%', '$787.3M', 'Stand-in Public Exchange']);
-  assert.match(rowOf(html, 'perp:BTC'), /<span class="mk-av" aria-hidden="true">BTC<\/span><span class="mk-nm"><b>BTC perpetual<\/b><span class="mk-sub">BTC · Perpetual<\/span>/);
+  assert.match(rowOf(html, 'perp:BTC'), /<span class="mk-av" aria-hidden="true">BTC<\/span><span class="mk-nm"><b>BTC perpetual<\/b><span class="mk-sub">BTC · Perp<\/span>/, "the fixture's name as the Account gave it; the sub in the face's word, Perp");
   assert.doesNotMatch(rowOf(html, 'stock:NVDA'), /mk-tag/, 'its broker is real money');
 
   // an event: its category for its sub and its tile, its price and its move in cents
@@ -177,14 +181,14 @@ test('sorts: Most traded, Biggest moves, Closing soonest only with events', () =
   assert.deepEqual(rowIds(movers.html).slice(-2), ['stock:AAPL', 'stock:SPY']);
   // the events' tab: Closing soonest too, the soonest first; an event's move in cents ranks under Biggest moves
   const predictions = fx('explore-predictions');
-  const events = screen({ predictions, tab: 'predictions' });
-  assert.match(events.html, /data-value="predictions" aria-pressed="true">Predictions · 9</);
+  const events = screen({ predictions, tab: 'macro' });
+  assert.match(events.html, /data-value="macro" aria-pressed="true">Macro &amp; events</);
   assert.deepEqual(sortsOf(events.html), [['volume', 'Most traded'], ['movers', 'Biggest moves'], ['closing', 'Closing soonest']]);
-  const closing = screen({ predictions, tab: 'predictions', sort: 'closing' });
+  const closing = screen({ predictions, tab: 'macro', sort: 'closing' });
   assert.match(closing.html, /class="seg-item pressed" aria-pressed="true" data-action="mkSort" data-value="closing">Closing soonest</);
   assert.deepEqual(rowIds(closing.html).slice(0, 2), ['event:predict:SI-BTC15-2610220730', 'event:paper-momentum:SX-YIELD-FRI']);
-  assert.equal(rowIds(screen({ predictions, tab: 'predictions', sort: 'movers' }).html)[0], 'event:predict:SI-ETH-WEEK', 'its 6¢ the biggest move');
-  // All with an event among its rows offers it too
+  assert.equal(rowIds(screen({ predictions, tab: 'macro', sort: 'movers' }).html)[0], 'event:predict:SI-ETH-WEEK', 'its 6¢ the biggest move');
+  // a tab with an event among its rows offers it too
   assert.deepEqual(sortsOf(screen({ all: withEvents() }).html).map(x => x[0]), ['volume', 'movers', 'closing']);
   // one row needs no sort
   const one = fx('explore-all');
@@ -192,64 +196,64 @@ test('sorts: Most traded, Biggest moves, Closing soonest only with events', () =
   assert.doesNotMatch(screen({ all: one }).html, /data-action="mkSort"/);
 });
 
-test('a cn row beside the Account rows under All, not under Stocks; Not listed line with Remove for a missed star', () => {
+test('a cn star on the Watchlist beside the Account stars, never under a tab; Not listed line with Remove for a missed star', () => {
   const cnState = (over = {}) => screen({ cn: [MOUTAI, ZED], asked: { 'us:ZZZZ': null }, quotes: { 'cn:600519': moutaiQuote() }, ...over });
   const stocks = cnState({ tab: 'stocks' }).html;
-  // Source counts come from its All read; local A-share stars do not change the public source count.
-  assert.match(stocks, /data-scope="more" data-value="all" aria-pressed="false">All · 30</);
-  assert.match(stocks, /data-value="stocks" aria-pressed="true">Stocks · 4</);
-  assert.match(stocks, /data-value="watching" aria-pressed="false">Watching</);
-  assert.deepEqual(rowIds(stocks), ['stock:NVDA', 'stock:SPY', 'stock:AAPL', 'us:ZZZZ']);
-  const all = cnState().html;
-  const [star, name, px, move, volume, source] = cells(rowOf(all, 'cn:600519'));
-  assert.match(star, /^<button type="button" class="mk-star" data-action="toggleWatch" data-id="cn:600519" aria-pressed="true" aria-label="Stop watching Kweichow Moutai">/);
+  assert.match(stocks, /data-value="stocks" aria-pressed="true">Stocks</);
+  assert.match(stocks, /data-value="watchlist" aria-pressed="false" title="Watchlist">/);
+  assert.doesNotMatch(stocks, /cn:600519|us:ZZZZ/, "a tab draws its own read's rows alone");
+  assert.doesNotMatch(stocks, /mk-note/);
+  const list = cnState({ tab: 'watchlist' }).html;
+  assert.deepEqual(rowIds(list), ['cn:600519', 'us:ZZZZ']);
+  // the Watchlist's rows carry no star column (G6)
+  const [name, px, move, volume, source] = cells(rowOf(list, 'cn:600519'));
+  assert.doesNotMatch(list, /class="mk-star"|<span class="sr-only">Watch<\/span>/);
   assert.match(name, /data-action="openMarket" data-id="cn:600519"><span class="mk-av" aria-hidden="true">K<\/span><span class="mk-nm"><b>Kweichow Moutai<\/b><span class="mk-sub">600519 · SH<\/span>/);
   assert.equal(px, '¥1,688.00');
   assert.equal(text(move), '▲up 0.48%');
   assert.equal(volume, '2M shares');
   assert.equal(text(source), 'Tencent', "the face's provider by its name, never the wire's own words");
-  // the old star the Account could not find: Not listed, every figure a dash, Remove where the star would be, no page to open
-  const zed = rowOf(stocks, 'us:ZZZZ');
+  // the old star the Account could not find: Not listed, every figure a dash, Remove after its name, no page to open
+  const zed = rowOf(list, 'us:ZZZZ');
   const z = cells(zed);
-  assert.equal(z[0], '<button type="button" class="mk-clear" data-action="removeAsked" data-id="us:ZZZZ" aria-label="Remove Zed Corp">Remove</button>');
-  assert.match(z[1], /^<span class="mk-who"><span class="mk-av" aria-hidden="true">Zed<\/span><span class="mk-nm"><b>Zed Corp<\/b><span class="mk-sub">Not listed at the Account<\/span><\/span><\/span>$/);
-  assert.deepEqual(z.slice(2).map(text), ['—', '—', '—', '']);
+  assert.equal(z[0], '<span class="mk-who"><span class="mk-av" aria-hidden="true">Zed</span><span class="mk-nm"><b>Zed Corp</b><span class="mk-sub">Not listed at the Account</span></span><button type="button" class="mk-clear" data-action="removeAsked" data-id="us:ZZZZ" aria-label="Remove Zed Corp">Remove</button></span>');
+  assert.deepEqual(z.slice(1).map(text), ['—', '—', '—', '']);
   assert.doesNotMatch(zed, /mk-star|openMarket/);
   // the A shares' quotes read's state, only where a cn row is drawn: polling, as it always is, says nothing; a failed read is said
-  assert.match(cnState({ connection: 'error' }).html, /<p class="mk-note">Quotes unavailable<\/p>/);
-  assert.doesNotMatch(cnState().html, /mk-note/, 'polling says nothing');
-  assert.doesNotMatch(stocks, /mk-note/);
+  assert.match(cnState({ tab: 'watchlist', connection: 'error' }).html, /<p class="mk-note">Quotes unavailable<\/p>/);
+  assert.doesNotMatch(list, /mk-note/, 'polling says nothing');
   assert.doesNotMatch(cnState({ tab: 'crypto', connection: 'error' }).html, /Quotes unavailable/, 'no cn row on Crypto');
   assert.match(cnState({ tab: 'stocks', watchError: 'full' }).html, /<p class="mk-note">The watchlist is full<\/p>/);
-  // Watching: every star — the Account's found in the read, a key no read lists as a placeholder, the A share, the Not listed line
-  const watching = cnState({ watch: ['coin:BTC', 'kalshi:KXGONE-26'], tab: 'watching' }).html;
-  assert.match(watching, /data-value="watching" aria-pressed="true">Watching</);
+  // every star — the Account's found in the read, a key no read lists as a placeholder with Remove, the A share, the Not listed line
+  const watching = cnState({ watch: ['coin:BTC', 'kalshi:KXGONE-26'], tab: 'watchlist' }).html;
+  assert.match(watching, /data-value="watchlist" aria-pressed="true" title="Watchlist">/);
   assert.deepEqual(rowIds(watching), ['coin:BTC', 'kalshi:KXGONE-26', 'cn:600519', 'us:ZZZZ']);
-  assert.match(rowOf(watching, 'coin:BTC'), /data-id="coin:BTC" aria-pressed="true" aria-label="Stop watching BTC"/);
   const gone = rowOf(watching, 'kalshi:KXGONE-26');
-  assert.match(cells(gone)[0], /^<button type="button" class="mk-star" data-action="toggleWatch" data-id="kalshi:KXGONE-26" aria-pressed="true"/);
-  assert.match(gone, /<span class="mk-who"><span class="mk-av" aria-hidden="true">KXGO<\/span><span class="mk-nm"><b>KXGONE-26<\/b><span class="mk-sub">Not in this read<\/span>/);
-  assert.deepEqual(cells(gone).slice(2).map(text), ['—', '—', '—', '']);
+  assert.match(gone, /<span class="mk-who"><span class="mk-av" aria-hidden="true">KXGO<\/span><span class="mk-nm"><b>KXGONE-26<\/b><span class="mk-sub">Not in this read<\/span><\/span><button type="button" class="mk-clear" data-action="toggleWatch" data-id="kalshi:KXGONE-26" aria-label="Remove KXGONE-26">Remove<\/button>/);
+  assert.deepEqual(cells(gone).slice(1).map(text), ['—', '—', '—', '']);
   assert.doesNotMatch(gone, /openMarket/, 'no read lists it: no page');
+  assert.doesNotMatch(rowOf(watching, 'coin:BTC'), /mk-clear|mk-star/, 'a row a tab or a search reaches is un-starred there');
 });
 
-test("Watching is the Account's list and the face's: a row watched at the Account alone reads Watched at the Account under its star", () => {
+test("the Watchlist is the Account's list and the face's; under a tab a row watched at the Account alone reads Watched at the Account under its star", () => {
   const AT = '<span class="mk-at">Watched at the Account</span>';
   // the page watches ex BTC/USDT and DOGE/USD at standin-pubex; the face's list has AAPL and BTC
-  const watching = screen({ account: true, watch: ['stock:AAPL', 'coin:BTC'], cn: [MOUTAI], tab: 'watching' }).html;
+  const watching = screen({ account: true, watch: ['stock:AAPL', 'coin:BTC'], cn: [MOUTAI], tab: 'watchlist' }).html;
   assert.deepEqual(rowIds(watching), ['stock:AAPL', 'coin:BTC', 'coin:DOGE', 'cn:600519']);
-  const doge = cells(rowOf(watching, 'coin:DOGE'))[0];
-  assert.equal(doge, `<button type="button" class="mk-star" data-action="toggleWatch" data-id="coin:DOGE" aria-pressed="true" aria-label="Stop watching DOGE">${doge.match(/<svg[\s\S]*<\/svg>/)[0]}</button>${AT}`);
-  for (const id of ['stock:AAPL', 'coin:BTC', 'cn:600519']) assert.doesNotMatch(rowOf(watching, id), /Watched at the Account/, `${id}: on the face's list`);
-  // All: the page's rows starred, the tab drawn for the page's list alone
+  assert.doesNotMatch(watching, /mk-at|mk-star/, 'no star column on the Watchlist');
+  // a tab: the page's rows starred, Watched at the Account under the star of one on the page's list alone
   const all = screen({ account: true }).html;
-  assert.match(all, /data-value="watching" aria-pressed="false">Watching</);
+  assert.match(all, /data-value="watchlist" aria-pressed="false"/);
+  const doge = cells(rowOf(all, 'coin:DOGE'))[0];
+  assert.equal(doge, `<button type="button" class="mk-star" data-action="toggleWatch" data-id="coin:DOGE" aria-pressed="true" aria-label="Stop watching DOGE">${doge.match(/<svg[\s\S]*<\/svg>/)[0]}</button>${AT}`);
   assert.match(cells(rowOf(all, 'coin:BTC'))[0], /aria-pressed="true" aria-label="Stop watching BTC">[\s\S]*Watched at the Account/);
   assert.match(cells(rowOf(all, 'coin:ETH'))[0], /aria-pressed="false"/);
   assert.doesNotMatch(cells(rowOf(all, 'coin:ETH'))[0], /mk-at/);
-  // no page: Watching remains available, with no star on
+  const faces = screen({ account: true, watch: ['stock:AAPL'] }).html;
+  assert.doesNotMatch(cells(rowOf(faces, 'stock:AAPL'))[0], /mk-at/, "on the face's list");
+  // no page: the Watchlist remains available, with no star on
   const none = screen().html;
-  assert.match(none, /data-value="watching"/);
+  assert.match(none, /data-value="watchlist"/);
   assert.doesNotMatch(none, /mk-at|aria-pressed="true" aria-label="Stop watching/);
   // a market's page reads it watched
   const pageHtml = screen({ account: true, route: { screen: 'markets', id: 'coin:DOGE' } }).html;
@@ -384,7 +388,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
 
   // an event's page, opened from Predictions (the read that lists it): its outcomes under its price, in cents; its category and
   // when it closes; its position, and the fill stated
-  const fed = page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'predictions' });
+  const fed = page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'macro' });
   assert.match(fed.html, new RegExp(`<span class="mk-av mk-av-lg" aria-hidden="true">Econ</span><div><h1 class="head-title">Will the Fed cut rates at its December meeting\\?</h1><span class="mk-sub">Economics · closes ${fmtDate(Date.parse('2026-10-31T10:35:46.773Z'))}</span>`));
   assert.match(fed.html, /<span class="mk-big">62¢<\/span><span class="up"><span aria-hidden="true">▲<\/span><span class="sr-only">up<\/span> 4¢<\/span><span class="mk-basis">24h<\/span><\/div><div class="mk-outs"><span class="mk-out">Yes 62¢<\/span><span class="mk-out">No 38¢<\/span><\/div>/);
   assert.match(fed.html, /<dt>24h volume<\/dt><dd>\$1\.8M<\/dd>/);
@@ -425,7 +429,7 @@ test('on a page that signs, a market\'s page carries Buy, and Sell where the mar
   assert.ok(doge.includes(buy('coin:DOGE')), doge);
   assert.doesNotMatch(doge, /data-side="sell"/);
   // a prediction held as a position
-  const fed = keys(page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'predictions' }));
+  const fed = keys(page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'macro' }));
   assert.ok(fed.includes(buy('event:predict:SI-FEDCUT-DEC')) && fed.includes(sell('event:predict:SI-FEDCUT-DEC')), fed);
   // a perpetual, and a pre-IPO one, are listed, not traded from the face this round: no ticket, though spot ETH is held
   const perp = keys(page('perp:ETH'));
@@ -462,7 +466,7 @@ test('candlesSvg draws closes for a range; cents for an event', () => {
   }
   // on a market's page: the Fed question's history in cents, under the range kept for it
   const read = { ok: true, venue: 'predict', venueName: 'Stand-in Predictions', symbol: 'SI-FEDCUT-DEC:YES', interval: '5m', range: '5D', candles: contract, more: false };
-  const fed = screen({ route: { screen: 'markets', id: 'event:predict:SI-FEDCUT-DEC' }, predictions: fx('explore-predictions'), tab: 'predictions', candles: { id: 'event:predict:SI-FEDCUT-DEC', range: '5D', data: read } }).html;
+  const fed = screen({ route: { screen: 'markets', id: 'event:predict:SI-FEDCUT-DEC' }, predictions: fx('explore-predictions'), tab: 'macro', candles: { id: 'event:predict:SI-FEDCUT-DEC', range: '5D', data: read } }).html;
   const history = section(fed, 'Price history');
   assert.ok(history.includes('aria-label="Closes over 5D: from 60¢ to 62¢, low 58¢, high 62¢"'), history);
   assert.match(history, /class="seg-item pressed" aria-pressed="true" data-action="setRange" data-value="5D"/);
@@ -490,7 +494,7 @@ test('no CJK, no icon URL in any rendered string', () => {
     conversations: [conv('s1', { title: 'BTC into the weekend' })],
   };
   const states = [
-    screen(base), screen({ ...base, tab: 'stocks' }), screen({ ...base, tab: 'watching' }), screen({ ...base, tab: 'predictions' }),
+    screen(base), screen({ ...base, tab: 'stocks' }), screen({ ...base, tab: 'watchlist' }), screen({ ...base, tab: 'macro' }),
     screen({ ...base, sort: 'movers' }), screen({ ...base, q: 'fed', results: predictions }), screen({ ...base, watchError: 'read' }),
     ...['coin:BTC', 'stock:NVDA', 'perp:BTC', 'event:predict:SI-FEDCUT-DEC', 'kalshi:KXFED-DEC', PARIS, 'coin:ODD', 'cn:600519'].map(id => screen({ ...base, route: { screen: 'markets', id } })),
   ];
@@ -504,31 +508,33 @@ test('no CJK, no icon URL in any rendered string', () => {
   }
 });
 
-test('empty states: Loading… before a read, No markets for an empty answer, Nothing watched yet; a refusal keeps its rows; the search line', () => {
+test('empty states: Loading… before a read, Nothing here with these filters for an empty answer, the Watchlist’s hint; a refusal keeps its rows; the search line', () => {
   const unread = screen({ all: null }).html;
   assert.match(unread, /<p class="mk-empty">Loading…<\/p>/);
-  // a count is the Account's: none is drawn before its read
-  assert.match(unread, /data-value="all" aria-pressed="true">All<\/button>/);
+  assert.match(unread, /data-value="crypto" aria-pressed="true">Crypto<\/button>/, 'no count, before a read or after');
   const none = fx('explore-all');
   none.items = [];
-  assert.match(screen({ all: none }).html, /<p class="mk-empty">No markets<\/p>/);
-  assert.match(screen({ tab: 'watching' }).html, /<p class="mk-empty">Nothing watched yet<\/p>/);
+  // on the main sources there is nothing to go back to: the sentence alone
+  assert.match(screen({ all: none }).html, /<p class="mk-empty">Nothing here with these filters\.<\/p>/);
+  assert.match(screen({ tab: 'watchlist' }).html, /<p class="mk-empty">Star a market under any tab to keep it here\.<\/p>/);
   // a read that failed before it ever answered says so, and the Account's sentence over that when it refused
-  const failed = R.exploreFailed(R.nav(emptyState(), { screen: 'markets', id: null }), { tab: 'all', at: NOW, message: null });
+  const crypto = R.setMarketsTab(R.nav(emptyState(), { screen: 'markets', id: null }), 'crypto');
+  const query = exploreQueryOf(crypto.markets);
+  const failed = R.exploreFailed(crypto, { tab: 'crypto', at: NOW, message: null, query });
   assert.match(renderMarketsScreen(failed, NOW), /<p class="mk-empty">Markets unavailable<\/p>/);
-  const busy0 = R.exploreFailed(R.nav(emptyState(), { screen: 'markets', id: null }), { tab: 'all', at: NOW, message: 'The account is busy: try again in a moment' });
+  const busy0 = R.exploreFailed(crypto, { tab: 'crypto', at: NOW, message: 'The account is busy: try again in a moment', query });
   const before = renderMarketsScreen(busy0, NOW);
   assert.match(before, /<p class="mk-note">The account is busy: try again in a moment<\/p><p class="mk-empty">Markets unavailable<\/p>/);
-  assert.match(before, /data-value="all" aria-pressed="true">All<\/button>/, 'no count it never read');
   // a refusal after an answer: the last rows stay, the Account's own sentence over them
-  const refused = R.exploreFailed(screen().s, { tab: 'all', at: NOW, message: 'The account is busy: try again in a moment' });
+  const shown = screen().s;
+  const refused = R.exploreFailed(shown, { tab: 'crypto', at: NOW, message: 'The account is busy: try again in a moment', query: exploreQueryOf(shown.markets) });
   const kept = renderMarketsScreen(refused, NOW);
   assert.equal(rowIds(kept).length, 12);
   assert.match(kept, /<p class="mk-note">The account is busy: try again in a moment<\/p>/);
-  // the search: its rows, how many for what, Clear; All results leads the tabs; Searching… until anything answers
+  // the search: its rows, how many for what, Back to the tab; the filters set aside; Searching… until anything answers
   const found = screen({ q: 'fed', results: fx('explore-predictions') }).html;
-  assert.match(found, /<p class="mk-q">9 markets for “fed” <button type="button" class="mk-clear" data-action="mkClear">Clear<\/button><\/p>/);
-  assert.match(found, /^[\s\S]*?<div class="mk-tabs" role="group" aria-label="Markets"><button type="button" class="mk-tab" data-action="mkTab" data-value="results" aria-pressed="true">All results<\/button>/);
+  assert.match(found, /<p class="mk-q">9 markets for “fed” <button type="button" class="mk-clear" data-action="mkBack">Back to Crypto<\/button><\/p>/);
+  assert.doesNotMatch(found, /mk-filters|mk-pill/);
   assert.match(found, /id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery" value="fed"/);
   assert.match(screen({ q: 'zz' }).html, /<p class="mk-empty">Searching…<\/p>/);
   const nothing = { ...fx('explore-predictions'), items: [] };
@@ -555,7 +561,7 @@ test("while searching, an answer without China's hits says the search is unavail
   const found = screen({ q: 'mao', results: hit }).html;
   assert.doesNotMatch(found, /mk-note/);
   assert.ok(rowIds(found).includes('cn:600519'));
-  assert.match(rowOf(found, 'cn:600519'), /<span class="mk-sub">600519 · SH<\/span>/, 'drawn as an A share, not as an Account row');
+  assert.match(rowOf(found, 'cn:600519'), /<span class="mk-sub"><span class="mk-tag">Stocks<\/span> 600519 · SH<\/span>/, 'drawn as an A share, not as an Account row, named by its class');
   // another venue missing is not China's
   assert.doesNotMatch(screen({ q: 'fed', results: { ...missed, missing: [{ venue: 'okx' }] } }).html, /Search is unavailable/);
   // the whole search failed: said once, where the rows would be
@@ -627,7 +633,7 @@ test("a failed history read says so under the range seg — the Account's senten
 test("an event's page finds the conversations that name it by its name, as Hand to gravit names it", () => {
   const fed = 'Will the Fed cut rates at its December meeting?';
   const html = screen({
-    route: { screen: 'markets', id: 'event:predict:SI-FEDCUT-DEC' }, predictions: fx('explore-predictions'), tab: 'predictions',
+    route: { screen: 'markets', id: 'event:predict:SI-FEDCUT-DEC' }, predictions: fx('explore-predictions'), tab: 'macro',
     conversations: [conv('s1', { title: `${fed} The odds into the meeting` }), conv('s2', { title: 'SI-FEDCUT-DEC sizing' })],
   }).html;
   const gravit = section(html, 'gravit on it');
@@ -636,8 +642,8 @@ test("an event's page finds the conversations that name it by its name, as Hand 
 });
 
 test('a kept sort the rows no longer offer gives way to Most traded: the seg presses it and the rows follow it', () => {
-  // Closing soonest kept on Watching, whose two rows close never: LINK starred first, NVDA traded most
-  const watching = R.setMarketsTab(screen({ watch: ['coin:LINK', 'stock:NVDA'] }).s, 'watching');
+  // Closing soonest kept on the Watchlist, whose two rows close never: LINK starred first, NVDA traded most
+  const watching = R.setMarketsTab(screen({ watch: ['coin:LINK', 'stock:NVDA'] }).s, 'watchlist');
   const kept = R.setMarketsSort(watching, 'closing');
   assert.equal(kept.markets.sort, 'closing', 'the slice keeps the choice');
   const html = renderMarketsScreen(kept, NOW);
@@ -646,16 +652,23 @@ test('a kept sort the rows no longer offer gives way to Most traded: the seg pre
   assert.deepEqual(rowIds(html), ['stock:NVDA', 'coin:LINK']);
 });
 
-test("the Account's sentence comes from the read the rows are from", () => {
-  // Crypto's own read still on its way: its rows are All's, and All's refusal is said over them
-  const crypto = R.setMarketsTab(screen().s, 'crypto');
-  const waiting = R.exploreLoading(R.exploreFailed(crypto, { tab: 'all', at: NOW, message: 'All refused' }), { tab: 'crypto' });
-  const html = renderMarketsScreen(waiting, NOW);
-  assert.deepEqual(rowIds(html), ['coin:BTC', 'coin:ETH', 'coin:DOGE', 'coin:SOL', 'coin:LINK']);
-  assert.match(html, /<p class="mk-note">All refused<\/p>/);
-  // once Crypto's own read answers, the rows are its own, and so is the state said over them
+test("the Account's sentence comes from the read the rows are from, and a read for other filters is never drawn", () => {
+  const main = screen().s;
+  const refused = R.exploreFailed(main, { tab: 'crypto', at: NOW, message: 'Main refused', query: exploreQueryOf(main.markets) });
+  const said = renderMarketsScreen(refused, NOW);
+  assert.match(said, /<p class="mk-note">Main refused<\/p>/);
+  assert.equal(rowIds(said).length, 12, 'its rows kept under it');
+  // All sources picked: the read kept is Main's, for another query: Loading…, none of its rows, none of its words
+  const all = R.setMarketsSource(refused, 'all');
+  const html = renderMarketsScreen(all, NOW);
+  assert.deepEqual(rowIds(html), []);
+  assert.match(html, /<p class="mk-empty">Loading…<\/p>/);
+  assert.doesNotMatch(html, /Main refused/);
+  // its own read answers: its rows, and nothing said over them
   const coins = { ...fx('explore-all'), items: fx('explore-all').items.filter(i => i.kind === 'coin') };
-  assert.doesNotMatch(renderMarketsScreen(R.exploreLoaded(waiting, { tab: 'crypto', data: coins, at: NOW }), NOW), /All refused/);
+  const landed = renderMarketsScreen(R.exploreLoaded(all, { tab: 'crypto', data: coins, at: NOW, query: exploreQueryOf(all.markets) }), NOW);
+  assert.deepEqual(rowIds(landed), ['coin:BTC', 'coin:ETH', 'coin:DOGE', 'coin:SOL', 'coin:LINK']);
+  assert.doesNotMatch(landed, /mk-note/);
 });
 
 test("the Account's words are text, never markup: a name, a venue, a category, a sentence and a note with tags in them", () => {
@@ -666,7 +679,7 @@ test("the Account's words are text, never markup: a name, a venue, a category, a
   all.items.push({ ...paris(), category: '<script>x</script>' });
   const candles = { id: 'coin:BTC', range: '1D', data: { ...fx('candles'), note: '<img src=x onerror=alert(1)>' } };
   const table = screen({ all, candles });
-  const refused = renderMarketsScreen(R.exploreFailed(table.s, { tab: 'all', at: NOW, message: '<u>busy</u> & "later"' }), NOW);
+  const refused = renderMarketsScreen(R.exploreFailed(table.s, { tab: 'crypto', at: NOW, message: '<u>busy</u> & "later"', query: exploreQueryOf(table.s.markets) }), NOW);
   const page = screen({ all, candles, route: { screen: 'markets', id: 'coin:BTC' } }).html;
   for (const html of [table.html, refused, page]) {
     for (const raw of ['<i>BTC</i>', '<b>Stand-in</b>', '<script', '<img', '<u>busy</u>', '"co"', '"later"']) assert.ok(!html.includes(raw), raw);
@@ -678,6 +691,131 @@ test("the Account's words are text, never markup: a name, a venue, a category, a
   assert.ok(page.includes('<p class="mk-note">&lt;img src=x onerror=alert(1)&gt;</p>'));
 });
 
+// ── Markets by underlying (spec 2026-11-19 G1–G8, §5.3): the tab row, the filters and their popovers, the chips, the empty
+// states, the search ──
+
+const pillsOf = html => [...html.matchAll(/data-action="mkFilter" data-value="([^"]+)" aria-expanded="(true|false)" aria-haspopup="listbox"><span class="mk-pill-k">([^<]+)<\/span><span class="mk-pill-v">([^<]*)<\/span>/g)].map(m => [m[1], m[3], m[4]]);
+const optionsOf = html => [...html.matchAll(/<button type="button" role="option" class="mk-opt" data-action="([^"]+)" data-value="([^"]*)" aria-selected="(true|false)"( disabled)?><span>([^<]+)<\/span>(?:<span class="mk-opt-note">([^<]+)<\/span>)?<\/button>/g)]
+  .map(m => ({ action: m[1], id: m[2], selected: m[3] === 'true', disabled: Boolean(m[4]), label: m[5], note: m[6] ?? null }));
+const chipsOf = html => [...html.matchAll(/<button type="button" class="mk-chip" data-action="mkChip" data-value="([^"]+)" aria-label="([^"]+)"><span>([^<]+)<\/span>/g)].map(m => [m[1], m[2], m[3]]);
+const open = (s, name) => R.openMarketsFilter(s, name);
+
+test('the tab row: the star first with its word for a screen reader, then the seven classes, no counts', () => {
+  const html = screen({ tab: 'watchlist' }).html;
+  const row = html.match(/<div class="mk-tabs" role="group" aria-label="Markets">([\s\S]*?)<\/div>/)[1];
+  const tabs = [...row.matchAll(/data-value="([^"]+)" aria-pressed="(true|false)"/g)].map(m => [m[1], m[2]]);
+  assert.deepEqual(tabs, [['watchlist', 'true'], ['crypto', 'false'], ['stocks', 'false'], ['indices', 'false'], ['commodities', 'false'], ['fx', 'false'], ['preipo', 'false'], ['macro', 'false']]);
+  // the star: its icon and its word for a screen reader alone, no word on screen
+  assert.match(row, /^<button type="button" class="mk-tab mk-tab-star" data-action="mkTab" data-value="watchlist" aria-pressed="true" title="Watchlist"><svg [^>]*>[\s\S]*?<\/svg><span class="sr-only">Watchlist<\/span><\/button>/);
+  const words = [...row.matchAll(/class="mk-tab" data-action="mkTab" data-value="[^"]+" aria-pressed="(?:true|false)">([^<]+)<\/button>/g)].map(m => m[1]);
+  assert.deepEqual(words, ['Crypto', 'Stocks', 'Indices', 'Commodities', 'FX', 'Pre-IPO', 'Macro &amp; events']);
+  assert.doesNotMatch(text(row), /\d/, 'no count after a name');
+  // another tab open: the star not pressed (the CSS fills it while pressed)
+  assert.match(screen().html, /class="mk-tab mk-tab-star" data-action="mkTab" data-value="watchlist" aria-pressed="false"/);
+});
+
+test('Stocks draws Region, Form and Source; Crypto draws Form and Source; the Watchlist none', () => {
+  assert.deepEqual(pillsOf(screen({ tab: 'stocks' }).html), [['region', 'Region', 'US'], ['form', 'Form', 'All'], ['source', 'Source', 'Main · cboe']]);
+  assert.deepEqual(pillsOf(screen({ tab: 'indices' }).html).map(p => p[0]), ['region', 'form', 'source']);
+  assert.deepEqual(pillsOf(screen().html), [['form', 'Form', 'All'], ['source', 'Source', 'Main · hyperliquid']]);
+  assert.deepEqual(pillsOf(screen({ tab: 'macro' }).html), [['form', 'Form', 'All'], ['source', 'Source', 'Main · kalshi + polymarket']]);
+  const list = screen({ tab: 'watchlist', watch: ['coin:BTC', 'stock:NVDA'] }).html;
+  assert.deepEqual(pillsOf(list), []);
+  assert.doesNotMatch(list, /mk-filters|mk-chip/);
+  assert.match(list, /data-action="mkSort" data-value="volume"/, 'the sort stays');
+  assert.doesNotMatch(list, /data-value="closing"/);
+  // the sources' names from the registry's read, once it answered
+  const named = R.marketSourcesLoaded(screen().s, { data: { ok: true, value: [{ id: 'hyperliquid', name: 'Hyperliquid' }] }, at: NOW });
+  assert.deepEqual(pillsOf(renderMarketsScreen(named, NOW))[1], ['source', 'Source', 'Main · Hyperliquid']);
+});
+
+test('a popover lists its options, the greyed ones disabled with their note', () => {
+  const stocks = screen({ tab: 'stocks' }).s;
+  assert.doesNotMatch(renderMarketsScreen(stocks, NOW), /mk-pop/, 'closed until its pill is pressed');
+  const region = renderMarketsScreen(open(stocks, 'region'), NOW);
+  assert.match(region, /data-action="mkFilter" data-value="region" aria-expanded="true" aria-haspopup="listbox">/);
+  assert.match(region, /<div class="mk-pop" role="listbox" aria-label="Region">/);
+  assert.deepEqual(optionsOf(region).map(o => [o.id, o.label, o.selected, o.disabled, o.note]), [
+    ['us', 'US', true, false, null], ['cn', 'China A', false, false, null], ['hk', 'Hong Kong', false, true, 'piece 2'], ['jp', 'Japan', false, true, 'piece 2'],
+    ['kr', 'Korea', false, true, 'piece 2'], ['tw', 'Taiwan', false, true, 'piece 2'], ['in', 'India', false, true, 'piece 2'], ['eu', 'Europe', false, true, 'piece 2'],
+  ]);
+  assert.ok(optionsOf(region).every(o => o.action === 'mkRegion'));
+  // Form on Macro: every form but Event contract none here, Options piece 3, perp in its word
+  const form = optionsOf(renderMarketsScreen(open(screen({ tab: 'macro' }).s, 'form'), NOW));
+  assert.deepEqual(form.map(o => [o.action, o.id, o.label, o.selected, o.disabled, o.note]), [
+    ['mkForm', '', 'All', true, false, null], ['mkForm', 'spot', 'Spot &amp; shares', false, true, 'none here'], ['mkForm', 'perp', 'Perp', false, true, 'none here'],
+    ['mkForm', 'token', 'Tokenized', false, true, 'none here'], ['mkForm', 'event', 'Event contract', false, false, null], ['mkForm', 'option', 'Options', false, true, 'piece 3'],
+  ]);
+  // Source on Crypto: Main, All sources, then each source, the main one marked main
+  const source = optionsOf(renderMarketsScreen(open(screen().s, 'source'), NOW));
+  assert.deepEqual(source.slice(0, 4).map(o => [o.action, o.id, o.label, o.selected, o.note]), [
+    ['mkSource', 'main', 'Main · hyperliquid', true, null], ['mkSource', 'all', 'All sources', false, null],
+    ['mkSource', 'hyperliquid', 'hyperliquid', false, 'main'], ['mkSource', 'coinbase', 'coinbase', false, null],
+  ]);
+  assert.ok(source.every(o => !o.disabled));
+  // one popover at a time
+  assert.equal((renderMarketsScreen(open(open(stocks, 'region'), 'form'), NOW).match(/class="mk-pop"/g) ?? []).length, 1);
+});
+
+test('Form and a non-main Source draw a removable chip; Main draws none', () => {
+  assert.deepEqual(chipsOf(screen().html), [], 'Main and every Form: no chip');
+  const perp = R.setMarketsForm(screen().s, 'perp');
+  const html = renderMarketsScreen(perp, NOW);
+  assert.deepEqual(chipsOf(html), [['form', 'Remove Perp', 'Perp']]);
+  assert.match(html, /<button type="button" class="mk-pill mk-pill-set" data-action="mkFilter" data-value="form"/);
+  // a form the main sources lack: Source goes to All sources, a chip each
+  const spot = renderMarketsScreen(R.setMarketsForm(screen().s, 'spot'), NOW);
+  assert.deepEqual(chipsOf(spot), [['form', 'Remove Spot &amp; shares', 'Spot &amp; shares'], ['source', 'Remove All sources', 'All sources']]);
+  assert.deepEqual(chipsOf(renderMarketsScreen(R.setMarketsSource(screen().s, 'coinbase'), NOW)), [['source', 'Remove coinbase', 'coinbase']]);
+  // Region is never a chip
+  assert.deepEqual(chipsOf(renderMarketsScreen(R.setMarketsRegion(screen({ tab: 'stocks' }).s, 'cn'), NOW)), []);
+});
+
+test('an empty filtered tab says so with Back to the main sources', () => {
+  const none = { ...fx('explore-all'), items: [] };
+  let s = R.setMarketsForm(screen({ all: none }).s, 'perp');
+  s = R.exploreLoaded(s, { tab: 'crypto', data: none, at: NOW, query: exploreQueryOf(s.markets) });
+  const html = renderMarketsScreen(s, NOW);
+  assert.match(html, /<p class="mk-empty">Nothing here with these filters\. <button type="button" class="mk-clear" data-action="mkMain">Back to the main sources<\/button><\/p>/);
+  assert.deepEqual(rowIds(html), []);
+  // still asked: Loading…, not the empty state
+  assert.match(renderMarketsScreen(R.setMarketsSource(s, 'all'), NOW), /<p class="mk-empty">Loading…<\/p>/);
+});
+
+test("a search sets the filters aside, names each result's class and offers Back to <tab>", () => {
+  const nvda = itemOf(fx('explore-all'), 'stock:NVDA');
+  const results = { ...fx('explore-all'), items: [{ ...nvda, asset: 'stocks', form: 'spot', region: 'us' }, { ...itemOf(fx('explore-all'), 'perp:BTC'), asset: 'crypto', form: 'perp', region: null },
+    { ...itemOf(fx('explore-predictions'), 'event:predict:SI-FEDCUT-DEC'), asset: 'macro', form: 'event', region: null },
+    { ...itemOf(fx('explore-all'), 'coin:LINK'), asset: null, form: 'perp', region: null }] };
+  const { s, html } = screen({ tab: 'stocks', q: 'x', results });
+  assert.equal(s.markets.tab, 'stocks', 'the tab kept for Back to');
+  assert.doesNotMatch(html, /mk-filters|mk-pill|mk-chip/);
+  assert.match(html, /<p class="mk-q">4 markets for “x” <button type="button" class="mk-clear" data-action="mkBack">Back to Stocks<\/button><\/p>/);
+  assert.match(rowOf(html, 'stock:NVDA'), /<span class="mk-sub"><span class="mk-tag">Stocks<\/span> /);
+  assert.match(rowOf(html, 'perp:BTC'), /<span class="mk-sub"><span class="mk-tag">Crypto<\/span> /);
+  assert.match(rowOf(html, 'event:predict:SI-FEDCUT-DEC'), /<span class="mk-sub"><span class="mk-tag">Macro &amp; events<\/span> /);
+  assert.match(rowOf(html, 'coin:LINK'), /<span class="mk-sub"><span class="mk-tag">Perp<\/span> /, 'no class: its form');
+  assert.match(html, /class="mk-star"/, 'a result keeps its star');
+  assert.match(screen({ tab: 'watchlist', q: 'x', results }).html, /data-action="mkBack">Back to Watchlist</);
+});
+
+test('the Watchlist draws no star column', () => {
+  const html = screen({ tab: 'watchlist', watch: ['coin:BTC', 'stock:NVDA'] }).html;
+  assert.deepEqual(rowIds(html), ['stock:NVDA', 'coin:BTC']);
+  assert.doesNotMatch(html, /class="mk-star"|<span class="sr-only">Watch<\/span>/);
+  assert.match(html, /<thead><tr><th scope="col" class="mk-c-name">Market<\/th>/);
+  assert.equal(cells(rowOf(html, 'coin:BTC')).length, 5);
+  // under a tab the column is there
+  assert.match(screen().html, /<thead><tr><th scope="col"><span class="sr-only">Watch<\/span><\/th>/);
+});
+
+test('a perp row reads Perp', () => {
+  const btc = { ...itemOf(fx('explore-all'), 'perp:BTC'), name: 'BTC perp' };
+  const html = screen({ all: { ...fx('explore-all'), items: [btc] } }).html;
+  assert.match(rowOf(html, 'perp:BTC'), /<b>BTC perp<\/b><span class="mk-sub">BTC · Perp<\/span>/);
+  assert.doesNotMatch(html, /[Pp]erpetual/);
+});
+
 test('a market route keeps an Account key whole and canonicalises a face id', () => {
   const nav = id => R.nav(emptyState(), { screen: 'markets', id }).route;
   assert.deepEqual(nav('event:predict:SI-FEDCUT-DEC'), { screen: 'markets', id: 'event:predict:SI-FEDCUT-DEC' });
@@ -687,19 +825,20 @@ test('a market route keeps an Account key whole and canonicalises a face id', ()
   assert.deepEqual(nav('garbage'), { screen: 'markets', id: null });
 });
 
-// ── the China tab and the A-share page (spec 2026-10-31) ──
+// ── Stocks › China A and the A-share page (spec 2026-10-31; 2026-11-19 G2) ──
 
 const RANK = { ok: true, sort: 'volume', total: 5577, asOf: '2026-10-31T06:46:10Z', session: { phase: 'closed', lastSession: '2026-10-30' }, items: [
   { id: 'cn:300502', symbol: '300502', name: '新易盛', price: 196, change_pct: -14.19, turnover: 21_607_600_000 },
   { id: 'cn:688825', symbol: '688825', name: '长鑫科技', price: 41.8, change_pct: -2.5, turnover: 12_145_020_000 }] };
 function chinaScreen(rank = s => R.rankLoaded(s, { sort: 'volume', data: RANK, at: NOW })) {
-  const s = rank(R.setMarketsTab(screen().s, 'china'));
+  const s = rank(R.setMarketsRegion(R.setMarketsTab(screen().s, 'stocks'), 'cn'));
   return { s, html: renderMarketsScreen(s, NOW) };
 }
 
 test("the China table: Today and Turnover in its header, a row's cells, the closed line", () => {
   const { html } = chinaScreen();
-  assert.match(html, /data-scope="more" data-value="china" aria-pressed="true">China</);
+  assert.match(html, /data-value="stocks" aria-pressed="true">Stocks</);
+  assert.match(html, /data-value="region" aria-expanded="false" aria-haspopup="listbox"><span class="mk-pill-k">Region<\/span><span class="mk-pill-v">China A<\/span>/);
   assert.match(html, /<th scope="col" class="r mk-c-chg">Today<\/th>/);
   assert.match(html, /<th scope="col" class="r mk-c-vol">Turnover<\/th>/);
   assert.match(html, /<p class="mk-note">Closed · 10-30 15:00 Beijing<\/p>/);
@@ -786,7 +925,7 @@ test('a ranking 503 draws one note, not the route words under it (minor #2)', ()
 });
 
 test("a failed read right after a sort switch says China unavailable, not Loading… (minor #3)", () => {
-  const s = R.rankFailed(R.setMarketsSort(R.rankLoaded(R.setMarketsTab(screen().s, 'china'), { sort: 'volume', data: RANK, at: NOW }), 'movers'), { sort: 'movers', at: NOW });
+  const s = R.rankFailed(R.setMarketsSort(R.rankLoaded(R.setMarketsRegion(R.setMarketsTab(screen().s, 'stocks'), 'cn'), { sort: 'volume', data: RANK, at: NOW }), 'movers'), { sort: 'movers', at: NOW });
   const html = renderMarketsScreen(s, NOW);
   assert.match(html, /<p class="mk-empty">China unavailable<\/p>/);
   assert.doesNotMatch(html, /Loading…/);
@@ -819,7 +958,7 @@ test("on a page that signs for an Account that takes writes, a market's page car
   for (const id of ['ord-0010', 'ord-0004', 'ord-0002']) assert.match(sol, new RegExp(`data-kind="amend" data-venue="ex" data-order="${id}"[^>]*>Change…</button>`), id);
   assert.doesNotMatch(keys(page('coin:SOL')), /data-kind="leverage"/, 'spot sets no leverage');
   // an event held is sold
-  assert.match(section(page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'predictions' }), 'You here'), /data-kind="close" data-venue="predict"[^>]*>Sell…<\/button>/);
+  assert.match(section(page('event:predict:SI-FEDCUT-DEC', { predictions: fx('explore-predictions'), tab: 'macro' }), 'You here'), /data-kind="close" data-venue="predict"[^>]*>Sell…<\/button>/);
   // a page that does not sign, or an Account that is read-only: none of the three
   const none = /data-kind="(close|amend|leverage)"/;
   for (const role of [null, 'pending', 'signed-out']) assert.doesNotMatch(page('perp:BTC', { role }) + page('coin:SOL', { role }), none, String(role));
@@ -974,19 +1113,19 @@ test('an Account that answers the book with express’s 404 page, and the trades
 
 test('Markets lists no Desk tab, and setMarketsTab with desk leaves the tab as it was', async () => {
   const { deskStatus, DESK_NOW } = await import('./helpers/desk-status.js');
-  const { s } = screen({ tab: 'watching' });
+  const { s } = screen({ tab: 'watchlist' });
   const html = renderMarketsScreen(R.deskLoaded(s, { data: deskStatus(), at: DESK_NOW }), DESK_NOW);
   const tabs = [...html.matchAll(/data-action="mkTab" data-value="([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(tabs, ['watching']);
+  assert.deepEqual(tabs, ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'preipo', 'macro']);
   assert.doesNotMatch(html, /data-action="deskPause"/, 'no Pause on Markets');
   assert.equal(R.setMarketsTab(s, 'desk'), s, 'desk is no tab of Markets');
-  assert.equal(R.setMarketsTab(s, 'desk').markets.tab, 'watching');
+  assert.equal(R.setMarketsTab(s, 'desk').markets.tab, 'watchlist');
 });
 
 test('a marked row draws its mark after its name; a page draws the plan and file under its price', async () => {
   const { deskStatus, DESK_NOW } = await import('./helpers/desk-status.js');
   const withDesk = st => R.deskLoaded(st, { data: deskStatus(), at: DESK_NOW });
-  const { s } = screen({ cn: [MOUTAI], quotes: { 'cn:600519': moutaiQuote() } });
+  const { s } = screen({ cn: [MOUTAI], quotes: { 'cn:600519': moutaiQuote() }, watch: ['stock:NVDA', 'coin:BTC'], tab: 'watchlist' });
   const html = renderMarketsScreen(withDesk(s), NOW);
   assert.match(rowOf(html, 'stock:NVDA'), /<b>NVIDIA[^<]*<\/b><span class="mk-level">stop 170 · -1\.30%<\/span>/);
   assert.match(rowOf(html, 'cn:600519'), /<span class="mk-level">buy_zone 1600-1650<\/span>/);

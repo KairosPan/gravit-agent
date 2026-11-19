@@ -2325,44 +2325,58 @@ keys are absent, not disabled, and the device line under the Account head says w
 
 ### Markets
 
-Markets opens on **Hyperliquid**, with **Hyperliquid** and **trade.xyz** showing their asset
-categories directly. **More markets** expands the actual public sources as buttons, including
-OKX, Coinbase, Kraken, US stocks and Robinhood Stock Tokens. The first
-two entries list native Hyperliquid perpetuals and the complete active `xyz` HIP-3 perpetual
-universe respectively; More markets holds the other public sources and connected markets.
-Lists and searches send `scope=hyperliquid|xyz|more` to both explore reads, with `source=<id>`
-when one More markets source is selected, so the services select their sources before fetching.
-The source directory comes from `/data/market/sources` independently of the first market list;
-it lists configured data products, not trading availability. Switching entries clears the previous list and search and
-discards their in-flight answers. A compact local Hyperliquid mark or `xyz` badge beside a
-contract names its origin on hover and to screen readers, including on its market page.
-The focused entries keep public quotes visible for reading even where the live connector is
-unavailable: those lines offer no connection-to-trade link, and still supply a paper row's day figures.
-Watching spans entries; exact-key lookups let saved xyz links and quieter watched contracts
-resolve without changing the selected entry. A missing `scope` retains the all-market API.
+Markets is organised by underlying (spec `docs/superpowers/specs/2026-11-19-markets-by-underlying-design.md`,
+G1–G8). One row of tabs under the search box (`Search markets`): the **Watchlist** first, a
+five-pointed star with no word on screen (`Watchlist` to a screen reader and on hover; filled
+while open), then **Crypto · Stocks · Indices · Commodities · FX · Pre-IPO · Macro & events**. The
+list is fixed and no tab carries a count; an empty one shows its empty state. Markets opens on the
+Watchlist. The tab row scrolls sideways on a narrow screen; nothing else does.
 
-One table under the search box (`Search markets`). Hyperliquid offers **All · Crypto**;
-trade.xyz offers **All · Stocks · Indices · Commodities · FX · Pre-IPO**, following its official
-underlying categories while retaining perpetual contract identities. More markets keeps **All**
-and its individual source buttons visible; a selected source's category row offers **All ·
-Crypto · Stocks · RWAs · Perps · Pre-IPO · Predictions**, with **China** for the aggregate view,
-adding Indices, Commodities
-and FX when its joined All read lists them. Selected-source counts are the market's count plus
-the Account's connected-only rows once All's read has answered, All counting the starred A shares
-too; China is the market's own tab. **Watching** stays available below the source rows, with
-**All results** first while searching, and remains a separate shared entry; the desk's view is its
-own screen ("The desk" below).
-Changing a source and category is one state transition and requests the chosen category directly;
-source-filtered paper rows retain their bound data source even when another product uses the same symbol.
-Tokenized-share sources retain RWAs classification in paper rows, so public and paper lines merge under one market key.
-Unread source rows show no guessed counts. A tab starts from Most traded. With two or more rows, the sorts **Most traded · Biggest moves**,
-and **Closing soonest** where a row closes: Most traded ranks the rows by their volume
-(a Kalshi row's contracts by their number), then the A shares by turnover (China's rows, in yuan); Biggest moves by the
-size of the 24-hour move; Closing soonest by the close; a row without the figure sorts last.
+Every tab but the Watchlist draws up to three filters as pills, each opening a popover of single
+choices (`client/js/render/markets.js`; the view is `filtersOf` in `client/js/host/market-view.js`):
+
+- **Region** (Stocks and Indices only): US by default, no "All"; US and China A, then Hong Kong,
+  Japan, Korea, Taiwan, India and Europe greyed `piece 2`. One region at a time; a tab switch goes
+  back to US; never a chip, and kept by the empty table's button. Stocks › China A is the Tencent
+  ranking (below); a region pick goes back to the main sources, and China A is Spot alone.
+- **Form**: All, Spot & shares, Perp, Tokenized, Event contract, and Options greyed `piece 3`; a
+  form the tab's sources do not carry is greyed `none here` (read from `SOURCE_FORMS`, never from the
+  rows). Picking a form the main sources lack switches Source to All sources, so the pick never
+  empties the table.
+- **Source**: `Main · <names>`, `All sources`, then each source family of the tab (a venue and its
+  `-preipo` source under one name; the main ones first, marked `main`), named from the registry's
+  read (`/data/market/sources`), by id while it has not answered.
+
+A Form set and a Source other than Main each draw a removable chip (`Remove <what>`); a tab switch
+clears them, and so does `Back to the main sources` under an empty table. The sort segment follows
+the filters: **Most traded · Biggest moves**, and **Closing soonest** where a row closes.
+
+Each tab opens on its main sources, the table `TAB_SOURCES` in `client/js/host/market-view.js`
+holds (spec §2): Crypto `hyperliquid`; Stocks · US `cboe`; Stocks · China A `china`; Indices,
+Commodities and FX `trade-xyz`; Pre-IPO `hyperliquid-preipo` and `trade-xyz`, one family named
+Hyperliquid; Macro & events `kalshi` and `polymarket`. "All sources" adds the further ones listed
+there (Crypto's spot venues and Kalshi and Polymarket, Stocks' trade.xyz perps and token issuers,
+Indices' Kalshi, Pre-IPO's eight exchanges and Kalshi and Polymarket, Macro's Polymarket US).
+
+The query each tab sends, to both explore halves (`exploreQueryOf`): the Watchlist the unscoped
+`limit=200`; a tab `asset=<tab>&sort=<sort>&limit=200`, then `region=<region>` on Stocks and
+Indices, `form=<form>` when one is set, and `source=<ids>` — the main ids, a family's ids, or under
+All sources the tab's whole list (the connected half then gets no `source`, so every connected line
+of the class shows: `connectedQueryOf`). Stocks › China A sends no explore read: its ranking is
+`asset=stocks&region=cn&sort=volume|movers&limit=20` (`rankQueryOf`), never Closing soonest. A
+read is drawn only under the filters it was asked for: an answer that lands after the operator
+changed a filter is kept but not drawn, and the screen says `Loading…` until its own read lands.
+
+The **Watchlist** is the starred markets (the stars below): every star found in any read (else
+`Not in this read`, with **Remove** after its name), the A shares starred and an old star the
+Account could not find. It draws no filters and no star column (a market is un-starred under its
+own tab or in a search); its sort is Most traded or Biggest moves; empty, it says `Star a market
+under any tab to keep it here.` It reads the unscoped read and locates each starred key that read
+lacks (`explore?q=<symbol>&key=<key>`), so starred rows keep their live price.
 
 A row: the star (`Watch BTC` / `Stop watching BTC`); the tile — the face's own letters, never an
 image the Account names — and the name over its sub (a coin's base, a stock's venue, a
-perpetual's base, an event's category, `Pre-IPO · Perpetual`), tagged `Closed` past its end and
+perp's base, an event's category, `Pre-IPO · Perp`; a search result's class first, `Stocks`, `Macro & events`), tagged `Closed` past its end and
 `Paper` where only a paper account trades it first; the price now, in its unit (`$63,226.60`, an
 event in cents `62¢`, an A share in yuan `¥1,688.00`) — the latest quote at the row's most traded
 connected line where the quotes poll or the stream has one, else the joined explore read's; the 24 hours
@@ -2371,9 +2385,13 @@ connected line where the quotes poll or the stream has one, else the joined expl
 price is from in its source's own words (`Robinhood · real time`, `Cboe · 15 min delayed`), with
 its age once it is more than five seconds old (`· 2 min ago`). Missing values stay em dashes.
 
-With a query the rows are both halves' search joined, the market's A-share hits among them (`N markets for “q”`,
-and Clear). With no rows the table says `Nothing watched yet` (Watching), `No markets` for an
-answer with none, `Loading…` or `Searching…` while a read is on its way, and `Markets
+With a query the search covers every market whatever the tab and the filters (`explore?q=<q>&limit=200`,
+both halves, the market's A-share hits among them): the filters are set aside, each row names its
+class, and the line reads `N markets for “q”` with `Back to <tab>`, which ends the search on the
+same tab with its Region, Form and Source as they were. With no rows the table says the
+Watchlist's hint, `Nothing here with these filters.` for a tab's answer with none (with `Back to
+the main sources` where a Form or a Source is set), `No markets` for a search's, `Loading…` or
+`Searching…` while a read is on its way, and `Markets
 unavailable` (`Search is unavailable` while searching) when the read failed before it ever
 answered. The muted lines say what is going on and nothing else: the market's own sentence when
 both halves of the read the rows are from failed (the rows read before it stay); a half that did
@@ -2383,17 +2401,16 @@ drawn; the search's `Search is unavailable` or `Some results may be missing` (th
 names China among what is missing when Tencent did not answer); the watchlist's trouble (`Couldn't save the watchlist`, `The watchlist is full`, `Couldn't read the
 saved watchlist`).
 
-**China** (specs `docs/superpowers/specs/2026-10-31-china-tab-design.md` and
-`2026-11-01-account-two-parts-design.md` §4) is the day's top 20 A shares from Tencent's ranking,
-the market's `explore?tab=china&sort=` through the face's market proxy: **Most traded** by turnover, **Biggest moves** by the size of the day's
-change, gainers and losers together. Its count is every A share the ranking lists (`China ·
-5,577`, Beijing listings included); its headers read **Today** and **Turnover**. A row: the star
+**Stocks › China A** (specs `docs/superpowers/specs/2026-10-31-china-tab-design.md` and
+`2026-11-01-account-two-parts-design.md` §4; since 2026-11-19 the region of Stocks, no tab of its own) is the day's top 20 A shares from Tencent's ranking,
+the market's `explore?asset=stocks&region=cn&sort=` through the face's market proxy: **Most traded** by turnover, **Biggest moves** by the size of the day's
+change, gainers and losers together. Its headers read **Today** and **Turnover**. A row: the star
 (the Account's watch list, like any row), a tile with the name's first character, the name over `<code> · <board>`
 (`SH`, `SZ`, `ChiNext`, `STAR`, `BJ`), the price in yuan, the change against the previous close,
 the turnover (`¥216.08亿`) and `Tencent`. It is read when China comes on screen and every 20 s
 while it stays, nothing otherwise; a muted line says `Closed · 10-30 15:00 Beijing` or `Midday
 break · 11:30 Beijing`, and `Couldn’t refresh China` over the rows kept when a read fails
-(`China unavailable` with none). No row shows while the ranking for another sort is on its way.
+(`China unavailable` with none, and after a failed read for a sort just picked). No row shows while the ranking for another sort is on its way.
 
 The stars are this browser's, in one store — the Account's row keys (`coin:BTC`, `stock:AAPL`,
 `event:<venue>:<market>`, `cn:600519`, …) under `gravit.account.watch.v1` — plus the old face list
@@ -2403,25 +2420,25 @@ absent and never written or deleted) — at most 100 each, in step across same-o
 storage events, never synchronised across devices. An old `us:` or `crypto:` star on the face's
 list is asked of both halves once per boot (`explore?q=<symbol>`, a coin by its base): found, it
 is the Account's row, starred, and moves to the Account's store; not found, it is listed once as
-`Not listed at the Account`, with **Remove** in place of its star; a read that fails asks again on
+`Not listed at the Account`, with **Remove** after its name; a read that fails asks again on
 the next boot. A starred market no read lists is drawn `Not in this read` and can still be
 un-starred; neither opens a page. On a page that signs for the Account, a star on an Account row
 is the Account's own watch list instead — the one gravit's seat reads: one press signs
 `setWatch` at the market's line (no sheet, as the retired page did), taken it reads the Account again
 and the star follows it, refused the Account's sentence is the watchlist's words; un-starring signs
-the Account's entry off and takes the key off this browser's store too. **Watching** is then both
+the Account's entry off and takes the key off this browser's store too. The **Watchlist** is then both
 lists at once.
 
-Entering Markets or explicitly switching its source, tab or sort reads once even if the browser
+Entering Markets or explicitly switching its tab, a filter or the sort reads once even if the browser
 reports a hidden tab. While Markets is on screen in a visible tab it reads every 20 seconds,
 and every 5 seconds the quotes of the rows drawn (on a market's page, its own market's), twelve
 markets a call; the search reads once the box has been quiet for 300 ms. Another screen or a
 hidden tab stops both polls. Each explore half has a 15-second client deadline: a hung request
 is cancelled, its last rows kept, and the next poll or entry can retry; an overtaken request
-cannot replace the selected source's rows ("The Account in the face" has every read).
+cannot replace the rows of the filters on screen ("The Account in the face" has every read).
 
 The A shares are the market's like every other public market (since plan A2; `DEVELOPMENT.md`
-§3.10 "China"): the ranking is `/data/market/explore?tab=china&sort=volume|movers`, the search is
+§3.10 "China"): the ranking is `/data/market/explore?asset=stocks&region=cn&sort=volume|movers&limit=20`, the search is
 the market half's `explore?q=` (Tencent's smartbox, merged with the other markets' hits, so there
 is no second read), the prices and the page's facts are `/data/market/quotes?pairs=china|<code>`,
 the history is `/data/market/candles?venue=china`, all through the market proxy and its
@@ -2439,7 +2456,7 @@ Once the market has answered for China (a ranking or a quote read), Account › 
 answering: A shares cannot be read now` when it has none — falling back to the face's
 `Tencent · Connected` / `Limited` / `Error` only when the market said nothing; while the proxy
 re-serves the market's last read (the market not answering) it reads `The market is not
-answering · China as last read`, as the China tab and Watching do, and an A share's page says
+answering · China as last read`, as Stocks › China A and the Watchlist do, and an A share's page says
 `The market is not answering · as of MM-DD HH:MM Beijing` over its last price, never Delayed or
 Closed; before any China read it is not drawn. Event timestamps are Tencent's own — its quote's last update, which can run
 past the close (16:14 for a 15:00 close on 2026-10-30) — read as Beijing time, and receipt time

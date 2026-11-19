@@ -29,8 +29,7 @@ import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf, fundingMissing
 import {
   candleRanges, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
-  chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf,
-  marketNavigationOf, marketOriginOf, marketSourceOf, moreSourcesOf,
+  chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf, marketOriginOf,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
@@ -89,48 +88,65 @@ function moveHtml(p) {
 
 // ---- the table
 
-// the star, and under it Watched at the Account for a market on the Account's own list alone; an old star the Account could not
-// find takes Remove in its place
+// the star, and under it Watched at the Account for a market on the Account's own list alone; a Watchlist row (`noStar`, G6)
+// has none: it is un-starred from its own tab or a search result
 function starCell(r) {
-  if (r.notListed) return `<button type="button" class="mk-clear" data-action="removeAsked" data-id="${esc(r.id)}" aria-label="${th('markets.star.removeName', { name: r.name })}">${th('markets.star.remove')}</button>`;
   return `<button type="button" class="mk-star" data-action="toggleWatch" data-id="${esc(r.id)}" aria-pressed="${r.watched === true}" aria-label="${r.watched ? th('markets.star.stop', { name: r.name }) : th('markets.star.watch', { name: r.name })}">${icon('star', 18, 2)}</button>` +
     (r.watched === true && r.atAccount === true ? `<span class="mk-at">${th('markets.star.atAccount')}</span>` : '');
 }
 
-// the tile, the name and under it the sub, Closed past its end, Paper where only a paper account trades it first; a market no
-// read lists, and a star the Account could not find, have no page to open
+// a Watchlist row no tab or search can reach to un-star — an old star the Account could not find, a star no read lists — keeps
+// Remove after its name (the old star's taken off, the other un-starred)
+function removeKey(r) {
+  if (r.notListed) return `<button type="button" class="mk-clear" data-action="removeAsked" data-id="${esc(r.id)}" aria-label="${th('markets.star.removeName', { name: r.name })}">${th('markets.star.remove')}</button>`;
+  if (r.placeholder) return `<button type="button" class="mk-clear" data-action="toggleWatch" data-id="${esc(r.id)}" aria-label="${th('markets.star.removeName', { name: r.name })}">${th('markets.star.remove')}</button>`;
+  return '';
+}
+
+// the tile, the name and under it a search result's class, the sub, Closed past its end, Paper where only a paper account trades
+// it first; a market no read lists, and a star the Account could not find, have no page to open
 function nameCell(r, mark = null) {
   const tags = [r.pastEnd ? t('markets.tag.closed') : '', r.paper ? t('markets.tag.paper') : ''].filter(Boolean).map(tag).join(' ');
   const badge = badgeFor(r.legs ?? []);
-  const inner = `${mkAv(r.tile)}<span class="mk-nm"><b>${esc(r.name)}</b>${mark ? levelMark(mark) : ''}<span class="mk-sub">${badge ? `${badge} ` : ''}${esc(r.sub)}${tags ? ` ${tags}` : ''}</span></span>`;
-  return r.placeholder || r.notListed ? `<span class="mk-who">${inner}</span>`
+  const kind = r.className ? `${tag(r.className)} ` : '';
+  const inner = `${mkAv(r.tile)}<span class="mk-nm"><b>${esc(r.name)}</b>${mark ? levelMark(mark) : ''}<span class="mk-sub">${kind}${badge ? `${badge} ` : ''}${esc(r.sub)}${tags ? ` ${tags}` : ''}</span></span>`;
+  return r.placeholder || r.notListed ? `<span class="mk-who">${inner}${removeKey(r)}</span>`
     : `<button type="button" class="mk-name" data-action="openMarket" data-id="${esc(r.id)}">${inner}</button>`;
 }
 
 // a row's volume: an A share's turnover in yuan (China's rows), else the view's word in its unit
 const volumeCell = p => (p.volumeUnit === 'yuan' ? yuan(p.volume) : volumeWordOf(p));
 
-function row(r, markFor) {
-  return `<tr data-id="${esc(r.id)}"><td>${starCell(r)}</td><td class="mk-c-name">${nameCell(r, markFor(r.id))}</td>` +
+function row(r, markFor, starred) {
+  return `<tr data-id="${esc(r.id)}">${starred ? `<td>${r.noStar ? '' : starCell(r)}</td>` : ''}<td class="mk-c-name">${nameCell(r, markFor(r.id))}</td>` +
     `<td class="r">${esc(priceWord(r.price, r.priced.unit))}</td><td class="r mk-c-chg">${moveHtml(r.priced)}</td>` +
     `<td class="r mk-c-vol">${esc(volumeCell(r.priced))}</td><td class="r mk-c-st"><span class="mk-st">${esc(r.sourceWord)}</span></td></tr>`;
 }
 
-// China's table says Today and Turnover where the Account's say 24h and Volume (spec 2026-10-31 §4)
+// China's table says Today and Turnover where the Account's say 24h and Volume (spec 2026-10-31 §4); a table of Watchlist rows
+// alone draws no star column (G6), and no table draws a region's
 function table(rows, { china = false, markFor = () => null } = {}) {
-  const head = `<tr><th scope="col"><span class="sr-only">${th('markets.head.watch')}</span></th><th scope="col" class="mk-c-name">${th('markets.head.market')}</th><th scope="col" class="r">${th('markets.head.price')}</th>` +
+  const starred = rows.some(r => !r.noStar);
+  const head = `<tr>${starred ? `<th scope="col"><span class="sr-only">${th('markets.head.watch')}</span></th>` : ''}<th scope="col" class="mk-c-name">${th('markets.head.market')}</th><th scope="col" class="r">${th('markets.head.price')}</th>` +
     `<th scope="col" class="r mk-c-chg">${china ? th('markets.head.today') : '24h'}</th><th scope="col" class="r mk-c-vol">${china ? th('markets.head.turnover') : th('markets.head.volume')}</th><th scope="col" class="r mk-c-st">${th('markets.head.source')}</th></tr>`;
-  return `<section class="cardbox mk-tcard" aria-label="${th('nav.markets')}"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, markFor)).join('')}</tbody></table></div></section>`;
+  return `<section class="cardbox mk-tcard" aria-label="${th('nav.markets')}"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, markFor, starred)).join('')}</tbody></table></div></section>`;
 }
 
-// where the rows would be when there are none, from the read they are from: nothing starred; an answer with nothing in it; a
-// read still on its way; or one that failed before it answered
-function emptyWord(read, tab, searching) {
-  if (tab === 'watching' && !searching) return t('markets.empty.watching');
-  if (tab === 'china' && !searching) return read.status === 'error' ? t('markets.empty.china') : read.answered && read.status === 'ready' ? t('markets.none') : t('common.loading');
-  if (read.answered) return t('markets.none');
-  if (read.status !== 'error') return searching ? t('markets.search.searching') : t('common.loading');
-  return searching ? t('markets.search.unavailable') : t('markets.unavailable');
+// where the rows would be when there are none (tableOf's `empty`, else the read they are from): the Watchlist with nothing
+// starred (G6); a tab whose read answered with nothing under its filters, with Back to the main sources where a Form or a Source
+// is set (§5.3); China A's ranking; a search's answer with nothing in it; a read still on its way, or one that failed before it
+// answered
+function emptyHtml(view) {
+  const { read, searching, china, empty: kind, filters } = view;
+  if (kind === 'watchlist') return empty(t('markets.empty.watchlist'));
+  if (china) return empty(read.status === 'error' ? t('markets.empty.china') : read.answered && read.status === 'ready' ? t('markets.none') : t('common.loading'));
+  if (kind === 'filters') {
+    const back = filters?.chips?.length ? ` <button type="button" class="mk-clear" data-action="mkMain">${th('markets.empty.back')}</button>` : '';
+    return `<p class="mk-empty">${th('markets.empty.filters')}${back}</p>`; // words-order: the sentence, then its key
+  }
+  if (read.answered) return empty(t('markets.none'));
+  if (read.status !== 'error') return empty(searching ? t('markets.search.searching') : t('common.loading'));
+  return empty(searching ? t('markets.search.unavailable') : t('markets.unavailable'));
 }
 
 // the search's A shares, while a query is active: the Account answered without China's hits (its `missing` names china) —
@@ -151,6 +167,43 @@ function chinaLines(read, data, session) {
   return note(chinaWord(session)) + note(why);
 }
 
+// the tab row (G1): the Watchlist first, a star with its word for a screen reader alone, filled while open; then a word a tab,
+// no counts
+function tabsHtml(tabs, current) {
+  return `<div class="mk-tabs" role="group" aria-label="${th('nav.markets')}">${tabs.map(tab => {
+    const pressed = `aria-pressed="${tab.id === current}"`;
+    return tab.id === 'watchlist'
+      ? `<button type="button" class="mk-tab mk-tab-star" data-action="mkTab" data-value="watchlist" ${pressed} title="${esc(tab.label)}">${icon('star', 20, 2)}<span class="sr-only">${esc(tab.label)}</span></button>`
+      : `<button type="button" class="mk-tab" data-action="mkTab" data-value="${esc(tab.id)}" ${pressed}>${esc(tab.label)}</button>`;
+  }).join('')}</div>`;
+}
+
+// a filter's pill and, while open, its popover: each option a choice, one the view greys disabled with its note, a main source
+// marked main
+function pillHtml(name, label, word, set, open, options, action, value) {
+  const opts = options.map(o => {
+    const aside = o.note ?? (o.main ? t('markets.source.mainMark') : null);
+    return `<button type="button" role="option" class="mk-opt" data-action="${action}"${attrs({ 'data-value': o.id })} aria-selected="${o.id === value}"${o.disabled ? ' disabled' : ''}>` +
+      `<span>${esc(o.label)}</span>${aside ? `<span class="mk-opt-note">${esc(aside)}</span>` : ''}</button>`;
+  }).join('');
+  return `<div class="mk-filter"><button type="button" class="${cls('mk-pill', set && 'mk-pill-set')}" data-action="mkFilter" data-value="${name}" aria-expanded="${open}" aria-haspopup="listbox">` +
+    `<span class="mk-pill-k">${label}</span><span class="mk-pill-v">${esc(word)}</span>${icon('chevDown', 14, 2)}</button>` + // words-order: a filter's name, then its value
+    (open ? `<div class="mk-pop" role="listbox" aria-label="${label}">${opts}</div>` : '') + '</div>';
+}
+
+// the filters (G2–G4): Region on Stocks and Indices, Form, Source, each with its popover; a chip for a Form set and a Source
+// other than Main, each removed by its key
+function filtersHtml(f, open) {
+  if (!f) return '';
+  const region = f.region
+    ? pillHtml('region', th('markets.filter.region'), f.region.options.find(o => o.id === f.region.value)?.label ?? f.region.value, false, open === 'region', f.region.options, 'mkRegion', f.region.value)
+    : '';
+  const form = pillHtml('form', th('markets.filter.form'), f.form.label, f.form.value !== '', open === 'form', f.form.options, 'mkForm', f.form.value);
+  const source = pillHtml('source', th('markets.filter.source'), f.source.label, f.source.value !== 'main', open === 'source', f.source.options, 'mkSource', f.source.value);
+  const chips = f.chips.map(c => `<button type="button" class="mk-chip" data-action="mkChip" data-value="${c.kind}" aria-label="${th('markets.chip.remove', { what: c.label })}"><span>${esc(c.label)}</span>${icon('x', 14, 2)}</button>`).join('');
+  return `<div class="mk-filters">${region}${form}${source}${chips}</div>`;
+}
+
 export function renderMarketsScreen(state, now) {
   const id = state.route?.screen === 'markets' ? state.route.id : null;
   if (id) {
@@ -159,42 +212,32 @@ export function renderMarketsScreen(state, now) {
   }
   const m = state.markets;
   const q = String(m.q ?? '').trim();
-  const searching = q !== '';
-  const { rows, tabs, sorts, sort, read, china, session } = tableOf(m, now, state.account?.data);
-  const source = marketSourceOf(m);
-  const categoriesHtml = scope => `<div class="mk-categories" role="group" aria-label="${esc(scope.label)}">${scope.categories.map(category => `<button type="button" class="mk-category" data-action="mkCategory" data-scope="${scope.id}" data-value="${category.id}"${scope.id === 'more' && source ? attrs({ 'data-source': source }) : ''} aria-pressed="${scope.active && category.id === m.tab}">${esc(category.count === null ? category.label : `${category.label} · ${category.count.toLocaleString('en-US')}`)}</button>`).join('')}</div>`;
-  const providers = [{ id: '', label: t('markets.tab.all') }, ...moreSourcesOf(m)];
-  const providersHtml = active => `<div class="mk-providers" role="group" aria-label="${th('markets.scope.more')}">${providers.map(provider => `<button type="button" class="mk-category mk-provider" data-action="mkSource" data-value="${esc(provider.id)}" aria-pressed="${active && provider.id === source}">${esc(provider.label)}</button>`).join('')}` +
-    `${m.sources?.status === 'loading' ? `<span class="mk-source-status">${th('common.loading')}</span>` : m.sources?.status === 'error' ? `<span class="mk-source-status">${th('markets.sources.unavailable')}</span>` : ''}</div>`;
-  const scopesHtml = `<div class="mk-scopes" role="group" aria-label="${th('markets.scope.label')}">${marketNavigationOf(m).map(scope =>
-    `<div class="mk-scope-row"><button type="button" class="mk-scope" data-action="mkScope" data-value="${scope.id}" aria-pressed="${scope.active}">${scope.id === 'more' ? icon('layers', 18, 2) : sourceBadge(scope.id, true)}<span>${esc(scope.label)}</span></button>` +
-    (scope.id === 'more' ? `<div class="mk-more">${providersHtml(scope.active)}${scope.active ? categoriesHtml(scope) : ''}</div>` : categoriesHtml(scope)) + '</div>').join('')}</div>`;
-  const globalTabs = [
-    ...tabs.filter(tab => tab.id === 'results'),
-    { id: 'watching', label: t('markets.tab.watching') },
-  ];
-  const tabsHtml = scopesHtml + `<div class="mk-tabs" role="group" aria-label="${th('nav.markets')}">${globalTabs.map(tab => `<button type="button" class="mk-tab" data-action="mkTab" data-value="${esc(tab.id)}" aria-pressed="${tab.id === m.tab}">${esc(tab.label)}</button>`).join('')}</div>`;
+  const view = tableOf(m, now, state.account?.data);
+  const { rows, tabs, sorts, sort, read, china, session, searching, filters } = view;
+  const tabWord = tabs.find(tab => tab.id === m.tab)?.label ?? '';
+  // while searching (G5) the filters are set aside: the search's count and Back to <tab>, which ends it
   const left = searching
-    ? `<p class="mk-q">${thn('markets.search.count', rows.length, { q })} <button type="button" class="mk-clear" data-action="mkClear">${th('markets.search.clear')}</button></p>`
-    : '<span></span>';
+    ? `<p class="mk-q">${thn('markets.search.count', rows.length, { q })} <button type="button" class="mk-clear" data-action="mkBack">${th('markets.search.back', { tab: tabWord })}</button></p>`
+    : filtersHtml(filters, m.open) || '<span></span>';
   const bar = `<div class="mk-bar">${left}${rows.length > 1 ? seg(sorts.map(s => [s.label, s.id]), sort, 'mkSort') : ''}</div>`;
   // the muted lines: the Account's own sentence when the read the rows are from refused, the A-share search's when it failed or
   // answered in part (said once: not again under a table that already says it), the face's wire's state where an A share is
   // drawn, the watchlist's
-  const emptyText = rows.length ? '' : emptyWord(read, m.tab, searching);
+  const emptyBody = rows.length ? '' : emptyHtml(view);
   const cnSearch = cnSearchWord(m, searching);
   const cnDrawn = rows.some(r => r.source === 'face' && !r.notListed);
   const chinaWords = china ? chinaLines(read, m.rank?.data, session) : '';
   // China's failure is said once, in the face's words: the route's own error text is not a sentence of the Account's
-  const words = chinaWords + note(china ? '' : read.message) + note(cnSearch !== emptyText ? cnSearch : '') + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
-  const body = rows.length ? table(rows, { china, markFor: id => markOf(state.desk?.data, id) }) : empty(emptyText);
-  return screenHtml(m, tabsHtml, `${bar}${words}${body}`);
+  const cnLine = cnSearch && !emptyBody.includes(`>${esc(cnSearch)}<`) ? cnSearch : '';
+  const words = chinaWords + note(china ? '' : read.message) + note(cnLine) + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
+  const body = rows.length ? table(rows, { china, markFor: id => markOf(state.desk?.data, id) }) : emptyBody;
+  return screenHtml(m, tabsHtml(tabs, m.tab), `${bar}${words}${body}`);
 }
 
 // the screen: its head with the search, the tabs, and what the tab draws
-const screenHtml = (m, tabsHtml, inner) => `<main class="main mkts"><div class="mk-head"><h1 class="head-title">${th('nav.markets')}</h1>` +
+const screenHtml = (m, tabs, inner) => `<main class="main mkts"><div class="mk-head"><h1 class="head-title">${th('nav.markets')}</h1>` +
   `<div class="search"><label for="mq" class="sr-only">${th('markets.search.label')}</label>${icon('search', 18, 2)}<input id="mq" type="search" autocomplete="off" placeholder="${th('markets.search.label')}" data-action="mkQuery"${attrs({ value: m.q })}></div></div>` +
-  `<div class="mk">${tabsHtml}${inner}</div></main>`;
+  `<div class="mk">${tabs}${inner}</div></main>`;
 
 // a level's mark (host/desk-view.js markOf): after a row's name, and on a market's page under its price with its plan and file
 const levelMark = mark => `<span class="mk-level">${esc(mark.label)}</span>`;

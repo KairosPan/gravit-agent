@@ -809,9 +809,12 @@ export function tableOf(markets, now = Date.now(), page = null) {
   const atPage = watchKeysOf(page, exploreRowsOf(m));
   const china = !searching && onChinaA(m);
   const watchlist = !searching && tab === 'watchlist';
-  // China A's ranking for another sort is no answer for this one (its rows are in that sort's order)
-  const rankShown = isRecord(m.rank) && (m.rank.data == null || m.rank.data.sort === (m.sort === 'movers' ? 'movers' : 'volume'));
-  const slot = searching ? m.results : china ? (rankShown ? m.rank : null) : shownRead(m, reads);
+  // China A's ranking for another sort is no answer for this one (its rows are in that sort's order); a read for this one that
+  // failed or is out, over another sort's rows kept, is this sort's read with nothing answered
+  const rankSort = m.sort === 'movers' ? 'movers' : 'volume';
+  const rankShown = isRecord(m.rank) && (m.rank.data == null || m.rank.data.sort === rankSort);
+  const rankAsked = isRecord(m.rank) && m.rank.sort === rankSort ? { ...m.rank, data: null } : null;
+  const slot = searching ? m.results : china ? (rankShown ? m.rank : rankAsked) : shownRead(m, reads);
   const rows = china ? chinaRowsOf(m, atPage) : unsortedRowsOf(m, { searching, watchlist, slot }, now, atPage);
   const twoSorts = china || watchlist;
   const { sorts, sort } = twoSorts

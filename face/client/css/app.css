@@ -1046,29 +1046,40 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .mk-tab:hover { color: var(--text); }
 .mk-tab[aria-pressed="true"] { color: var(--text); font-weight: 700; }
 .mk-tab[aria-pressed="true"]::after { background: var(--text); }
-/* Markets starts at a venue; its small mark travels with each contract, including on narrow screens. */
-.mk-scopes { display: flex; flex-direction: column; gap: 10px; }
-.mk-scope-row { display: grid; grid-template-columns: 158px minmax(0, 1fr); align-items: start; gap: 12px; }
-.mk-scope { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface); color: var(--dim); font-size: calc(14px * var(--fs)); font-weight: 600; white-space: nowrap; }
-.mk-scope:hover { color: var(--text); background: var(--surface-2); }
-.mk-scope[aria-pressed="true"] { border-color: var(--text); background: var(--surface-2); color: var(--text); }
-.mk-categories { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
-.mk-more { min-width: 0; }
-.mk-providers { display: flex; flex-wrap: wrap; gap: 4px; }
-.mk-provider { text-align: left; }
-.mk-more > .mk-categories { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
-.mk-source-status { align-self: center; padding: 8px 11px; color: var(--dim); font-size: calc(13px * var(--fs)); }
-.mk-category { min-height: 42px; padding: 8px 11px; border: 1px solid transparent; border-radius: var(--radius-s); background: transparent; color: var(--dim); font-size: calc(14px * var(--fs)); font-weight: 500; white-space: nowrap; }
-.mk-category:hover { color: var(--text); background: var(--surface-2); }
-.mk-category[aria-pressed="true"] { border-color: var(--text); background: var(--surface-2); color: var(--text); font-weight: 600; }
+/* the Watchlist's tab: a star, filled while open (G1) */
+.mk-tab-star { display: inline-flex; align-items: center; justify-content: center; }
+.mk-tab-star svg { display: block; }
+.mk-tab-star[aria-pressed="true"] svg { fill: currentColor; }
+/* the filters (G2-G4): a pill a filter, its popover under it, a chip a filter set; they wrap, never scroll the page sideways */
+.mk-filters { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.mk-filter { position: relative; min-width: 0; }
+.mk-pill { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 40px; padding: 6px 10px 6px 14px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font-size: calc(14px * var(--fs)); white-space: nowrap; }
+.mk-pill:hover { background: var(--surface-2); }
+.mk-pill-k { color: var(--dim); }
+.mk-pill-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mk-pill svg { flex: none; color: var(--dim); }
+.mk-pill-set { border-color: var(--accent-edge); background: var(--accent-soft); color: var(--accent-ink); }
+.mk-pill-set .mk-pill-k, .mk-pill-set svg { color: var(--accent-ink); }
+.mk-pill[aria-expanded="true"] svg { transform: rotate(180deg); }
+.mk-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 5; width: 280px; max-width: calc(100cqw - 16px); max-height: 380px; overflow: auto; padding: 6px; border: 1px solid var(--card-border); border-radius: var(--radius-m); background: var(--surface); box-shadow: var(--shadow-lift); }
+.mk-opt { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding: 8px 10px; border: 0; border-radius: var(--radius-s); background: transparent; color: var(--text); font-size: calc(14px * var(--fs)); text-align: left; }
+.mk-opt:hover:not(:disabled) { background: var(--surface-2); }
+.mk-opt[aria-selected="true"] { background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+.mk-opt:disabled { color: var(--dim); cursor: default; }
+.mk-opt-note { flex: none; font-family: var(--font-mono); font-size: calc(11px * var(--fm)); color: var(--dim); }
+.mk-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 34px; padding: 2px 8px 2px 12px; border: 0; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text); font-size: calc(13px * var(--fs)); white-space: nowrap; }
+.mk-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mk-chip svg { flex: none; color: var(--dim); }
+.mk-chip:hover svg { color: var(--text); }
+/* a narrow screen: a popover spans the filters' row, whichever pill opened it */
 @container (max-width: 600px) {
-  .mk-scope-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
-  .mk-scope { justify-self: start; }
+  .mk-filter { position: static; }
+  .mk-pop { left: 0; right: 0; width: auto; max-width: none; }
 }
+.mk-who .mk-clear { flex: none; margin-left: auto; }
 .mk-source-badge { display: inline-flex; align-items: center; justify-content: center; flex: none; height: 17px; min-width: 21px; padding: 0 3px; border-radius: 4px; background: var(--surface-2); color: var(--text); font-family: var(--font-sans); font-size: calc(10px * var(--fs)); font-weight: 600; line-height: 1; vertical-align: -2px; }
 .mk-source-hyperliquid { color: var(--market-hl-ink); background: var(--market-hl-fill); }
 .mk-source-badge svg { display: block; flex: none; }
-.mk-scope .mk-source-badge { vertical-align: baseline; }
 .mk-sub .mk-source-badge { margin-right: 3px; }
 .mk-source-xyz { letter-spacing: -0.02em; }
 .mk-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: -10px; }
