@@ -1196,7 +1196,7 @@ export function boot(win, host = {}) {
     if (searchTimer !== null) timers.cancel(searchTimer);
     searchTimer = timers.after(SEARCH_QUIET_MS, () => { searchTimer = null; markets.search(q); });
   }
-  // the search ended (Back to <tab>, Clear, another tab): the box emptied, a search still waiting gone, the search's read forgotten
+  // the search ended (Back to <tab>, another tab): the box emptied, a search still waiting gone, the search's read forgotten
   function endSearch() {
     const box = doc.getElementById('mq');
     if (box) box.value = '';
@@ -1981,7 +1981,7 @@ export function boot(win, host = {}) {
       timers.after(0, () => win.URL.revokeObjectURL(url));
     },
     // Markets (spec 2026-11-19): the tabs (a tab ends a search), a filter's popover, Region, Form and Source, a chip, the empty
-    // table's Back to the main sources, Back to <tab>, the sort, Clear, the star, Remove, a row's page, a page's range
+    // table's Back to the main sources, Back to <tab>, the sort, the star, Remove, a row's page, a page's range
     mkTab: el => {
       const searching = String(store.get().markets.q ?? '').trim() !== '';
       marketsChoice('setMarketsTab', el.dataset.value);
@@ -2017,14 +2017,6 @@ export function boot(win, host = {}) {
     // a routine card's two answers in the thread (plan 3 Task 3): ✓ adds the routine, ✗ dismisses it; the card settles on the read after
     routineYes: el => { void deskRoutines.confirm(el.dataset.proposal); },
     routineNo: el => { void deskRoutines.dismiss(el.dataset.proposal); },
-    // the render keeps what an input holds, so Clear empties the box before the query; a search still waiting goes with it
-    mkClear: () => {
-      const box = doc.getElementById('mq');
-      if (box) box.value = '';
-      store.dispatch('setMarketsQuery', '');
-      searchNow('');
-      doc.getElementById('mq')?.focus?.();
-    },
     // the star, on or off as it is drawn: an Account key in the Account's own list (signed, on a page that signs) or store, a cn
     // id on the face's list
     toggleWatch: el => {
@@ -2520,6 +2512,8 @@ export function boot(win, host = {}) {
       }
       if (s.edit) { store.dispatch('cancelEdit'); return; }
       if (s.confirm) { store.dispatch('cancelConfirm'); return; }
+      // a Markets filter's popover, before any drawer
+      if (s.route.screen === 'markets' && s.markets.open) { store.dispatch('openMarketsFilter', null); return; }
       // a module card's Run sheet first, then the owner sheet over any drawer, then the stock drawer; Trade's ticket after every drawer
       if (s.runSheet) runSheet.close();
       else if (sheetUp(s)) sheet.close();

@@ -700,6 +700,16 @@ const optionsOf = html => [...html.matchAll(/<button type="button" role="option"
 const chipsOf = html => [...html.matchAll(/<button type="button" class="mk-chip" data-action="mkChip" data-value="([^"]+)" aria-label="([^"]+)"><span>([^<]+)<\/span>/g)].map(m => [m[1], m[2], m[3]]);
 const open = (s, name) => R.openMarketsFilter(s, name);
 
+test("a search closes an open filter's popover, so Back to <tab> finds it closed", () => {
+  const s = open(screen().s, 'source');
+  assert.equal(s.markets.open, 'source');
+  const searching = R.setMarketsQuery(s, 'BTC');
+  assert.equal(searching.markets.open, null, 'the search closes it');
+  assert.equal(R.setMarketsQuery(searching, '').markets.open, null, 'and it stays closed after the search');
+  // a blank query (no search) leaves an open popover as it was
+  assert.equal(R.setMarketsQuery(s, '  ').markets.open, 'source');
+});
+
 test('the tab row: the star first with its word for a screen reader, then the seven classes, no counts', () => {
   const html = screen({ tab: 'watchlist' }).html;
   const row = html.match(/<div class="mk-tabs" role="group" aria-label="Markets">([\s\S]*?)<\/div>/)[1];

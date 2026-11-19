@@ -364,3 +364,43 @@ test('a query carries its asset, form, region and raw source list to the join', 
     { tab: '', q: '', sort: 'movers', scope: '', source: 'kalshi,polymarket', asset: 'crypto', form: 'perp', region: 'us', limit: 50 });
   assert.deepEqual(orderOf('tab=crypto&limit=12'), { tab: 'crypto', q: '', sort: '', scope: '', source: '', asset: '', form: '', region: '', limit: 12 });
 });
+
+// The class path browses named sources like the focused scopes (final review item 1): a connection that does not serve here
+// keeps its public lines read-only, and a connected venue speaks only for the rows it lists itself.
+test('the class path keeps an away source read-only, and the old params still drop it', () => {
+  const market = body([
+    row('event:A', [pub('kalshi', 'A-YES', 'live:kalshi')], { kind: 'event', tabs: ['all', 'predictions'] }),
+    row('event:B', [pub('polymarket', 'B-YES', 'live:polymarket')], { kind: 'event', tabs: ['all', 'predictions'] }),
+  ]);
+  const here = [{ connector: 'live:polymarket', verdict: 'close-only' }];
+  for (const opts of [{ asset: 'macro', source: 'kalshi,polymarket' }, { asset: 'predictions', source: 'polymarket' }, { source: 'kalshi,polymarket' }]) {
+    const joined = joinExplore(market, body([]), { ...opts, here });
+    assert.ok(keys(joined).includes('event:B'), `${JSON.stringify(opts)}: the close-only source's lines stay`);
+    const leg = joined.items.find(i => i.key === 'event:B').at[0];
+    assert.deepEqual([leg.venue, leg.public, leg.canTrade], ['polymarket', true, false]);
+    assert.equal(Object.hasOwn(leg, 'connectTo'), false, 'no connect-to-trade route for a source that does not serve here');
+    const kalshi = joined.items.find(i => i.key === 'event:A');
+    if (kalshi) assert.equal(kalshi.at[0].connectTo, 'kalshi', 'a serving source keeps its route');
+  }
+  // the old params, unscoped with one source or none: unchanged
+  assert.deepEqual(keys(joinExplore(market, body([]), { here })), ['event:A']);
+  assert.deepEqual(keys(joinExplore(market, body([]), { tab: 'predictions', source: 'polymarket', here })), ['event:A']);
+});
+
+test('on the class path a connected venue speaks only for the rows it lists, not the whole public source', () => {
+  const connector = 'live:hyperliquid-trade';
+  const market = body([
+    row('perp:BTC', [pub('hyperliquid', 'BTC-PERP', connector)], { tabs: ['all', 'crypto'] }),
+    row('perp:DOGE', [pub('hyperliquid', 'DOGE-PERP', connector)], { tabs: ['all', 'crypto'] }),
+    row('perp:xyz:GOLD', [pub('trade-xyz', 'xyz:GOLD-PERP', connector)], { tabs: ['all', 'commodities'] }),
+  ]);
+  const connected = body([row('perp:BTC', [con('hl-wallet', 'BTC/USDC:USDC', { publicSource: 'hyperliquid' })], { tabs: ['all', 'crypto'] })]);
+  const venues = [{ id: 'hl-wallet', connector, paper: false }];
+  const crypto = joinExplore(market, connected, { asset: 'crypto', source: 'hyperliquid', venues });
+  assert.deepEqual(keys(crypto), ['perp:BTC', 'perp:DOGE'], 'a public perp the wallet does not list stays');
+  assert.deepEqual(linesOf(crypto, 'perp:BTC'), ['hl-wallet|BTC/USDC:USDC'], 'the wallet speaks for the row it lists');
+  const commodities = joinExplore(market, connected, { asset: 'commodities', source: 'trade-xyz', venues });
+  assert.deepEqual(keys(commodities), ['perp:xyz:GOLD']);
+  // the old params, unscoped: a connected venue speaks for its whole connection, as before
+  assert.deepEqual(keys(joinExplore(market, connected, { venues })), ['perp:BTC']);
+});

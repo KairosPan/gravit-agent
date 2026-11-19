@@ -5,7 +5,8 @@
 // - A public line is left out where a connected venue that is not paper speaks for its connection (the same `connector`), and
 //   where the venues read says its connection does not serve here (`not-served`, `closed`, `close-only`); a row left with no
 //   lines goes. The focused Hyperliquid and xyz scopes keep the latter as read-only public data, without a connect-to-trade
-//   route; an explicitly selected More provider does the same. Broad More and unscoped reads retain the original contract.
+//   route; an explicitly selected More provider and the class path below do the same, and there a connected venue speaks only
+//   for the rows it lists itself. Broad More and unscoped old-param reads retain the original contract.
 // - By underlying (asset, form or region asked, or two sources or more, with no scope), a source list keeps the lines of its
 //   sources only: a public line by its venue id, a connected one by its venue id or the public source it prices from
 //   (`publicSource`); a row left with no lines goes. No source keeps every line; one source on the old params changes nothing.
@@ -138,7 +139,13 @@ export function joinExplore(market, connected, { venues = [], here = [], tab = '
   const away = new Set(records(here).filter(v => AWAY.has(str(v.verdict)) && str(v.connector)).map(v => v.connector));
   const scoped = ['hyperliquid', 'xyz', 'more'].includes(scope);
   const provider = scope === 'more' && str(source) !== '';
-  const focused = scope === 'hyperliquid' || scope === 'xyz' || provider;
+  // the class path (by underlying): asset, form or region asked, or two sources or more, with no scope
+  const byClass = Boolean(str(asset) || str(form) || str(region));
+  const ids = str(source).split(',').map(s => s.trim()).filter(Boolean);
+  const classPath = !scope && (byClass || ids.length > 1);
+  // browsing named sources or a class — the focused scopes and the class path: a connected venue speaks for the rows it lists
+  // only, and a source that does not serve here stays as read-only public data
+  const focused = scope === 'hyperliquid' || scope === 'xyz' || provider || classPath;
   const connectorOf = l => str(l.connector) || str(records(venues).find(v => v.id === l.venue)?.connector);
   const inScope = (row, line) => {
     if (!scoped) return true;
@@ -147,10 +154,8 @@ export function joinExplore(market, connected, { venues = [], here = [], tab = '
     const origin = row.kind === 'perp' ? marketOriginOf({ ...line, connector: connectorOf(line) }) : null;
     return scope === 'more' ? origin === null : origin === scope;
   };
-  // the class path (by underlying): a source list keeps its sources' lines; a scope keeps the rule above
-  const byClass = Boolean(str(asset) || str(form) || str(region));
-  const ids = str(source).split(',').map(s => s.trim()).filter(Boolean);
-  const listed = !scope && ids.length > 0 && (byClass || ids.length > 1);
+  // the class path: a source list keeps its sources' lines; a scope keeps the rule above
+  const listed = classPath && ids.length > 0;
   const inList = l => ids.includes(str(l.venue)) || (l.public !== true && (allSources === true || ids.includes(str(l.publicSource))));
   const scopedRows = body => new Map([...byKey(body)].flatMap(([key, row]) => {
     const kept = scoped ? withLines(row, l => inScope(row, l)) : listed ? withLines(row, inList) : row;
@@ -163,7 +168,7 @@ export function joinExplore(market, connected, { venues = [], here = [], tab = '
     const mr = mRows.get(key), cr = cRows.get(key);
     // A focused public market remains discoverable when the connected venue's shorter list omits it. Only a connected
     // line for this same row replaces it; a connected Hyperliquid wallet must not hide the entire xyz public universe.
-    const rowSpeaks = scoped ? new Set(records(cr?.at).filter(l => l.paper !== true).map(connectorOf)) : speaks;
+    const rowSpeaks = scoped || classPath ? new Set(records(cr?.at).filter(l => l.paper !== true).map(connectorOf)) : speaks;
     const keep = l => !(l.public === true && (rowSpeaks.has(str(l.connector)) || (!focused && away.has(str(l.connector)))));
     const readOnly = l => {
       if (!focused || l.public !== true || !away.has(str(l.connector))) return l;

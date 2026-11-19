@@ -2103,6 +2103,8 @@ export function tradeXyzPublic(deps: PublicDeps = {}): PublicSource {
       const [coin, category] = [str(list(pair)[0]), str(list(pair)[1])];
       if (coin?.startsWith("xyz:") && category) out.set(coin, category);
     }
+    // an answer that names no xyz market (empty, not a list) is no read: the kept categories stay
+    if (!out.size) return no("E_VENUE_REJECTED", { venue: id, message: `${name} answered without its categories` });
     lastCats = out;
     return out;
   });

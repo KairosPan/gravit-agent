@@ -125,7 +125,7 @@ export const isSourceOf = (markets, v) => v === 'main' || v === 'all' || familie
 const sortOf = m => (ACCOUNT_SORT_IDS.includes(m?.sort) ? m.sort : 'volume');
 /** The explore read the tab on screen takes, or null on Stocks › China A (its ranking, rankQueryOf): the Watchlist the
  *  unscoped read; a tab its asset, the sort, its region (Stocks, Indices), its form and the source ids the Source selects
- *  (All sources the tab's whole list, never none). */
+ *  (All sources the tab's whole list, never none; region cn none, as the market asks). */
 export function exploreQueryOf(markets) {
   const m = isRecord(markets) ? markets : {};
   const tab = tabOf(m);
@@ -133,7 +133,9 @@ export function exploreQueryOf(markets) {
   if (onChinaA(m)) return null;
   const form = FORMS.live.includes(m.form) ? `&form=${m.form}` : '';
   const region = REGIONED.has(tab) ? `&region=${regionOf(m)}` : '';
-  return `asset=${tab}&sort=${sortOf(m)}&limit=${MARKET_ROWS}${region}${form}&source=${selectedIds(m).join(',')}`;
+  // region cn names no public source (the market refuses one beside it, reads.ts): the class alone, which answers its empty state
+  const source = REGIONED.has(tab) && regionOf(m) === 'cn' ? '' : `&source=${selectedIds(m).join(',')}`;
+  return `asset=${tab}&sort=${sortOf(m)}&limit=${MARKET_ROWS}${region}${form}${source}`;
 }
 /** The query the connected half takes: under All sources the tab's class with no source list, so every connected line of
  *  the class shows (spec §5.2; the join then rules the public lines alone, `allSources`); otherwise exploreQueryOf's. */

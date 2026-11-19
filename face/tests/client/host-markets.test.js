@@ -11,6 +11,7 @@ import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startMarkets, EXPLORE_MS, EXPLORE_TIMEOUT_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS, BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT } from '../../client/js/host/markets.js';
 import { rowsOf, pageOf, tableOf, cnStateWord } from '../../client/js/host/market-view.js';
+import { renderMarketsScreen } from '../../client/js/render/markets.js';
 import { STORAGE_KEY, ACCOUNT_WATCH_KEY, readAccountWatch, saveAccountWatch } from '../../client/js/wire/market-model.js';
 import { setTable } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
@@ -2112,5 +2113,29 @@ test("an event window's refusal lands failed with the market's words; read once 
   r.store.dispatch('nav', route);
   await settle();
   assert.equal(r.reads.filter(p => p.includes('since=')).length, 2);
+  r.markets.close();
+});
+
+// Indices › China A (final review item 2): the market refuses a source with region cn, so the screen sends none there and
+// draws the tab's empty state, never the refusal
+test('Indices › China A asks with no source and draws the empty state, not the refusal', async () => {
+  const r = rig({ tab: 'indices', answer: path => {
+    if (!path.startsWith('/data/market/explore?')) return undefined;
+    const q = query(path);
+    if (q.region !== 'cn') return undefined;
+    // the market's own rule (market/src/reads.ts): a source beside region cn is refused; else no rows outside spot stocks
+    return q.source !== undefined ? refused(400, { ok: false, refusal: { code: 'E_MARKET_BAD_REQUEST', message: 'China is not part of a selected public source' } }) : NO_CONNECTED();
+  } });
+  r.store.dispatch('setMarketsRegion', 'cn');
+  r.markets.show(true);
+  await settle();
+  const cn = r.allReads.filter(p => p.includes('/explore?') && query(p).region === 'cn');
+  assert.ok(cn.length >= 2, 'both halves asked');
+  for (const p of cn) assert.equal(query(p).source, undefined, `${p}: no source with region cn`);
+  assert.equal(r.m().explore.indices.status, 'ready');
+  const state = { ...r.store.get(), route: { screen: 'markets' } };
+  const html = renderMarketsScreen(state);
+  assert.doesNotMatch(html, /China is not part of a selected public source/);
+  assert.match(html, /Nothing here with these filters\./);
   r.markets.close();
 });

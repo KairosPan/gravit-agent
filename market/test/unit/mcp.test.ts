@@ -153,6 +153,13 @@ describe("market:mcp", () => {
     }
   });
 
+  it("market_explore's description says a full class names its sources, and a source list is not mixed with scope or tab", async () => {
+    const { tools } = await client.listTools();
+    const d = tools.find((t) => t.name === "market_explore")!.description ?? "";
+    expect(d).toMatch(/a whole class needs its source\(s\) named \(`asset=fx&source=trade-xyz`\)/);
+    expect(d).toMatch(/`scope` and `tab` are not mixed with `asset`, `form`, `region` or a source list/);
+  });
+
   it("market_candles answers a public source's history", async () => {
     const r = await client.callTool({ name: "market_candles", arguments: { venue: "fake", symbol: "BTC/USDT", interval: "1h", range: "1D" } });
     expect(r.isError).toBeFalsy();

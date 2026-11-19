@@ -169,6 +169,25 @@ describe("trade.xyz's public xyz perpetuals", () => {
     expect(source.notes!({}).join(" ")).not.toContain("categories did not answer");
   });
 
+  it("treats an empty or malformed categories answer as a failed read: the kept categories stay, and none kept is said", async () => {
+    for (const empty of [json([]), json({}), json([["BTC", "crypto"]])]) {
+      const overrides: Record<string, HttpReply> = { perpCategories: json([["xyz:NVDA", "stocks"]]) };
+      const net = network(overrides);
+      let now = NOW;
+      const source = tradeXyzPublic({ http: net.http, clock: () => now });
+      await source.listings({ limit: 20 });
+      overrides.perpCategories = empty;
+      now += LIST_MS + KEEP_MS + 1;
+      const rows = await source.listings({ limit: 20 }) as Listing[];
+      expect(net.sent.filter((s) => s.body.type === "perpCategories")).toHaveLength(2);
+      expect(rows.find((m) => m.symbol === "xyz:NVDA-PERP")).toMatchObject({ category: "stocks" });
+      expect(source.notes!({}).join(" ")).not.toContain("categories did not answer");
+      const never = tradeXyzPublic({ http: network({ perpCategories: empty }).http, clock: () => NOW });
+      await never.listings({ limit: 20 });
+      expect(never.notes!({})).toContain("trade.xyz: its categories did not answer, so its markets are under no tab now; a search still finds them.");
+    }
+  });
+
   it("says so when no categories were ever read", async () => {
     const net = network({ perpCategories: json(null, 500) });
     const source = tradeXyzPublic({ http: net.http, clock: () => NOW });

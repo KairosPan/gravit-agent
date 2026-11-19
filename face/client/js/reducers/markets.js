@@ -219,6 +219,7 @@ export const reducers = {
     const v = String(q ?? '');
     const m = s.markets;
     if (v === m.q) return s;
-    return blank(v) && !blank(m.q) ? mk(s, { q: v, results: { ...IDLE } }) : mk(s, { q: v });
+    // a search closes a filter's popover (the filters are not drawn while it shows), so Back to <tab> finds it closed
+    return blank(v) && !blank(m.q) ? mk(s, { q: v, results: { ...IDLE } }) : mk(s, blank(v) ? { q: v } : { q: v, open: null });
   },
 };

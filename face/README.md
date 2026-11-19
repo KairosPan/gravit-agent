@@ -2362,7 +2362,8 @@ The query each tab sends, to both explore halves (`exploreQueryOf`): the Watchli
 `limit=200`; a tab `asset=<tab>&sort=<sort>&limit=200`, then `region=<region>` on Stocks and
 Indices, `form=<form>` when one is set, and `source=<ids>` — the main ids, a family's ids, or under
 All sources the tab's whole list (the connected half then gets no `source`, so every connected line
-of the class shows: `connectedQueryOf`). Stocks › China A sends no explore read: its ranking is
+of the class shows: `connectedQueryOf`); with `region=cn` no `source` at all (the market refuses a
+source beside it; Indices › China A answers its empty state). Stocks › China A sends no explore read: its ranking is
 `asset=stocks&region=cn&sort=volume|movers&limit=20` (`rankQueryOf`), never Closing soonest. A
 read is drawn only under the filters it was asked for: an answer that lands after the operator
 changed a filter is kept but not drawn, and the screen says `Loading…` until its own read lands.
@@ -2983,7 +2984,7 @@ request`. Eight exact routes, none naming the account:
 
 | Route | What it reads at the market | TTL | Abort | Query names |
 |---|---|---|---|---|
-| `GET /data/market/explore` | `GET /api/explore`: the public markets, by scope, exact source, tab, China's ranking, or search | 20 s | 10 s | `tab`, `q`, `key`, `sort`, `limit`, `scope`, `source` |
+| `GET /data/market/explore` | `GET /api/explore`: the public markets, by scope, source list, tab, underlying (asset, form, region), China's ranking, or search | 20 s | 10 s | `tab`, `q`, `key`, `sort`, `limit`, `scope`, `source`, `asset`, `form`, `region` |
 | `GET /data/market/sources` | `GET /api/sources`: the configured public source directory; data products, not trading availability | 30 s | 7 s | none |
 | `GET /data/market/quotes` | `GET /api/quotes`: up to twelve A shares (`china|<code>`); any other pair is refused, its price being in explore | 3 s | 7 s | `pairs` (2,000 characters) |
 | `GET /data/market/candles` | `GET /api/candles`: a public line's or an A share's price history — by range, a page back (`before`), or, since 2026-11-12, a dated window (`since` and `before` together, a public line's alone: a stock's page at an event) | 30 s | 25 s | `venue`, `symbol`, `interval`, `range`, `before`, `since`, `limit` |
@@ -2992,16 +2993,22 @@ request`. Eight exact routes, none naming the account:
 | `GET /data/market/stream` | `GET /api/stream`: the market's push channel (`snapshot`, `quote`, `trades`, `book`, `hb`), one upstream request per browser connection | — | — | `client` (required), `since`, `markets` (4,000 characters) |
 | `POST /data/market/stream/markets` | `POST /api/stream/markets`: the public markets a stream follows | — | 7 s | none |
 
-Both explore reads accept `source` as one exact public source ID, only with `scope=more` or no
-scope; the selection filters sources and connected products before fetching or limiting rows.
-A selected source cannot include China.
+Both explore reads accept `source` as one exact public source ID or a comma list of them (at most
+12 ids and 400 characters, each known, duplicates dropped, an empty segment refused), only with
+`scope=more` or no scope; the selection filters sources and connected products before fetching or
+limiting rows. They also ask by underlying: `asset` (crypto, stocks, indices, commodities, fx,
+preipo, macro), `form` (spot, perp, token, event) and `region` (us, cn), filtered before the cut.
+`asset`, `form`, `region` or a list of two sources or more is refused beside `scope` or `tab`
+(400). A selected source cannot include China, nor be sent with `region=cn`.
 
 The join (`client/js/host/explore-join.js`, `joinExplore`) makes one table of the two halves'
 explore answers to one query: a connected half the proxy re-served stale is dropped, a stale
 market half kept and marked; a public line is dropped where a connected (non-paper) venue of the
 same connection speaks for it, or where the venues read (`/data/account/venues`, once) says the
-venue is `not-served`, `closed` or `close-only` here. The focused Hyperliquid and trade.xyz entries
-retain those public lines for reading, with `canTrade: false` and no `connectTo`; a market both halves list is one row, its
+venue is `not-served`, `closed` or `close-only` here. The focused Hyperliquid and trade.xyz entries,
+an explicit More provider and every read by underlying (asset, form or region, or two sources or
+more) retain those public lines for reading, with `canTrade: false` and no `connectTo`, and there a
+connected venue speaks only for the rows it lists itself; a market both halves list is one row, its
 lines the connected ones first, then the public, then the paper; both halves sort together as the
 Account's old explore sorted and are cut once at the limit; a half that failed is named in
 `missing` (`The Account is not answering: the venues connected are not listed`, `The market is not

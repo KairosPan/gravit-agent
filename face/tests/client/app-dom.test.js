@@ -1114,19 +1114,19 @@ test("the Desk's routines: open a row, flip its switch, Test it, Delete it once 
   store.timers.clear();
 });
 
-// the manual look (2026-10-20): the render keeps what an input holds, so Clear must empty the box itself
-test('Clear empties the search box as well as the query', async () => {
+// a Markets filter's popover closes on Escape, in the app's Escape chain (final review item 6)
+test("Escape closes a Markets filter's popover", async () => {
   const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
-  const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
   const h = host();
   const store = bootMarkets(f, h, fakeMarkets());
   await h.ready();
-  mq.value = 'BTC';
-  f.fire('root', 'input', { target: mq });
-  assert.equal(mq.value, 'BTC', 'a render keeps what was typed');
-  f.click({ tagName: 'BUTTON', dataset: { action: 'mkClear' } });
-  assert.equal(store.get().markets.q, '');
-  assert.equal(mq.value, '', 'the box is empty too');
+  store.dispatch('setMarketsTab', 'crypto');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'mkFilter', value: 'form' } });
+  assert.equal(store.get().markets.open, 'form');
+  assert.match(f.html(), /data-action="mkFilter" data-value="form" aria-expanded="true"/);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().markets.open, null);
+  assert.match(f.html(), /data-action="mkFilter" data-value="form" aria-expanded="false"/);
   store.timers.clear();
 });
 
