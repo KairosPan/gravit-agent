@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tradeXyzPublic, KEEP_MS, type Listing } from "../../src/live/public-markets.ts";
+import { tradeXyzPublic, KEEP_MS, LIST_MS, type Listing } from "../../src/live/public-markets.ts";
 import type { CandlePage } from "../../src/live/trade.ts";
 import type { Http, HttpReply } from "../../src/live/types.ts";
 
@@ -153,5 +153,42 @@ describe("trade.xyz's public xyz perpetuals", () => {
       expect(m).not.toHaveProperty("implied");
       expect(m).not.toHaveProperty("group");
     }
+  });
+
+  it("uses the last categories it read when a later read refuses", async () => {
+    const overrides: Record<string, HttpReply> = { perpCategories: json([["xyz:NVDA", "stocks"]]) };
+    const net = network(overrides);
+    let now = NOW;
+    const source = tradeXyzPublic({ http: net.http, clock: () => now });
+    expect(await source.listings({ limit: 20 })).toEqual(expect.arrayContaining([expect.objectContaining({ symbol: "xyz:NVDA-PERP", category: "stocks" })]));
+    overrides.perpCategories = json(null, 500);
+    now += LIST_MS + KEEP_MS + 1;
+    const rows = await source.listings({ limit: 20 }) as Listing[];
+    expect(rows.find((m) => m.symbol === "xyz:NVDA-PERP")).toMatchObject({ category: "stocks" });
+    expect(net.sent.filter((s) => s.body.type === "perpCategories")).toHaveLength(2);
+    expect(source.notes!({}).join(" ")).not.toContain("categories did not answer");
+  });
+
+  it("says so when no categories were ever read", async () => {
+    const net = network({ perpCategories: json(null, 500) });
+    const source = tradeXyzPublic({ http: net.http, clock: () => NOW });
+    const rows = await source.listings({ limit: 20 }) as Listing[];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.find((m) => m.symbol === "xyz:NVDA-PERP")).not.toHaveProperty("category");
+    expect(source.notes!({})).toContain("trade.xyz: its categories did not answer, so its markets are under no tab now; a search still finds them.");
+  });
+
+  it("drops the kept categories on reset", async () => {
+    const overrides: Record<string, HttpReply> = { perpCategories: json([["xyz:NVDA", "stocks"]]) };
+    const net = network(overrides);
+    let now = NOW;
+    const source = tradeXyzPublic({ http: net.http, clock: () => now });
+    await source.listings({ limit: 20 });
+    overrides.perpCategories = json(null, 500);
+    now += LIST_MS + KEEP_MS + 1;
+    source.reset!();
+    const rows = await source.listings({ limit: 20 }) as Listing[];
+    expect(rows.find((m) => m.symbol === "xyz:NVDA-PERP")).not.toHaveProperty("category");
+    expect(source.notes!({}).join(" ")).toContain("categories did not answer");
   });
 });

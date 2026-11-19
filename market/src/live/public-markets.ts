@@ -2092,6 +2092,9 @@ export function tradeXyzPublic(deps: PublicDeps = {}): PublicSource {
   const keep = keeper<Listing[]>(clock, KEEP_MS);
   const filed = keeper<Map<string, string>>(clock, LIST_MS);
   let shown: { of: number; total: number } | undefined;
+  /** the last categories an answer carried: a later refusal reads them, so no market falls off its tab */
+  let lastCats: Map<string, string> | undefined;
+  let catsMissing = false;
   const categories = () => filed("categories", async () => {
     const body = await hlAsk(info, id, name, { type: "perpCategories" });
     if (isRefusal(body)) return body;
@@ -2100,11 +2103,14 @@ export function tradeXyzPublic(deps: PublicDeps = {}): PublicSource {
       const [coin, category] = [str(list(pair)[0]), str(list(pair)[1])];
       if (coin?.startsWith("xyz:") && category) out.set(coin, category);
     }
+    lastCats = out;
     return out;
   });
   const load = (): Promise<Listing[] | Refusal> => keep("xyz", async () => {
-    const [body, cats] = await Promise.all([hlAsk(info, id, name, { type: "metaAndAssetCtxs", dex: "xyz" }), categories()]);
+    const [body, read] = await Promise.all([hlAsk(info, id, name, { type: "metaAndAssetCtxs", dex: "xyz" }), categories()]);
     if (isRefusal(body)) return body;
+    const cats = isRefusal(read) ? lastCats : read;
+    catsMissing = cats === undefined;
     const answer = list(body);
     const meta = rec(answer[0]);
     const universe = list(meta.universe);
@@ -2121,7 +2127,7 @@ export function tradeXyzPublic(deps: PublicDeps = {}): PublicSource {
       const coin = str(u.name);
       if (!coin?.startsWith("xyz:") || coin.length <= 4 || !HL_COIN.test(coin) || u.isDelisted === true) return;
       const base = coin.slice(4);
-      const category = isRefusal(cats) ? undefined : cats.get(coin);
+      const category = cats?.get(coin);
       const mark = preIpoOf("hyperliquid", category !== undefined ? { category } : {}, base, coin);
       const price = pos(c.midPx) ?? pos(c.markPx);
       const day = since(price, pos(c.prevDayPx));
@@ -2152,7 +2158,7 @@ export function tradeXyzPublic(deps: PublicDeps = {}): PublicSource {
   const funding = hyperliquidFunding(info, id, name, form, deps.pace ?? hostLane);
   return {
     id, name, kind: "exchange", ...HL_TRADE,
-    reset: () => { keep.clear(); filed.clear(); bars.clear(); depth.clear(); funding.clear(); },
+    reset: () => { keep.clear(); filed.clear(); lastCats = undefined; catsMissing = false; bars.clear(); depth.clear(); funding.clear(); },
     async listings(o) {
       const all = await load();
       if (isRefusal(all)) return all;
@@ -2166,7 +2172,10 @@ export function tradeXyzPublic(deps: PublicDeps = {}): PublicSource {
       return isRefusal(all) ? all : all.find((m) => m.symbol.toUpperCase() === symbol.trim().toUpperCase()) ?? null;
     },
     candles: bars, book: depth.book, trades: depth.trades, fundingHistory: funding.history,
-    notes: (o) => !o.q?.trim() && shown ? [`${name}: ${shown.of} of ${shown.total} active xyz perpetuals shown · contracts on Hyperliquid, not ownership of their underlying assets.`] : [],
+    notes: (o) => [
+      ...(!o.q?.trim() && shown ? [`${name}: ${shown.of} of ${shown.total} active xyz perpetuals shown · contracts on Hyperliquid, not ownership of their underlying assets.`] : []),
+      ...(catsMissing ? [`${name}: its categories did not answer, so its markets are under no tab now; a search still finds them.`] : []),
+    ],
   };
 }
 
