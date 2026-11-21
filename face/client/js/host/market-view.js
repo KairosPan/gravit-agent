@@ -88,8 +88,8 @@ const localName = venue => LOCAL_NAMES[venue] ?? t('markets.tab.indices');
 const sourcesOfTab = m => {
   const tab = tabOf(m);
   if (tab === 'watchlist') return { main: [], also: [] };
-  // a non-US share region's perps are trade.xyz's; its Spot is a read of its own, never a registered source (spec §5.6)
-  if (tab === 'stocks' && regionOf(m) !== 'us' && regionOf(m) !== 'cn') return { main: ['trade-xyz'], also: [] };
+  // a non-US region's perps (Stocks or Indices, China A too) are trade.xyz's; its Spot is a read of its own, never a registered source (spec §5.6)
+  if (nonUs(m)) return { main: ['trade-xyz'], also: [] };
   return TAB_SOURCES[tab === 'stocks' ? `stocks:${regionOf(m)}` : tab] ?? { main: [], also: [] };
 };
 const familyKey = id => id.replace(/-preipo$/, '');

@@ -136,6 +136,23 @@ test('rankQueryOf and exploreQueryOf by region, form and tab', () => {
   assert.equal(t('markets.empty.noSpotSource'), 'No free source lists these shares; their perps are under Perp.');
 });
 
+test('Perp on a non-US region reads trade.xyz alone: the pill, the families and the query agree', () => {
+  for (const [tab, region] of [['stocks', 'cn'], ['stocks', 'kr'], ['indices', 'jp']]) {
+    const m = on(tab, ['setMarketsRegion', region], ['setMarketsForm', 'perp']).markets;
+    const f = filtersOf(m).source;
+    assert.deepEqual(f.options.map(o => o.id), ['main', 'all', 'trade-xyz'], `${tab} ${region}`);
+    assert.equal(f.label, t('markets.source.main', { names: 'trade-xyz' }), `${tab} ${region}`);
+    assert.equal(decoded(exploreQueryOf(m)).source, 'trade-xyz');
+  }
+});
+
+test('a Form pick that makes the view local clears a family Source', () => {
+  const s = on('indices', ['setMarketsSource', 'kalshi'], ['setMarketsForm', 'event']);
+  assert.equal(s.markets.source, 'kalshi');
+  const local = R.setMarketsForm(s, 'spot');
+  assert.deepEqual([local.markets.form, local.markets.source], ['spot', 'main']);
+});
+
 test('the Source filter on a region’s own read is its one venue, fixed', () => {
   const names = (tab, region) => filtersOf(on(tab, ['setMarketsRegion', region]).markets).source.options.map(o => o.label);
   assert.deepEqual(names('stocks', 'hk').slice(2), ['Tencent']);

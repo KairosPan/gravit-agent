@@ -3,7 +3,7 @@
 // its base's compare rows, the Account keys starred and what each old us:/crypto: star was found as; the A shares' quotes, their
 // search hits' prices and China's state, the Account's too — and the screen's own view of it: the tab, its Region, Form and
 // Source and the popover open, the sort, the query, a page's range
-import { ACCOUNT_SORT_IDS, CANDLE_RANGES, MARKET_TABS, REGIONS, isAccountKey, formsInView, formsOfSource, mainFormsOf, isSourceOf } from '../host/market-view.js';
+import { ACCOUNT_SORT_IDS, CANDLE_RANGES, MARKET_TABS, REGIONS, onLocal, isAccountKey, formsInView, formsOfSource, mainFormsOf, isSourceOf } from '../host/market-view.js';
 import { number } from '../wire/market-model.js';
 import { chinaProviderOf, isCnKey } from '../wire/china.js';
 
@@ -188,7 +188,9 @@ export const reducers = {
   setMarketsForm(s, id) {
     const m = s.markets;
     if (m.tab === 'watchlist' || (id !== '' && !formsInView(m).includes(id))) return s;
-    const source = id !== '' && m.source === 'main' && !mainFormsOf(m).includes(id) ? 'all' : m.source;
+    let source = id !== '' && m.source === 'main' && !mainFormsOf(m).includes(id) ? 'all' : m.source;
+    // a view on a region's own read has one fixed source: a family picked before does not wait to reappear
+    if (onLocal({ ...m, form: id })) source = 'main';
     return mk(s, { form: id, source, open: null });
   },
   setMarketsSource(s, v) {
