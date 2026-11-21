@@ -165,7 +165,7 @@ export function koreaSource(deps: { http?: CnHttp; clock?: () => number } = {}):
 
   async function history(symbol: string, range: CandleRange): Promise<LocalHistory | Refusal> {
     const code = krCode(symbol);
-    if (!code) return badAction("a Korean share is its code, six digits");
+    if (!code) return badAction("a Korean share is its code, six digits or letters");
     if (range === "1D" || range === "5D") return badAction("Korea's intraday chart is not read here");
     if (!Object.hasOwn(CN_BARS, range)) return badAction("no such Korean chart range");
     const url = krChartUrl(code);

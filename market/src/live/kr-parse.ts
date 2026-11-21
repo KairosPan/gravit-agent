@@ -39,9 +39,12 @@ const delayOf = (o: Record<string, unknown>): number | null => {
   return isRecord(x) && typeof x.delayTime === "number" && Number.isFinite(x.delayTime) && x.delayTime >= 0 ? x.delayTime : null;
 };
 
-/** A Korean code from what a person or a page types: six digits, kept as they are (`005935` is the preferred share, not `5935`) */
+/** a Korean code: six characters, digits and upper-case letters (KRX issues alphanumeric codes such as 0126Z0) */
+export const KR_CODE = /^[0-9A-Z]{6}$/;
+/** A Korean code from what a person or a page types: six digits or letters, kept as they are (`005935` is the preferred share, not `5935`); letters are upper-cased */
 export function krCode(input: string): string | null {
-  return /^\d{6}$/.test(input) ? input : null;
+  const code = input.toUpperCase();
+  return KR_CODE.test(code) ? code : null;
 }
 
 // ---- URLs ------------------------------------------------------------------------------------------------------------------------
@@ -65,7 +68,7 @@ export function parseKrRank(text: string): { total: number; rows: KrRankRow[] } 
   for (const s of value.stocks) {
     if (!isRecord(s) || s.stockEndType !== "stock") continue;
     const code = s.itemCode, name = s.stockName;
-    if (typeof code !== "string" || !/^\d{6}$/.test(code) || typeof name !== "string" || !name.trim()) continue;
+    if (typeof code !== "string" || !KR_CODE.test(code) || typeof name !== "string" || !name.trim()) continue;
     rows.push({ code, name: name.trim(), price: raw(s, "closePrice", true), changePct: figure(s.fluctuationsRatio), turnover: figure(s.accumulatedTradingValueRaw),
       at: stampOf(s.localTradedAt), delayMin: delayOf(s) });
   }
@@ -74,13 +77,13 @@ export function parseKrRank(text: string): { total: number; rows: KrRankRow[] } 
 }
 
 // ---- quotes ----------------------------------------------------------------------------------------------------------------------
-/** the `datas` of a polling reply, by six-digit code; null when the body holds none */
+/** the `datas` of a polling reply, by six-character code; null when the body holds none */
 export function parseKrQuotes(text: string): Map<string, KrQuote> | null {
   const value = json(text);
   if (!isRecord(value) || !Array.isArray(value.datas)) return null;
   const quotes = new Map<string, KrQuote>();
   for (const d of value.datas) {
-    if (!isRecord(d) || typeof d.itemCode !== "string" || !/^\d{6}$/.test(d.itemCode)) continue;
+    if (!isRecord(d) || typeof d.itemCode !== "string" || !KR_CODE.test(d.itemCode)) continue;
     const price = raw(d, "closePrice", true), change = raw(d, "compareToPreviousClosePrice");
     const asOf = stampOf(d.localTradedAt);
     quotes.set(d.itemCode, {
@@ -111,14 +114,14 @@ export function parseKrChart(text: string, code: string): CnBar[] | null {
 }
 
 // ---- search ----------------------------------------------------------------------------------------------------------------------
-/** the Korean listings of an autocomplete reply (it answers the world's): nationCode KOR, a six-digit code; null for any other body */
+/** the Korean listings of an autocomplete reply (it answers the world's): nationCode KOR, a six-character code; null for any other body */
 export function parseKrSearch(text: string): KrHit[] | null {
   const value = json(text);
   if (!isRecord(value) || !Array.isArray(value.items)) return null;
   const hits: KrHit[] = [];
   const seen = new Set<string>();
   for (const i of value.items) {
-    if (!isRecord(i) || i.nationCode !== "KOR" || typeof i.code !== "string" || !/^\d{6}$/.test(i.code) || typeof i.name !== "string" || !i.name.trim()) continue;
+    if (!isRecord(i) || i.nationCode !== "KOR" || typeof i.code !== "string" || !KR_CODE.test(i.code) || typeof i.name !== "string" || !i.name.trim()) continue;
     if (seen.has(i.code)) continue;
     seen.add(i.code);
     hits.push({ code: i.code, name: i.name.trim() });

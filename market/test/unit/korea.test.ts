@@ -33,8 +33,7 @@ const FRI_11 = Date.parse("2026-11-20T02:00:00Z"), MON_11 = Date.parse("2026-11-
 const down = text("<html>busy</html>", 500);
 const asks = (n: ReturnType<typeof net>) => n.sent.filter((u) => u.includes("marketValue/KOSPI")).length;
 const page = JSON.parse(RANK_BODY) as { stocks: Array<{ stockEndType: string; itemCode: string; accumulatedTradingValueRaw: string }> };
-// a code with a letter (0126Z0) is read nowhere here: six digits only
-const shares = page.stocks.filter((s) => s.stockEndType === "stock" && /^\d{6}$/.test(s.itemCode));
+const shares = page.stocks.filter((s) => s.stockEndType === "stock");
 const byTurnover = [...shares].sort((a, b) => Number(b.accumulatedTradingValueRaw) - Number(a.accumulatedTradingValueRaw)).map((s) => `kr:${s.itemCode}`);
 
 describe("the Korea source", () => {
@@ -52,7 +51,7 @@ describe("the Korea source", () => {
     expect(n.sent.some((u) => u.endsWith("page=2&pageSize=100"))).toBe(true);
     expect(r.items.length).toBeLessThanOrEqual(KR_RANK_ROWS);
     expect(r.items.map((i) => i.key)).toEqual(byTurnover); // the fixture answers both pages alike; a code is listed once
-    expect(r.items.every((i) => /^kr:\d{6}$/.test(i.key) && i.currency === "KRW" && i.region === "kr" && i.kind === "share")).toBe(true);
+    expect(r.items.every((i) => /^kr:[0-9A-Z]{6}$/.test(i.key) && i.currency === "KRW" && i.region === "kr" && i.kind === "share")).toBe(true);
     expect(r.items.every((i) => i.nameLocal === undefined)).toBe(true);
     const sk = r.items.find((i) => i.key === "kr:000660")!;
     expect(sk).toMatchObject({ name: "SK하이닉스", price: 1100000, changePct24h: -7.02, turnoverLocal: 3618595000000, quoteFrom: "Naver · real time" });
@@ -60,6 +59,30 @@ describe("the Korea source", () => {
     expect(r.read).toMatchObject({ venue: "kr", region: "kr", sort: "volume", total: r.items.length, asOf: new Date(SUN).toISOString(),
       session: { phase: "closed", lastSession: "2026-11-20" }, status: { state: "live", said: "Naver · answering" },
       note: "the 200 largest KOSPI shares by market value, ordered by today's turnover" });
+  });
+
+  it("the ranking includes the alphanumeric 0126Z0, in turnover order", async () => {
+    const r = answered(await koreaSource({ http: net(routes()).http, clock: () => SUN }).rank("volume"));
+    const keys = r.items.map((i) => i.key);
+    expect(keys).toContain("kr:0126Z0");
+    expect(keys.indexOf("kr:0126Z0")).toBe(byTurnover.indexOf("kr:0126Z0"));
+  });
+
+  it("a page 2 that fails fails the whole read: refused with nothing before it, stale with something", async () => {
+    const two = text(RANK_BODY);
+    let broken = false;
+    const n = net(routes([["page=2&", () => (broken ? down : two)], ["page=1&", two]]));
+    let t = FRI_11;
+    const s = koreaSource({ http: n.http, clock: () => t });
+    broken = true;
+    expect(refused(await s.rank("volume")).code).toBe("E_VENUE_UNREACHABLE");
+    broken = false;
+    const first = answered(await s.rank("volume"));
+    broken = true;
+    t += 60_000;
+    const stale = answered(await s.rank("volume"));
+    expect(stale.read.status.state).toBe("stale");
+    expect(stale.items).toEqual(first.items);
   });
 
   it("two different pages are both read, and the top 200 are re-sorted by turnover as one", async () => {
@@ -155,6 +178,15 @@ describe("the Korea source", () => {
       lastSession: "2026-11-20", phase: "closed", quoteStatus: "live" });
   });
 
+  it("quotes: an alphanumeric code is asked upper-cased and read", async () => {
+    const body = JSON.parse(fxText("naver-kr-quotes.json"));
+    body.datas = [{ ...body.datas[0], itemCode: "0126Z0", stockName: "알파" }];
+    const n = net(routes([["realtime/domestic/stock", text(JSON.stringify(body))]]));
+    const q = answered(await koreaSource({ http: n.http, clock: () => SUN }).quotes(["0126z0"]));
+    expect(n.sent).toEqual(["https://polling.finance.naver.com/api/realtime/domestic/stock/0126Z0"]);
+    expect(q.get("0126Z0")).toMatchObject({ symbol: "0126Z0", name: "알파", price: 180900 });
+  });
+
   it("quotes: a trading weekday takes the quote's day; a failure is refused; a non-code is not asked", async () => {
     expect(answered(await koreaSource({ http: net(routes()).http, clock: () => FRI_11 }).quotes(["005930"])).get("005930")!.session).toEqual({ open: true });
     expect(answered(await koreaSource({ http: net(routes()).http, clock: () => MON_11 }).quotes(["005930"])).get("005930")!.local.phase).toBe("closed");
@@ -194,10 +226,11 @@ describe("the Korea source", () => {
     // naver-search.json (q=samsung) holds no Korean item: this reply is hand-made, shaped like the fixture's items
     const made = text(JSON.stringify({ query: "samsung", items: [
       { code: "02812", name: "Samsung CSI China Dragon Internet ETF", typeCode: "HONG_KONG", nationCode: "HKG", category: "stock" },
-      { code: "005930", name: "삼성전자", typeCode: "KOSPI", nationCode: "KOR", category: "stock" }] }));
+      { code: "005930", name: "삼성전자", typeCode: "KOSPI", nationCode: "KOR", category: "stock" },
+      { code: "0126Z0", name: "알파", typeCode: "KOSPI", nationCode: "KOR", category: "stock" }] }));
     const n = net(routes([["ac.stock.naver.com", made]]));
     const hits = answered(await koreaSource({ http: n.http, clock: () => SUN }).search("samsung"));
-    expect(hits.map((h) => h.key)).toEqual(["kr:005930"]);
+    expect(hits.map((h) => h.key)).toEqual(["kr:005930", "kr:0126Z0"]);
     expect(hits[0]).toMatchObject({ name: "삼성전자", currency: "KRW", price: 180900, quoteFrom: "Naver · real time" });
     expect(n.sent[0]).toBe("https://ac.stock.naver.com/ac?q=samsung&target=stock");
   });
