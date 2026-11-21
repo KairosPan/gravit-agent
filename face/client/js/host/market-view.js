@@ -10,6 +10,7 @@
 // here. No DOM.
 import { normalizeAsset, number } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, isChiNext, cnHitsOf } from '../wire/china.js';
+import { localKeyOf } from '../wire/local.js';
 import { MIN, HOUR, DAY } from '../time.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
 import { t, isSaid, sayOf } from '../i18n/words.js';
@@ -367,6 +368,8 @@ export function volumeWordOf(priced) {
   if (volume === null) return '—';
   if (priced.volumeUnit === 'contracts') return t('markets.volume.contracts', { n: compact(volume) });
   if (priced.volumeUnit === 'shares') return t('markets.volume.shares', { n: compact(volume) });
+  // a share's turnover in its own currency (Hong Kong, Korea, Taiwan): its code before it, never a dollar sign
+  if (priced.volumeUnit === 'local') return typeof priced.currency === 'string' && priced.currency ? `${priced.currency} ${compact(volume)}` : compact(volume); // words-order: a currency code and its amount
   return `$${compact(volume)}`;
 }
 
@@ -496,22 +499,59 @@ export function cnStateWord(quote, connection, providers = []) {
 // the ranking's answer as the store keeps it, when it is one
 const rankOf = m => (m?.rank?.data?.ok === true && Array.isArray(m.rank.data.items) ? m.rank.data : null);
 
-/** China's rows: the ranking's items in its order, when the read is for the sort in effect (no rows in another sort's order); a
- *  row starred (cnStarsOf's: the Account keys starred, the page's china entries `atPage` names, an old cn star not yet moved)
- *  reads watched. */
-export function chinaRowsOf(markets, atPage = []) {
+// the ranking kept, when it is the one the view on screen reads: read for its query (its sort aside), or — one that names none, as
+// China's always did — on Stocks › China A
+function rankFits(data, m) {
+  const query = rankQueryOf(m);
+  if (query === null || !isRecord(data)) return false;
+  return typeof data.query === 'string' ? unsorted(data.query) === unsorted(query) : onChinaA(m);
+}
+// a share's currency as the row's unit (`hkd`), USD's when it names none
+const CURRENCY_UNITS = { CNY: 'cny', HKD: 'hkd', KRW: 'krw', TWD: 'twd' };
+
+/** A region's own rows (spec 2026-11-20 §5.6): the ranking's items in its order, when the read is for the view on screen and the sort
+ *  in effect (no rows of another region, nor in another sort's order). An A share as China's rows always were — its board, its star
+ *  (cnStarsOf's: the Account keys starred, the page's china entries `atPage` names, an old cn star not yet moved); a Hong Kong, Korean
+ *  or Taiwanese share its code and its local name, its price and turnover in its currency (`currency`, `unit`); a cash index its
+ *  level, change and change %, no currency. No star on any but an A share (spec §2 non-goal). */
+export function localRowsOf(markets, atPage = []) {
   const m = isRecord(markets) ? markets : {};
   const data = rankOf(m);
   const sort = m.sort === 'movers' ? 'movers' : 'volume';
-  if (!data || data.sort !== sort) return [];
-  const starred = new Set(cnStarsOf(m, atPage));
-  return records(data.items).filter(i => /^cn:\d{6}$/.test(str(i.id))).map(i => {
-    const symbol = str(i.symbol) || i.id.slice(3);
-    const priced = { price: number(i.price), unit: 'cny', changePct: number(i.change_pct), change24h: null, volume: number(i.turnover), volumeUnit: 'yuan', implied: null };
+  const local = onLocal(m);
+  if (!data || !local || data.sort !== sort || !rankFits(data, m)) return [];
+  const venue = local.venue;
+  const starred = venue === 'china' ? new Set(cnStarsOf(m, atPage)) : new Set();
+  return records(data.items).filter(i => localKeyOf(str(i.id))?.venue === venue).map(i => {
+    const symbol = str(i.symbol) || localKeyOf(i.id).symbol;
+    const name = str(i.name) || symbol;
+    const row = {
+      id: i.id, live: null, closeTime: null, pastEnd: false, paper: false, atAccount: false, legs: [],
+      tabs: [venue === 'china' ? CHINA_TAB : venue], form: 'spot', region: local.region,
+    };
+    if (venue === 'china') {
+      const priced = { price: number(i.price), unit: 'cny', changePct: number(i.change_pct), change24h: null, volume: number(i.turnover), volumeUnit: 'yuan', implied: null };
+      return {
+        ...row, source: 'china', kind: 'stock', name, tile: cnTileOf(str(i.name), symbol), sub: `${symbol} · ${cnBoardOf(symbol)}`,
+        priced, price: priced.price, sourceWord: TENCENT, watched: starred.has(i.id),
+      };
+    }
+    const sourceWord = str(i.quote_from) || localName(venue);
+    if (venue === 'ix') {
+      const priced = { price: number(i.price), unit: 'level', changePct: number(i.change_pct), change24h: number(i.change), volume: null, volumeUnit: 'none', implied: null };
+      return {
+        ...row, source: 'local', kind: 'index', name, tile: Array.from(name)[0] ?? symbol, sub: symbol.toUpperCase(),
+        priced, price: priced.price, sourceWord, watched: false, noStar: true, unit: 'level', currency: null,
+      };
+    }
+    const currency = str(i.currency) || null;
+    const unit = CURRENCY_UNITS[currency] ?? 'usd';
+    const priced = { price: number(i.price), unit, changePct: number(i.change_pct), change24h: null, volume: number(i.turnover), volumeUnit: 'local', currency, implied: null };
+    const nameLocal = str(i.name_local);
     return {
-      id: i.id, source: 'china', kind: 'stock', name: str(i.name) || symbol, tile: cnTileOf(str(i.name), symbol), sub: `${symbol} · ${cnBoardOf(symbol)}`,
-      priced, price: priced.price, live: null, sourceWord: TENCENT, closeTime: null, pastEnd: false, paper: false,
-      watched: starred.has(i.id), atAccount: false, legs: [], tabs: [CHINA_TAB], form: 'spot', region: 'cn',
+      ...row, source: 'local', kind: 'share', name, tile: Array.from(name)[0] ?? symbol,
+      sub: [symbol, nameLocal].filter(Boolean).join(' · '), // words-order: a code and its local name under the visual separator
+      code: symbol, nameLocal: nameLocal || null, priced, price: priced.price, sourceWord, watched: false, noStar: true, unit, currency,
     };
   });
 }
@@ -826,33 +866,37 @@ function shownRead(m, reads) {
 }
 
 /** The table on the renderer's clock (`now`, for the ages beside the source words), `page` the Account's: `{ rows, sorts, sort,
- *  tabs, filters, read, china, session, searching, empty }`.
+ *  tabs, filters, read, china, local, session, searching, empty }`.
  *  - rows: while searching (G5) the search's (`results`), its A shares the hits, each named by its class (`className`); on
- *    Stocks › China A the ranking's; on the Watchlist (G6) every star, found in any read (else a placeholder that can still be
+ *    a region's own read (onLocal's: China A, Hong Kong, Korea, Taiwan, Indices on Spot) its ranking's; on the Watchlist (G6) every star, found in any read (else a placeholder that can still be
  *    un-starred), the A shares starred and an old us:/crypto: star the Account could not find, each `noStar`; on any other tab
  *    the rows of its own read once that read is for the filters on screen (a read for other filters is never drawn under
  *    these: Review Focus), sorted by the sort in effect.
- *  - sorts: China A and the Watchlist offer Most traded and Biggest moves; elsewhere Closing soonest too where a row closes.
+ *  - sorts: a region's own read and the Watchlist offer Most traded and Biggest moves; elsewhere Closing soonest too where a row closes.
  *  - tabs: marketTabs's; filters: filtersOf's, none while searching.
  *  - read: `{ status, answered, message }` of the rows' read — the search's, the ranking's, the tab's own (`loading` while the
  *    one for these filters is out).
- *  - empty: `'watchlist'` on an empty Watchlist, `'filters'` on a tab whose read answered with no rows, else null. */
+ *  - local: onLocal's view (`{ venue, region }`) while not searching, else null; china: whether that is China A.
+ *  - empty: `'watchlist'` on an empty Watchlist, `'noSpot'` on Stocks › Japan or India on Spot (no free source lists them),
+ *    `'filters'` on a tab whose read answered with no rows, else null. */
 export function tableOf(markets, now = Date.now(), page = null) {
   const m = isRecord(markets) ? markets : {};
   const searching = !blank(m.q);
   const tab = tabOf(m);
   const reads = isRecord(m.explore) ? m.explore : {};
   const atPage = watchKeysOf(page, exploreRowsOf(m));
-  const china = !searching && onChinaA(m);
+  const local = searching ? null : onLocal(m);
+  const china = local?.venue === 'china';
   const watchlist = !searching && tab === 'watchlist';
-  // China A's ranking for another sort is no answer for this one (its rows are in that sort's order); a read for this one that
-  // failed or is out, over another sort's rows kept, is this sort's read with nothing answered
+  // a region's ranking for another sort or another view is no answer for this one (its rows are in that sort's order, or another
+  // region's); a read for this one that failed or is out, over rows kept for another, is this view's read with nothing answered
   const rankSort = m.sort === 'movers' ? 'movers' : 'volume';
-  const rankShown = isRecord(m.rank) && (m.rank.data == null || m.rank.data.sort === rankSort);
-  const rankAsked = isRecord(m.rank) && m.rank.sort === rankSort ? { ...m.rank, data: null } : null;
-  const slot = searching ? m.results : china ? (rankShown ? m.rank : rankAsked) : shownRead(m, reads);
-  const rows = china ? chinaRowsOf(m, atPage) : unsortedRowsOf(m, { searching, watchlist, slot }, now, atPage);
-  const twoSorts = china || watchlist;
+  const rankShown = isRecord(m.rank) && (m.rank.data == null || (m.rank.data.sort === rankSort && rankFits(m.rank.data, m)));
+  const rankFor = typeof m.rank?.query === 'string' ? unsorted(m.rank.query) === unsorted(rankQueryOf(m) ?? '') : china;
+  const rankAsked = isRecord(m.rank) && m.rank.sort === rankSort && rankFor ? { ...m.rank, data: null } : null;
+  const slot = searching ? m.results : local ? (rankShown ? m.rank : rankAsked) : shownRead(m, reads);
+  const rows = local ? localRowsOf(m, atPage) : unsortedRowsOf(m, { searching, watchlist, slot }, now, atPage);
+  const twoSorts = !!local || watchlist;
   const { sorts, sort } = twoSorts
     ? { sorts: accountSorts().filter(s => s.id !== 'closing'), sort: m.sort === 'movers' ? 'movers' : 'volume' }
     : sortsOf(rows, m.sort);
@@ -860,10 +904,10 @@ export function tableOf(markets, now = Date.now(), page = null) {
     ? { status: 'loading', answered: false, message: null }
     : { status: str(slot?.status) || 'idle', answered: isRecord(slot) && slot.data != null,
       message: (isSaid(slot?.message) ? sayOf(slot.message) : str(slot?.message)) || null };
-  const empty = rows.length > 0 || searching ? null : watchlist ? 'watchlist' : read.answered ? 'filters' : null;
+  const empty = rows.length > 0 || searching ? null : watchlist ? 'watchlist' : noSpotSource(m) ? 'noSpot' : read.answered ? 'filters' : null;
   return {
-    rows: china ? rows : sorted(rows, sort), sorts, sort, tabs: marketTabs(), filters: searching ? null : filtersOf(m), read,
-    china, session: china ? rankOf(m)?.session ?? null : null, searching, empty,
+    rows: local ? rows : sorted(rows, sort), sorts, sort, tabs: marketTabs(), filters: searching ? null : filtersOf(m), read,
+    china, local, session: local && rankFits(rankOf(m), m) ? rankOf(m)?.session ?? null : null, searching, empty,
   };
 }
 

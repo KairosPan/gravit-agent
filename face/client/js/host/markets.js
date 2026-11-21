@@ -21,8 +21,9 @@
 import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
-import { CHINA_VENUE, isCnKey, chinaPairOf, rankOf, cnQuoteOf, cnHitsOf } from '../wire/china.js';
-import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, connectedQueryOf, chinaRankQueryOf, onChinaA } from './market-view.js';
+import { CHINA_VENUE, isCnKey } from '../wire/china.js';
+import { localKeyOf, isLocalKey, localPairOf, localRankOf, localQuoteOf, localHitsOf } from '../wire/local.js';
+import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, connectedQueryOf, chinaRankQueryOf, rankQueryOf, onLocal, onChinaA } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
 import { venuesOf } from './account-view.js';
@@ -32,16 +33,16 @@ import { said, isSaid } from '../i18n/words.js';
 import { windowAsk, windowPath, EVENT_RANGE } from './event-window.js';
 import { toHash } from '../router.js';
 
-// China's state while the proxy re-serves the market's last read: the market is not answering — flagged, so recheckChina knows it
-// by the flag, never by the table's words for it
-const notAnswering = () => ({ state: 'unavailable', said: said('markets.cn.notAnswering'), notAnswering: true });
+// a venue's state while the proxy re-serves the market's last read: the market is not answering — flagged, so recheckChina knows
+// it by the flag, never by the table's words for it (China's words name China, the other venues' the read alone)
+const notAnswering = (venue = CHINA_VENUE) => ({ state: 'unavailable', said: venue === CHINA_VENUE ? said('markets.cn.notAnswering') : said('markets.local.notAnswering'), notAnswering: true });
 
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 // Longer than the explore proxies' 10 s bound, but shorter than the next poll. A browser request can otherwise stay
 // pending before reaching the proxy and hold the host's same-path deduplication lock forever.
 export const EXPLORE_TIMEOUT_MS = 15_000;
 export const WATCH_LIMIT = 100;   // either list's: the cn list's, the Account keys' cap
-// Stocks › China A's rows one ranking read asks for (market-view.js rankQueryOf's limit)
+// a region's own rows one ranking read asks for (market-view.js rankQueryOf's limit)
 export const RANK_ROWS = 20;
 // a market page's book, the levels a side; its latest trades; a perpetual's funding lines
 export const BOOK_DEPTH = 10, TRADES_LIMIT = 20, FUNDING_LIMIT = 100;
@@ -67,13 +68,15 @@ const messageOf = body => words(body?.refusal?.message) ?? (isSaid(body?.error) 
 // an answer (`ok: true`) carrying the list the views read: a body of any other shape is never data
 const answered = (body, list) => body?.ok === true && Array.isArray(body[list]);
 // the explore read the tab on screen takes, by its filters (market-view.js exploreQueryOf: the Watchlist's the unscoped read),
-// asked of both halves; none on Stocks › China A, whose read is the ranking (rankQueryOf). A search is its own read beside it.
+// asked of both halves; none on a region's own view (onLocal's), whose read is its ranking (rankQueryOf). A search is its own read
+// beside it.
 function exploreOf(m) {
   const query = exploreQueryOf(m);
   return query === null ? null : { tab: m.tab, query };
 }
-// what the screen reads now: the tab's explore query, or China A's ranking; a change of it reads again at once
-const shownOf = m => (onChinaA(m) ? `rank:${chinaRankQueryOf(m)}` : `explore:${m.tab}:${exploreQueryOf(m)}`);
+// what the screen reads now: the tab's explore query, or a region's own ranking (China A, Hong Kong, Korea, Taiwan, the cash
+// indices); a change of it — a region switched — reads again at once
+const shownOf = m => (onLocal(m) ? `rank:${rankQueryOf(m)}` : `explore:${m.tab}:${exploreQueryOf(m)}`);
 // a rejection the proxy answered for an upstream not answering: its 503 `{unreachable}`, or no body at all — never a refusal
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const unreachable = body => body === undefined || body === null || (isRecord(body) && typeof body.unreachable === 'string');
@@ -95,6 +98,7 @@ export function startMarkets({
   let venuesAsked = false;   // the venues read asked, once, when Markets is first shown
   let sourcesAskedAt = null; // an unsuccessful catalog retries no faster than the visible explore beat
   let depthId = null;        // the Account market page whose four reads are read, from entering it to leaving it
+  let localPage = null;      // a local market's page (Hong Kong, Korea, Taiwan, an index) on screen: its quote asked first
   const kinds = new Map();   // a kind of read → { flight, path, seq, cancel }
   const signing = new Set(); // the Account keys whose setWatch is in the air
   const located = new Map(); // last exact-key lookup, independently of the selected scope; failures retry on a later poll
@@ -194,30 +198,46 @@ export function startMarkets({
     }, ['marketSourcesLoading']);
   }
 
-  // China's ranking for the sort in effect (Stocks › China A, rankQueryOf's: never Closing soonest): the answer for a sort the
-  // screen has left lands nowhere (one flight, the newer path's); an answer kept and re-served stale by the proxy lands as the
-  // ranking it was, marked stale (rankOf)
+  // A region's own ranking for the sort in effect (onLocal's view, rankQueryOf's: never Closing soonest) — off any such view, China
+  // A's (recheckChina's) — with the venue's state it carries: the answer for a sort or a region the screen has left lands nowhere
+  // (one flight, the newer path's; and the store drops a query not last asked); an answer kept and re-served stale by the proxy
+  // lands as the ranking it was, marked stale (localRankOf)
   function readRank() {
     const m = store.get().markets;
     const sort = m.sort === 'movers' ? 'movers' : 'volume';
-    fly('rank', `${EXPLORE}?${chinaRankQueryOf(m)}`, (body, refused) => {
-      const data = refused ? null : rankOf(body, sort);
-      if (!data) { store.dispatch('rankFailed', { sort, at: now(), message: messageOf(body) }); return; }
-      store.dispatch('rankLoaded', { sort, data, at: now() });
+    const query = rankQueryOf(m) ?? chinaRankQueryOf(m);
+    const venue = onLocal(m)?.venue ?? CHINA_VENUE;
+    fly('rank', `${EXPLORE}?${query}`, (body, refused) => {
+      const data = refused ? null : localRankOf(body, query);
+      if (!data) { store.dispatch('rankFailed', { sort, query, at: now(), message: messageOf(body) }); return; }
+      store.dispatch('rankLoaded', { sort, query, data, at: now() });
       // a ranking the proxy re-served stale is the market not answering: its last sentence is no state of now
-      store.dispatch('chinaStatusUpdated', { status: body.stale === true ? notAnswering() : body.china.status });
-    }, ['rankLoading', { sort }]);
+      store.dispatch('localStatusUpdated', { venue, status: body.stale === true ? notAnswering(venue) : rawStatus(body) });
+    }, ['rankLoading', { sort, query }]);
+  }
+  // the state a ranking's read says, as it came: its `local` read's, else (China's) its `china` read's
+  const rawStatus = body => (isRecord(body.local) ? body.local.status : body.china?.status);
+  // China's state alone, off China A's ranking, while another region's own view is on screen (its ranking is that view's, never
+  // overtaken by China's): the ranking itself lands nowhere
+  function readChinaState() {
+    const query = chinaRankQueryOf(store.get().markets);
+    fly('chinaState', `${EXPLORE}?${query}`, (body, refused) => {
+      if (refused || !localRankOf(body, query)) return;
+      store.dispatch('chinaStatusUpdated', { status: body.stale === true ? notAnswering() : rawStatus(body) });
+    });
   }
   // China's state last said as the market not answering, and the market answering afresh: its state read again, off the China
   // ranking that carries it — else that sentence would stay on Venues and Markets until a reload
   function recheckChina() {
     const providers = store.get().markets.providers;
     if (!Array.isArray(providers) || !providers.some(p => p?.market === 'cn' && p.notAnswering === true)) return;
+    const m = store.get().markets;
+    if (onLocal(m) && !onChinaA(m)) { if (!inAir('chinaState')) readChinaState(); return; }
     if (!inAir('rank')) readRank();
   }
-  // the read for the tab on screen: China A's ranking there, else the explore; on the Watchlist the stars its read lacks
+  // the read for the tab on screen: a region's own ranking there, else the explore; on the Watchlist the stars its read lacks
   function readShown() {
-    if (onChinaA(store.get().markets)) readRank(); else readExplore();
+    if (onLocal(store.get().markets)) readRank(); else readExplore();
     if (store.get().markets.tab === 'watchlist') locateMissing();
   }
   // the Watchlist's stars (Account keys, not A shares) its unscoped read does not list, each found by its exact key (locate)
@@ -266,40 +286,43 @@ export function startMarkets({
     ask('quotes:market', QUOTES, pairs.filter(p => !connected.has(venueOf(p))));
   }
 
-  // the A shares' prices, the market's (venue china), on the tick and at once for a page reached (its own id first): the cn page's own first, then the cn rows in view — twelve a call, none while
-  // one is out. Each priced row lands over the quotes kept; one the market refused keeps its kept price, marked stale, with the
-  // market's sentence as China's state; an answer the proxy re-serves stale (the market not answering) lands every price stale, the connection
-  // 'stale' and China's state the market not answering;
-  // a read that fails keeps every price and says the connection failed
-  function readCnQuotes(pageId = null) {
+  // The local markets' prices, the market's (venues china, hk, kr, tw, ix), on the tick and at once for a page reached (its own id
+  // first): the local page's own first, then the local rows in view — twelve pairs a call, none while one is out — each into the
+  // quotes kept by its row's key (the A shares' store). Each priced row lands over the quotes kept; one the market refused keeps its
+  // kept price, marked stale, with the market's sentence as its venue's state; an answer the proxy re-serves stale (the market not
+  // answering) lands every price stale, the connection 'stale' and each venue's state the market not answering; a read that fails
+  // keeps every price and says the connection failed
+  function readLocalQuotes(pageId = null) {
     if (inAir('cnQuotes')) return;
     const s = store.get();
-    const page = isCnKey(pageId) ? pageId : s.route?.screen === 'markets' && isCnKey(s.route.id) ? s.route.id : null;
-    const rows = rowsOf(s.markets, now(), s.account?.data).filter(r => isCnKey(r.id) && (inView === null || inView.has(r.id))).map(r => r.id);
+    const routed = s.route?.screen === 'markets' && isLocalKey(s.route.id) ? s.route.id : null;
+    const page = isLocalKey(pageId) ? pageId : routed ?? localPage;
+    const rows = rowsOf(s.markets, now(), s.account?.data).filter(r => isLocalKey(r.id) && (inView === null || inView.has(r.id))).map(r => r.id);
     const ids = [...new Set([page, ...rows].filter(Boolean))].slice(0, QUOTE_PAIRS);
     if (!ids.length) return;
-    fly('cnQuotes', `${QUOTES}?pairs=${encodeURIComponent(ids.map(chinaPairOf).join(','))}`, (body, refused) => {
+    fly('cnQuotes', `${QUOTES}?pairs=${encodeURIComponent(ids.map(localPairOf).join(','))}`, (body, refused) => {
       const kept = store.get().markets.quotes;
       if (refused || !answered(body, 'quotes')) { store.dispatch('quotesUpdated', { quotes: kept, connection: 'error' }); return; }
       const next = { ...kept };
-      let refusal = null;
+      const refusals = new Map();
       for (const row of body.quotes) {
-        if (row?.venue !== CHINA_VENUE) continue;
-        const quote = cnQuoteOf(row, now());
+        const quote = localQuoteOf(row, now());
         if (quote) { next[quote.id] = body.stale === true ? { ...quote, quote_status: 'stale' } : quote; continue; }
-        const id = `cn:${row.symbol}`;
-        if (!isCnKey(id) || row.refusal === undefined) continue;
+        const id = ids.find(x => localPairOf(x) === `${row?.venue}|${row?.symbol}`);
+        if (!id || row.refusal === undefined) continue;
         if (Object.hasOwn(kept, id)) next[id] = { ...kept[id], quote_status: 'stale' };
-        refusal ??= row.refusal;
+        const venue = localKeyOf(id).venue;
+        if (!refusals.has(venue)) refusals.set(venue, row.refusal);
       }
+      const venues = [...new Set(ids.map(id => localKeyOf(id).venue))];
       if (body.stale === true) {
         store.dispatch('quotesUpdated', { quotes: next, connection: 'stale' });
-        store.dispatch('chinaStatusUpdated', { status: notAnswering() });
+        for (const venue of venues) store.dispatch('localStatusUpdated', { venue, status: notAnswering(venue) });
         return;
       }
       store.dispatch('quotesUpdated', { quotes: next, connection: 'polling' });
-      if (refusal) store.dispatch('chinaStatusUpdated', { status: { state: 'unavailable', said: words(refusal?.message) ?? '' } });
-      else recheckChina();
+      for (const [venue, refusal] of refusals) store.dispatch('localStatusUpdated', { venue, status: { state: 'unavailable', said: words(refusal?.message) ?? '' } });
+      if (!refusals.has(CHINA_VENUE)) recheckChina();
     });
   }
 
@@ -308,7 +331,7 @@ export function startMarkets({
     exploreTimer = schedule(() => { exploreTimer = null; if (closed || !shown) return; armExplore(); readShown(); readSources(); }, EXPLORE_MS);
   }
   function armQuotes() {
-    quotesTimer = schedule(() => { quotesTimer = null; if (closed || !shown) return; armQuotes(); readQuotes(); readCnQuotes(); beatDepth(); }, QUOTES_MS);
+    quotesTimer = schedule(() => { quotesTimer = null; if (closed || !shown) return; armQuotes(); readQuotes(); readLocalQuotes(); beatDepth(); }, QUOTES_MS);
   }
   function stopPolls() {
     if (exploreTimer !== null) { cancelTimer(exploreTimer); exploreTimer = null; }
@@ -648,8 +671,8 @@ export function startMarkets({
       halves.read('results', `q=${encodeURIComponent(q.trim())}&limit=${ROWS}`, {
         land: (data, kept) => {
           store.dispatch('resultsLoaded', { data, at: now() });
-          // the A shares the hits, the market's alone
-          if (kept.market) store.dispatch('hitQuotesLoaded', { quotes: cnHitsOf(kept.market).quotes });
+          // the local hits (the A shares, and Hong Kong's, Korea's, Taiwan's, the indices'), the market's alone
+          if (kept.market) store.dispatch('hitQuotesLoaded', { quotes: localHitsOf(kept.market).quotes });
         },
         failed: message => store.dispatch('resultsFailed', { at: now(), message }),
         loading: ['resultsLoading'],
@@ -698,16 +721,23 @@ export function startMarkets({
       saveList(m.watchlist.filter(a => a.id !== id));
       if (!id.startsWith('cn:')) store.dispatch('forgetAsked', id);
     },
-    /** The market page on screen (an A share: its history at venue china, reached cold or not; another Account key: its reads
-     *  and its follow), or null on leaving. */
+    /** The market page on screen (an A share: its history at venue china, reached cold or not; another local market — Hong Kong,
+     *  Korea, Taiwan, an index — its quote at once; another Account key: its reads and its follow), or null on leaving. */
     page(id) {
       if (closed) return;
       waiting = null;
       if (id !== depthId) leaveDepth();
+      localPage = isLocalKey(id) && !isCnKey(id) ? id : null;
       if (isCnKey(id)) {
         if (followed) unfollow();
         readCnCandles(id, rangeOf(id));
-        readCnQuotes(id);
+        readLocalQuotes(id);
+        return;
+      }
+      // a Hong Kong, Korean or Taiwanese share's page, or an index's: its price at once (its page is the A share's kind of page)
+      if (localPage) {
+        if (followed) unfollow();
+        readLocalQuotes(id);
         return;
       }
       if (isAccountKey(id)) { open(id); return; }

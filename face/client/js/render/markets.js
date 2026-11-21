@@ -29,7 +29,7 @@ import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf, fundingMissing
 import {
   candleRanges, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
-  chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf, marketOriginOf,
+  chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf, marketOriginOf, noSpotSourceWord,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
@@ -68,9 +68,14 @@ export function sourceBadge(origin, decorative = false) {
 }
 const badgeFor = legs => sourceBadge(marketOriginOf(legs.find(l => l.connected) ?? legs.find(l => l.public)));
 
-/** A price in its unit's words: an event's in cents (62¢, 62.5¢), an A share's in yuan, anything else in dollars; none is —. */
+const LOCAL_UNITS = new Set(['hkd', 'krw', 'twd']);
+/** A price in its unit's words: an event's in cents (62¢, 62.5¢), an A share's in yuan, a local share's in its currency, an index's
+ *  level bare, anything else in dollars; none is —. */
 export function priceWord(v, unit) {
   if (v === null || v === undefined) return EM;
+  // a cash index's level: a number, no currency; a local share's price in its own currency (Hong Kong, Korea, Taiwan)
+  if (unit === 'level') return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (LOCAL_UNITS.has(unit)) return price(v, unit.toUpperCase());
   return unit === 'cents' ? `${Number(v.toFixed(1))}¢` : price(v, unit === 'cny' ? 'CNY' : 'USD');
 }
 
@@ -134,11 +139,13 @@ function table(rows, { china = false, markFor = () => null } = {}) {
 
 // where the rows would be when there are none (tableOf's `empty`, else the read they are from): the Watchlist with nothing
 // starred (G6); a tab whose read answered with nothing under its filters, with Back to the main sources where a Form or a Source
-// is set (§5.3); China A's ranking; a search's answer with nothing in it; a read still on its way, or one that failed before it
+// is set (§5.3); Stocks › Japan or India on Spot, which no free source lists; China A's ranking; a search's answer with nothing in it; a read still on its way, or one that failed before it
 // answered
-function emptyHtml(view) {
+function emptyHtml(view, m) {
   const { read, searching, china, empty: kind, filters } = view;
   if (kind === 'watchlist') return empty(t('markets.empty.watchlist'));
+  // Stocks › Japan or India on Spot: no free source lists those shares
+  if (kind === 'noSpot') return empty(noSpotSourceWord(m) ?? '');
   if (china) return empty(read.status === 'error' ? t('markets.empty.china') : read.answered && read.status === 'ready' ? t('markets.none') : t('common.loading'));
   if (kind === 'filters') {
     const back = filters?.chips?.length ? ` <button type="button" class="mk-clear" data-action="mkMain">${th('markets.empty.back')}</button>` : '';
@@ -223,7 +230,7 @@ export function renderMarketsScreen(state, now) {
   // the muted lines: the Account's own sentence when the read the rows are from refused, the A-share search's when it failed or
   // answered in part (said once: not again under a table that already says it), the face's wire's state where an A share is
   // drawn, the watchlist's
-  const emptyBody = rows.length ? '' : emptyHtml(view);
+  const emptyBody = rows.length ? '' : emptyHtml(view, m);
   const cnSearch = cnSearchWord(m, searching);
   const cnDrawn = rows.some(r => r.source === 'face' && !r.notListed);
   const chinaWords = china ? chinaLines(read, m.rank?.data, session) : '';

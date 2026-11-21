@@ -1481,6 +1481,7 @@ export const ZH = Object.freeze({
   'markets.volume.shares': '{n} 股',
   'markets.volume.contracts': '{n} 张合约',
   'markets.cn.notAnswering': '市场服务无响应 · 中国行情为上次读取',
+  'markets.local.notAnswering': '市场服务无响应 · 行情为上次读取',
   'markets.cn.notAnsweringAsOf': '市场服务无响应 · 截至北京时间 {date} {time}',
   'markets.cn.closedOn': '休市 · 北京时间 {day} 15:00',
   'markets.cn.closed': '休市',

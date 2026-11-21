@@ -5,7 +5,8 @@
 // Source and the popover open, the sort, the query, a page's range
 import { ACCOUNT_SORT_IDS, CANDLE_RANGES, MARKET_TABS, REGIONS, onLocal, isAccountKey, formsInView, formsOfSource, mainFormsOf, isSourceOf } from '../host/market-view.js';
 import { number } from '../wire/market-model.js';
-import { chinaProviderOf, isCnKey } from '../wire/china.js';
+import { isCnKey } from '../wire/china.js';
+import { LOCAL_VENUES, localProviderOf, venueOfMarket } from '../wire/local.js';
 
 const mk = (s, patch) => ({ ...s, markets: { ...s.markets, ...patch } });
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -20,9 +21,19 @@ const EXPLORED = new Set(MARKET_TABS);
 // a market's history: an A share's (cn: and its six digits, never another cn: id) or another Account key's, at one of the
 // candle ranges
 const charted = (id, range) => (isCnKey(id) || (isAccountKey(id) && !String(id).startsWith('cn:'))) && CANDLE_RANGES.includes(range);
-// the China ranking's two sorts
+// a local ranking's two sorts
 const RANKED = new Set(['volume', 'movers']);
 const rank = (s, patch) => mk(s, { rank: { ...s.markets.rank, ...patch } });
+// a ranking's answer for a query other than the one last asked (a region left behind, landing late: Review Focus 5) lands nowhere;
+// one that names no query lands as China A's always did
+const overtaken = (s, query) => typeof query === 'string' && typeof s.markets.rank?.query === 'string' && s.markets.rank.query !== query;
+const asked = query => (typeof query === 'string' ? { query } : {});
+// a venue's state, its provider the only one of that venue: the others kept, in LOCAL_VENUES's order
+function provided(s, venue, status) {
+  const others = (Array.isArray(s.markets.providers) ? s.markets.providers : []).filter(p => venueOfMarket(p?.market) !== venue);
+  const order = p => LOCAL_VENUES.indexOf(venueOfMarket(p?.market) ?? '');
+  return mk(s, { providers: [...others, ...localProviderOf(venue, status)].sort((a, b) => order(a) - order(b)) });
+}
 const named = v => typeof v === 'string' && v !== '';
 // what the market says of its leverage — the most it takes and the margin modes it sets — kept only where it says them (the Leverage
 // sheet bounds its field by them)
@@ -54,7 +65,9 @@ export const reducers = {
   // providers; the prices a search's A-share hits carry, by cn id
   watchlistLoaded: (s, { items, error }) => mk(s, { watchlist: items, watchError: error }),
   quotesUpdated: (s, { quotes, connection }) => mk(s, { quotes, connection }),
-  chinaStatusUpdated: (s, { status } = {}) => mk(s, { providers: chinaProviderOf(status) }),
+  chinaStatusUpdated: (s, { status } = {}) => provided(s, 'china', status),
+  // a local venue's state (Hong Kong, Korea, Taiwan, the indices; China's too), from its ranking or a refused quote
+  localStatusUpdated: (s, { venue, status } = {}) => (LOCAL_VENUES.includes(venue) ? provided(s, venue, status) : s),
   hitQuotesLoaded: (s, { quotes } = {}) => mk(s, { hitQuotes: isRecord(quotes) ? quotes : {} }),
 
   // the explore reads by tab (market-view.js exploreQueryOf's, kept with the query asked), and the search's (explore?q=): a
@@ -68,11 +81,12 @@ export const reducers = {
     const other = typeof query === 'string' && own(kept, 'query') !== query;
     return keyed(s, 'explore', tab, { status: 'error', at, message, ...(other ? { data: null, query } : {}) });
   },
-  // Stocks › China A's ranking (explore?asset=stocks&region=cn, as rankOf keeps it), by the sort it was read for: a failed read keeps
-  // its rows
-  rankLoading: (s, { sort } = {}) => (RANKED.has(sort) ? rank(s, { status: 'loading', sort }) : s),
-  rankLoaded: (s, { sort, data, at } = {}) => (RANKED.has(sort) ? rank(s, { status: 'ready', sort, data, at, message: null }) : s),
-  rankFailed: (s, { sort, at, message = null } = {}) => (RANKED.has(sort) ? rank(s, { status: 'error', sort, at, message }) : s),
+  // a region's own ranking — Stocks › China A, Hong Kong, Korea, Taiwan, Indices on Spot (explore?asset=…&form=spot&region=…, as
+  // wire/local.js localRankOf keeps it) — by the sort and the query it was read for: a failed read keeps its rows; an answer for a
+  // query other than the one last asked is dropped
+  rankLoading: (s, { sort, query } = {}) => (RANKED.has(sort) ? rank(s, { status: 'loading', sort, ...asked(query) }) : s),
+  rankLoaded: (s, { sort, data, at, query } = {}) => (RANKED.has(sort) && !overtaken(s, query) ? rank(s, { status: 'ready', sort, data, at, message: null }) : s),
+  rankFailed: (s, { sort, at, message = null, query } = {}) => (RANKED.has(sort) && !overtaken(s, query) ? rank(s, { status: 'error', sort, at, message }) : s),
   resultsLoading: s => read(s, { status: 'loading' }),
   resultsLoaded: (s, { data, at } = {}) => read(s, { status: 'ready', data, at, message: null }),
   resultsFailed: (s, { at, message = null } = {}) => read(s, { status: 'error', at, message }),

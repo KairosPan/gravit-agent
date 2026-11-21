@@ -2118,16 +2118,154 @@ test("an event window's refusal lands failed with the market's words; read once 
 
 // Indices › China A on Spot is the market's cash-index read (rankQueryOf, `ix`): the host asks no explore for it until
 // the region-keyed ranking path routes it (Task 11); Perp there is the generic read with trade.xyz as its source
-test('Indices › China A asks no explore on Spot; its Perp asks region cn with trade.xyz', async () => {
+test('Indices › China A asks no explore on Spot, the cash indices alone; its Perp asks region cn with trade.xyz', async () => {
   const r = rig({ tab: 'indices', answer: path => (path.startsWith('/data/market/explore?') && query(path).region === 'cn' ? NO_CONNECTED() : undefined) });
   r.store.dispatch('setMarketsRegion', 'cn');
   r.markets.show(true);
   await settle();
-  assert.deepEqual(r.allReads.filter(p => p.includes('/explore?') && query(p).region === 'cn'), [], 'Spot: nothing asked yet');
+  assert.deepEqual(r.allReads.filter(p => p.includes('/explore?') && query(p).region === 'cn'), ['/data/market/explore?asset=indices&form=spot&region=cn&sort=volume&limit=20'],
+    'Spot: the cash indices ranking (the local path), no explore read');
+  const spot = r.allReads.length;
   r.store.dispatch('setMarketsForm', 'perp');
   await settle();
-  const cn = r.allReads.filter(p => p.includes('/explore?') && query(p).region === 'cn');
+  const cn = r.allReads.slice(spot).filter(p => p.includes('/explore?') && query(p).region === 'cn');
   assert.ok(cn.length >= 1);
   for (const p of cn) assert.deepEqual([query(p).form, query(p).source], ['perp', 'trade-xyz'], p);
+  r.markets.close();
+});
+
+// ── the local path (spec 2026-11-20 §5.6): Hong Kong, Korea, Taiwan and the cash indices read as China A's ranking is ──
+
+const LOCAL_RANK = (asset, region, sort = 'volume') => `/data/market/explore?asset=${asset}&form=spot&region=${region}&sort=${sort}&limit=20`;
+const localRead = (venue, region, sort) => ({
+  venue, region, sort, total: 2, asOf: '2026-11-21T02:30:00.000Z', session: { phase: 'trading', lastSession: '2026-11-20' },
+  status: { state: 'live', said: `${venue} answering`, at: '2026-11-21T02:30:00.000Z' }, note: '',
+});
+const shareItem = (venue, code) => ({
+  key: `${venue}:${code}`, kind: 'share', name: `Co ${code}`, base: code, currency: { hk: 'HKD', kr: 'KRW', tw: 'TWD' }[venue], asset: 'stocks',
+  form: 'spot', region: venue, price: 100, changePct24h: 1.5, turnoverLocal: 2e9, quoteFrom: 'Src', tabs: [], at: [],
+});
+const indexItem = (region, id) => ({ key: `ix:${region}:${id}`, kind: 'index', name: id.toUpperCase(), base: id, asset: 'indices', form: 'spot', region, price: 18000, change24h: 12, changePct24h: 0.07, quoteFrom: 'Naver · 15 min delayed', tabs: [], at: [] });
+// the market's answer to a local ranking query: the venue's rows, for the query's sort
+function localAnswer(path) {
+  const p = query(path);
+  if (p.form !== 'spot' || !p.region || !p.sort) return undefined;
+  const venue = p.asset === 'indices' ? 'ix' : p.region;
+  const items = venue === 'ix' ? [indexItem(p.region, 'dax'), indexItem(p.region, 'cac')] : venue === 'kr' ? [shareItem('kr', '005930'), shareItem('kr', '000660')] : [shareItem(venue, venue === 'hk' ? '00700' : '2330')];
+  return { ok: true, asOf: '2026-11-21T02:30:00.000Z', tabs: [], items, movers: [], closing: [], mostTraded: [], missing: [], notes: [], local: localRead(venue, p.region, p.sort) };
+}
+const isExplore = path => path.startsWith('/data/market/explore?') && !query(path).form?.startsWith('spot');
+
+test('Stocks › Korea reads the kr ranking, Indices › Europe the ix one: never an explore read there', async () => {
+  const r = rig({ answer: localAnswer });
+  r.store.dispatch('setMarketsTab', 'stocks');
+  r.store.dispatch('setMarketsRegion', 'kr');
+  r.markets.show(true);
+  assert.deepEqual(r.reads, [LOCAL_RANK('stocks', 'kr')], 'at once, nothing else');
+  assert.equal(r.m().rank.query, 'asset=stocks&form=spot&region=kr&sort=volume&limit=20');
+  await settle();
+  assert.equal(r.m().rank.status, 'ready');
+  assert.equal(r.m().rank.data.venue, 'kr');
+  assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id), ['kr:005930', 'kr:000660']);
+  assert.deepEqual(r.m().providers, [{ id: 'naver', market: 'kr', status: 'connected', said: 'kr answering' }], "Korea's state, the market's");
+  r.fire(EXPLORE_MS);
+  assert.equal(r.reads.at(-1), LOCAL_RANK('stocks', 'kr'), 'every 20 s');
+  await settle();
+  r.store.dispatch('setMarketsSort', 'movers');
+  assert.equal(r.reads.at(-1), LOCAL_RANK('stocks', 'kr', 'movers'), 'again on a new sort');
+  await settle();
+  r.store.dispatch('setMarketsTab', 'indices');
+  r.store.dispatch('setMarketsRegion', 'eu');
+  assert.equal(r.reads.at(-1), LOCAL_RANK('indices', 'eu'), 'Indices › Europe: the cash indices at once');
+  await settle();
+  assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id), ['ix:eu:dax', 'ix:eu:cac']);
+  assert.deepEqual(r.m().providers.map(p => [p.id, p.market]), [['naver', 'kr'], ['indices', 'ix']], 'one provider a venue');
+  assert.deepEqual(r.reads.filter(p => isExplore(p) && ['kr', 'eu'].includes(query(p).region)), [], 'never an explore read on a local view (Indices › US, passed through, has its own)');
+  r.markets.close();
+});
+
+test('switching region fast: the ranking of the region left behind, landing late, is never drawn (Review Focus 5)', async () => {
+  const slow = deferred();
+  const r = rig({ answer: path => (path === LOCAL_RANK('stocks', 'hk') ? slow.promise : localAnswer(path)) });
+  r.store.dispatch('setMarketsTab', 'stocks');
+  r.store.dispatch('setMarketsRegion', 'hk');
+  r.markets.show(true);
+  r.store.dispatch('setMarketsRegion', 'tw');
+  assert.equal(r.reads.at(-1), LOCAL_RANK('stocks', 'tw'), 'the new region read at once');
+  await settle();
+  slow.resolve(localAnswer(LOCAL_RANK('stocks', 'hk')));
+  await settle();
+  assert.equal(r.m().rank.data.venue, 'tw');
+  assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id), ['tw:2330']);
+  // a ranking kept for one region is drawn under no other: back on Hong Kong, nothing until its own read lands
+  const held = deferred();
+  const r2 = rig({ answer: path => (path === LOCAL_RANK('stocks', 'kr') ? held.promise : localAnswer(path)) });
+  r2.store.dispatch('setMarketsTab', 'stocks');
+  r2.store.dispatch('setMarketsRegion', 'hk');
+  r2.markets.show(true);
+  await settle();
+  assert.deepEqual(rowsOf(r2.m(), NOW).map(x => x.id), ['hk:00700']);
+  r2.store.dispatch('setMarketsRegion', 'kr');
+  assert.deepEqual(rowsOf(r2.m(), NOW), [], "Hong Kong's rows are not Korea's");
+  held.resolve(localAnswer(LOCAL_RANK('stocks', 'kr')));
+  await settle();
+  assert.deepEqual(rowsOf(r2.m(), NOW).map(x => x.id), ['kr:005930', 'kr:000660']);
+  for (const x of [r, r2]) x.markets.close();
+});
+
+test('local quotes: the page first, then the local rows in view, twelve pairs a call, into the quotes the A shares use', async () => {
+  const facts = { prevClose: 99, open: 99, high: 101, low: 98, volume: 1e6, turnover: 1e8, lastSession: '2026-11-20', phase: 'trading', quoteStatus: 'delayed' };
+  const asked = [];
+  const r = rig({
+    answer: path => {
+      if (!path.startsWith('/data/market/quotes?')) return localAnswer(path);
+      asked.push(path);
+      return { ok: true, quotes: pairsIn(path).map(p => {
+        const [venue, symbol] = [p.slice(0, p.indexOf('|')), p.slice(p.indexOf('|') + 1)];
+        if (symbol === '000660') return { venue, symbol, refusal: { code: 'E_MARKET_UNAVAILABLE', message: 'Naver is not answering' } };
+        return { venue, symbol, market: { symbol, name: `Co ${symbol}`, price: 101, change24h: 2, changePct24h: 2, quoteAt: '2026-11-21T02:30:00Z', quoteFrom: 'Naver · 15 min delayed', currency: 'KRW', local: facts } };
+      }) };
+    },
+  });
+  r.store.dispatch('setMarketsTab', 'stocks');
+  r.store.dispatch('setMarketsRegion', 'kr');
+  r.markets.show(true);
+  await settle();
+  r.markets.rowsInView(['kr:005930']);
+  r.markets.page('hk:00700');
+  assert.deepEqual(pairsIn(asked.at(-1)), ['hk|00700', 'kr|005930'], 'at once: the page first, then the rows in view');
+  await settle();
+  assert.equal(r.m().quotes['hk:00700'].price, 101);
+  assert.equal(r.m().quotes['kr:005930'].currency, 'KRW');
+  assert.equal(r.m().connection, 'polling');
+  r.markets.page(null);
+  r.markets.rowsInView(null);
+  r.fire(QUOTES_MS);
+  assert.deepEqual(pairsIn(asked.at(-1)), ['kr|005930', 'kr|000660'], 'every 5 s, the rows in view');
+  await settle();
+  assert.equal(Object.hasOwn(r.m().quotes, 'kr:000660'), false, 'a refused pair is not quoted');
+  assert.deepEqual(r.m().providers.find(p => p.market === 'kr'), { id: 'naver', market: 'kr', status: 'error', said: 'Naver is not answering' });
+  // the cash indices: ix pairs
+  r.store.dispatch('setMarketsTab', 'indices');
+  r.store.dispatch('setMarketsRegion', 'eu');
+  await settle();
+  r.fire(QUOTES_MS);
+  assert.deepEqual(pairsIn(asked.at(-1)), ['ix|eu:dax', 'ix|eu:cac']);
+  r.markets.close();
+});
+
+test("China said not answering while Korea is on screen: China's state read again, Korea's ranking left as it is", async () => {
+  const r = rig({ answer: path => (isChina(path) ? ranked(query(path).sort) : localAnswer(path)) });
+  r.store.dispatch('setMarketsTab', 'stocks');
+  r.store.dispatch('setMarketsRegion', 'kr');
+  r.markets.show(true);
+  await settle();
+  r.store.dispatch('chinaStatusUpdated', { status: { state: 'unavailable', said: 'The market is not answering · China as last read', notAnswering: true } });
+  r.markets.accountAnswered({ ok: true });
+  await settle();
+  assert.equal(r.reads.filter(isChina).length, 1, "China's ranking read once, for its state");
+  assert.deepEqual(r.m().providers.map(p => [p.market, p.status]), [['cn', 'connected'], ['kr', 'connected']]);
+  assert.equal(r.m().rank.data.venue, 'kr', "Korea's ranking stays the one drawn");
+  assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id), ['kr:005930', 'kr:000660']);
   r.markets.close();
 });

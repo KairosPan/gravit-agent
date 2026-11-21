@@ -1488,6 +1488,7 @@ export const EN = Object.freeze({
   'markets.volume.shares': '{n} shares',
   'markets.volume.contracts': '{n} contracts',
   'markets.cn.notAnswering': 'The market is not answering · China as last read',
+  'markets.local.notAnswering': 'The market is not answering · as last read',
   'markets.cn.notAnsweringAsOf': 'The market is not answering · as of {date} {time} Beijing',
   'markets.cn.closedOn': 'Closed · {day} 15:00 Beijing',
   'markets.cn.closed': 'Closed',

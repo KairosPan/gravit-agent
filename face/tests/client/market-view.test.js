@@ -10,7 +10,7 @@ import {
   canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, volumeWordOf, watchWord, mentionsOf,
   accountTabs, accountSorts, ACCOUNT_TAB_IDS, ACCOUNT_SORT_IDS, CANDLE_RANGES, isAccountKey, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
   pageOf, faceAssetOf, handWordsOf, watchedOf, watchKeysOf, setWatchOf,
-  CHINA_TAB, cnBoardOf, cnTileOf, chinaRowsOf, chinaWord, cnStateWord, cnPageOf,
+  CHINA_TAB, cnBoardOf, cnTileOf, localRowsOf, chinaWord, cnStateWord, cnPageOf,
   marketOriginOf, exploreQueryOf, MARKET_TABS,
 } from '../../client/js/host/market-view.js';
 
@@ -889,10 +889,10 @@ test("China's rows: the ranking's order, the code and board, the name's first ch
   assert.deepEqual(t.read, { status: 'ready', answered: true, message: null });
   assert.deepEqual(t.rows.map(r => [r.id, r.tile, r.sub, r.sourceWord, r.priced.unit, r.priced.volumeUnit, r.priced.volume, r.priced.changePct, r.price]),
     [['cn:300502', '新', '300502 · ChiNext', 'Tencent', 'cny', 'yuan', 21_607_600_000, -14.19, 196], ['cn:688825', '长', '688825 · STAR', 'Tencent', 'cny', 'yuan', 12_145_020_000, -2.5, 41.8]]);
-  assert.equal(chinaRowsOf(china({ watchlist: [asset('cn:688825')] }))[1].watched, true);
+  assert.equal(localRowsOf(china({ watchlist: [asset('cn:688825')] }))[1].watched, true);
   // the Account keys starred and the page's china entries fill China's stars too
-  assert.deepEqual(chinaRowsOf(china({ watch: ['cn:300502'] })).map(r => r.watched), [true, false]);
-  assert.deepEqual(chinaRowsOf(china(), ['cn:688825']).map(r => r.watched), [false, true]);
+  assert.deepEqual(localRowsOf(china({ watch: ['cn:300502'] })).map(r => r.watched), [true, false]);
+  assert.deepEqual(localRowsOf(china(), ['cn:688825']).map(r => r.watched), [false, true]);
   const onChina = tableOf(china(), NOW, { ...fx('account'), watch: [{ venue: 'china', symbol: '688825', at: '2026-11-01T01:00:00.000Z' }] });
   assert.deepEqual(onChina.rows.map(r => r.watched), [false, true], "the page's china entry, through tableOf");
   assert.equal(tableOf(markets({ explore: { all: read(fx('explore-all')) } }), NOW).china, false, 'another tab is not China A');

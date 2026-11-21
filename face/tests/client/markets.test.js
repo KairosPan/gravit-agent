@@ -1327,3 +1327,61 @@ test('choosing 1M on the event page navigates to the plain stock page and draws 
   assert.match(history, /class="mk-chart"/);
   markets.close();
 });
+
+// ── the local path (spec 2026-11-20 §5.6): Hong Kong, Korea, Taiwan and the cash indices drawn as China A's ranking is ──
+
+const HK_QUERY = 'asset=stocks&form=spot&region=hk&sort=volume&limit=20';
+const KR_QUERY = 'asset=stocks&form=spot&region=kr&sort=volume&limit=20';
+const EU_QUERY = 'asset=indices&form=spot&region=eu&sort=volume&limit=20';
+const localRank = (venue, query, items) => ({ ok: true, venue, query, sort: 'volume', total: items.length, asOf: '2026-11-21T02:30:00Z', session: { phase: 'trading', lastSession: '2026-11-20' },
+  status: { state: 'live', said: '' }, stale: false, items });
+const HK_RANK = localRank('hk', HK_QUERY, [
+  { id: 'hk:00700', symbol: '00700', name: 'Tencent', name_local: '騰訊控股', kind: 'share', price: 400, change_pct: 1.27, turnover: 4.8e9, currency: 'HKD', quote_from: 'Tencent' },
+  { id: 'hk:09988', symbol: '09988', name: 'Alibaba', kind: 'share', price: 80, change_pct: -0.5, turnover: 3e9, currency: 'HKD', quote_from: 'Tencent' }]);
+const EU_RANK = localRank('ix', EU_QUERY, [{ id: 'ix:eu:dax', symbol: 'dax', name: 'DAX', kind: 'index', price: 18000.5, change: 12.5, change_pct: 0.07, quote_from: 'Naver · 15 min delayed' }]);
+const onRegion = (tab, region) => R.setMarketsRegion(R.setMarketsTab(screen().s, tab), region);
+
+test('the ranking a query was not last asked for is dropped (Review Focus 5); one with no query lands as China A always did', () => {
+  let s = R.rankLoading(onRegion('stocks', 'hk'), { sort: 'volume', query: HK_QUERY });
+  s = R.rankLoading(R.setMarketsRegion(s, 'kr'), { sort: 'volume', query: KR_QUERY });
+  assert.equal(s.markets.rank.query, KR_QUERY);
+  const late = R.rankLoaded(s, { sort: 'volume', query: HK_QUERY, data: HK_RANK, at: NOW });
+  assert.equal(late, s, "Hong Kong's answer, landing after Korea was asked, changes nothing");
+  assert.equal(R.rankFailed(s, { sort: 'volume', query: HK_QUERY, at: NOW }), s, 'nor its failure');
+  const kr = localRank('kr', KR_QUERY, [{ id: 'kr:005930', symbol: '005930', name: '삼성전자', kind: 'share', price: 55000, change_pct: 1, turnover: 1e12, currency: 'KRW', quote_from: 'Naver' }]);
+  assert.equal(R.rankLoaded(s, { sort: 'volume', query: KR_QUERY, data: kr, at: NOW }).markets.rank.data, kr);
+  assert.equal(R.rankLoaded(s, { sort: 'volume', data: RANK, at: NOW }).markets.rank.data, RANK, 'no query: as it always was');
+});
+
+test("a local ranking's rows: a share's code and local name, its price and turnover in its currency, no star; an index's level", () => {
+  const s = R.rankLoaded(R.rankLoading(onRegion('stocks', 'hk'), { sort: 'volume', query: HK_QUERY }), { sort: 'volume', query: HK_QUERY, data: HK_RANK, at: NOW });
+  const rows = rowsOf(s.markets, NOW);
+  assert.deepEqual(rows.map(r => [r.id, r.name, r.sub, r.priced.unit, r.currency, r.noStar]), [
+    ['hk:00700', 'Tencent', '00700 · 騰訊控股', 'hkd', 'HKD', true], ['hk:09988', 'Alibaba', '09988', 'hkd', 'HKD', true]]);
+  const html = renderMarketsScreen(s, NOW);
+  assert.deepEqual(rowIds(html), ['hk:00700', 'hk:09988']);
+  const [name, px, move, turnover, source] = cells(rowOf(html, 'hk:00700'));
+  assert.match(name, /<b>Tencent<\/b><span class="mk-sub">00700 · 騰訊控股<\/span>/);
+  assert.equal(px, 'HKD 400.00');
+  assert.equal(text(move), '▲up 1.27%');
+  assert.equal(turnover, 'HKD 4.8B');
+  assert.equal(text(source), 'Tencent');
+  assert.doesNotMatch(html, /mk-star/, 'no watchlist star on a Hong Kong row');
+  // the cash indices: a level, no currency, its change %
+  const ix = R.rankLoaded(R.rankLoading(onRegion('indices', 'eu'), { sort: 'volume', query: EU_QUERY }), { sort: 'volume', query: EU_QUERY, data: EU_RANK, at: NOW });
+  const [dax] = rowsOf(ix.markets, NOW);
+  assert.deepEqual([dax.id, dax.kind, dax.name, dax.priced.unit, dax.priced.change24h, dax.currency], ['ix:eu:dax', 'index', 'DAX', 'level', 12.5, null]);
+  const ixHtml = renderMarketsScreen(ix, NOW);
+  assert.equal(cells(rowOf(ixHtml, 'ix:eu:dax'))[1], '18,000.50');
+  assert.equal(text(cells(rowOf(ixHtml, 'ix:eu:dax'))[4]), 'Naver · 15 min delayed');
+  // a ranking kept for Hong Kong is no answer on Korea's screen
+  assert.deepEqual(rowsOf(R.setMarketsRegion(s, 'kr').markets, NOW), []);
+});
+
+test('Stocks › Japan and India on Spot: the empty line says no free source lists those shares', () => {
+  for (const region of ['jp', 'in']) {
+    const html = renderMarketsScreen(onRegion('stocks', region), NOW);
+    assert.match(html, /<p class="mk-empty">No free source lists these shares; their perps are under Perp\.<\/p>/, region);
+  }
+  assert.doesNotMatch(renderMarketsScreen(R.setMarketsForm(onRegion('stocks', 'jp'), 'perp'), NOW), /No free source/);
+});
