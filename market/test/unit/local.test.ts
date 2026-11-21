@@ -35,17 +35,19 @@ describe("rows", () => {
     expect(r.key).toBe("ix:jp:n225");
     expect(r.kind).toBe("index");
     expect(r.currency).toBeUndefined();
-    expect(r.at![0]).toMatchObject({ venue: "ix", canTrade: false });
+    expect(r.at![0]).toMatchObject({ venue: "ix", canTrade: false, symbol: "jp:n225" });
   });
 });
 
 describe("staleRank", () => {
-  const last = { at: 1_000, answer: { items: [], read } };
-  it("answers a ranking up to 10 minutes old, flagged stale", () => {
+  const last = { at: 1_000, base: { rows: [1, 2], asOf: read.asOf, status: read.status } };
+  it("answers a ranking's read up to 10 minutes old, flagged stale", () => {
     const s = staleRank(last, 1_000 + 599_999, "late")!;
-    expect(s.read.status).toEqual({ state: "stale", said: "late", at: read.asOf });
+    expect(s.status).toEqual({ state: "stale", said: "late", at: read.asOf });
+    expect(s.rows).toEqual([1, 2]);
     expect(staleRank(last, 1_000 + 600_000, "late")).toBeNull();
     expect(staleRank(undefined, 5, "late")).toBeNull();
+    expect(staleRank(null, 5, "late")).toBeNull();
   });
 });
 
@@ -57,5 +59,18 @@ describe("rankTtlMs", () => {
     expect(rankTtlMs(SESSIONS.hk, Date.parse("2026-11-20T04:30:00Z"), 10_000)).toBe(10_000);
     // Friday 17:00 Hong Kong to Monday 09:30
     expect(rankTtlMs(SESSIONS.hk, Date.parse("2026-11-20T09:00:00Z"), 10_000)).toBe(Date.parse("2026-11-23T01:30:00Z") - Date.parse("2026-11-20T09:00:00Z"));
+  });
+  it("keeps 60 s for 45 minutes after the close (the closing auction, a delayed source's last prints), then to the next open", async () => {
+    const { rankTtlMs } = await import("../../src/live/local.ts");
+    const { SESSIONS } = await import("../../src/live/local-session.ts");
+    // Friday: Hong Kong closes 16:00 HKT (08:00Z), Korea 15:30 KST (06:30Z)
+    expect(rankTtlMs(SESSIONS.hk, Date.parse("2026-11-20T08:01:00Z"), 10_000)).toBe(60_000);
+    expect(rankTtlMs(SESSIONS.hk, Date.parse("2026-11-20T08:01:00Z"), 5_000)).toBe(60_000);
+    expect(rankTtlMs(SESSIONS.hk, Date.parse("2026-11-20T08:44:00Z"), 10_000)).toBe(60_000);
+    expect(rankTtlMs(SESSIONS.hk, Date.parse("2026-11-20T08:50:00Z"), 10_000)).toBe(Date.parse("2026-11-23T01:30:00Z") - Date.parse("2026-11-20T08:50:00Z"));
+    expect(rankTtlMs(SESSIONS.kr, Date.parse("2026-11-20T06:31:00Z"), 10_000)).toBe(60_000);
+    expect(rankTtlMs(SESSIONS.kr, Date.parse("2026-11-20T07:20:00Z"), 10_000)).toBe(Date.parse("2026-11-23T00:00:00Z") - Date.parse("2026-11-20T07:20:00Z"));
+    // before the open is not after a close
+    expect(rankTtlMs(SESSIONS.hk, Date.parse("2026-11-23T01:00:00Z"), 10_000)).toBe(1_800_000);
   });
 });

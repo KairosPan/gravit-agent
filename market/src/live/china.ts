@@ -67,16 +67,16 @@ const round = (v: number, places: number): number => Math.round(v * 10 ** places
 type Kept<T> = { at: number; answer: T };
 type RankAnswer = { items: ExploreItem[]; read: ChinaRead };
 
-/** ONE OF THE SOURCE'S KEEPS: an answer kept `ttl` per key, a flight shared per key; `read` resolves to its answer or a refusal, which is
+/** ONE OF THE SOURCE'S KEEPS: an answer kept `ttl` per key (given the time the answer was kept, so a keep can follow the session it was read in), a flight shared per key; `read` resolves to its answer or a refusal, which is
  * never kept. As an answer comes in, those past their keep are let go and at most CN_KEPT stay, the oldest let go first: the quotes are kept
  * by the set of codes asked and a chart by its URL, so a set asked once (the rows a page shows, as the ranking moves under them) or a chart
  * opened once is not kept for the life of the process */
-export function cnKeeper<T>(now: () => number, ttl: (key: string) => number) {
+export function cnKeeper<T>(now: () => number, ttl: (key: string, at: number) => number) {
   const kept = new Map<string, Kept<T>>();
   const flights = new Map<string, Promise<T | Refusal>>();
   const keep = (key: string, answer: T): void => {
     const at = now();
-    for (const [k, e] of kept) if (at - e.at >= ttl(k)) kept.delete(k);
+    for (const [k, e] of kept) if (at - e.at >= ttl(k, e.at)) kept.delete(k);
     kept.delete(key);
     kept.set(key, { at, answer });
     while (kept.size > CN_KEPT) kept.delete(kept.keys().next().value!);
@@ -86,7 +86,7 @@ export function cnKeeper<T>(now: () => number, ttl: (key: string) => number) {
     flights,
     ask(key: string, read: () => Promise<T | Refusal>, isAnswer: (v: T | Refusal) => v is T): Promise<T | Refusal> {
       const hit = kept.get(key);
-      if (hit && now() - hit.at < ttl(key)) return Promise.resolve(hit.answer);
+      if (hit && now() - hit.at < ttl(key, hit.at)) return Promise.resolve(hit.answer);
       const flying = flights.get(key);
       if (flying) return flying;
       const flight = read().then((v) => { if (isAnswer(v)) keep(key, v); return v; })

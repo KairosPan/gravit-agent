@@ -302,7 +302,9 @@ export function marketReads(core: MarketCore): MarketReads {
     }
     const got = await src.rank(sort === "movers" ? "movers" : "volume");
     if (isRefusal(got)) return got;
-    return { asOf: got.read.asOf, tabs: [{ id: venue, label: w.label, count: got.read.total }], items: got.items.slice(0, limit), ...body, notes: [w.note, got.read.note], local: got.read };
+    // a source whose read note is its venue note (Hong Kong's) says it once
+    const notes = [...new Set([w.note, got.read.note])];
+    return { asOf: got.read.asOf, tabs: [{ id: venue, label: w.label, count: got.read.total }], items: got.items.slice(0, limit), ...body, notes, local: got.read };
   }
 
   /** A REGION'S CASH INDICES (world-indices.ts): their levels, by the day's move with `movers`, a search kept to the names and ids that hold it */
@@ -450,7 +452,7 @@ export function marketReads(core: MarketCore): MarketReads {
       for (const v of [...SHARE_VENUES, "ix"] as LocalVenue[]) {
         const src = quoterOf(v);
         const codes = [...new Set(pairs.filter((p) => p.venue === v).flatMap((p) => { const c = LOCAL_WORDS[v].code(p.symbol); return c ? [c] : []; }))];
-        if (src && codes.length) locals.set(v, src.quotes(codes).catch((err: unknown) => no("E_VENUE_UNREACHABLE", { venue: v, message: `${LOCAL_WORDS[v].label} is not answering: no quote could be read now` })));
+        if (src && codes.length) locals.set(v, src.quotes(codes).catch(() => no("E_VENUE_UNREACHABLE", { venue: v, message: `${LOCAL_WORDS[v].label} is not answering: no quote could be read now` })));
       }
       return Promise.all(pairs.map(async (p) => {
         if (isLocalVenue(p.venue)) {
@@ -501,7 +503,10 @@ export function marketReads(core: MarketCore): MarketReads {
         if ([ask.before, ask.since].some((x) => x !== undefined && String(x).trim() !== "")) return no("E_MARKET_BAD_REQUEST", { venue: id, message: w.history });
         const range = (ask.range ?? "").trim();
         if (!(CANDLE_RANGES as readonly string[]).includes(range)) return no("E_MARKET_BAD_REQUEST", { venue: id, message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
-        return src.history(sym, range as CandleRange);
+        // the venue's own code, as the quotes take it (a Hong Kong code padded, a Korean or Taiwanese one upper-cased, an index's lower-cased)
+        const code = w.code(sym);
+        if (!code) return no("E_MARKET_BAD_REQUEST", { venue: id, message: w.bad });
+        return src.history(code, range as CandleRange);
       }
       const asked = historyAsk(interval, ask);
       if (isRefusal(asked)) return asked;

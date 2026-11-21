@@ -68,7 +68,7 @@ export function shareRow(o: {
   };
 }
 
-/** one cash index as a row: a level, no currency, view-only */
+/** one cash index as a row: a level, no currency, view-only; its `at` symbol is `<region>:<id>`, as quotes and candles take it */
 export function indexRow(o: {
   region: RegionId; id: string; name: string; level: number | null; change: number | null; changePct: number | null; quoteFrom: string; quoteAt?: string;
 }): ExploreItem {
@@ -79,24 +79,30 @@ export function indexRow(o: {
     ...(o.changePct !== null ? { changePct24h: o.changePct } : {}),
     ...(o.quoteAt !== undefined ? { quoteAt: o.quoteAt } : {}),
     quoteFrom: o.quoteFrom, tabs: [],
-    at: [{ venue: "ix", venueName: "Indices", symbol: o.id, connected: false, canTrade: false, public: true,
+    at: [{ venue: "ix", venueName: "Indices", symbol: `${o.region}:${o.id}`, connected: false, canTrade: false, public: true,
       ...(o.level !== null ? { price: o.level } : {}), ...(o.quoteAt !== undefined ? { quoteAt: o.quoteAt } : {}), quoteFrom: o.quoteFrom }],
   };
 }
 
-/** a failed ranking answered from the last good one: within STALE_KEEP_MS of it, flagged stale with `said`; else null */
-export function staleRank<T extends { read: LocalRead }>(last: { at: number; answer: T } | undefined, now: number, said: string): T | null {
+/** a failed ranking answered from the last good read (a source's kept base): within STALE_KEEP_MS of it, flagged stale with `said` (its
+ * `at` the read's own asOf); else null */
+export function staleRank<T extends { status: LocalStatus; asOf: string }>(last: { at: number; base: T } | null | undefined, now: number, said: string): T | null {
   if (!last || now - last.at >= STALE_KEEP_MS) return null;
-  return { ...last.answer, read: { ...last.answer.read, status: { state: "stale", said, at: last.answer.read.asOf } } };
+  return { ...last.base, status: { state: "stale", said, at: last.base.asOf } };
 }
 
 const QUARTER_MS = 900_000;
-/** How long a ranking read at `nowMs` is kept: `inSessionMs` while the market is trading or at midday, else until its next session's first window
- * opens (weekdays; the opening is found on a 15-minute grid, every market's windows open on one). Holidays are not modelled, so a ranking read
- * before a holiday is kept to the next weekday's open, which is when it would next change anyway. */
+/** the keep for the 45 minutes after a session ends: Hong Kong's closing auction runs ten minutes past the close, and a delayed source (Naver's
+ * indices, 15 to 20 minutes) is still printing the session's last figures */
+export const CLOSING_KEEP_MS = 60_000;
+/** How long a read made at `nowMs` is kept: `inSessionMs` while the market is trading or at midday; CLOSING_KEEP_MS while any of the previous
+ * three quarter-hours was (within 45 minutes after the session's end); else until its next session's first window opens (weekdays; the opening
+ * is found on a 15-minute grid, every market's windows open on one). Holidays are not modelled, so a read before a holiday is kept to the next
+ * weekday's open, which is when it would next change anyway. */
 export function rankTtlMs(hours: SessionHours, nowMs: number, inSessionMs: number): number {
-  const phase = localSession(hours, nowMs).phase;
-  if (phase === "trading" || phase === "midday") return inSessionMs;
+  const live = (t: number): boolean => { const p = localSession(hours, t).phase; return p === "trading" || p === "midday"; };
+  if (live(nowMs)) return inSessionMs;
+  if ([1, 2, 3].some((q) => live(nowMs - q * QUARTER_MS))) return CLOSING_KEEP_MS;
   const start = Math.floor(nowMs / QUARTER_MS) * QUARTER_MS;
   for (let t = start + QUARTER_MS; t <= start + 9 * 86_400_000; t += QUARTER_MS) {
     if (localSession(hours, t).phase === "trading") return Math.max(t - nowMs, inSessionMs);

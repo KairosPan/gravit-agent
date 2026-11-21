@@ -26,6 +26,15 @@ describe("politeHosts", () => {
     await expect(http("https://www.twse.com.tw/x", init)).rejects.toThrow("paused");
   });
 
+  it("a 3xx reply (no redirect is followed) pauses the host as a 403 does", async () => {
+    let now = 0;
+    const sent: string[] = [];
+    const http = politeHosts(async (url) => { sent.push(url); return reply(302); }, TWSE_HOSTS, { clock: () => now });
+    expect((await http("https://www.twse.com.tw/a", init)).status).toBe(302);
+    await expect(http("https://www.twse.com.tw/b", init)).rejects.toThrow("paused");
+    expect(sent).toEqual(["https://www.twse.com.tw/a"]);
+  });
+
   it("a host off the list throws before any request", async () => {
     let n = 0;
     const http = politeHosts(async () => { n++; return reply(200); }, NAVER_HOSTS);

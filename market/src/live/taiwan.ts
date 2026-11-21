@@ -12,11 +12,11 @@ import type { CnSession } from "./cn-session.ts";
 import { realCnHttp, type CnHttp } from "./cn-http.ts";
 import { QUOTE_RESPONSE_LIMIT, QUOTE_TIMEOUT_MS } from "./cn-quotes.ts";
 import { SEARCH_RESULTS } from "./cn-search.ts";
-import { BARS_TTL_MS, cnKeeper, QUOTES_TTL_MS, STALE_KEEP_MS } from "./china.ts";
+import { BARS_TTL_MS, cnKeeper, QUOTES_TTL_MS } from "./china.ts";
 import type { ExploreItem } from "./explore.ts";
 import { politeHosts, retryOnce, TWSE_HOSTS } from "./local-http.ts";
 import { localSession, SESSIONS } from "./local-session.ts";
-import { quoteWord, rankTtlMs, shareRow, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource, type LocalStatus } from "./local.ts";
+import { quoteWord, rankTtlMs, shareRow, staleRank, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource, type LocalStatus } from "./local.ts";
 import {
   MIS_BATCH, parseDayAll, parseMis, parseStockDay, TW_BODY_LIMIT, TW_UNIVERSE, twCode, twDayAllUrl, twMisUrl, twStockDayUrl,
   type DayRow, type DayTable, type MisQuote,
@@ -38,6 +38,9 @@ const RANK_LIVE_MS = 30_000;
 /** a day table that is older than the last session (the close's table is not out yet, or the day was a holiday) is read again after this */
 const DAY_RETRY_MS = 300_000;
 const MONTH_NOW_TTL_MS = 600_000;
+/** the least time between two month asks of www.twse.com.tw that were not kept: a year's chart is thirteen of them */
+export const MONTH_GAP_MS = 2_000;
+const MONTHS_HOST = "www.twse.com.tw";
 const QUARTER_MS = 900_000;
 const TAIPEI_MS = 8 * 3_600_000;
 
@@ -89,12 +92,14 @@ export function taiwanSource(deps: { http?: CnHttp; clock?: () => number } = {})
   const http = politeHosts(deps.http ?? realCnHttp, TWSE_HOSTS, deps.clock ? { clock: deps.clock } : {});
   let status: LocalStatus = { state: "unavailable", said: "TWSE · not read yet" };
 
+  /** one ask, one more after a timeout or a network error, except of www.twse.com.tw (the month pages), which is asked once */
   async function get(url: string, timeoutMs: number, maxBytes: number): Promise<string> {
-    const reply = await retryOnce(() => http(url, { timeoutMs, maxBytes }));
+    const ask = () => http(url, { timeoutMs, maxBytes });
+    const reply = await (new URL(url).hostname === MONTHS_HOST ? ask() : retryOnce(ask));
     if (reply.status !== 200) throw new Error("http");
     return new TextDecoder("utf-8").decode(reply.bytes);
   }
-  const keeper = <T>(ttl: (key: string) => number) => cnKeeper<T>(now, ttl);
+  const keeper = <T>(ttl: (key: string, at: number) => number) => cnKeeper<T>(now, ttl);
 
   // ---- the day table: one read per close ------------------------------------------------------------------------------------------
   let table: { until: number; day: DayTable } | null = null;
@@ -168,11 +173,8 @@ export function taiwanSource(deps: { http?: CnHttp; clock?: () => number } = {})
       kept = { until: now() + ttl, base };
       return base;
     }
-    const old = last && now() - last.at < STALE_KEEP_MS ? last : null;
-    if (old) {
-      status = { state: "stale", said: `TWSE did not answer · Taiwan as of ${hhmm.format(new Date(old.at))} CST`, at: old.base.asOf };
-      return { ...old.base, status };
-    }
+    const old = last ? staleRank(last, now(), `TWSE did not answer · Taiwan as of ${hhmm.format(new Date(last.at))} CST`) : null;
+    if (old) { status = old.status; return old; }
     status = { state: "unavailable", said: UNAVAILABLE_SAID };
     return unavailable();
   }
@@ -194,7 +196,8 @@ export function taiwanSource(deps: { http?: CnHttp; clock?: () => number } = {})
   }
 
   // ---- quotes ----------------------------------------------------------------------------------------------------------------------
-  const quoteKeeper = keeper<Map<string, LocalMarket>>(() => QUOTES_TTL_MS);
+  /** a quote is kept 5 s in session, a minute in the 45 after the close, then until the next open (as the ranking, by when it was read) */
+  const quoteKeeper = keeper<Map<string, LocalMarket>>((_, at) => rankTtlMs(SESSIONS.tw, at, QUOTES_TTL_MS));
   const isMarkets = (v: Map<string, LocalMarket> | Refusal): v is Map<string, LocalMarket> => v instanceof Map;
 
   async function readQuotes(codes: string[]): Promise<Map<string, LocalMarket> | Refusal> {
@@ -240,6 +243,13 @@ export function taiwanSource(deps: { http?: CnHttp; clock?: () => number } = {})
   /** a month is kept for the life of the process once it is past, ten minutes while it is the current one (the key says which, as it was asked) */
   const months = keeper<Bars>((key) => (key.endsWith("|now") ? MONTH_NOW_TTL_MS : Number.POSITIVE_INFINITY));
   const isBars = (v: Bars | Refusal): v is Bars => Array.isArray(v);
+  /** the month asks that were not kept, one at a time and MONTH_GAP_MS apart across every chart read (a kept month waits for nothing) */
+  let monthTurn: Promise<void> = Promise.resolve();
+  function nextMonthTurn(): Promise<void> {
+    const turn = monthTurn;
+    monthTurn = turn.then(() => new Promise<void>((resolve) => { setTimeout(resolve, MONTH_GAP_MS); }));
+    return turn;
+  }
 
   async function history(symbol: string, range: CandleRange): Promise<LocalHistory | Refusal> {
     const code = twCode(symbol);
@@ -251,10 +261,11 @@ export function taiwanSource(deps: { http?: CnHttp; clock?: () => number } = {})
     const today = new Date(at + TAIPEI_MS);
     const back = range === "YTD" ? today.getUTCMonth() : MONTHS[range]!;
     const bars = new Map<number, Bars[number]>();
-    // the months, newest first, one ask each and one after another; a month failing fails the read
+    // the months, newest first, one ask each and one after another, those not kept MONTH_GAP_MS apart; a month failing fails the read
     for (let i = 0; i <= back; i++) {
       const url = twStockDayUrl(code, monthOf(at, i));
       const got = await months.ask(`${url}|${i === 0 ? "now" : "past"}`, async () => {
+        await nextMonthTurn();
         try { return parseStockDay(await get(url, QUOTE_TIMEOUT_MS, HISTORY_BODY_LIMIT)) ?? unavailable(); } catch { return unavailable(); }
       }, isBars);
       if (!isBars(got)) return got;

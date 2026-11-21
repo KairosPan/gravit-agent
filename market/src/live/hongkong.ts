@@ -9,7 +9,7 @@ import { CN_BARS, HISTORY_BODY_LIMIT } from "./cn-history.ts";
 import { realCnHttp, type CnHttp } from "./cn-http.ts";
 import { decodeGbk, QUOTE_RESPONSE_LIMIT, QUOTE_TIMEOUT_MS } from "./cn-quotes.ts";
 import { decodeSmartbox, SEARCH_RESPONSE_LIMIT, SEARCH_RESULTS, SEARCH_TIMEOUT_MS } from "./cn-search.ts";
-import { BARS_TTL_MS, cnKeeper, MINUTES_TTL_MS, QUOTES_TTL_MS, RANK_TTL_MS, SEARCH_FLIGHTS, SEARCH_KEEP, SEARCH_TTL_MS, STALE_KEEP_MS } from "./china.ts";
+import { BARS_TTL_MS, cnKeeper, MINUTES_TTL_MS, QUOTES_TTL_MS, RANK_TTL_MS, SEARCH_FLIGHTS, SEARCH_KEEP, SEARCH_TTL_MS } from "./china.ts";
 import { eastmoney, emListUrl, EASTMONEY_NAME, type EmRow } from "./eastmoney.ts";
 import type { ExploreItem } from "./explore.ts";
 import {
@@ -18,7 +18,7 @@ import {
 } from "./hk-parse.ts";
 import { HK_HOSTS, politeHosts, retryOnce } from "./local-http.ts";
 import { localSession, SESSIONS } from "./local-session.ts";
-import { quoteWord, rankTtlMs, shareRow, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource, type LocalStatus } from "./local.ts";
+import { quoteWord, rankTtlMs, shareRow, staleRank, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource, type LocalStatus } from "./local.ts";
 import type { CandleRange } from "./trade.ts";
 
 export { HK_RANK_ROWS, hkCode };
@@ -68,7 +68,7 @@ export function hongKongSource(deps: { http?: CnHttp; clock?: () => number; east
     return reply.bytes;
   }
   const utf8 = (bytes: Uint8Array): string => new TextDecoder("utf-8").decode(bytes);
-  const keeper = <T>(ttl: (key: string) => number) => cnKeeper<T>(now, ttl);
+  const keeper = <T>(ttl: (key: string, at: number) => number) => cnKeeper<T>(now, ttl);
 
   // ---- the ranking -----------------------------------------------------------------------------------------------------------------
   /** the one ranking read both sorts are made from: movers is the same rows re-sorted, so the host sees one read */
@@ -118,11 +118,8 @@ export function hongKongSource(deps: { http?: CnHttp; clock?: () => number; east
       kept = { until: now() + rankTtlMs(SESSIONS.hk, now(), RANK_TTL_MS), base };
       return base;
     }
-    const old = last && now() - last.at < STALE_KEEP_MS ? last : null;
-    if (old) {
-      status = { state: "stale", said: `Tencent and Eastmoney did not answer · Hong Kong as of ${hhmm.format(new Date(old.at))} HKT`, at: old.base.asOf };
-      return { ...old.base, status };
-    }
+    const old = last ? staleRank(last, now(), `Tencent and Eastmoney did not answer · Hong Kong as of ${hhmm.format(new Date(last.at))} HKT`) : null;
+    if (old) { status = old.status; return old; }
     status = { state: "unavailable", said: UNAVAILABLE_SAID };
     return unavailable();
   }
@@ -141,7 +138,8 @@ export function hongKongSource(deps: { http?: CnHttp; clock?: () => number; east
   }
 
   // ---- quotes ----------------------------------------------------------------------------------------------------------------------
-  const quoteKeeper = keeper<Map<string, LocalMarket>>(() => QUOTES_TTL_MS);
+  /** a quote is kept 5 s in session, a minute in the 45 after the close, then until the next open (as the ranking, by when it was read) */
+  const quoteKeeper = keeper<Map<string, LocalMarket>>((_, at) => rankTtlMs(SESSIONS.hk, at, QUOTES_TTL_MS));
   const isMarkets = (v: Map<string, LocalMarket> | Refusal): v is Map<string, LocalMarket> => v instanceof Map;
 
   async function readQuotes(codes: string[], said: boolean): Promise<Map<string, LocalMarket> | Refusal> {

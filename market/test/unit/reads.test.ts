@@ -17,6 +17,7 @@ import { INTERVAL_MS, type Candle, type CandleInterval, type CandlePage, type Ca
 import { no } from "../../src/refuse.ts";
 import { startMarketServer, type MarketServerHandle } from "../../src/server.ts";
 import type { Listing, PublicSource } from "../../src/live/public-markets.ts";
+import { HK_NOTE } from "../../src/live/hongkong.ts";
 import { fakeChina, fakeHub, fakeIndices, fakeLocal, fakeSource, listing } from "../fakes.ts";
 
 const servers: MarketServerHandle[] = [];
@@ -1228,6 +1229,23 @@ describe("the local regions and the world's indices in the market's reads", () =
     expect(refused(await r.reads.candles("tw", "2330", "", { range: "2Y" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: expect.stringContaining("a range is one of") });
     expect(refused(await marketReads(createMarketCore({ sources: [] })).candles("hk", "00700", "", { range: "1M" }))).toMatchObject({ message: "Hong Kong is not read by this market" });
     expect([r.hk.calls.history, r.ix.calls.history, r.kr.calls.history, r.tw.calls.history]).toEqual([[["00700", "1M"]], [["jp:n225", "1Y"]], [], []]);
+  });
+
+  it("candles: the symbol is the venue's own code (padded, upper-cased, an index's case dropped); a non-code is refused in its words", async () => {
+    const r = regions();
+    expect(answered(await r.reads.candles("hk", "700", "", { range: "1M" }))).toMatchObject({ symbol: "00700" });
+    expect(answered(await r.reads.candles("ix", "JP:N225", "", { range: "1Y" }))).toMatchObject({ symbol: "jp:n225" });
+    answered(await r.reads.candles("kr", "0126z0", "", { range: "1M" }));
+    expect(refused(await r.reads.candles("tw", "x", "", { range: "1M" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "a Taiwan share is its code, four to six digits or letters" });
+    expect(refused(await r.reads.candles("ix", "jp:nope", "", { range: "1Y" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "an index is <region>:<id> from the market's list (jp:n225)" });
+    expect([r.hk.calls.history, r.ix.calls.history, r.kr.calls.history, r.tw.calls.history]).toEqual([[["00700", "1M"]], [["jp:n225", "1Y"]], [["0126Z0", "1M"]], []]);
+  });
+
+  it("a local ranking's notes say each thing once: Hong Kong's read note is its venue note", async () => {
+    const hk = fakeLocal("hk", { rank: async (sort) => ({ items: [], read: { venue: "hk", region: "hk", sort, total: 0, asOf: "2026-11-20T08:00:00.000Z",
+      session: { phase: "closed", lastSession: "2026-11-20" } as never, status: { state: "live", said: "Tencent · answering" }, note: HK_NOTE } }) });
+    const reads = marketReads(createMarketCore({ sources: [], hk: hk.source }));
+    expect(answered(await reads.explore({ region: "hk" })).notes).toEqual([HK_NOTE]);
   });
 });
 

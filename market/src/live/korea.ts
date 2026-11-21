@@ -10,7 +10,7 @@ import type { CnSession } from "./cn-session.ts";
 import { realCnHttp, type CnHttp } from "./cn-http.ts";
 import { QUOTE_RESPONSE_LIMIT, QUOTE_TIMEOUT_MS } from "./cn-quotes.ts";
 import { SEARCH_RESPONSE_LIMIT, SEARCH_RESULTS, SEARCH_TIMEOUT_MS } from "./cn-search.ts";
-import { BARS_TTL_MS, cnKeeper, QUOTES_TTL_MS, RANK_TTL_MS, SEARCH_FLIGHTS, SEARCH_KEEP, SEARCH_TTL_MS, STALE_KEEP_MS } from "./china.ts";
+import { BARS_TTL_MS, cnKeeper, QUOTES_TTL_MS, RANK_TTL_MS, SEARCH_FLIGHTS, SEARCH_KEEP, SEARCH_TTL_MS } from "./china.ts";
 import type { ExploreItem } from "./explore.ts";
 import {
   krChartUrl, krCode, krQuoteUrl, krRankUrl, krSearchUrl, KR_BODY_LIMIT, KR_RANK_PAGE, KR_RANK_ROWS,
@@ -18,7 +18,7 @@ import {
 } from "./kr-parse.ts";
 import { NAVER_HOSTS, politeHosts, retryOnce } from "./local-http.ts";
 import { localSession, SESSIONS } from "./local-session.ts";
-import { quoteWord, rankTtlMs, shareRow, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource, type LocalStatus } from "./local.ts";
+import { quoteWord, rankTtlMs, shareRow, staleRank, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource, type LocalStatus } from "./local.ts";
 import type { CandleRange } from "./trade.ts";
 
 export { KR_RANK_ROWS, krCode };
@@ -55,7 +55,7 @@ export function koreaSource(deps: { http?: CnHttp; clock?: () => number } = {}):
     return reply.bytes;
   }
   const utf8 = (bytes: Uint8Array): string => new TextDecoder("utf-8").decode(bytes);
-  const keeper = <T>(ttl: (key: string) => number) => cnKeeper<T>(now, ttl);
+  const keeper = <T>(ttl: (key: string, at: number) => number) => cnKeeper<T>(now, ttl);
 
   // ---- the ranking -----------------------------------------------------------------------------------------------------------------
   /** the one ranking read both sorts are made from: movers is the same rows re-sorted, so the host sees one read */
@@ -94,11 +94,8 @@ export function koreaSource(deps: { http?: CnHttp; clock?: () => number } = {}):
       kept = { until: now() + rankTtlMs(SESSIONS.kr, now(), RANK_TTL_MS), base };
       return base;
     }
-    const old = last && now() - last.at < STALE_KEEP_MS ? last : null;
-    if (old) {
-      status = { state: "stale", said: `Naver did not answer · Korea as of ${hhmm.format(new Date(old.at))} KST`, at: old.base.asOf };
-      return { ...old.base, status };
-    }
+    const old = last ? staleRank(last, now(), `Naver did not answer · Korea as of ${hhmm.format(new Date(last.at))} KST`) : null;
+    if (old) { status = old.status; return old; }
     status = { state: "unavailable", said: UNAVAILABLE_SAID };
     return unavailable();
   }
@@ -118,7 +115,8 @@ export function koreaSource(deps: { http?: CnHttp; clock?: () => number } = {}):
   }
 
   // ---- quotes ----------------------------------------------------------------------------------------------------------------------
-  const quoteKeeper = keeper<Map<string, LocalMarket>>(() => QUOTES_TTL_MS);
+  /** a quote is kept 5 s in session, a minute in the 45 after the close, then until the next open (as the ranking, by when it was read) */
+  const quoteKeeper = keeper<Map<string, LocalMarket>>((_, at) => rankTtlMs(SESSIONS.kr, at, QUOTES_TTL_MS));
   const isMarkets = (v: Map<string, LocalMarket> | Refusal): v is Map<string, LocalMarket> => v instanceof Map;
 
   async function readQuotes(codes: string[], said: boolean): Promise<Map<string, LocalMarket> | Refusal> {

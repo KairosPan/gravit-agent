@@ -2,8 +2,8 @@
  * One read per region: the first source of each index is asked once for all that region's indices it covers (Naver and Eastmoney take a
  * comma list), then the next source once for those that failed; the whole read is bounded at 9 s and what answered is returned. An index no
  * source answered keeps its last level flagged stale for a day, then is left out with the read's note naming it. A non-200 reply, a body that
- * does not parse and a reply with no row are each a failure for the indices it should have carried. A read that is not whole (a stale row or
- * a missing one) is never written into the keep. An index with no source that answered in Task 3's fixtures is not on the list (spec §5.3). */
+ * does not parse and a reply with no row are each a failure for the indices it should have carried. What a read answered fresh is kept, a
+ * partial read as well as a whole one; a stale row is rebuilt from the last levels, never written into the keep as fresh. An index with no source that answered in Task 3's fixtures is not on the list (spec §5.3). */
 import { isRefusal, type Refusal } from "../core/errors.ts";
 import { no } from "../refuse.ts";
 import { CN_BARS, HISTORY_BODY_LIMIT, historyUrl, parseKline, type CnBar } from "./cn-history.ts";

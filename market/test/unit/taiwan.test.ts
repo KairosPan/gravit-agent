@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import type { CnHttp, CnReply } from "../../src/live/cn-http.ts";
 import { MIS_BATCH, taiwanSource, twCode, TW_UNIVERSE } from "../../src/live/taiwan.ts";
@@ -39,7 +39,15 @@ const misAsks = (n: ReturnType<typeof net>) => n.sent.filter((u) => u.includes("
 const day = (JSON.parse(DAY_BODY) as Array<{ Code: string; TradeValue: string }>)
   .filter((r) => !r.Code.startsWith("00")).sort((a, b) => Number(b.TradeValue || 0) - Number(a.TradeValue || 0)).slice(0, TW_UNIVERSE);
 
+/** a history read run to its end under fake timers (the month asks are spaced 2 s apart) */
+async function driven<T>(p: Promise<T>): Promise<T> {
+  await vi.runAllTimersAsync();
+  return p;
+}
+
 describe("the Taiwan source", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
   it("is venue tw, named TWSE", () => {
     const s = taiwanSource({ http: net(routes()).http, clock: () => SUN });
     expect([s.venue, s.name, TW_UNIVERSE, MIS_BATCH]).toEqual(["tw", "TWSE", 200, 50]);
@@ -167,8 +175,9 @@ describe("the Taiwan source", () => {
 
   it("history 1M: two month asks (the fixture answers both), bars deduped and oldest first", async () => {
     const n = net(routes());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const s = taiwanSource({ http: n.http, clock: () => Date.parse("2026-11-23T02:00:00Z") });
-    const h = answered(await s.history("2330", "1M"));
+    const h = answered(await driven(s.history("2330", "1M")));
     const asks = n.sent.filter((u) => u.includes("STOCK_DAY?"));
     expect(asks.map((u) => /date=(\d+)/.exec(u)![1])).toEqual(["20261101", "20261001"]);
     expect(h).toMatchObject({ venue: "tw", symbol: "2330", range: "1M", source: "TWSE" });
@@ -179,9 +188,10 @@ describe("the Taiwan source", () => {
   });
 
   it("history asks: 3M four, 6M seven, 1Y thirteen, YTD the months since January; a past month is kept, the current one ten minutes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const asksFor = async (range: "3M" | "6M" | "1Y" | "YTD", sym = "2330"): Promise<number> => {
       const n = net(routes());
-      answered(await taiwanSource({ http: n.http, clock: () => Date.parse("2026-11-23T02:00:00Z") }).history(sym, range));
+      answered(await driven(taiwanSource({ http: n.http, clock: () => Date.parse("2026-11-23T02:00:00Z") }).history(sym, range)));
       return n.sent.filter((u) => u.includes("STOCK_DAY?")).length;
     };
     expect(await asksFor("3M")).toBe(4);
@@ -191,11 +201,44 @@ describe("the Taiwan source", () => {
     const n = net(routes());
     let t = Date.parse("2026-11-23T02:00:00Z");
     const s = taiwanSource({ http: n.http, clock: () => t });
-    await s.history("2330", "1M");
+    await driven(s.history("2330", "1M"));
     t += 11 * 60_000;
-    await s.history("2330", "1M");
+    await driven(s.history("2330", "1M"));
     expect(n.sent.filter((u) => u.includes("date=20261001"))).toHaveLength(1);
     expect(n.sent.filter((u) => u.includes("date=20261101"))).toHaveLength(2);
+  });
+
+  it("history: uncached months are asked 2 s apart (1Y's thirteen take at least 24 s); kept months cost nothing", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const n = net(routes());
+    const s = taiwanSource({ http: n.http, clock: () => Date.parse("2026-11-23T02:00:00Z") });
+    const months = () => n.sent.filter((u) => u.includes("STOCK_DAY?")).length;
+    const started = Date.now();
+    let done = false;
+    const p = s.history("2330", "1Y").then((h) => { done = true; return h; });
+    await vi.advanceTimersByTimeAsync(23_999);
+    expect(months()).toBe(12);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    answered(await p);
+    expect(months()).toBe(13);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(24_000);
+    // the past months are kept for the process, the current one ten minutes: asked again at once, nothing waits and nothing is sent
+    const again = Date.now();
+    answered(await s.history("2330", "1Y"));
+    expect(months()).toBe(13);
+    expect(Date.now()).toBe(again);
+  });
+
+  it("history: a month that times out at www.twse.com.tw is not asked again", async () => {
+    let asked = 0;
+    const http: CnHttp = async (url) => {
+      if (url.includes("STOCK_DAY?")) { asked++; throw new Error("timeout"); }
+      return { status: 404, bytes: new Uint8Array() };
+    };
+    const s = taiwanSource({ http, clock: () => SUN });
+    expect(refused(await s.history("2330", "1M")).code).toBe("E_VENUE_UNREACHABLE");
+    expect(asked).toBe(1);
   });
 
   it("history refusals: 5Y, MAX, the intraday ranges, a bad code, a month failing", async () => {
