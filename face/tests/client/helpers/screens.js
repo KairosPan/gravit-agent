@@ -532,7 +532,8 @@ function marketsRegionsStates() {
     ['markets-region-hk-closed-stale', rank(region('stocks', 'hk'), 'hk', hkItems, { session: { phase: 'closed', lastSession: '2026-11-20' }, stale: true })],
     ['markets-page-hk', R.candlesLoaded(hkPage, { id: 'hk:00700', range: '1M', at: NOW,
       data: { ok: true, range: '1M', candles: [{ t: Date.parse('2026-11-19T07:00:00Z'), c: 390 }, { t: Date.parse('2026-11-20T07:00:00Z'), c: 395 }] } })],
-    ['markets-page-index-refused', R.candlesFailed(R.candlesLoading(ixPage, { id: 'ix:eu:dax', range: '1D' }), { id: 'ix:eu:dax', range: '1D', at: NOW, message: 'No minute chart for this index' })],
+    // an index opens on 3M (its market reads no intraday chart): a refusal of that range, in the market's sentence
+    ['markets-page-index-refused', R.candlesFailed(R.candlesLoading(ixPage, { id: 'ix:eu:dax', range: '3M' }), { id: 'ix:eu:dax', range: '3M', at: NOW, message: "No source is answering: that index's history cannot be read now" })],
     ['markets-search-local', R.resultsLoaded(R.setMarketsQuery(R.setMarketsTab(on, 'stocks'), 'te'), { data: search, at: NOW })],
   ];
 }

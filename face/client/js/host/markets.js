@@ -22,8 +22,8 @@ import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey } from '../wire/china.js';
-import { localKeyOf, isLocalKey, localPairOf, localRankOf, localQuoteOf, localHitsOf } from '../wire/local.js';
-import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, connectedQueryOf, chinaRankQueryOf, rankQueryOf, onLocal, onChinaA } from './market-view.js';
+import { localKeyOf, isLocalKey, localPairOf, localRankOf, localQuoteOf, localHitsOf, venueOfMarket } from '../wire/local.js';
+import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, connectedQueryOf, chinaRankQueryOf, rankQueryOf, onLocal, onChinaA, localRangeOf, localRangesOf } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
 import { venuesOf } from './account-view.js';
@@ -287,17 +287,19 @@ export function startMarkets({
   }
 
   // The local markets' prices, the market's (venues china, hk, kr, tw, ix), on the tick and at once for a page reached (its own id
-  // first): the local page's own first, then the local rows in view — twelve pairs a call, none while one is out — each into the
-  // quotes kept by its row's key (the A shares' store). Each priced row lands over the quotes kept; one the market refused keeps its
-  // kept price, marked stale, with the market's sentence as its venue's state; an answer the proxy re-serves stale (the market not
-  // answering) lands every price stale, the connection 'stale' and each venue's state the market not answering; a read that fails
-  // keeps every price and says the connection failed
+  // first): the local page's own first, then the A-share rows in view — twelve pairs a call, none while one is out — each into the
+  // quotes kept by its row's key (the A shares' store). A Hong Kong, Korean or Taiwanese row, or an index's, is priced from its
+  // region's ranking (localRowsOf), so only its page is asked. Each priced row lands over the quotes kept; one the market refused
+  // keeps its kept price, marked stale, with the market's sentence as its venue's state; an answer the proxy re-serves stale (the
+  // market not answering) lands every price stale, the connection 'stale' and each venue's state the market not answering, and the
+  // next fresh priced answer for a venue so flagged says it answering again (China's state is read again, recheckChina); a read that
+  // fails keeps every price and says the connection failed
   function readLocalQuotes(pageId = null) {
     if (inAir('cnQuotes')) return;
     const s = store.get();
     const routed = s.route?.screen === 'markets' && isLocalKey(s.route.id) ? s.route.id : null;
     const page = isLocalKey(pageId) ? pageId : routed ?? localPage;
-    const rows = rowsOf(s.markets, now(), s.account?.data).filter(r => isLocalKey(r.id) && (inView === null || inView.has(r.id))).map(r => r.id);
+    const rows = rowsOf(s.markets, now(), s.account?.data).filter(r => isCnKey(r.id) && (inView === null || inView.has(r.id))).map(r => r.id);
     const ids = [...new Set([page, ...rows].filter(Boolean))].slice(0, QUOTE_PAIRS);
     if (!ids.length) return;
     fly('cnQuotes', `${QUOTES}?pairs=${encodeURIComponent(ids.map(localPairOf).join(','))}`, (body, refused) => {
@@ -305,9 +307,15 @@ export function startMarkets({
       if (refused || !answered(body, 'quotes')) { store.dispatch('quotesUpdated', { quotes: kept, connection: 'error' }); return; }
       const next = { ...kept };
       const refusals = new Map();
+      const priced = new Map();
       for (const row of body.quotes) {
         const quote = localQuoteOf(row, now());
-        if (quote) { next[quote.id] = body.stale === true ? { ...quote, quote_status: 'stale' } : quote; continue; }
+        if (quote) {
+          next[quote.id] = body.stale === true ? { ...quote, quote_status: 'stale' } : quote;
+          const venue = localKeyOf(quote.id).venue;
+          if (quote.price !== null && !priced.has(venue)) priced.set(venue, quote.source);
+          continue;
+        }
         const id = ids.find(x => localPairOf(x) === `${row?.venue}|${row?.symbol}`);
         if (!id || row.refusal === undefined) continue;
         if (Object.hasOwn(kept, id)) next[id] = { ...kept[id], quote_status: 'stale' };
@@ -322,6 +330,14 @@ export function startMarkets({
       }
       store.dispatch('quotesUpdated', { quotes: next, connection: 'polling' });
       for (const [venue, refusal] of refusals) store.dispatch('localStatusUpdated', { venue, status: { state: 'unavailable', said: words(refusal?.message) ?? '' } });
+      // a venue last said not answering, priced afresh: answering again, in its quote's source words (China's state is read again)
+      const flagged = store.get().markets.providers;
+      for (const [venue, source] of priced) {
+        if (venue === CHINA_VENUE || refusals.has(venue)) continue;
+        if (Array.isArray(flagged) && flagged.some(p => p?.notAnswering === true && venueOfMarket(p.market) === venue)) {
+          store.dispatch('localStatusUpdated', { venue, status: { state: 'live', said: source } });
+        }
+      }
       if (!refusals.has(CHINA_VENUE)) recheckChina();
     });
   }
@@ -347,10 +363,12 @@ export function startMarkets({
     readSources();
   }
 
-  // the range a page's chart is drawn at: the one kept for it, 1D until one is chosen
+  // the range a page's chart is drawn at: the one kept for it, 1D until one is chosen — a Hong Kong, Korean or Taiwanese share's or
+  // an index's, one its market reads, its market's first until one is chosen (localRangeOf)
   function rangeOf(id) {
     const candles = store.get().markets.candles;
     const range = Object.hasOwn(candles, id) ? candles[id]?.range : undefined;
+    if (isLocalKey(id) && !isCnKey(id)) return localRangeOf(id, range);
     return named(range) ? range : '1D';
   }
   // Keyed first: read `r` (candles, book, trades) at a page's line. A connected line asks the account's connected route; the
@@ -761,6 +779,8 @@ export function startMarkets({
         if (win?.location) win.location.hash = toHash(plain);
       }
       if (isLocalKey(id)) {
+        // a range the market refuses for this market (an index's 1D, Taiwan's 5Y…) is never asked
+        if (!localRangesOf(id).includes(value)) return;
         store.dispatch('setRange', { id, range: value });
         if (rangeOf(id) === value) readLocalCandles(id, value);
         return;

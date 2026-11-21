@@ -27,7 +27,7 @@ import { orderWords, marketKeysOn, marketKey, changeKey, positionKeys, positionS
 import { marketLeverageSeedOf } from '../host/sheet-market.js';
 import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf, fundingMissingOf } from '../host/market-depth-view.js';
 import {
-  candleRanges, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
+  candleRanges, localCandleRanges, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
   chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf, marketOriginOf, noSpotSourceWord,
   localPageOf, localWord, localDownWord, localRefreshWord, localStateWord, regionWord,
@@ -606,7 +606,7 @@ function localPage(id, state, now) {
     `${priced ? `${chgHtml(number(quote.change_pct))}<span class="mk-basis">${esc(basisWord(quote))}</span>` : ''}</div>` +
     `${stateWord ? `<p class="mk-asof">${esc(stateWord)}</p>` : ''}${planHtml(markOf(state.desk?.data, id))}` +
     `<dl class="mk-facts">${view.facts.map(f => `<div><dt>${esc(f.label)}</dt><dd>${esc(localFactWord(f, asset.currency))}</dd></div>`).join('')}</dl>`;
-  const left = [section(th('markets.history.title'), localHistory(view), seg(candleRanges(), view.range, 'setRange', { 'data-id': id }))];
+  const left = [section(th('markets.history.title'), localHistory(view), seg(localCandleRanges(id), view.range, 'setRange', { 'data-id': id }))];
   const keys = `<div class="mk-d-acts"><button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button></div>`; // words-order: an icon, then its word
   const about = aboutHtml(state.conversations, { symbol: asset.symbol, name: asset.name }, now);
   return pageHtml(who, keys, top, left, about.length ? [section(th('markets.about'), feed(about))] : []);

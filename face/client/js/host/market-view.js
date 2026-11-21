@@ -290,6 +290,28 @@ const rangeWords = () => ({
 /** A market's history ranges as `[label, id]` (a seg's items), in CANDLE_RANGES's order: the id is the Account's range. */
 export const candleRanges = () => { const w = rangeWords(); return CANDLE_RANGES.map(id => [w[id], id]); };
 
+// the ranges each local market's source reads, and the one a page opens on: Korea's and the indices' daily history alone (no
+// intraday chart), Taiwan's up to a year, Hong Kong's minutes for one day (no five-day) and its daily bars; China's every range
+const LONG_RANGES = ['1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
+const LOCAL_RANGES = { hk: ['1D', ...LONG_RANGES], kr: LONG_RANGES, ix: LONG_RANGES, tw: ['1M', '3M', '6M', 'YTD', '1Y'] };
+const LOCAL_FIRST_RANGE = { hk: '1D', kr: '3M', ix: '3M', tw: '3M' };
+/** The ranges a local key's market reads (a Hong Kong, Korean or Taiwanese share's, an index's), in CANDLE_RANGES's order; every
+ *  range for any other key. @param {unknown} id */
+export function localRangesOf(id) {
+  const venue = localKeyOf(id)?.venue;
+  return venue && Object.hasOwn(LOCAL_RANGES, venue) ? LOCAL_RANGES[venue] : CANDLE_RANGES;
+}
+/** The range a page's chart is drawn at: `kept` when its market reads it, else the market's first (3M for Korea, Taiwan and the
+ *  indices, 1D for Hong Kong and every other key). */
+export function localRangeOf(id, kept) {
+  const ranges = localRangesOf(id);
+  if (typeof kept === 'string' && ranges.includes(kept)) return kept;
+  const venue = localKeyOf(id)?.venue;
+  return venue && Object.hasOwn(LOCAL_FIRST_RANGE, venue) ? LOCAL_FIRST_RANGE[venue] : '1D';
+}
+/** A local page's range seg items, `[label, id]`: its market's ranges alone. */
+export const localCandleRanges = id => { const ranges = localRangesOf(id); return candleRanges().filter(([, r]) => ranges.includes(r)); };
+
 const TENCENT = 'Tencent'; // en-kept: the provider's name
 const PROVIDERS = { tencent: TENCENT };
 const MARKET_PROVIDER = { cn: TENCENT };
@@ -1195,14 +1217,15 @@ const localFacts = share => [
 /** A Hong Kong, Korean or Taiwanese share's page, or a cash index's (spec 2026-11-20 §5.6), or null for any other id: its asset
  *  (`{ id, venue, kind, region, symbol, name, nameLocal, currency }`, an index's currency null), its quote (the quotes poll's, else its
  *  search hit's price), its facts `{ label, value, unit }` — `price` in its currency (an index's level bare), `shares`, `amount` in its
- *  currency, `word` — the range kept (1D until one is chosen) and its history read, as the A share's (cnPageOf). */
+ *  currency, `word` — the range kept (its market's first, localRangeOf, until one it reads is chosen) and its history read, as the A
+ *  share's (cnPageOf). */
 export function localPageOf(markets, id) {
   const m = isRecord(markets) ? markets : {};
   const asset = localAssetOf(m, id);
   if (!asset) return null;
   const quote = own(m.quotes, id) ?? own(m.hitQuotes, id) ?? null;
   const chart = own(m.candles, id);
-  const range = isRecord(chart) && CANDLE_RANGES.includes(chart.range) ? chart.range : '1D';
+  const range = localRangeOf(id, isRecord(chart) ? chart.range : undefined);
   const data = isRecord(chart) && chart.data?.ok === true ? chart.data : null;
   const current = data !== null && data.range === range;
   const q = isRecord(quote) ? quote : {};

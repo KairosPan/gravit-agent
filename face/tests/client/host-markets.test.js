@@ -2233,24 +2233,58 @@ test('local quotes: the page first, then the local rows in view, twelve pairs a 
   await settle();
   r.markets.rowsInView(['kr:005930']);
   r.markets.page('hk:00700');
-  assert.deepEqual(pairsIn(asked.at(-1)), ['hk|00700', 'kr|005930'], 'at once: the page first, then the rows in view');
+  assert.deepEqual(pairsIn(asked.at(-1)), ['hk|00700'], "at once: the page alone (a Korean row is priced from Korea's ranking)");
   await settle();
   assert.equal(r.m().quotes['hk:00700'].price, 101);
-  assert.equal(r.m().quotes['kr:005930'].currency, 'KRW');
   assert.equal(r.m().connection, 'polling');
-  r.markets.page(null);
-  r.markets.rowsInView(null);
-  r.fire(QUOTES_MS);
-  assert.deepEqual(pairsIn(asked.at(-1)), ['kr|005930', 'kr|000660'], 'every 5 s, the rows in view');
+  r.markets.page('kr:005930');
+  assert.deepEqual(pairsIn(asked.at(-1)), ['kr|005930']);
+  await settle();
+  assert.equal(r.m().quotes['kr:005930'].currency, 'KRW');
+  r.markets.page('kr:000660');
   await settle();
   assert.equal(Object.hasOwn(r.m().quotes, 'kr:000660'), false, 'a refused pair is not quoted');
   assert.deepEqual(r.m().providers.find(p => p.market === 'kr'), { id: 'naver', market: 'kr', status: 'error', said: 'Naver is not answering' });
-  // the cash indices: ix pairs
+  // off a page, the Korean rows in view are not polled: their prices are the ranking's
+  r.markets.page(null);
+  r.markets.rowsInView(null);
+  const polled = asked.length;
+  r.fire(QUOTES_MS);
+  await settle();
+  assert.equal(asked.length, polled, 'no quotes asked for Korean rows');
+  // nor the cash indices
   r.store.dispatch('setMarketsTab', 'indices');
   r.store.dispatch('setMarketsRegion', 'eu');
   await settle();
   r.fire(QUOTES_MS);
-  assert.deepEqual(pairsIn(asked.at(-1)), ['ix|eu:dax', 'ix|eu:cac']);
+  await settle();
+  assert.equal(asked.length, polled, 'no quotes asked for index rows');
+  r.markets.close();
+});
+
+test("a local page said not answering (a stale quotes answer) is said answering again by the next fresh priced answer", async () => {
+  const facts = { prevClose: 99, open: 99, high: 101, low: 98, volume: 1e6, turnover: 1e8, lastSession: '2026-11-20', phase: 'trading', quoteStatus: 'unsaid' };
+  let stale = true;
+  const r = rig({
+    answer: path => {
+      if (!path.startsWith('/data/market/quotes?')) return localAnswer(path);
+      return { ok: true, ...(stale ? { stale: true } : {}), quotes: pairsIn(path).map(p => {
+        const [venue, symbol] = [p.slice(0, p.indexOf('|')), p.slice(p.indexOf('|') + 1)];
+        return { venue, symbol, market: { symbol, name: 'Tencent', price: 400, change24h: 2, changePct24h: 0.5, quoteAt: '2026-11-21T02:30:00Z', quoteFrom: 'Tencent', currency: 'HKD', local: facts } };
+      }) };
+    },
+  });
+  r.markets.show(true);
+  r.markets.page('hk:00700');
+  await settle();
+  assert.equal(r.m().providers.find(p => p.market === 'hk')?.notAnswering, true, 'the stale answer says the market not answering');
+  stale = false;
+  r.fire(QUOTES_MS);
+  await settle();
+  const hk = r.m().providers.find(p => p.market === 'hk');
+  assert.equal(hk.notAnswering, undefined, 'the flag goes with the fresh answer');
+  assert.equal(hk.status, 'connected');
+  assert.equal(r.m().quotes['hk:00700'].quote_status === 'stale', false);
   r.markets.close();
 });
 
@@ -2288,7 +2322,12 @@ test("a Hong Kong share's page reads its history at venue hk; an index's at venu
   await settle();
   assert.equal(r.m().candles['hk:00700'].data.candles.length, 2);
   r.markets.page('ix:eu:dax');
-  assert.equal(r.reads.find(p => p.includes('venue=ix')), '/data/market/candles?venue=ix&symbol=eu%3Adax&range=1D');
+  assert.equal(r.reads.find(p => p.includes('venue=ix')), '/data/market/candles?venue=ix&symbol=eu%3Adax&range=3M', 'a cold index page asks 3M, a range the market reads');
+  const before = r.reads.length;
+  r.markets.range('ix:eu:dax', '1D');
+  assert.equal(r.reads.length, before, 'a range the market refuses for an index is not asked');
+  r.markets.page('tw:2330');
+  assert.equal(r.reads.find(p => p.includes('venue=tw')), '/data/market/candles?venue=tw&symbol=2330&range=3M');
   assert.deepEqual(r.follows, [], 'a local share follows nothing on the stream');
   r.markets.close();
 });

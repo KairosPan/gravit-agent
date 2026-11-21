@@ -996,3 +996,21 @@ test("localPageOf: a Hong Kong share's asset, quote, facts and history read; an 
   assert.equal(localPageOf({}, 'stock:AAPL'), null);
   assert.equal(localPageOf({}, 'hk:700'), null);
 });
+
+test("a local page's ranges are its market's: Korea and the indices from 1M (3M first), Taiwan up to 1Y (3M first), Hong Kong all but 5D (1D first)", async () => {
+  const { localPageOf, localRangesOf, localRangeOf, localCandleRanges, CANDLE_RANGES } = await import('../../client/js/host/market-view.js');
+  const long = ['1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
+  assert.deepEqual(localRangesOf('kr:005930'), long);
+  assert.deepEqual(localRangesOf('ix:jp:n225'), long);
+  assert.deepEqual(localRangesOf('tw:2330'), ['1M', '3M', '6M', 'YTD', '1Y']);
+  assert.deepEqual(localRangesOf('hk:00700'), ['1D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX']);
+  assert.deepEqual(localRangesOf('cn:600519'), CANDLE_RANGES, 'China unchanged');
+  assert.deepEqual([localRangeOf('kr:005930'), localRangeOf('ix:eu:dax'), localRangeOf('tw:2330'), localRangeOf('hk:00700'), localRangeOf('cn:600519')], ['3M', '3M', '3M', '1D', '1D']);
+  assert.equal(localRangeOf('tw:2330', '1Y'), '1Y', 'a range the market reads is kept');
+  assert.equal(localRangeOf('tw:2330', '5Y'), '3M', 'one it refuses is not');
+  assert.equal(localRangeOf('hk:00700', '5D'), '1D');
+  assert.deepEqual(localCandleRanges('tw:2330').map(([, id]) => id), ['1M', '3M', '6M', 'YTD', '1Y']);
+  assert.equal(localPageOf({ quotes: {} }, 'kr:005930').range, '3M', 'a cold Korean page opens on 3M');
+  assert.equal(localPageOf({ quotes: {}, candles: { 'tw:2330': { range: '1D' } } }, 'tw:2330').range, '3M');
+  assert.equal(localPageOf({ quotes: {}, candles: { 'ix:jp:n225': { range: '1Y' } } }, 'ix:jp:n225').range, '1Y');
+});
