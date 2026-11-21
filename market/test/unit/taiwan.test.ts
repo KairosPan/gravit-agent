@@ -74,7 +74,8 @@ describe("the Taiwan source", () => {
     expect(r.items.map((i) => i.base)).toEqual(want);
     expect(r.items[0]).toMatchObject({ quoteFrom: "TWSE · real time", price: 100, changePct24h: 5.26 });
     expect(r.read).toMatchObject({ session: { phase: "trading" }, status: { state: "live" } });
-    expect(r.read.note).toContain("priced live");
+    expect(r.read.note).toContain("priced live")
+    expect(r.read.note).toContain("estimated turnover");
     // movers re-sorts the same read; the dash row has no price
     const m = answered(await s.rank("movers"));
     expect(misAsks(n)).toHaveLength(4);
@@ -136,6 +137,22 @@ describe("the Taiwan source", () => {
       const s = taiwanSource({ http: net(routes([["getStockInfo", bad]])).http, clock: () => MON_10 });
       expect(refused(await s.rank("volume")).code).toBe("E_VENUE_UNREACHABLE");
     }
+  });
+
+  it("MIS answering with no quotes in session is a failure: stale after a good read, unavailable cold", async () => {
+    const empty = text(JSON.stringify({ msgArray: [], rtcode: "0000" }));
+    const cold = taiwanSource({ http: net(routes([["getStockInfo", empty]])).http, clock: () => MON_10 });
+    expect(refused(await cold.rank("volume")).code).toBe("E_VENUE_UNREACHABLE");
+    let body: CnReply = mis()("getStockInfo?ex_ch=tse_1101.tw");
+    const n = net(routes([["getStockInfo", (u) => (body === empty ? empty : mis()(u))]]));
+    let t = MON_10;
+    const s = taiwanSource({ http: n.http, clock: () => t });
+    expect(answered(await s.rank("volume")).read.status.state).toBe("live");
+    body = empty;
+    t += 31_000;
+    const r = answered(await s.rank("volume"));
+    expect(r.read.status.state).toBe("stale");
+    expect(r.items.some((i) => i.price !== undefined)).toBe(true);
   });
 
   it("quotes from MIS, at most 30 at once", async () => {

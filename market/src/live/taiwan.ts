@@ -27,7 +27,7 @@ export { TW_UNIVERSE, MIS_BATCH, twCode };
 export const TW_ID = "tw";
 export const TW_NAME = "TWSE";
 const NOTE_CLOSE = "the 200 busiest TWSE shares at the last close";
-const NOTE_LIVE_TURNOVER = "the 200 busiest TWSE shares at the last close, priced live, ordered by today's turnover";
+const NOTE_LIVE_TURNOVER = "the 200 busiest TWSE shares at the last close, priced live, ordered by today's estimated turnover";
 const NOTE_LIVE_MOVE = "the 200 busiest TWSE shares at the last close, priced live, ordered by today's move";
 const NOTE_CLOSE_MOVE = "the 200 busiest TWSE shares at the last close, ordered by the move";
 const LIVE_SAID = "TWSE · answering";
@@ -133,7 +133,7 @@ export function taiwanSource(deps: { http?: CnHttp; clock?: () => number } = {})
     const all = new Map<string, MisQuote>();
     for (let i = 0; i < codes.length; i += MIS_BATCH) {
       const got = parseMis(await get(twMisUrl(codes.slice(i, i + MIS_BATCH)), QUOTE_TIMEOUT_MS, QUOTE_RESPONSE_LIMIT));
-      if (!got) throw new Error("invalid quotes");
+      if (!got || !got.size) throw new Error("invalid quotes"); // an empty answer is a failure, never a ranking of priceless rows
       for (const [c, q] of got) all.set(c, q);
     }
     return all;
@@ -260,8 +260,11 @@ export function taiwanSource(deps: { http?: CnHttp; clock?: () => number } = {})
       if (!isBars(got)) return got;
       for (const b of got) bars.set(b.t, b);
     }
+    // the window opens on today's day of the month `back` months ago, clamped to that month's last day (31 March less a month is 28 February)
+    const target = today.getUTCMonth() - back;
+    const lastDay = new Date(Date.UTC(today.getUTCFullYear(), target + 1, 0)).getUTCDate();
     const from = range === "YTD" ? Date.UTC(today.getUTCFullYear(), 0, 1) - TAIPEI_MS
-      : Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - back, today.getUTCDate()) - TAIPEI_MS;
+      : Date.UTC(today.getUTCFullYear(), target, Math.min(today.getUTCDate(), lastDay)) - TAIPEI_MS;
     const candles = [...bars.values()].filter((b) => b.t >= from).sort((a, b) => a.t - b.t);
     if (!candles.length) return badAction("TWSE has no daily bars for that code");
     return { venue: "tw", venueName: TW_NAME, symbol: code, range, candles, source: TW_NAME };
