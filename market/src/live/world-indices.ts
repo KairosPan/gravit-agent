@@ -18,7 +18,7 @@ import {
   misIndexUrl, naverDomesticUrl, naverIndexChartUrl, naverWorldUrl, parseMisIndex, parseNaverIndexChart, parseNaverIndices, parseTencentIndices,
   tencentIndexUrl, type IxLevel,
 } from "./index-parse.ts";
-import { HK_HOSTS, NAVER_HOSTS, politeHosts, retryOnce, TWSE_HOSTS } from "./local-http.ts";
+import { HK_HOSTS, NAVER_HOSTS, politeHosts, TWSE_HOSTS } from "./local-http.ts";
 import { localSession, SESSIONS, type SessionHours } from "./local-session.ts";
 import { indexRow, quoteWord, rankTtlMs, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalStatus } from "./local.ts";
 import type { CnSession } from "./cn-session.ts";
@@ -34,6 +34,8 @@ export interface WorldIndex {
 
 export const IX_READ_MS = 9_000;
 export const IX_LIVE_MS = 15_000;
+/** one source's try for a step: the step's own cap, inside what is left of the read's budget */
+export const IX_STEP_MS = 3_500;
 /** a level kept after its sources stopped answering is shown (flagged stale) for a day, then left out */
 export const IX_STALE_MS = 86_400_000;
 const CN_HOURS: SessionHours = { zone: "Asia/Shanghai", windows: [["09:30", "11:30"], ["13:00", "15:00"]] };
@@ -77,7 +79,7 @@ export const WORLD_INDICES: readonly WorldIndex[] = [
 ];
 
 type Fresh = IxLevel & { from: string };
-type Base = { fresh: Map<string, Fresh>; stale: Map<string, Fresh>; left: WorldIndex[]; asOf: string; session: CnSession; whole: boolean };
+type Base = { fresh: Map<string, Fresh>; stale: Map<string, Fresh>; left: WorldIndex[]; asOf: string; session: CnSession };
 type LevelsAnswer = { items: ExploreItem[]; read: LocalRead };
 const ids = (region: RegionId): WorldIndex[] => WORLD_INDICES.filter((i) => i.region === region);
 const MONTHS: Partial<Record<CandleRange, number>> = { "1M": 1, "3M": 3, "6M": 6, "1Y": 12, "5Y": 60 };
@@ -98,21 +100,31 @@ export function worldIndices(deps: { http?: CnHttp; clock?: () => number; eastmo
   const unavailable = (): Refusal => no("E_VENUE_UNREACHABLE", { venue: "ix", message: "no source is answering: the indices cannot be read now" });
   const badAction = (message: string): Refusal => no("E_ACCOUNT_BAD_ACTION", { venue: "ix", message });
 
-  async function get(http: CnHttp, url: string, maxBytes = QUOTE_RESPONSE_LIMIT): Promise<Uint8Array> {
-    const reply = await retryOnce(() => http(url, { timeoutMs: QUOTE_TIMEOUT_MS, maxBytes }));
+  /** one try, no retry for an index ask (a chain's next source must get its turn inside the read's budget); `timeoutMs` bounds the try */
+  async function get(http: CnHttp, url: string, maxBytes = QUOTE_RESPONSE_LIMIT, timeoutMs = QUOTE_TIMEOUT_MS): Promise<Uint8Array> {
+    const reply = await http(url, { timeoutMs, maxBytes });
     if (reply.status !== 200) throw new Error("http");
     return reply.bytes;
+  }
+  /** `work` bounded by its own timer: a source that never answers is let go (its late answer is dropped) */
+  function within<T>(work: Promise<T>, ms: number, empty: T): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    work.catch(() => {});
+    return Promise.race([work, new Promise<T>((resolve) => { timer = setTimeout(() => resolve(empty), ms); })]).finally(() => clearTimeout(timer));
   }
   const utf8 = (b: Uint8Array): string => new TextDecoder("utf-8").decode(b);
 
   /** one ask of one source for these codes: what it answered by code; a failed ask answers nothing */
-  async function ask(from: SourceCode["from"], codes: string[]): Promise<Map<string, IxLevel>> {
+  async function ask(from: SourceCode["from"], codes: string[], ms: number): Promise<Map<string, IxLevel>> {
+    return within(askOnce(from, codes, ms), ms, new Map());
+  }
+  async function askOnce(from: SourceCode["from"], codes: string[], ms: number): Promise<Map<string, IxLevel>> {
     try {
-      if (from === "tencent") return parseTencentIndices(decodeGbk(await get(tencent, tencentIndexUrl(codes))), codes) ?? new Map();
-      if (from === "naver") return parseNaverIndices(utf8(await get(naver, naverWorldUrl(codes))), "world") ?? new Map();
-      if (from === "naver-kr") return parseNaverIndices(utf8(await get(naver, naverDomesticUrl(codes))), "domestic") ?? new Map();
+      if (from === "tencent") return parseTencentIndices(decodeGbk(await get(tencent, tencentIndexUrl(codes), QUOTE_RESPONSE_LIMIT, ms)), codes) ?? new Map();
+      if (from === "naver") return parseNaverIndices(utf8(await get(naver, naverWorldUrl(codes), QUOTE_RESPONSE_LIMIT, ms)), "world") ?? new Map();
+      if (from === "naver-kr") return parseNaverIndices(utf8(await get(naver, naverDomesticUrl(codes), QUOTE_RESPONSE_LIMIT, ms)), "domestic") ?? new Map();
       if (from === "twse") {
-        const one = parseMisIndex(utf8(await get(twse, misIndexUrl(codes[0]!))), codes[0]!);
+        const one = parseMisIndex(utf8(await get(twse, misIndexUrl(codes[0]!), QUOTE_RESPONSE_LIMIT, ms)), codes[0]!);
         return one ? new Map([[codes[0]!, one]]) : new Map();
       }
       const rows = await em_.list(emSecidsUrl(codes));
@@ -130,63 +142,74 @@ export function worldIndices(deps: { http?: CnHttp; clock?: () => number; eastmo
   const lastGood = new Map<string, { at: number; level: Fresh }>();
   const keySource = (i: WorldIndex): string => `${i.region}:${i.id}`;
 
-  async function readRegion(region: RegionId): Promise<Base | Refusal> {
+  /** what a read says from its fresh answers: an index not fresh keeps its last level, flagged stale, for a day, then is left out */
+  function assemble(region: RegionId, fresh: Map<string, Fresh>, at: number, asOf: string, session: CnSession): Base {
+    const stale = new Map<string, Fresh>();
+    const left: WorldIndex[] = [];
+    for (const i of ids(region)) {
+      if (fresh.has(i.id)) continue;
+      const old = lastGood.get(keySource(i));
+      if (old && at - old.at < IX_STALE_MS) stale.set(i.id, old.level); else left.push(i);
+    }
+    return { fresh, stale, left, asOf, session };
+  }
+
+  async function readRegion(region: RegionId): Promise<{ base: Base; fresh: Map<string, Fresh>; session: CnSession } | Refusal> {
     const list = ids(region);
     const fresh = new Map<string, Fresh>();
+    const started = now();
     let closed = false;
-    /** the indices at their `step`th source, grouped by source, each group asked once; those that failed go to the next, not waiting for the others */
-    const run = (pending: WorldIndex[], step: number): Promise<void> => {
-      const groups = new Map<SourceCode["from"], WorldIndex[]>();
-      for (const i of pending) { const s = i.quote[step]; if (s) groups.set(s.from, [...(groups.get(s.from) ?? []), i]); }
-      return Promise.all([...groups].map(async ([from, members]) => {
-        const got = await ask(from, members.map((i) => i.quote[step]!.code));
-        if (closed) return;
-        const failed: WorldIndex[] = [];
-        for (const i of members) {
-          const l = got.get(i.quote[step]!.code);
-          if (l) fresh.set(i.id, { ...l, from: quoteWord(NAMES[from], l.delayMin) }); else failed.push(i);
-        }
-        if (failed.length) await run(failed, step + 1);
-      })).then(() => undefined);
+    /** step by step: at each, the indices still unanswered are grouped by their source for that step and each source is asked once, capped at
+     * IX_STEP_MS (and at what is left of the budget), so the next source always gets its turn */
+    const run = async (): Promise<void> => {
+      for (let step = 0; step < 3; step++) {
+        const left = IX_READ_MS - (now() - started);
+        if (left <= 0 || closed) return;
+        const groups = new Map<SourceCode["from"], WorldIndex[]>();
+        for (const i of list) { const s = i.quote[step]; if (s && !fresh.has(i.id)) groups.set(s.from, [...(groups.get(s.from) ?? []), i]); }
+        if (!groups.size) return;
+        await Promise.all([...groups].map(async ([from, members]) => {
+          const got = await ask(from, members.map((i) => i.quote[step]!.code), Math.min(left, IX_STEP_MS));
+          if (closed) return;
+          for (const i of members) { const l = got.get(i.quote[step]!.code); if (l) fresh.set(i.id, { ...l, from: quoteWord(NAMES[from], l.delayMin) }); }
+        }));
+      }
     };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<void>((resolve) => { timer = setTimeout(resolve, IX_READ_MS); });
-    await Promise.race([run(list, 0), deadline]);
+    await Promise.race([run(), deadline]);
     clearTimeout(timer);
     closed = true;
     const at = now();
     const answered = new Map(fresh); // a late answer cannot change what this read says
     for (const [id, l] of answered) lastGood.set(`${region}:${id}`, { at, level: l });
-    const stale = new Map<string, Fresh>();
-    const left: WorldIndex[] = [];
-    for (const i of list) {
-      if (answered.has(i.id)) continue;
-      const old = lastGood.get(keySource(i));
-      if (old && at - old.at < IX_STALE_MS) stale.set(i.id, old.level); else left.push(i);
-    }
-    if (!answered.size && !stale.size) { status = { state: "unavailable", said: "no source is answering: the indices cannot be read now" }; return unavailable(); }
     const asOf = new Date(at).toISOString();
     const lastTrade = [...answered.values()].map((l) => l.at).find((t) => t !== null) ?? null;
     const sessions = list.map((i) => localSession(hoursOf(i.hours), at, answered.get(i.id)?.at ?? lastTrade));
     const session = sessions.find((s) => s.phase === "trading") ?? sessions.find((s) => s.phase === "midday") ?? sessions[0]!;
-    status = stale.size ? { state: "stale", said: `${[...stale.keys()].join(", ")} not answering · last level shown`, at: asOf } : { state: "live", said: "Indices · answering", at: asOf };
-    return { fresh: answered, stale, left, asOf, session, whole: !stale.size && !left.length };
+    const b = assemble(region, answered, at, asOf, session);
+    if (!answered.size && !b.stale.size) { status = { state: "unavailable", said: "no source is answering: the indices cannot be read now" }; return unavailable(); }
+    status = b.stale.size ? { state: "stale", said: `${[...b.stale.keys()].join(", ")} not answering · last level shown`, at: asOf } : { state: "live", said: "Indices · answering", at: asOf };
+    return { base: b, fresh: answered, session };
   }
 
-  /** a region's read kept 15 s in session, until its earliest next open outside it (Europe's indices each by their own exchange's hours) */
-  const kept = new Map<RegionId, { until: number; base: Base }>();
+  /** a region's read kept 15 s in session, until its earliest next open outside it (Europe's indices each by their own exchange's hours). What is
+   * kept is the fresh answers alone, a partial read as well as a whole one; a stale row is rebuilt from the last levels when the keep is read,
+   * never written into it as fresh. A read with no fresh answer is not kept. */
+  const kept = new Map<RegionId, { until: number; fresh: Map<string, Fresh>; asOf: string; session: CnSession }>();
   const flights = new Map<RegionId, Promise<Base | Refusal>>();
   async function base(region: RegionId): Promise<Base | Refusal> {
     const hit = kept.get(region);
-    if (hit && now() < hit.until) return hit.base;
+    if (hit && now() < hit.until) return assemble(region, hit.fresh, now(), hit.asOf, hit.session);
     let flight = flights.get(region);
     if (!flight) {
-      flight = readRegion(region).then((b) => {
-        if (!isRefusal(b) && b.whole) {
+      flight = readRegion(region).then((r) => {
+        if (isRefusal(r)) return r;
+        if (r.fresh.size) {
           const t = now();
-          kept.set(region, { until: t + Math.min(...ids(region).map((i) => rankTtlMs(hoursOf(i.hours), t, IX_LIVE_MS))), base: b });
+          kept.set(region, { until: t + Math.min(...ids(region).map((i) => rankTtlMs(hoursOf(i.hours), t, IX_LIVE_MS))), fresh: r.fresh, asOf: r.base.asOf, session: r.session });
         }
-        return b;
+        return r.base;
       }).finally(() => flights.delete(region));
       flights.set(region, flight);
     }
@@ -235,7 +258,7 @@ export function worldIndices(deps: { http?: CnHttp; clock?: () => number; eastmo
           ...(l.change !== null ? { change24h: l.change } : {}), ...(l.changePct !== null ? { changePct24h: l.changePct } : {}),
           session: { open: s.phase === "trading" },
           local: { prevClose: l.prevClose, open: l.open, high: l.high, low: l.low, volume: null, turnover: null, lastSession: s.lastSession, phase: s.phase,
-            quoteStatus: l.delayMin === null ? "unsaid" : l.delayMin > 0 ? "delayed" : "live" },
+            quoteStatus: stale || l.delayMin === null ? "unsaid" : l.delayMin > 0 ? "delayed" : "live" },
         });
       }
     }
@@ -275,6 +298,7 @@ export function worldIndices(deps: { http?: CnHttp; clock?: () => number; eastmo
     if (!i) return badAction("no such index");
     if (range === "1D" || range === "5D") return badAction("an index's intraday chart is not read here");
     if (!Object.hasOwn(EM_LIMIT, range)) return badAction("no such chart range");
+    if (!i.history.length) return badAction("no history source for this index");
     return histories.ask(`${id}|${range}`, async () => {
       for (const s of i.history) {
         const got = await bars(s, range);

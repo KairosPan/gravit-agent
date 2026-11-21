@@ -10,6 +10,8 @@ const fx = (n: string): Buffer => readFileSync(new URL(`../fixtures/regions/${n}
 const reply = (b: Uint8Array | string, status = 200): CnReply => ({ status, bytes: typeof b === "string" ? new TextEncoder().encode(b) : b });
 const answered = <T,>(v: T | Refusal): T => { if (isRefusal(v)) throw new Error(`refused: ${v.message}`); return v; };
 
+const refusedWith = (v: unknown): string => { if (!isRefusal(v)) throw new Error("answered"); return v.message; };
+
 type Route = [string, CnReply | ((url: string) => CnReply)];
 function net(routes: Route[]) {
   const sent: string[] = [];
@@ -142,8 +144,45 @@ describe("levels", () => {
     expect(keysOf(stale)).toHaveLength(4);
     expect(stale.items[0]!.quoteFrom).toContain("stale");
     expect(stale.read.status.state).toBe("stale");
+    expect(answered(await w.quotes(["eu:dax"])).get("eu:dax")!.local.quoteStatus).toBe("unsaid");
     t += 86_400_000;
     expect(isRefusal(await w.levels("eu"))).toBe(true);
+  });
+
+  it("a partial read is kept too: one index failing fast does not make the healthy hosts be asked again", async () => {
+    const n = net([["ulist.np", reply("", 500)], ...ROUTES]);
+    let t = Date.parse("2026-11-23T01:00:00Z"); // Monday 10:00 Seoul, in session
+    const w = worldIndices({ http: n.http, clock: () => t });
+    const a = answered(await w.levels("kr"));
+    expect(keysOf(a)).toEqual(["ix:kr:kospi", "ix:kr:kosdaq"]);
+    t += 5_000;
+    const b = answered(await w.levels("kr"));
+    expect(keysOf(b)).toEqual(["ix:kr:kospi", "ix:kr:kosdaq"]);
+    expect(b.read.note).toContain("KOSPI 200");
+    expect(n.sent.filter((u) => u.includes("domestic/index"))).toHaveLength(1);
+    expect(n.sent.filter((u) => u.includes("ulist.np"))).toHaveLength(1);
+    t += 15_000;
+    await w.levels("kr");
+    expect(n.sent.filter((u) => u.includes("domestic/index"))).toHaveLength(2);
+  });
+
+  it("a hanging Naver does not hold the read: Eastmoney answers all four of Europe within 9 s", async () => {
+    vi.useFakeTimers();
+    const n = net(ROUTES);
+    const http: CnHttp = (url, init) => (url.includes("worldstock") ? new Promise<CnReply>(() => {}) : n.http(url, init));
+    const pending = worldIndices({ http }).levels("eu");
+    await vi.advanceTimersByTimeAsync(3_500);
+    const r = answered(await pending);
+    expect(keysOf(r)).toEqual(["ix:eu:sx5e", "ix:eu:dax", "ix:eu:ftse", "ix:eu:cac"]);
+    expect(r.items.every((i) => i.quoteFrom === "Eastmoney")).toBe(true);
+  });
+
+  it("failed indices of one step are asked of a shared next source once", async () => {
+    const n = net([["worldstock/index", reply("", 500)], ...ROUTES]);
+    answered(await worldIndices({ http: n.http, clock: () => SAT }).levels("us"));
+    const asks = n.sent.filter((u) => u.includes("ulist.np"));
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toContain("100.SPX,100.DJIA");
   });
 
   it("every source down is a refusal", async () => {
@@ -189,11 +228,12 @@ describe("history", () => {
     expect(answered(await w.history("jp:n225", "3M"))).toMatchObject({ source: "Naver" });
     expect(isRefusal(await w.history("jp:n225", "1D"))).toBe(true);
     expect(isRefusal(await w.history("jp:nope", "1Y"))).toBe(true);
+    expect(refusedWith(await w.history("kr:kosdaq", "1Y"))).toContain("no history source for this index");
   });
 });
 
 describe("eastmoney dep", () => {
-  it("is built from the http when not given", async () => {
+  it("an eastmoney built from the same http is accepted as the dep", async () => {
     const n = net([["worldstock/index", reply("", 500)], ...ROUTES]);
     const r = answered(await worldIndices({ http: n.http, clock: () => SAT, eastmoney: eastmoney({ http: n.http, clock: () => SAT }) }).levels("jp"));
     expect(r.items[0]!.quoteFrom).toBe("Eastmoney");
