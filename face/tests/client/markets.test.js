@@ -1501,3 +1501,48 @@ test("every word of a local page and table is in the Chinese table", () => {
   assert.match(down, /Naver/);
   assert.match(text(down.match(/<p class="mk-empty">[^<]*<\/p>/)?.[0] ?? ''), CJK);
 });
+
+test("a search hit's source keeps its declared delay, and a hit naming no currency is priced in its venue's", () => {
+  const kr = { key: 'kr:005930', kind: 'share', name: '삼성전자', base: '005930', price: 71500, changePct24h: -0.69, quoteFrom: 'Naver · 15 min delayed', tabs: ['kr'], at: [] };
+  const tw = { key: 'tw:2330', kind: 'share', name: 'TSMC', base: '2330', currency: 'TWD', price: 1025, changePct24h: 0.99, tabs: ['tw'], at: [] };
+  const body = { ...fx('explore-search-china'), items: [...fx('explore-search-china').items, kr, tw] };
+  const html = screen({ q: 'sa', results: body }).html;
+  const row = cells(rowOf(html, 'kr:005930'));
+  assert.equal(row[2], '₩71,500', 'no currency named: the won, the venue’s');
+  assert.equal(text(row.at(-1)), 'Naver · 15 min delayed', 'the hit’s own words, its delay in its own figure');
+  assert.equal(text(cells(rowOf(html, 'tw:2330')).at(-1)), 'TWSE', 'a hit naming no source: its venue’s name alone');
+});
+
+test("a local page says under its price when the market is not answering, or its source fails", () => {
+  const route = { screen: 'markets', id: 'hk:00700' };
+  const base = screen({ route, all: null, quotes: { 'hk:00700': TENCENT_Q } }).s;
+  assert.doesNotMatch(renderMarketsScreen(base, NOW), /mk-asof/, 'answering: nothing said');
+  const stale = renderMarketsScreen(R.quotesUpdated(base, { quotes: { 'hk:00700': TENCENT_Q }, connection: 'stale' }), NOW);
+  assert.match(stale, /<p class="mk-asof">The market is not answering · as last read<\/p>/);
+  const said = renderMarketsScreen(R.localStatusUpdated(base, { venue: 'hk', status: { state: 'unavailable', said: '', notAnswering: true } }), NOW);
+  assert.match(said, /<p class="mk-asof">The market is not answering · as last read<\/p>/);
+  const down = renderMarketsScreen(R.localStatusUpdated(base, { venue: 'hk', status: { state: 'unavailable', said: '' } }), NOW);
+  assert.match(down, /<p class="mk-asof">Tencent is not answering: Hong Kong shares cannot be read now<\/p>/);
+  const own = renderMarketsScreen(R.localStatusUpdated(base, { venue: 'hk', status: { state: 'unavailable', said: 'Tencent refused the quote' } }), NOW);
+  assert.match(own, /<p class="mk-asof">Tencent refused the quote<\/p>/);
+  // another venue's trouble is not this page's
+  assert.doesNotMatch(renderMarketsScreen(R.localStatusUpdated(base, { venue: 'kr', status: { state: 'unavailable', said: '' } }), NOW), /mk-asof/);
+});
+
+test("a US index's 1M closes are drawn on their own session dates, whichever source stamped them", () => {
+  const route = { screen: 'markets', id: 'ix:us:spx' };
+  const spx = localQuote('ix', 'us:spx', { symbol: 'us:spx', name: 'S&P 500', price: 5900.1, change24h: 10, changePct24h: 0.17, quoteAt: '2026-11-20T21:00:00Z', quoteFrom: 'Naver',
+    local: { prevClose: 5890.1, open: 5891, high: 5910, low: 5880, volume: null, turnover: null, lastSession: '2026-11-20', phase: 'closed', quoteStatus: 'unsaid' } });
+  const s = R.setRange(screen({ route, all: null, quotes: { 'ix:us:spx': spx } }).s, { id: 'ix:us:spx', range: '1M' });
+  // Eastmoney's bars: the US session's date at 15:00 Beijing (07:00Z, the night before New York's close of that date)
+  const em = renderMarketsScreen(R.candlesLoaded(s, { id: 'ix:us:spx', range: '1M', at: NOW,
+    data: { ok: true, range: '1M', candles: [{ t: Date.parse('2026-11-19T15:00:00+08:00'), c: 5880 }, { t: Date.parse('2026-11-20T15:00:00+08:00'), c: 5900.1 }] } }), NOW);
+  assert.match(section(em, 'Price history'), /<span>2026-11-19<\/span>[\s\S]*<span>2026-11-20<\/span>/);
+  // Naver's bars: the session's local date at 15:30 UTC+9
+  const naver = renderMarketsScreen(R.candlesLoaded(s, { id: 'ix:us:spx', range: '1M', at: NOW,
+    data: { ok: true, range: '1M', candles: [{ t: Date.parse('2026-11-19T15:30:00+09:00'), c: 5880 }, { t: Date.parse('2026-11-20T15:30:00+09:00'), c: 5900.1 }] } }), NOW);
+  assert.match(section(naver, 'Price history'), /<span>2026-11-19<\/span>[\s\S]*<span>2026-11-20<\/span>/);
+  assert.doesNotMatch(section(naver, 'Price history'), /2026-11-21/);
+  assert.match(section(naver, 'Price history'), /5,900\.10/);
+  assert.doesNotMatch(section(naver, 'Price history'), /\$/);
+});

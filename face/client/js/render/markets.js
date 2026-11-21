@@ -30,7 +30,7 @@ import {
   candleRanges, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
   chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf, marketOriginOf, noSpotSourceWord,
-  localPageOf, localWord, localDownWord, localRefreshWord, regionWord,
+  localPageOf, localWord, localDownWord, localRefreshWord, localStateWord, regionWord,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
@@ -577,8 +577,10 @@ function localFactWord({ value: v, unit }, currency) {
   return String(v);
 }
 
-// its price history at its range: 1D and 5D the sessions on its session's grid, longer the closes on their (Beijing-stamped) dates, in
-// its currency; a refusal's sentence where the chart would be
+// its price history at its range: 1D and 5D the sessions on its session's grid, longer the closes on their dates, in its currency; a
+// refusal's sentence where the chart would be. Every source stamps a daily bar so that its Beijing date is the session's own date —
+// Tencent's and Eastmoney's at 15:00 Beijing, Naver's at 15:30 UTC+9 (market/src/live/eastmoney.ts parseEmKline, index-parse.ts
+// parseNaverIndexChart) — so a New York or European session's close is drawn on its own date, never the next day
 function localHistory(view) {
   const h = view.history;
   const fmt = v => localPrice(v, view.asset.currency);
@@ -599,9 +601,10 @@ function localPage(id, state, now) {
     .filter(Boolean).join(' · '); // words-order: a market's facts under the visual separator
   const who = `<div class="mk-who">${mkAv(Array.from(asset.name)[0] ?? asset.symbol, 'lg')}<div><h1 class="head-title">${esc(asset.name)}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
   const priced = number(quote?.price) !== null;
+  const stateWord = localStateWord(asset.venue, state.markets.connection, state.markets.providers);
   const top = `<div class="mk-d-px"><span class="mk-big">${esc(localPrice(number(quote?.price), asset.currency))}</span>` +
     `${priced ? `${chgHtml(number(quote.change_pct))}<span class="mk-basis">${esc(basisWord(quote))}</span>` : ''}</div>` +
-    `${planHtml(markOf(state.desk?.data, id))}` +
+    `${stateWord ? `<p class="mk-asof">${esc(stateWord)}</p>` : ''}${planHtml(markOf(state.desk?.data, id))}` +
     `<dl class="mk-facts">${view.facts.map(f => `<div><dt>${esc(f.label)}</dt><dd>${esc(localFactWord(f, asset.currency))}</dd></div>`).join('')}</dl>`;
   const left = [section(th('markets.history.title'), localHistory(view), seg(candleRanges(), view.range, 'setRange', { 'data-id': id }))];
   const keys = `<div class="mk-d-acts"><button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button></div>`; // words-order: an icon, then its word

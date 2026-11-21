@@ -139,6 +139,7 @@ export function localHitsOf(body) {
     hits.push({
       id: i.key, venue: k.venue, symbol: str(i.base) || k.symbol, name: str(i.name), kind: str(i.kind),
       currency: str(i.currency) || null, ...(str(i.nameLocal) ? { nameLocal: i.nameLocal } : {}),
+      ...(str(i.quoteFrom) ? { quoteFrom: i.quoteFrom } : {}),
     });
     quotes[i.key] = { price: number(i.price), change_pct: number(i.changePct24h) };
   }

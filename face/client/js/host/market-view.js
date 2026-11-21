@@ -69,6 +69,8 @@ const regionOf = m => (REGIONED.has(tabOf(m)) && REGIONS[tabOf(m)].includes(m?.r
 // on a non-US region the Form is Spot or Perp, Spot when none is stored (spec §5.4); elsewhere the stored form or none
 const nonUs = m => REGIONED.has(tabOf(m)) && regionOf(m) !== 'us';
 const formOf = m => (nonUs(m) ? (m?.form === 'perp' ? 'perp' : 'spot') : FORMS.live.includes(m?.form) ? m.form : '');
+// a share's currency by its venue, when no read names it
+const VENUE_CURRENCY = { hk: 'HKD', kr: 'KRW', tw: 'TWD' };
 /** The region's own read the view is on (spec §5.6): Stocks cn/hk/kr/tw on Spot, its share venue; Indices on Spot (any region),
  *  `ix`; else null (Japan and India on Spot have no source: the generic read, no rows). */
 export function onLocal(m) {
@@ -816,13 +818,13 @@ function localHitRow(hit, quote) {
   const index = hit.venue === 'ix';
   const symbol = index ? hit.symbol.slice(hit.symbol.indexOf(':') + 1) : hit.symbol;
   const name = hit.name || symbol;
-  const currency = index ? null : hit.currency;
+  const currency = index ? null : hit.currency ?? VENUE_CURRENCY[hit.venue] ?? null;
   const unit = index ? 'level' : CURRENCY_UNITS[currency] ?? 'usd';
   const priced = { price: number(quote?.price), unit, changePct: number(quote?.change_pct), change24h: null, volume: null, volumeUnit: index ? 'none' : 'local', currency, implied: null };
   return {
     id: hit.id, source: 'local', kind: index ? 'index' : 'share', name, tile: Array.from(name)[0] ?? symbol,
     sub: index ? symbol.toUpperCase() : [symbol, hit.nameLocal].filter(Boolean).join(' · '), // words-order: a code and its local name under the visual separator
-    priced, price: priced.price, live: null, sourceWord: localName(hit.venue), closeTime: null, pastEnd: false, paper: false, watched: false,
+    priced, price: priced.price, live: null, sourceWord: str(hit.quoteFrom) || localName(hit.venue), closeTime: null, pastEnd: false, paper: false, watched: false,
     atAccount: false, noStar: true, legs: [], tabs: [hit.venue], asset: index ? 'indices' : 'stocks', form: 'spot', unit, currency,
   };
 }
@@ -1125,9 +1127,6 @@ export function cnPageOf(markets, id) {
 
 // ── a local market's page (spec 2026-11-20 §5.6): a Hong Kong, Korean or Taiwanese share's, a cash index's — the A share's kind of page ──
 
-// a share's currency by its venue, when no read names it
-const VENUE_CURRENCY = { hk: 'HKD', kr: 'KRW', tw: 'TWD' };
-
 /** A session's phase (a quote's `market_status`, a ranking's `phase`) in the region's word: Open, Lunch break, Closed; '' for none. */
 export function localSessionWord(phase) {
   if (phase === 'open' || phase === 'trading') return t('markets.session.open');
@@ -1157,6 +1156,16 @@ export function localDownWord(venue) {
     case 'ix': return t('markets.local.downIx');
     default: return t('markets.unavailable');
   }
+}
+/** A local page's state line under its price, as the A share's (cnStateWord): the market not answering (the proxy re-serving its last
+ *  read, or the venue's provider said not answering) — its price is as last read; the venue's source failing (its provider in error) —
+ *  the source's own sentence, else its source named; else nothing. */
+export function localStateWord(venue, connection, providers = []) {
+  const market = venue === 'china' ? 'cn' : venue;
+  const provider = (Array.isArray(providers) ? providers : []).find(p => p?.market === market);
+  if (connection === 'stale' || provider?.notAnswering === true) return t('markets.local.notAnswering');
+  if (provider?.status === 'error') return str(provider.said) || localDownWord(venue);
+  return '';
 }
 /** A refresh of a region's ranking that failed over the rows kept, its source named. */
 export const localRefreshWord = venue => t('markets.local.refreshFailed', { source: localName(venue) });

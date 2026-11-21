@@ -97,6 +97,7 @@ test('localHitsOf: every local key, with its price', () => {
   const { hits, quotes } = localHitsOf({ ok: true, items: [share('hk', '00700', { nameLocal: '騰訊控股' }), { key: 'stock:AAPL', price: 1 }, ...fx('explore-search-china').items.filter(i => i.key === 'cn:600519')] });
   assert.deepEqual(hits.map(h => [h.id, h.venue]), [['hk:00700', 'hk'], ['cn:600519', 'china']]);
   assert.equal(hits[0].nameLocal, '騰訊控股');
+  assert.equal(hits[0].quoteFrom, 'Src', 'its source words kept, a declared delay with them');
   assert.deepEqual(quotes['hk:00700'], { price: 100, change_pct: 1.5 });
   assert.deepEqual(localHitsOf(null), { hits: [], quotes: {} });
 });
