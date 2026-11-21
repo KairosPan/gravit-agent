@@ -72,16 +72,20 @@ export type AssetId = "crypto" | "stocks" | "indices" | "commodities" | "fx" | "
 export const ASSET_IDS: readonly AssetId[] = ["crypto", "stocks", "indices", "commodities", "fx", "preipo", "macro"];
 export type FormId = "spot" | "perp" | "token" | "event";
 export const FORM_IDS: readonly FormId[] = ["spot", "perp", "token", "event"];
-export type RegionId = "us" | "cn";
-export const REGION_IDS: readonly RegionId[] = ["us", "cn"];
+export type RegionId = "us" | "cn" | "hk" | "jp" | "kr" | "tw" | "in" | "eu";
+export const REGION_IDS: readonly RegionId[] = ["us", "cn", "hk", "jp", "kr", "tw", "in", "eu"];
 
 /** the share and index perpetuals whose underlying has no US listing (an ADR or a US-listed ETF counts as US: BABA, TSM, ASML, EWJ), by
- * their upper-case base without its `xyz:` namespace: such a row carries no region. Judged from trade.xyz's 112 stocks and indices coins in
- * Hyperliquid's perpCategories, read once on 2026-11-19 (market/test/fixtures/xyz-equity-categories.json); a private company counts only
- * when it is not American. Korean, Japanese, Chinese and Indian shares, then the three indices */
-export const NON_US_UNDERLYINGS: ReadonlySet<string> = new Set<string>([
-  "CAMBRICON", "CXMT", "GIGADEV", "HYUNDAI", "IBIDEN", "JIO", "KIOXIA", "MINIMAX", "RELIANCE", "SHEIN", "SKHX", "SKHY", "SMSN", "SOFTBANK", "UNITREE", "ZHIPU",
-  "JP225", "KR200", "NIFTY",
+ * their upper-case base without its `xyz:` namespace, with the region it is listed in; null is a private company, which carries no region.
+ * Judged from trade.xyz's 112 stocks and indices coins in Hyperliquid's perpCategories, read once on 2026-11-19
+ * (market/test/fixtures/xyz-equity-categories.json); a private company counts only when it is not American. Korea, Japan, India, China A,
+ * then the private ones */
+export const NON_US_REGIONS: ReadonlyMap<string, RegionId | null> = new Map<string, RegionId | null>([
+  ["SMSN", "kr"], ["SKHX", "kr"], ["SKHY", "kr"], ["HYUNDAI", "kr"], ["KR200", "kr"],
+  ["SOFTBANK", "jp"], ["KIOXIA", "jp"], ["IBIDEN", "jp"], ["JP225", "jp"],
+  ["RELIANCE", "in"], ["NIFTY", "in"],
+  ["CAMBRICON", "cn"], ["GIGADEV", "cn"],
+  ["CXMT", null], ["MINIMAX", null], ["SHEIN", null], ["UNITREE", null], ["ZHIPU", null], ["JIO", null],
 ]);
 
 export interface Classified {
@@ -109,6 +113,14 @@ export function classOf(i: { key: string; kind: string; base?: string | undefine
       return { asset: "stocks", form: "token", region: "us" };
     case "ashare":
       return { asset: "stocks", form: "spot", region: "cn" };
+    case "share": {
+      const region = REGION_IDS.find((id) => i.key.startsWith(`${id}:`));
+      return { asset: "stocks", form: "spot", ...(region ? { region } : {}) };
+    }
+    case "index": {
+      const region = REGION_IDS.find((id) => i.key.startsWith(`ix:${id}:`));
+      return { asset: "indices", form: "spot", ...(region ? { region } : {}) };
+    }
     case "perp": {
       const tab = i.key.startsWith("preipo:") ? "preipo" : perpCategoryTab(i.category);
       const asset = ASSET_IDS.find((id) => id === tab);
@@ -116,7 +128,8 @@ export function classOf(i: { key: string; kind: string; base?: string | undefine
       if (asset !== "stocks" && asset !== "indices") return { asset, form: "perp" };
       const base = String(i.base ?? "");
       const bare = base.slice(base.indexOf(":") + 1).toUpperCase();
-      return { asset, form: "perp", ...(NON_US_UNDERLYINGS.has(bare) ? {} : { region: "us" as const }) };
+      const region = NON_US_REGIONS.has(bare) ? NON_US_REGIONS.get(bare) : "us";
+      return { asset, form: "perp", ...(region ? { region } : {}) };
     }
     case "event": {
       const word = typeof i.category === "string" ? normalWords(i.category) : "";

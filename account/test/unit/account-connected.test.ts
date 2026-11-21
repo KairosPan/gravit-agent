@@ -100,7 +100,7 @@ describe("a connected venue's own reads (GET /api/account/connected/…)", () =>
       expect(fx.body.items.map((i: { key: string }) => i.key)).toEqual(["perp:EUR"]);
       expect(fx.body.items[0]).toMatchObject({ asset: "fx", form: "perp" });
       expect((await get("/api/account/connected/explore?form=perp")).body.items.map((i: { key: string }) => i.key).sort()).toEqual(["perp:BTC", "perp:EUR"]);
-      for (const q of ["asset=bonds", "form=future", "region=eu"]) expect((await get(`/api/account/connected/explore?${q}`)).status).toBe(409);
+      for (const q of ["asset=bonds", "form=future", "region=mars"]) expect((await get(`/api/account/connected/explore?${q}`)).status).toBe(409);
     } finally { await srv.close(); }
   });
 

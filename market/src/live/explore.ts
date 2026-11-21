@@ -112,9 +112,9 @@ export interface ExploreSources {
   public?: PublicSource[] | undefined;
 }
 
-export type ExploreKind = "coin" | "stock" | "perp" | "event" | "rwa" | "ashare";
+export type ExploreKind = "coin" | "stock" | "perp" | "event" | "rwa" | "ashare" | "share" | "index";
 /** the kinds a dollar row is made of: an event is priced per contract, an A share (china.ts) in CNY and never in `exploreAcross` */
-type DollarKind = Exclude<ExploreKind, "event" | "ashare">;
+type DollarKind = Exclude<ExploreKind, "event" | "ashare" | "share" | "index">;
 export type ExploreSort = "volume" | "movers" | "closing";
 
 export interface ExploreOptions {
@@ -232,7 +232,7 @@ export interface ExploreItem {
   /** dollars; an event's is its first outcome's; an A share's (kind ashare) is in CNY, as `currency` says */
   price?: number | undefined;
   /** the currency `price` is in where it is not dollars: an A share's, CNY (china.ts) */
-  currency?: "CNY" | undefined;
+  currency?: "CNY" | "HKD" | "KRW" | "TWD" | undefined;
   /** which source `price` came from and how far behind the market it is, in its words (ExploreAt.quoteFrom), where the line that priced the
    * row says: a US stock's real-time or delayed quote */
   quoteFrom?: string | undefined;
@@ -246,6 +246,10 @@ export interface ExploreItem {
   volumeUsd24h?: number | undefined;
   /** an A share's turnover in the session, in yuan (china.ts): it carries no dollar volume */
   turnoverCny?: number | undefined;
+  /** a share's or index's session turnover in its own `currency` (HK, KR, TW rows); carries no dollar volume */
+  turnoverLocal?: number | undefined;
+  /** the source's own name for the thing where `name` is English (a Korean or Chinese company name) */
+  nameLocal?: string | undefined;
   /** the event contracts traded in 24 hours, where a venue counts contracts instead of dollars (Kalshi) */
   contracts24h?: number | undefined;
   /** an event market's whole event, all its markets together, in dollars over 24 hours, where the venue reports it (Polymarket): how hot the
