@@ -48,3 +48,14 @@ describe("staleRank", () => {
     expect(staleRank(undefined, 5, "late")).toBeNull();
   });
 });
+
+describe("rankTtlMs", () => {
+  it("is the in-session keep while trading or at midday, else the time to the next open", async () => {
+    const { rankTtlMs } = await import("../../src/live/local.ts");
+    const { SESSIONS } = await import("../../src/live/local-session.ts");
+    expect(rankTtlMs(SESSIONS.hk, Date.parse("2026-11-20T03:00:00Z"), 10_000)).toBe(10_000);
+    expect(rankTtlMs(SESSIONS.hk, Date.parse("2026-11-20T04:30:00Z"), 10_000)).toBe(10_000);
+    // Friday 17:00 Hong Kong to Monday 09:30
+    expect(rankTtlMs(SESSIONS.hk, Date.parse("2026-11-20T09:00:00Z"), 10_000)).toBe(Date.parse("2026-11-23T01:30:00Z") - Date.parse("2026-11-20T09:00:00Z"));
+  });
+});

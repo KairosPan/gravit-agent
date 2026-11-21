@@ -2,13 +2,14 @@
  * keeps (`cnKeeper`), the same status, the same stale rule, every row view-only and priced in HKD. When Tencent's ranking does not answer,
  * Eastmoney's main-board list stands behind it (its ETFs dropped), its rows worded "Eastmoney · delayed". An empty ranking, from either, is a
  * failure. A refusal carries the market's own words, never a source's text, a URL or a thrown message. */
+import type { CnSession } from "./cn-session.ts";
 import { isRefusal, type Refusal } from "../core/errors.ts";
 import { no } from "../refuse.ts";
 import { CN_BARS, HISTORY_BODY_LIMIT } from "./cn-history.ts";
 import { realCnHttp, type CnHttp } from "./cn-http.ts";
 import { decodeGbk, QUOTE_RESPONSE_LIMIT, QUOTE_TIMEOUT_MS } from "./cn-quotes.ts";
 import { decodeSmartbox, SEARCH_RESPONSE_LIMIT, SEARCH_RESULTS, SEARCH_TIMEOUT_MS } from "./cn-search.ts";
-import { BARS_TTL_MS, cnKeeper, MINUTES_TTL_MS, QUOTES_TTL_MS, RANK_TTL_MS, SEARCH_FLIGHTS, SEARCH_KEEP, SEARCH_TTL_MS } from "./china.ts";
+import { BARS_TTL_MS, cnKeeper, MINUTES_TTL_MS, QUOTES_TTL_MS, RANK_TTL_MS, SEARCH_FLIGHTS, SEARCH_KEEP, SEARCH_TTL_MS, STALE_KEEP_MS } from "./china.ts";
 import { eastmoney, emListUrl, EASTMONEY_NAME, type EmRow } from "./eastmoney.ts";
 import type { ExploreItem } from "./explore.ts";
 import {
@@ -17,7 +18,7 @@ import {
 } from "./hk-parse.ts";
 import { HK_HOSTS, politeHosts, retryOnce } from "./local-http.ts";
 import { localSession, SESSIONS } from "./local-session.ts";
-import { quoteWord, shareRow, staleRank, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource, type LocalStatus } from "./local.ts";
+import { quoteWord, rankTtlMs, shareRow, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource, type LocalStatus } from "./local.ts";
 import type { CandleRange } from "./trade.ts";
 
 export { HK_RANK_ROWS, hkCode };
@@ -48,7 +49,7 @@ const round = (v: number, places: number): number => Math.round(v * 10 ** places
 
 type Kept<T> = { at: number; answer: T };
 type RankAnswer = { items: ExploreItem[]; read: LocalRead };
-type Rows = { total: number; rows: HkRankRow[]; from: string; note: string; said: string };
+type Rows = { total: number; rows: HkRankRow[]; from: string; note: string; said: string; lastTrade?: string };
 
 const rowOf = (r: { code: string; name: string; price: number | null; changePct: number | null; turnover: number | null }, quoteFrom: string): ExploreItem =>
   shareRow({ venue: "hk", venueName: HK_NAME, code: r.code, name: r.name, currency: "HKD", price: r.price, changePct: r.changePct, turnover: r.turnover, quoteFrom });
@@ -70,8 +71,11 @@ export function hongKongSource(deps: { http?: CnHttp; clock?: () => number; east
   const keeper = <T>(ttl: (key: string) => number) => cnKeeper<T>(now, ttl);
 
   // ---- the ranking -----------------------------------------------------------------------------------------------------------------
-  const good = new Map<LocalSort, Kept<RankAnswer>>();
-  const ranks = keeper<RankAnswer>(() => RANK_TTL_MS);
+  /** the one ranking read both sorts are made from: movers is the same rows re-sorted, so the host sees one read */
+  type Base = { rows: HkRankRow[]; total: number; from: string; note: string; said: string; asOf: string; session: CnSession; status: LocalStatus };
+  let last: { at: number; base: Base } | null = null;
+  let kept: { until: number; base: Base } | null = null;
+  let flight: Promise<Base | Refusal> | null = null;
 
   /** Tencent's turnover ranking, page after page up to HK_RANK_ROWS rows; any page failing fails the read, and so does an empty one */
   async function tencentRows(): Promise<Rows> {
@@ -84,38 +88,57 @@ export function hongKongSource(deps: { http?: CnHttp; clock?: () => number; east
     const seen = new Set<string>();
     const rows = got.flatMap((p) => p.rows).filter((r) => !seen.has(r.code) && seen.add(r.code)).slice(0, HK_RANK_ROWS);
     if (!rows.length) throw new Error("empty ranking");
-    return { total: got[0]!.total, rows, from: HK_NAME, note: HK_NOTE, said: LIVE_SAID };
+    // the ranking carries no trade time: the top share's quote has one (a failed side read leaves it out)
+    const top = await quotes([rows[0]!.code], false);
+    const lastTrade = isMarkets(top) ? top.get(rows[0]!.code)?.quoteAt : undefined;
+    return { total: got[0]!.total, rows, from: HK_NAME, note: HK_NOTE, said: LIVE_SAID, ...(lastTrade ? { lastTrade } : {}) };
   }
   /** Eastmoney's main-board list by turnover, its funds and leveraged products dropped */
   async function eastmoneyRows(): Promise<Rows | null> {
-    const list = await em.list(emListUrl(EM_FS, { fid: "f6", pz: HK_RANK_ROWS }));
-    if (isRefusal(list)) return null;
-    const rows = list.filter((r: EmRow) => /^\d{5}$/.test(r.code) && !ETP_NAME.test(r.name))
-      .map((r): HkRankRow => ({ code: r.code, name: r.name, price: r.price, changePct: r.changePct, turnover: r.turnover }));
-    return rows.length ? { total: rows.length, rows, from: EM_FROM, note: EM_NOTE, said: EM_LIVE_SAID } : null;
+    try {
+      const list = await em.list(emListUrl(EM_FS, { fid: "f6", pz: HK_RANK_ROWS }));
+      if (isRefusal(list)) return null;
+      const kept = list.filter((r: EmRow) => /^\d{5}$/.test(r.code) && !ETP_NAME.test(r.name));
+      const rows = kept.map((r): HkRankRow => ({ code: r.code, name: r.name, price: r.price, changePct: r.changePct, turnover: r.turnover }));
+      const lastTrade = kept.find((r) => r.at !== undefined)?.at;
+      return rows.length ? { total: rows.length, rows, from: EM_FROM, note: EM_NOTE, said: EM_LIVE_SAID, ...(lastTrade ? { lastTrade } : {}) } : null;
+    } catch { return null; }
   }
 
-  async function readRank(sort: LocalSort): Promise<RankAnswer | Refusal> {
+  async function readRank(): Promise<Base | Refusal> {
     const startedAt = now();
     let got: Rows | null;
     try { got = await tencentRows(); } catch { got = await eastmoneyRows(); }
     if (got) {
       const asOf = new Date(now()).toISOString();
       status = { state: "live", said: got.said, at: asOf };
-      const size = (r: HkRankRow): number => (r.changePct === null ? -1 : Math.abs(r.changePct));
-      // movers: the turnover ranking, re-sorted by the size of the move (stable, so ties stay in turnover order)
-      const rows = sort === "movers" ? [...got.rows].sort((a, b) => size(b) - size(a)) : got.rows;
-      const read: LocalRead = { venue: "hk", region: "hk", sort, total: got.total, asOf, session: localSession(SESSIONS.hk, startedAt), status, note: got.note };
-      const answer: RankAnswer = { items: rows.map((r) => rowOf(r, got.from)), read };
-      good.set(sort, { at: now(), answer });
-      return answer;
+      const base: Base = { rows: got.rows, total: got.total, from: got.from, note: got.note, said: got.said, asOf, status,
+        session: localSession(SESSIONS.hk, startedAt, got.lastTrade) };
+      last = { at: now(), base };
+      kept = { until: now() + rankTtlMs(SESSIONS.hk, now(), RANK_TTL_MS), base };
+      return base;
     }
-    const stale = staleRank(good.get(sort), now(), `Tencent and Eastmoney did not answer · Hong Kong as of ${hhmm.format(new Date(good.get(sort)?.at ?? 0))} HKT`);
-    if (stale) { status = stale.read.status; return stale; }
+    const old = last && now() - last.at < STALE_KEEP_MS ? last : null;
+    if (old) {
+      status = { state: "stale", said: `Tencent and Eastmoney did not answer · Hong Kong as of ${hhmm.format(new Date(old.at))} HKT`, at: old.base.asOf };
+      return { ...old.base, status };
+    }
     status = { state: "unavailable", said: UNAVAILABLE_SAID };
     return unavailable();
   }
-  const freshRank = (v: RankAnswer | Refusal): v is RankAnswer => !isRefusal(v) && v.read.status.state === "live";
+  const answerOf = (base: Base, sort: LocalSort): RankAnswer => {
+    const size = (r: HkRankRow): number => (r.changePct === null ? -1 : Math.abs(r.changePct));
+    // movers: the turnover ranking, re-sorted by the size of the move (stable, so ties stay in turnover order)
+    const rows = sort === "movers" ? [...base.rows].sort((a, b) => size(b) - size(a)) : base.rows;
+    return { items: rows.map((r) => rowOf(r, base.from)),
+      read: { venue: "hk", region: "hk", sort, total: base.total, asOf: base.asOf, session: base.session, status: base.status, note: base.note } };
+  };
+  async function rank(sort: LocalSort): Promise<RankAnswer | Refusal> {
+    if (kept && now() < kept.until) return answerOf(kept.base, sort);
+    flight ??= readRank().finally(() => { flight = null; });
+    const base = await flight;
+    return isRefusal(base) ? base : answerOf(base, sort);
+  }
 
   // ---- quotes ----------------------------------------------------------------------------------------------------------------------
   const quoteKeeper = keeper<Map<string, LocalMarket>>(() => QUOTES_TTL_MS);
@@ -228,7 +251,7 @@ export function hongKongSource(deps: { http?: CnHttp; clock?: () => number; east
   return {
     venue: "hk",
     name: HK_NAME,
-    rank: (sort) => ranks.ask(sort, () => readRank(sort), freshRank),
+    rank,
     search,
     quotes: (symbols) => quotes(symbols),
     history,

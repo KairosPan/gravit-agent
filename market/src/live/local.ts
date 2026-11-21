@@ -4,6 +4,7 @@
 import type { Refusal } from "../core/errors.ts";
 import type { CnBar, CnMinutes, ChinaRange } from "./cn-history.ts";
 import type { CnPhase, CnSession } from "./cn-session.ts";
+import { localSession, type SessionHours } from "./local-session.ts";
 import { STALE_KEEP_MS, type ChinaStatus } from "./china.ts";
 import type { RegionId } from "./categories.ts";
 import type { ExploreItem } from "./explore.ts";
@@ -87,4 +88,18 @@ export function indexRow(o: {
 export function staleRank<T extends { read: LocalRead }>(last: { at: number; answer: T } | undefined, now: number, said: string): T | null {
   if (!last || now - last.at >= STALE_KEEP_MS) return null;
   return { ...last.answer, read: { ...last.answer.read, status: { state: "stale", said, at: last.answer.read.asOf } } };
+}
+
+const QUARTER_MS = 900_000;
+/** How long a ranking read at `nowMs` is kept: `inSessionMs` while the market is trading or at midday, else until its next session's first window
+ * opens (weekdays; the opening is found on a 15-minute grid, every market's windows open on one). Holidays are not modelled, so a ranking read
+ * before a holiday is kept to the next weekday's open, which is when it would next change anyway. */
+export function rankTtlMs(hours: SessionHours, nowMs: number, inSessionMs: number): number {
+  const phase = localSession(hours, nowMs).phase;
+  if (phase === "trading" || phase === "midday") return inSessionMs;
+  const start = Math.floor(nowMs / QUARTER_MS) * QUARTER_MS;
+  for (let t = start + QUARTER_MS; t <= start + 9 * 86_400_000; t += QUARTER_MS) {
+    if (localSession(hours, t).phase === "trading") return Math.max(t - nowMs, inSessionMs);
+  }
+  return inSessionMs;
 }

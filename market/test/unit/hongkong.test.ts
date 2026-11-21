@@ -91,7 +91,7 @@ describe("the Hong Kong source", () => {
   });
 
   it("both failing answers the last good ranking stale, within ten minutes; past them, refused", async () => {
-    let t = SUN;
+    let t = FRI_11;
     let broken = false;
     const n = net(routes([["hk_rank.php", () => (broken ? down : RANK)], ["eastmoney", () => (broken ? down : EM)]]));
     const s = hongKongSource({ http: n.http, clock: () => t });
@@ -106,6 +106,56 @@ describe("the Hong Kong source", () => {
     t += 700_000;
     expect(refused(await s.rank("volume")).code).toBe("E_VENUE_UNREACHABLE");
     expect(s.status().state).toBe("unavailable");
+  });
+
+  it("the keep: in session 10 s, outside it until the next session opens", async () => {
+    const asks = (n: ReturnType<typeof net>) => n.sent.filter((u) => u.includes("hk_rank.php")).length;
+    let t = FRI_11;
+    const a = net(routes());
+    const s = hongKongSource({ http: a.http, clock: () => t });
+    answered(await s.rank("volume"));
+    const first = asks(a);
+    t += 5_000;
+    answered(await s.rank("volume"));
+    expect(asks(a)).toBe(first);
+    t += 6_000; // 11 s on
+    answered(await s.rank("volume"));
+    expect(asks(a)).toBe(first * 2);
+    t = SUN;
+    const b = net(routes());
+    const closed = hongKongSource({ http: b.http, clock: () => t });
+    answered(await closed.rank("volume"));
+    const once = asks(b);
+    t += 3_600_000;
+    answered(await closed.rank("volume"));
+    expect(asks(b)).toBe(once);
+    t += 36 * 3_600_000; // past Monday's open
+    answered(await closed.rank("volume"));
+    expect(asks(b)).toBe(once * 2);
+  });
+
+  it("volume and movers are one read of the host", async () => {
+    const n = net(routes());
+    const s = hongKongSource({ http: n.http, clock: () => FRI_11 });
+    await Promise.all([s.rank("volume"), s.rank("movers")]);
+    await s.rank("movers");
+    expect(n.sent.filter((u) => u.includes("hk_rank.php"))).toHaveLength(HK_RANK_ROWS / 50);
+  });
+
+  it("the ranking's session takes the top share's quote day: a Monday after a holiday is closed", async () => {
+    const r = answered(await hongKongSource({ http: net(routes()).http, clock: () => MON_11 }).rank("volume"));
+    expect(r.read.session.phase).toBe("closed");
+    const fri = answered(await hongKongSource({ http: net(routes()).http, clock: () => FRI_11 }).rank("volume"));
+    expect(fri.read.session.phase).toBe("trading");
+  });
+
+  it("the Eastmoney path takes a row's own time for the session; a throwing Eastmoney is a refusal", async () => {
+    const row = (code: string, name: string, at?: string) => ({ code, name, price: 1, changePct: 1, change: 1, turnover: 5, prevClose: 1, open: 1, high: 1, low: 1, volume: 1, ...(at ? { at } : {}) });
+    const em = { list: async () => [row("00700", "腾讯控股", "2026-11-20T16:08:00+08:00")], kline: async () => [] } as unknown as ReturnType<typeof eastmoney>;
+    const r = answered(await hongKongSource({ http: net(routes([["hk_rank.php", down]])).http, clock: () => MON_11, eastmoney: em }).rank("volume"));
+    expect(r.read.session.phase).toBe("closed");
+    const boom = { list: async () => { throw new Error("boom"); }, kline: async () => [] } as unknown as ReturnType<typeof eastmoney>;
+    expect(refused(await hongKongSource({ http: net(routes([["hk_rank.php", down]])).http, clock: () => MON_11, eastmoney: boom }).rank("volume")).code).toBe("E_VENUE_UNREACHABLE");
   });
 
   it("a refusing host (a 429) is read as a failure and not asked again", async () => {
