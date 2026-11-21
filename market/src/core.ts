@@ -1,11 +1,17 @@
 /** THE MARKET'S CORE: what the market's routes answer from — the keyless public sources (each read through the market's own read cache,
  * read-cache.ts keptSource), the stream hub (the venues' streams joined with the US shares' background reader), China, a coin's price,
- * Nasdaq's headlines, Lunhui's relay and iFinD client, and the AKShare sidecar. `createMarketCore` takes each as it is handed (a test's fakes; absent: none);
+ * Hong Kong, Korea and Taiwan's shares and the world's cash indices, Nasdaq's headlines, Lunhui's relay and iFinD client, and the AKShare sidecar. `createMarketCore` takes each as it is handed (a test's fakes; absent: none);
  * `realMarketCore` is the main's, built over the real network. It holds no wallet, no home and no key, and writes nothing to disk. */
 import { createAkshare, akshareCommand, type Akshare } from "./live/akshare.ts";
 import { chinaSource, type ChinaSource } from "./live/china.ts";
 import { cnHosts, realCnHttp } from "./live/cn-http.ts";
 import { createIfind, IFIND_HOST, type CnIfind } from "./live/cn-ifind.ts";
+import { eastmoney } from "./live/eastmoney.ts";
+import { hongKongSource } from "./live/hongkong.ts";
+import { koreaSource } from "./live/korea.ts";
+import type { LocalSource } from "./live/local.ts";
+import { taiwanSource } from "./live/taiwan.ts";
+import { worldIndices } from "./live/world-indices.ts";
 import { createWencai, wencaiPerDay, type CnWencai } from "./live/cn-wencai.ts";
 import { createCnRelay, type CnRelay } from "./live/cn-relay.ts";
 import { historyKeep, pageWeight } from "./live/history.ts";
@@ -16,12 +22,21 @@ import { joinHubs, StreamHub, type HubVenue, type MarketHub } from "./live/strea
 import type { Candle, CandlePage } from "./live/trade.ts";
 import { HISTORY_KEPT, HISTORY_KEPT_BARS, isBan, keptSource, notServedBy, ReadCache } from "./read-cache.ts";
 
+/** the world's cash indices (world-indices.ts): a region's levels, an index's quote and history */
+export type WorldIndices = ReturnType<typeof worldIndices>;
+
 export interface MarketCoreOptions {
   /** the keyless public sources (absent: none — only the main builds publicSources()) */
   sources?: PublicSource[] | undefined;
   /** the stream hub (absent: none) */
   hub?: MarketHub | undefined;
   china?: ChinaSource | undefined;
+  /** Hong Kong (Tencent), Korea (Naver), Taiwan (TWSE) and the world's cash indices, each read of its own like China (absent: none — that
+   * region's reads refuse) */
+  hk?: LocalSource | undefined;
+  kr?: LocalSource | undefined;
+  tw?: LocalSource | undefined;
+  indices?: WorldIndices | undefined;
   /** a US share's headlines (absent: none — GET /api/news refuses) */
   news?: NewsSource | undefined;
   /** a coin's price in dollars (absent: none, every asset undefined) */
@@ -39,6 +54,10 @@ export interface MarketCore {
   source(id: string): PublicSource | undefined;
   readonly hub: MarketHub | undefined;
   readonly china: ChinaSource | undefined;
+  readonly hk: LocalSource | undefined;
+  readonly kr: LocalSource | undefined;
+  readonly tw: LocalSource | undefined;
+  readonly indices: WorldIndices | undefined;
   readonly news: NewsSource | undefined;
   readonly price: Price;
   readonly cn: MarketCoreOptions["cn"];
@@ -65,6 +84,10 @@ function coreOver(cache: ReadCache, o: MarketCoreOptions): MarketCore {
     source: (id) => byId.get(id),
     hub: o.hub,
     china: o.china,
+    hk: o.hk,
+    kr: o.kr,
+    tw: o.tw,
+    indices: o.indices,
     news: o.news,
     price: o.price ?? noPrice,
     cn: o.cn,
@@ -103,18 +126,24 @@ export function restAnswers(cache: ReadCache, venue: HubVenue): boolean {
 }
 
 /** THE MAIN'S CORE, over the real network: every keyless source, the venues' streams joined with each source's own background reader
- * (the US stocks line's), Tencent's China, the exchanges' prices, Lunhui's relay and iFinD (its token from this process's environment),
+ * (the US stocks line's), Tencent's China, Hong Kong, Korea, Taiwan and the world's indices (one Eastmoney client between Hong Kong's backup
+ * and the indices', so a pause of that host holds for both), the exchanges' prices, Lunhui's relay and iFinD (its token from this process's environment),
  * and the AKShare sidecar (MARKET_AKSHARE_BIN), started on first use. No socket opens and no child starts until something is asked */
 export function realMarketCore(): MarketCore {
   const cache = new ReadCache();
   const sources = publicSources();
   const feeds = sources.flatMap((x) => (x.feed ? [x.feed] : []));
   const hub = joinHubs(new StreamHub({ answers: (v) => restAnswers(cache, v) }), ...feeds);
+  const em = eastmoney();
   const ifind = createIfind({ env: () => process.env, http: cnHosts(realCnHttp, [IFIND_HOST]) });
   return coreOver(cache, {
     sources,
     hub,
     china: chinaSource(),
+    hk: hongKongSource({ eastmoney: em }),
+    kr: koreaSource(),
+    tw: taiwanSource(),
+    indices: worldIndices({ eastmoney: em }),
     news: nasdaqNews(),
     price: publicPrices(),
     cn: { relay: createCnRelay(realCnHttp), ifind, wencai: createWencai({ picker: ifind, configured: () => ifind.configured(), perDay: wencaiPerDay(process.env) }) },

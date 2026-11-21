@@ -160,6 +160,17 @@ describe("market:mcp", () => {
     expect(d).toMatch(/`scope` and `tab` are not mixed with `asset`, `form`, `region` or a source list/);
   });
 
+  it("market_explore names the eight regions, the local rankings and the cash indices; quotes and candles name the new venues", async () => {
+    const { tools } = await client.listTools();
+    const explore = tools.find((t) => t.name === "market_explore")!;
+    expect((explore.inputSchema.properties!.region as { enum: string[] }).enum).toEqual(["us", "cn", "hk", "jp", "kr", "tw", "in", "eu"]);
+    expect(explore.description).toContain("`region` us · cn · hk · jp · kr · tw · in · eu; `asset=stocks&region=hk|kr|tw` is that market's ranking (Tencent, Naver, TWSE; view-only, local currency in `currency`, turnover in `turnoverLocal`); `asset=indices&form=spot&region=<r>` is that region's cash indices (levels in points, no currency); Japanese and Indian shares exist only as trade.xyz perps (`form=perp`)");
+    for (const name of ["market_quotes", "market_candles"]) {
+      const d = tools.find((t) => t.name === name)!.description ?? "";
+      for (const venue of ["`china`", "`hk`", "`kr`", "`tw`", "`ix`"]) expect(d, `${name} ${venue}`).toContain(venue);
+    }
+  });
+
   it("market_candles answers a public source's history", async () => {
     const r = await client.callTool({ name: "market_candles", arguments: { venue: "fake", symbol: "BTC/USDT", interval: "1h", range: "1D" } });
     expect(r.isError).toBeFalsy();

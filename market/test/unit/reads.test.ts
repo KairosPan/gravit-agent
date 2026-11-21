@@ -17,7 +17,7 @@ import { INTERVAL_MS, type Candle, type CandleInterval, type CandlePage, type Ca
 import { no } from "../../src/refuse.ts";
 import { startMarketServer, type MarketServerHandle } from "../../src/server.ts";
 import type { Listing, PublicSource } from "../../src/live/public-markets.ts";
-import { fakeChina, fakeHub, fakeSource, listing } from "../fakes.ts";
+import { fakeChina, fakeHub, fakeIndices, fakeLocal, fakeSource, listing } from "../fakes.ts";
 
 const servers: MarketServerHandle[] = [];
 afterEach(async () => {
@@ -214,7 +214,7 @@ describe("the market's refusals say nothing of an account", () => {
   it("a pair that is not China's, in quotes: E_VENUE_RAIL_CLOSED, priced in explore", async () => {
     const { get } = await market();
     const [pub] = (await get("/api/quotes?pairs=fake|BTC/USDT")).body.quotes as Array<Record<string, any>>;
-    expect(pub!.refusal).toMatchObject({ code: "E_VENUE_RAIL_CLOSED", venue: "fake", message: '"fake" is priced in explore: the market quotes A shares only (venue "china")' });
+    expect(pub!.refusal).toMatchObject({ code: "E_VENUE_RAIL_CLOSED", venue: "fake", message: '"fake" is priced in explore: the market quotes A shares (venue "china"), Hong Kong, Korean and Taiwanese shares (hk, kr, tw) and the cash indices (ix)' });
   });
 
   it("China not read: its sentence unchanged, its code the market's", async () => {
@@ -330,7 +330,7 @@ describe("a public market's price history: windows and memory", () => {
   const HOUR = 60 * MIN;
   const DAY = 24 * HOUR;
   const NOW = Date.parse("2026-10-17T07:03:30Z");
-  const view = (r: CandlesView | ChinaHistory | Refusal): CandlesView => {
+  const view = (r: Awaited<ReturnType<ReturnType<typeof marketReads>["candles"]>>): CandlesView => {
     if (isRefusal(r)) throw new Error(`refused: ${r.code} ${r.message}`);
     if (!("interval" in r)) throw new Error("an A share's history, not a market's bars");
     return r;
@@ -685,7 +685,7 @@ describe("China in the market's reads", () => {
       expect(s.calls.quotes).toEqual([["600519", "688981", "000002"]]);
       expect(got.map((r) => [r.venue, r.symbol, r.market ? "market" : r.refusal!.message])).toEqual([
         ["china", "600519", "market"],
-        ["nowhere", "BTC/USDT", '"nowhere" is priced in explore: the market quotes A shares only (venue "china")'],
+        ["nowhere", "BTC/USDT", '"nowhere" is priced in explore: the market quotes A shares (venue "china"), Hong Kong, Korean and Taiwanese shares (hk, kr, tw) and the cash indices (ix)'],
         ["china", "688981", "market"],
         ["china", "60051", "an A share is its six digits"],
         ["china", "000002", "no A-share quote for 000002"],
@@ -1101,3 +1101,137 @@ describe("explore by underlying", () => {
     expect(search).toHaveBeenCalledOnce();
   });
 });
+
+/** THE LOCAL REGIONS IN THE MARKET'S READS: Hong Kong, Korea and Taiwan's rankings, searches, quotes and charts, and the world's cash indices,
+ * each over its fake (fakes.ts) — routed by underlying, beside the generic path that answers every other region and form */
+describe("the local regions and the world's indices in the market's reads", () => {
+  const answered = <T,>(v: T | Refusal): T => { if (isRefusal(v)) throw new Error(`refused: ${v.code} ${v.message}`); return v; };
+  const refused = (v: unknown): Refusal => { if (!isRefusal(v)) throw new Error(`answered: ${JSON.stringify(v).slice(0, 160)}`); return v; };
+  const src = (id: string, rows: Listing[]): PublicSource => ({ ...fakeSource({ id }), listings: async () => rows.map((r) => ({ ...r })) });
+  const perp = (base: string, category: string, volumeUsd24h: number): Listing => listing(`${base}-PERP`, 10, { kind: "perp", base, quote: "USDC", category, volumeUsd24h });
+  function regions(o: { sources?: PublicSource[] } = {}) {
+    const hk = fakeLocal("hk"), kr = fakeLocal("kr"), tw = fakeLocal("tw"), ix = fakeIndices();
+    const reads = marketReads(createMarketCore({ sources: o.sources ?? [fakeSource({ id: "okx" })], china: fakeChina(), hk: hk.source, kr: kr.source, tw: tw.source, indices: ix.source }));
+    return { reads, hk, kr, tw, ix };
+  }
+  const NAMES = { hk: ["Hong Kong", "hk:00700", "Tencent"], kr: ["Korea", "kr:005930", "Naver"], tw: ["Taiwan", "tw:2330", "TWSE"] } as const;
+
+  it("region hk, kr or tw on Stocks Spot (or with neither named) is that source's ranking, with its read", async () => {
+    for (const venue of ["hk", "kr", "tw"] as const) {
+      const r = regions();
+      const [label, key] = NAMES[venue];
+      for (const query of [{ region: venue }, { asset: "stocks", region: venue }, { asset: "stocks", form: "spot", region: venue }]) {
+        const got = answered(await r.reads.explore(query));
+        expect(got.items.map((i) => i.key)).toEqual([key]);
+        expect(got.tabs).toEqual([{ id: venue, label, count: 200 }]);
+        expect(got.local).toMatchObject({ venue, region: venue, sort: "volume", total: 200 });
+        expect(got.china).toBeUndefined();
+      }
+      answered(await r.reads.explore({ region: venue, sort: "movers" }));
+      expect(r[venue].calls.rank).toEqual(["volume", "volume", "volume", "movers"]);
+    }
+  });
+
+  it("a search on a local region is that source's hits alone", async () => {
+    const r = regions();
+    const got = answered(await r.reads.explore({ asset: "stocks", region: "hk", q: "tencent" }));
+    expect(got.items.map((i) => i.key)).toEqual(["hk:00700"]);
+    expect(got.tabs).toEqual([{ id: "hk", label: "Hong Kong", count: 1 }]);
+    expect([r.hk.calls.search, r.hk.calls.rank, r.kr.calls.search]).toEqual([["tencent"], [], []]);
+  });
+
+  it("refuses a source beside a local region, and the closing sort", async () => {
+    const r = regions();
+    expect(refused(await r.reads.explore({ asset: "stocks", region: "hk", source: "okx" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Hong Kong is not part of a selected public source" });
+    expect(refused(await r.reads.explore({ region: "kr", sort: "closing" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Korea is sorted by volume or movers" });
+    expect(r.kr.calls.rank).toEqual([]);
+  });
+
+  it("a local region the market does not read is refused in its words", async () => {
+    const reads = marketReads(createMarketCore({ sources: [] }));
+    expect(refused(await reads.explore({ region: "tw" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Taiwan is not read by this market" });
+    expect(refused(await reads.explore({ asset: "indices", form: "spot", region: "jp" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "The cash indices are not read by this market" });
+  });
+
+  it("asset=indices&form=spot is the region's cash indices, any region", async () => {
+    const r = regions();
+    const jp = answered(await r.reads.explore({ asset: "indices", form: "spot", region: "jp" }));
+    expect(jp.items.map((i) => i.key)).toEqual(["ix:jp:n225"]);
+    expect(jp.tabs).toEqual([{ id: "indices", label: "Indices", count: 1 }]);
+    expect(jp.local).toMatchObject({ venue: "ix", region: "jp", total: 1 });
+    const us = answered(await r.reads.explore({ asset: "indices", form: "spot", region: "us", sort: "movers" }));
+    expect(us.items.map((i) => i.key)).toEqual(["ix:us:spx"]);
+    expect(r.ix.calls.levels).toEqual([["jp", "volume"], ["us", "movers"]]);
+  });
+
+  it("every other region and form is the generic path: Korea's perps at trade.xyz, no Japanese spot shares, China's perps", async () => {
+    const r = regions({ sources: [src("trade-xyz", [perp("xyz:SMSN", "stocks", 1e7), perp("xyz:CAMBRICON", "stocks", 1e7), perp("BTC", "crypto", 1e9)])] });
+    const kr = answered(await r.reads.explore({ asset: "stocks", form: "perp", region: "kr", source: "trade-xyz" }));
+    expect(kr.items.map((i) => i.key)).toEqual(["perp:xyz:SMSN"]);
+    expect(kr.local).toBeUndefined();
+    const jp = answered(await r.reads.explore({ asset: "stocks", form: "spot", region: "jp" }));
+    expect(jp.items).toEqual([]);
+    const cn = answered(await r.reads.explore({ asset: "stocks", form: "perp", region: "cn", source: "trade-xyz" }));
+    expect(cn.items.map((i) => i.key)).toEqual(["perp:xyz:CAMBRICON"]);
+    expect([r.hk.calls.rank, r.kr.calls.rank, r.tw.calls.rank, r.ix.calls.levels]).toEqual([[], [], [], []]);
+  });
+
+  it("China's answer keeps china and carries local, venue china", async () => {
+    const read: ChinaRead = { sort: "volume", total: 5577, asOf: "2026-11-19T07:00:00.000Z", session: { phase: "closed", lastSession: "2026-11-18" } as ChinaRead["session"], status: { state: "live", said: "Tencent · answering" } as ChinaStatus };
+    const row = (await fakeChina().search("600519")) as ExploreItem[];
+    const china = { ...fakeChina(), rank: async (sort: "volume" | "movers") => ({ items: row, read: { ...read, sort } }) };
+    const reads = marketReads(createMarketCore({ sources: [], china }));
+    const got = answered(await reads.explore({ asset: "stocks", region: "cn" }));
+    expect(got.china).toMatchObject({ sort: "volume", total: 5577 });
+    expect(got.local).toEqual({ venue: "china", region: "cn", sort: "volume", total: 5577, asOf: read.asOf, session: read.session, status: read.status, note: CHINA_NOTE });
+  });
+
+  it("a search on All asks China, Hong Kong, Korea and Taiwan; a late Korea is in missing, the others answered", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const hk = fakeLocal("hk", { search: async () => [shareOf("hk", "00700")] });
+      const kr = fakeLocal("kr", { search: () => new Promise<never>(() => {}) });
+      const tw = fakeLocal("tw", { search: async () => no("E_VENUE_UNREACHABLE", { venue: "tw", message: "TWSE's search did not answer" }) });
+      const reads = marketReads(createMarketCore({ sources: [fakeSource({ id: "okx" })], china: fakeChina(), hk: hk.source, kr: kr.source, tw: tw.source }));
+      const asked = reads.explore({ q: "600519" });
+      await vi.advanceTimersByTimeAsync(CHINA_SEARCH_WAIT_MS + 10);
+      const x = answered(await asked);
+      expect(x.items.map((i) => i.key)).toEqual(["cn:600519", "hk:00700"]);
+      expect(x.missing).toEqual([
+        expect.objectContaining({ venue: "kr", venueName: "Naver", connected: false, why: "Naver did not answer in 4 seconds" }),
+        expect.objectContaining({ venue: "tw", venueName: "TWSE", connected: false, why: "TWSE's search did not answer" }),
+      ]);
+      expect([hk.calls.search, kr.calls.search, tw.calls.search]).toEqual([["600519"], ["600519"], ["600519"]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("quotes: Hong Kong, Korea, Taiwan and the indices, one read per venue; a bad code refused per pair", async () => {
+    const r = regions();
+    const got = answered(await r.reads.quotes([{ venue: "hk", symbol: "700" }, { venue: "hk", symbol: "abc" }, { venue: "ix", symbol: "jp:n225" }, { venue: "kr", symbol: "005930" }, { venue: "tw", symbol: "2330" }, { venue: "ix", symbol: "jp:nope" }, { venue: "kr", symbol: "12" }]));
+    expect(got[0]).toMatchObject({ venue: "hk", symbol: "00700", market: { symbol: "00700", currency: "HKD" } });
+    expect(got[1]).toMatchObject({ venue: "hk", symbol: "abc", refusal: { code: "E_MARKET_BAD_REQUEST", message: "a Hong Kong share is its code, up to five digits" } });
+    expect(got[2]).toMatchObject({ venue: "ix", symbol: "jp:n225", market: { symbol: "jp:n225", price: 38_000 } });
+    expect(got[3]).toMatchObject({ venue: "kr", symbol: "005930", market: { currency: "KRW" } });
+    expect(got[4]).toMatchObject({ venue: "tw", symbol: "2330", market: { currency: "TWD" } });
+    expect(got[5]).toMatchObject({ venue: "ix", refusal: { code: "E_MARKET_BAD_REQUEST", message: "an index is <region>:<id> from the market's list (jp:n225)" } });
+    expect(got[6]).toMatchObject({ venue: "kr", refusal: { code: "E_MARKET_BAD_REQUEST", message: "a Korean share is its code, six digits or letters" } });
+    expect([r.hk.calls.quotes, r.kr.calls.quotes, r.tw.calls.quotes, r.ix.calls.quotes]).toEqual([[["00700"]], [["005930"]], [["2330"]], [["jp:n225"]]]);
+  });
+
+  it("candles: hk, kr, tw and ix by range only, as china", async () => {
+    const r = regions();
+    expect(answered(await r.reads.candles("hk", "00700", "", { range: "1M" }))).toMatchObject({ venue: "hk", symbol: "00700", range: "1M" });
+    expect(answered(await r.reads.candles("ix", "jp:n225", "", { range: "1Y" }))).toMatchObject({ venue: "ix", symbol: "jp:n225", range: "1Y" });
+    expect(refused(await r.reads.candles("kr", "005930", "", { range: "1M", before: "1700000000000" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "a Korean share's history is read by range" });
+    expect(refused(await r.reads.candles("tw", "2330", "", { range: "2Y" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: expect.stringContaining("a range is one of") });
+    expect(refused(await marketReads(createMarketCore({ sources: [] })).candles("hk", "00700", "", { range: "1M" }))).toMatchObject({ message: "Hong Kong is not read by this market" });
+    expect([r.hk.calls.history, r.ix.calls.history, r.kr.calls.history, r.tw.calls.history]).toEqual([[["00700", "1M"]], [["jp:n225", "1Y"]], [], []]);
+  });
+});
+
+/** one share as a local source's search finds it */
+function shareOf(venue: "hk" | "kr" | "tw", code: string): ExploreItem {
+  return { key: `${venue}:${code}`, kind: "share", name: code, base: code, asset: "stocks", form: "spot", region: venue, quoteFrom: "x", tabs: [], at: [] } as unknown as ExploreItem;
+}

@@ -2,6 +2,9 @@
  * book, trades and bars; China with one A share; and a hub the test makes speak. Nothing leaves the process. */
 import type { ExploreItem } from "../src/live/explore.ts";
 import type { ChinaHistory, ChinaMarket, ChinaSource } from "../src/live/china.ts";
+import { indexRow, shareRow, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource } from "../src/live/local.ts";
+import type { WorldIndices } from "../src/core.ts";
+import type { RegionId } from "../src/live/categories.ts";
 import { readLike, type Listing, type PublicSource } from "../src/live/public-markets.ts";
 import type { HubBook, HubQuote, HubTick, MarketHub } from "../src/live/stream-hub.ts";
 import type { Candle } from "../src/live/trade.ts";
@@ -63,6 +66,59 @@ export function fakeChina(): ChinaSource {
     history: async (symbol, range) => ({ venue: "china", venueName: "Tencent", symbol, range, candles: [], source: "Tencent · daily", adjustment: "forward-adjusted (前复权)" }) as ChinaHistory,
     status: () => ({ state: "live", said: "Tencent · answering" }),
   };
+}
+
+/** each local region's fake: its venue, its source's name, its currency, one share's code and name, and the code typed short (Hong Kong) */
+const LOCAL = {
+  hk: { name: "Tencent", currency: "HKD", code: "00700", share: "Tencent Holdings", region: "Hong Kong" },
+  kr: { name: "Naver", currency: "KRW", code: "005930", share: "삼성전자", region: "Korea" },
+  tw: { name: "TWSE", currency: "TWD", code: "2330", share: "TSMC", region: "Taiwan" },
+} as const;
+
+/** a local region's source (Hong Kong, Korea or Taiwan) with one share, every ask recorded; any of its reads replaced by `o` */
+export function fakeLocal(venue: "hk" | "kr" | "tw", o: Partial<Pick<LocalSource, "rank" | "search" | "quotes" | "history">> = {}) {
+  const f = LOCAL[venue];
+  const calls = { rank: [] as LocalSort[], search: [] as string[], quotes: [] as string[][], history: [] as Array<[string, string]> };
+  const row = () => shareRow({ venue, venueName: f.name, code: f.code, name: f.share, currency: f.currency, price: 100, changePct: 1.5, turnover: 1e9, quoteFrom: f.name });
+  const read = (sort: LocalSort): LocalRead => ({ venue, region: venue, sort, total: 200, asOf: new Date(READ_AT).toISOString(), session: { phase: "closed", lastSession: "2026-11-20" } as LocalRead["session"],
+    status: { state: "live", said: `${f.name} · answering` }, note: `${f.region}: the fake's ranking` });
+  const market = (code: string): LocalMarket => ({ symbol: code, name: f.share, kind: "spot", base: code, quote: f.currency, currency: f.currency, open: false, types: [], price: 100, quoteFrom: f.name,
+    local: { prevClose: 99, open: 99, high: 101, low: 98, volume: 1e6, turnover: 1e9, lastSession: "2026-11-20", phase: "closed", quoteStatus: "unsaid" } }) as LocalMarket;
+  const source: LocalSource = {
+    venue, name: f.name,
+    rank: async (sort) => { calls.rank.push(sort); return o.rank ? o.rank(sort) : { items: [row()], read: read(sort) }; },
+    search: async (q) => { calls.search.push(q); return o.search ? o.search(q) : q === f.code || f.share.toLowerCase().includes(q.toLowerCase()) ? [row()] : []; },
+    quotes: async (symbols) => { calls.quotes.push([...symbols]); return o.quotes ? o.quotes(symbols) : new Map(symbols.filter((s) => s === f.code).map((s) => [s, market(s)])); },
+    history: async (symbol, range) => { calls.history.push([symbol, range]); return o.history ? o.history(symbol, range) : ({ venue, venueName: f.name, symbol, range, candles: [], source: f.name }) as LocalHistory; },
+    status: () => ({ state: "live", said: `${f.name} · answering` }),
+  };
+  return { source, calls };
+}
+
+/** the world's indices with Japan's Nikkei 225 and the US's S&P 500, every ask recorded */
+export function fakeIndices() {
+  const calls = { levels: [] as Array<[RegionId, LocalSort | undefined]>, quotes: [] as string[][], history: [] as Array<[string, string]> };
+  const LIST: Record<string, Array<{ id: string; name: string; level: number }>> = { jp: [{ id: "n225", name: "Nikkei 225", level: 38_000 }], us: [{ id: "spx", name: "S&P 500", level: 6_000 }] };
+  const source: WorldIndices = {
+    async levels(region, sort) {
+      calls.levels.push([region, sort]);
+      const list = LIST[region] ?? [];
+      return { items: list.map((i) => indexRow({ region, id: i.id, name: i.name, level: i.level, change: 10, changePct: 0.1, quoteFrom: "Naver · 15 min delayed" })),
+        read: { venue: "ix", region, sort: sort ?? "volume", total: list.length, asOf: new Date(READ_AT).toISOString(), session: { phase: "closed", lastSession: "2026-11-20" } as LocalRead["session"], status: { state: "live", said: "Indices · answering" }, note: "the cash indices, each from its own source" } };
+    },
+    async quotes(ids) {
+      calls.quotes.push([...ids]);
+      return new Map(ids.flatMap((id) => {
+        const [region, ix] = id.split(":");
+        const i = (LIST[region!] ?? []).find((x) => x.id === ix);
+        return i ? [[id, { symbol: id, name: i.name, kind: "spot", base: i.id, quote: "pts", open: false, types: [], price: i.level, quoteFrom: "Naver · 15 min delayed",
+          local: { prevClose: null, open: null, high: null, low: null, volume: null, turnover: null, lastSession: "2026-11-20", phase: "closed", quoteStatus: "delayed" } } as LocalMarket] as const] : [];
+      }));
+    },
+    async history(id, range) { calls.history.push([id, range]); return { venue: "ix", venueName: "Eastmoney", symbol: id, range, candles: [], source: "Eastmoney" } as LocalHistory; },
+    status: () => ({ state: "live", said: "Indices · answering" }),
+  };
+  return { source, calls };
 }
 
 /** a hub the test makes speak: it streams the fake's markets, and the "stocks" source's prices alone (pricesOnly); it records every hold

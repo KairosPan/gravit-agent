@@ -1,13 +1,17 @@
 /** THE MARKET'S PUBLIC READS, the face's Markets reads: what there is to trade (explore), a fresh price for a few A shares (quotes), one
  * market's price history (candles), its order book (book) and its latest trades (trades) — under names without "account", proxied by the
- * face under /data/market (face/src/market-proxy.ts) and read by gravit through market:mcp. Each answers from the keyless public sources
- * and China alone: the market keeps no venue connected (a connected venue's own reads are the account's, /api/account/connected/…), no
+ * face under /data/market (face/src/market-proxy.ts) and read by gravit through market:mcp. Each answers from the keyless public sources,
+ * China, and the local regions (Hong Kong, Korea, Taiwan, the world's cash indices: live/local.ts) alone: the market keeps no venue
+ * connected (a connected venue's own reads are the account's, /api/account/connected/…), no
  * list of where the user can connect, and no market-down hold (the market never sees itself down).
  *
  *   GET  /api/explore   ?scope= &source= &tab= &q= &key= &sort= &limit=  Exploration; or by underlying, ?asset= &form= &region= with
- *                       &source=<id>,<id>… (never beside scope or tab), region=cn being the China read
- *   GET  /api/quotes    ?pairs=<venue>|<symbol>,… (or ?pair= each)  {quotes: [{venue, symbol, market? | refusal?}]}: A shares only
- *   GET  /api/candles   ?venue= &symbol= &interval= &range= &since= &before= &limit=   CandlesView, or an A share's ChinaHistory
+ *                       &source=<id>,<id>… (never beside scope or tab), region=cn being the China read, region=hk|kr|tw on Stocks Spot that
+ *                       region's ranking, asset=indices&form=spot a region's cash indices
+ *   GET  /api/quotes    ?pairs=<venue>|<symbol>,… (or ?pair= each)  {quotes: [{venue, symbol, market? | refusal?}]}: A shares (china), Hong
+ *                       Kong, Korean and Taiwanese shares (hk, kr, tw) and the cash indices (ix)
+ *   GET  /api/candles   ?venue= &symbol= &interval= &range= &since= &before= &limit=   CandlesView, or an A share's ChinaHistory, or a local
+ *                       region's LocalHistory (hk, kr, tw, ix: by range)
  *   GET  /api/book      ?venue= &symbol= &depth=                  BookView
  *   GET  /api/trades    ?venue= &symbol= &limit=                  TradesView
  *   GET  /api/news      ?symbols=<A,B> &since=<ISO time>          {news: {<SYM>: Headline[]}, unavailable?: {<SYM>: reason}}: US shares
@@ -22,9 +26,15 @@ import { ASSET_IDS, FORM_IDS, REGION_IDS, TABS, type AssetId, type FormId, type 
 import { CHINA_ID, CHINA_NAME, CHINA_NOTE, type ChinaHistory, type ChinaMarket } from "./live/china.ts";
 import type { ChinaRange } from "./live/cn-history.ts";
 import { RANK_ROWS } from "./live/cn-rank.ts";
+import { HK_NOTE } from "./live/hongkong.ts";
+import { hkCode } from "./live/hk-parse.ts";
+import { krCode } from "./live/kr-parse.ts";
+import { twCode } from "./live/tw-parse.ts";
+import { WORLD_INDICES } from "./live/world-indices.ts";
+import type { LocalHistory, LocalMarket, LocalVenue } from "./live/local.ts";
 import { NEWS_ID, NEWS_KEEP_MS, NEWS_NAME, type Headline } from "./live/news.ts";
 import { US_TICKER } from "./live/us-quotes.ts";
-import { exploreAcross, type Exploration, type ExploreSort } from "./live/explore.ts";
+import { exploreAcross, type Exploration, type ExploreItem, type ExploreSort } from "./live/explore.ts";
 import { INTERVAL_RANGE, PAGE_MOST, pageOf, RANGE_BAR, rangeSince, sessionsSince } from "./live/history.ts";
 import { KEEP_MS as LISTING_KEEP_MS, type PublicSource } from "./live/public-markets.ts";
 import { CANDLE_INTERVALS, CANDLE_RANGES, HISTORY_MOST, type Candle, type CandleInterval, type CandlePage, type CandleRange, type CandleWindow, type Market, type OrderBook, type PublicTrade } from "./live/trade.ts";
@@ -35,7 +45,7 @@ export interface MarketReads {
   /** `source` is one source's id or a comma list of them; `asset`, `form` and `region` (categories.ts) ask by underlying */
   explore(o: { scope?: string | undefined; source?: string | undefined; tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined; asset?: string | undefined; form?: string | undefined; region?: string | undefined }): Promise<Exploration | Refusal>;
   quotes(pairs: Array<{ venue: string; symbol: string }>): Promise<Array<{ venue: string; symbol: string; market?: Market; refusal?: Refusal }> | Refusal>;
-  candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; since?: string | number | undefined; limit?: string | number | undefined }): Promise<CandlesView | ChinaHistory | Refusal>;
+  candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; since?: string | number | undefined; limit?: string | number | undefined }): Promise<CandlesView | ChinaHistory | LocalHistory | Refusal>;
   book(venue: string, symbol: string, depth?: number): Promise<BookView | Refusal>;
   trades(venue: string, symbol: string, limit?: number): Promise<TradesView | Refusal>;
   /** each US share's latest headlines (at most NEWS_PER_SYMBOL, newest first, none older than `since`), a feed that refuses under
@@ -114,11 +124,36 @@ export interface TradesView {
   public?: true | undefined;
 }
 
-/** how long a search waits for China's hits beside the other sources (exploreAcross's per-source budget): late, they are `missing` */
+/** how long a search waits for China's hits (and Hong Kong's, Korea's and Taiwan's) beside the other sources (exploreAcross's per-source
+ * budget): late, they are `missing` */
 export const CHINA_SEARCH_WAIT_MS = 4_000;
 /** the market's words where it reads no China */
 const CHINA_NOT_READ = "China is not read by this market";
 const EXPLORE_SORTS: readonly ExploreSort[] = ["volume", "movers", "closing"];
+
+/** THE LOCAL REGIONS' WORDS: each venue's name on a page, how its code is typed (live/*-parse.ts), and its refusals in the market's words */
+type ShareVenue = "hk" | "kr" | "tw";
+const SHARE_VENUES: readonly ShareVenue[] = ["hk", "kr", "tw"];
+const isShareVenue = (v: string | undefined): v is ShareVenue => (SHARE_VENUES as readonly string[]).includes(v ?? "");
+const isLocalVenue = (v: string): v is LocalVenue => isShareVenue(v) || v === "ix";
+/** an index as a pair names it: `<region>:<id>` from the market's list (world-indices.ts WORLD_INDICES), lower-cased */
+const ixCode = (s: string): string | null => {
+  const id = s.trim().toLowerCase();
+  return WORLD_INDICES.some((i) => `${i.region}:${i.id}` === id) ? id : null;
+};
+const LOCAL_WORDS: Record<LocalVenue, { label: string; notRead: string; notSource: string; sorted: string; code: (s: string) => string | null; bad: string; quote: string; history: string; note: string }> = {
+  hk: { label: "Hong Kong", notRead: "Hong Kong is not read by this market", notSource: "Hong Kong is not part of a selected public source", sorted: "Hong Kong is sorted by volume or movers",
+    code: hkCode, bad: "a Hong Kong share is its code, up to five digits", quote: "Hong Kong", history: "a Hong Kong share's history is read by range", note: HK_NOTE },
+  kr: { label: "Korea", notRead: "Korea is not read by this market", notSource: "Korea is not part of a selected public source", sorted: "Korea is sorted by volume or movers",
+    code: krCode, bad: "a Korean share is its code, six digits or letters", quote: "Korean", history: "a Korean share's history is read by range",
+    note: "Korea: KOSPI shares as Naver gives them, view-only and priced in KRW; no venue here trades them." },
+  tw: { label: "Taiwan", notRead: "Taiwan is not read by this market", notSource: "Taiwan is not part of a selected public source", sorted: "Taiwan is sorted by volume or movers",
+    code: twCode, bad: "a Taiwan share is its code, four to six digits or letters", quote: "Taiwan", history: "a Taiwan share's history is read by range",
+    note: "Taiwan: TWSE-listed shares as TWSE gives them, view-only and priced in TWD; no venue here trades them." },
+  ix: { label: "Indices", notRead: "The cash indices are not read by this market", notSource: "The cash indices are not part of a selected public source", sorted: "The cash indices are sorted by volume or movers",
+    code: ixCode, bad: "an index is <region>:<id> from the market's list (jp:n225)", quote: "index", history: "an index's history is read by range",
+    note: "Indices: the cash indices, levels in points, view-only; no venue here trades them." },
+};
 /** how long a chart's first view may take (Nasdaq's whole history of a share is about ten seconds), and one page scrolled left */
 export const HISTORY_WAIT_MS = 20_000;
 export const PAGE_WAIT_MS = 12_000;
@@ -246,7 +281,42 @@ export function marketReads(core: MarketCore): MarketReads {
     }
     const got = await china.rank(sort === "movers" ? "movers" : "volume");
     if (isRefusal(got)) return got;
-    return { asOf: got.read.asOf, tabs: [{ id: "china", label: "China", count: got.read.total }], items: got.items.slice(0, Math.min(limit, RANK_ROWS)), ...body, china: got.read };
+    const r = got.read;
+    return { asOf: r.asOf, tabs: [{ id: "china", label: "China", count: r.total }], items: got.items.slice(0, Math.min(limit, RANK_ROWS)), ...body, china: r,
+      local: { venue: CHINA_ID, region: "cn", sort: r.sort, total: r.total, asOf: r.asOf, session: r.session, status: r.status, note: CHINA_NOTE } };
+  }
+
+  /** A LOCAL REGION'S SHARES (Hong Kong, Korea, Taiwan): its source's ranking by turnover (`volume`, the default) or by the day's move
+   * (`movers`), with its read in `local` — or, with `q`, that source's hits alone. A refusal of the source is the answer; never kept here
+   * (each source keeps its own reads) */
+  async function exploreLocal(venue: ShareVenue, q: string, sort: string | undefined, limit: number): Promise<Exploration | Refusal> {
+    const w = LOCAL_WORDS[venue];
+    const src = core[venue];
+    if (!src) return no("E_MARKET_BAD_REQUEST", { venue, message: w.notRead });
+    if (sort === "closing") return no("E_MARKET_BAD_REQUEST", { venue, message: w.sorted });
+    const body = { movers: [], closing: [], mostTraded: [], missing: [] };
+    if (q) {
+      const hits = await src.search(q);
+      if (isRefusal(hits)) return hits;
+      return { asOf: new Date(now()).toISOString(), tabs: [{ id: venue, label: w.label, count: hits.length }], items: hits.slice(0, limit), ...body, notes: [w.note] };
+    }
+    const got = await src.rank(sort === "movers" ? "movers" : "volume");
+    if (isRefusal(got)) return got;
+    return { asOf: got.read.asOf, tabs: [{ id: venue, label: w.label, count: got.read.total }], items: got.items.slice(0, limit), ...body, notes: [w.note, got.read.note], local: got.read };
+  }
+
+  /** A REGION'S CASH INDICES (world-indices.ts): their levels, by the day's move with `movers`, a search kept to the names and ids that hold it */
+  async function exploreIndices(region: RegionId, q: string, sort: string | undefined, limit: number): Promise<Exploration | Refusal> {
+    const w = LOCAL_WORDS.ix;
+    const ix = core.indices;
+    if (!ix) return no("E_MARKET_BAD_REQUEST", { venue: "ix", message: w.notRead });
+    if (sort === "closing") return no("E_MARKET_BAD_REQUEST", { venue: "ix", message: w.sorted });
+    const got = await ix.levels(region, sort === "movers" ? "movers" : "volume");
+    if (isRefusal(got)) return got;
+    const Q = q.toLowerCase();
+    const items = Q ? got.items.filter((i) => i.name.toLowerCase().includes(Q) || (i.base ?? "").toLowerCase().includes(Q)) : got.items;
+    return { asOf: got.read.asOf, tabs: [{ id: "indices", label: "Indices", count: items.length }], items: items.slice(0, limit), movers: [], closing: [], mostTraded: [], missing: [],
+      notes: [w.note, got.read.note], local: got.read };
   }
 
   /** a venue and a market as the book and the trades take them (as `candles` does): a venue's id, and the market as plain text */
@@ -304,14 +374,30 @@ export function marketReads(core: MarketCore): MarketReads {
         if (scope && scope !== "more") return no("E_MARKET_BAD_REQUEST", { message: "China is in more markets" });
         return exploreChina(q, sort, limit);
       }
-      // CHINA BY UNDERLYING: China A's shares are region cn, spot stocks — China's read; nothing else is listed in cn
-      if (region === "cn") {
+      // THE LOCAL READS BY UNDERLYING: a region's shares on Stocks Spot (either left out) are its own source's — China A's (cn), Hong Kong's,
+      // Korea's, Taiwan's — and a region's cash indices (Indices Spot) the world indices'; never beside a source list. Every other region and
+      // form (perps on these regions, Stocks Spot on jp, in, eu) is the generic path below, which classOf already filters
+      const sharesSpot = (asset ?? "stocks") === "stocks" && (form ?? "spot") === "spot";
+      if (region === "cn" && sharesSpot) {
         if (ids.length) return no("E_MARKET_BAD_REQUEST", { message: "China is not part of a selected public source" });
-        if ((asset ?? "stocks") === "stocks" && (form ?? "spot") === "spot") return exploreChina(q, sort, limit);
-        return { asOf: new Date(now()).toISOString(), tabs: [], items: [], movers: [], closing: [], mostTraded: [], missing: [], notes: [] };
+        return exploreChina(q, sort, limit);
       }
-      // a search on All asks China too, beside the other sources and within their budget; no other tab ever asks it
-      const china = !ids.length && !byClass && (!scope || scope === "more") && q && !key && (tab === undefined || tab === "all") ? core.china : undefined;
+      if (isShareVenue(region) && sharesSpot) {
+        if (ids.length) return no("E_MARKET_BAD_REQUEST", { venue: region, message: LOCAL_WORDS[region].notSource });
+        return exploreLocal(region, q, sort, limit);
+      }
+      if (region !== undefined && asset === "indices" && form === "spot") {
+        if (ids.length) return no("E_MARKET_BAD_REQUEST", { venue: "ix", message: LOCAL_WORDS.ix.notSource });
+        return exploreIndices(region as RegionId, q, sort, limit);
+      }
+      // a search on All asks China, Hong Kong, Korea and Taiwan too, beside the other sources and each within their budget; no other tab ever
+      // asks them
+      const allSearch = !ids.length && !byClass && (!scope || scope === "more") && q && !key && (tab === undefined || tab === "all");
+      const china = core.china;
+      const asks: Array<{ venue: string; name: string; search: (q: string) => Promise<ExploreItem[] | Refusal> }> = !allSearch ? [] : [
+        ...(china ? [{ venue: CHINA_ID, name: CHINA_NAME, search: (x: string) => china.search(x) }] : []),
+        ...SHARE_VENUES.flatMap((v) => { const src = core[v]; return src ? [{ venue: v, name: src.name, search: (x: string) => src.search(x) }] : []; }),
+      ];
       // trade.xyz's own lines are its own: a legacy xyz: line at hyperliquid-preipo is left out wherever trade.xyz is read beside it
       const strip = scope === "more" || (ids.includes("hyperliquid-preipo") && ids.includes("trade-xyz"));
       const pub = core.sources()
@@ -334,17 +420,24 @@ export function marketReads(core: MarketCore): MarketReads {
             ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}),
             ...(asset ? { asset: asset as AssetId } : {}), ...(form ? { form: form as FormId } : {}), ...(region ? { region: region as RegionId } : {}),
           }),
-          china ? within(CHINA_SEARCH_WAIT_MS, china.search(q), CHINA_ID, CHINA_NAME) : undefined,
+          Promise.all(asks.map((a) => within(CHINA_SEARCH_WAIT_MS, a.search(q), a.venue, a.name))),
         ]);
-        if (hits === undefined) return explored;
-        // China's hits after the dollar rows; a late or refused China half is said in `missing`, the rest answered without it
-        if (isRefusal(hits)) return { ...explored, missing: [...explored.missing, { venue: CHINA_ID, venueName: CHINA_NAME, connected: false, why: hits.message, code: hits.code }] };
-        return { ...explored, items: [...explored.items, ...hits].slice(0, limit) };
+        if (!asks.length) return explored;
+        // the local hits after the dollar rows, China's first; a late or refused one is said in `missing`, the rest answered without it
+        const found: ExploreItem[] = [];
+        const missing = [...explored.missing];
+        hits.forEach((h, i) => {
+          const a = asks[i]!;
+          if (isRefusal(h)) missing.push({ venue: a.venue, venueName: a.name, connected: false, why: h.message, code: h.code });
+          else found.push(...h);
+        });
+        return { ...explored, items: [...explored.items, ...found].slice(0, limit), missing };
       });
     },
 
-    /** a fresh price for each of a few A shares, from China's source in ONE read. Any other pair is refused by name: a public market's
-     * price is in explore's rows, and a connected venue's quote is the account's (/api/account/connected/quotes) */
+    /** a fresh price for each of a few A shares, from China's source in ONE read, and for Hong Kong, Korean and Taiwanese shares and the
+     * cash indices, one read per venue (a code typed short is answered at its own: hk|700 at 00700). Any other pair is refused by name: a
+     * public market's price is in explore's rows, and a connected venue's quote is the account's (/api/account/connected/quotes) */
     async quotes(pairs) {
       if (!pairs.length || pairs.length > 12) return no("E_MARKET_BAD_REQUEST", { message: "quotes are asked for 1 to 12 markets at once, each venue|symbol" });
       const six = (p: { symbol: string }) => /^\d{6}$/.test(p.symbol);
@@ -352,7 +445,25 @@ export function marketReads(core: MarketCore): MarketReads {
       const china = core.china;
       const cn: Promise<Map<string, ChinaMarket> | Refusal> = !asked.length ? Promise.resolve(new Map())
         : china ? china.quotes(asked) : Promise.resolve(no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: CHINA_NOT_READ }));
+      const quoterOf = (v: LocalVenue) => (v === "ix" ? core.indices : core[v]);
+      const locals = new Map<LocalVenue, Promise<Map<string, LocalMarket> | Refusal>>();
+      for (const v of [...SHARE_VENUES, "ix"] as LocalVenue[]) {
+        const src = quoterOf(v);
+        const codes = [...new Set(pairs.filter((p) => p.venue === v).flatMap((p) => { const c = LOCAL_WORDS[v].code(p.symbol); return c ? [c] : []; }))];
+        if (src && codes.length) locals.set(v, src.quotes(codes).catch((err: unknown) => no("E_VENUE_UNREACHABLE", { venue: v, message: `${LOCAL_WORDS[v].label} is not answering: no quote could be read now` })));
+      }
       return Promise.all(pairs.map(async (p) => {
+        if (isLocalVenue(p.venue)) {
+          const v = p.venue;
+          const w = LOCAL_WORDS[v];
+          if (!quoterOf(v)) return { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: v, message: w.notRead }) };
+          const code = w.code(p.symbol);
+          if (!code) return { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: v, message: w.bad }) };
+          const got = await locals.get(v)!;
+          if (isRefusal(got)) return { ...p, refusal: got };
+          const m = got.get(code);
+          return m ? { venue: v, symbol: code, market: m } : { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: v, message: `no ${w.quote} quote for ${code}` }) };
+        }
         if (p.venue === CHINA_ID) {
           if (!china) return { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: CHINA_NOT_READ }) };
           if (!six(p)) return { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: "an A share is its six digits" }) };
@@ -361,7 +472,7 @@ export function marketReads(core: MarketCore): MarketReads {
           const m = got.get(p.symbol);
           return m ? { ...p, market: m } : { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: `no A-share quote for ${p.symbol}` }) };
         }
-        return { ...p, refusal: no("E_VENUE_RAIL_CLOSED", { venue: p.venue, message: `"${p.venue}" is priced in explore: the market quotes A shares only (venue "china")` }) };
+        return { ...p, refusal: no("E_VENUE_RAIL_CLOSED", { venue: p.venue, message: `"${p.venue}" is priced in explore: the market quotes A shares (venue "china"), Hong Kong, Korean and Taiwanese shares (hk, kr, tw) and the cash indices (ix)` }) };
       }));
     },
 
@@ -381,6 +492,16 @@ export function marketReads(core: MarketCore): MarketReads {
         const range = (ask.range ?? "").trim();
         if (!(CANDLE_RANGES as readonly string[]).includes(range)) return no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
         return china.history(sym, range as ChinaRange);
+      }
+      // a Hong Kong, Korean or Taiwanese share's history, or a cash index's, is its own source's, by range, as an A share's
+      if (isLocalVenue(id)) {
+        const w = LOCAL_WORDS[id];
+        const src = id === "ix" ? core.indices : core[id];
+        if (!src) return no("E_MARKET_BAD_REQUEST", { venue: id, message: w.notRead });
+        if ([ask.before, ask.since].some((x) => x !== undefined && String(x).trim() !== "")) return no("E_MARKET_BAD_REQUEST", { venue: id, message: w.history });
+        const range = (ask.range ?? "").trim();
+        if (!(CANDLE_RANGES as readonly string[]).includes(range)) return no("E_MARKET_BAD_REQUEST", { venue: id, message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
+        return src.history(sym, range as CandleRange);
       }
       const asked = historyAsk(interval, ask);
       if (isRefusal(asked)) return asked;

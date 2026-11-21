@@ -89,6 +89,7 @@ import { iconOf } from "./icons.ts";
 import { impliedUsd, PER_SHARE, PRE_IPO_CATEGORY, PRE_IPO_GROUP, PRE_IPO_PER_POINT } from "./preipo.ts";
 import type { EventsQuery, Listing, PublicSource } from "./public-markets.ts";
 import type { ChinaRead } from "./china.ts";
+import type { LocalRead } from "./local.ts";
 import { inDollars, type LiveTrader, type Market, type MarketSession, type MarketStats } from "./trade.ts";
 import { isStable } from "./types.ts";
 
@@ -310,7 +311,8 @@ export interface ExploreMissing extends CompareMissing {
 
 export interface Exploration {
   asOf: string;
-  tabs: Array<{ id: TabId; label: string; count: number }>;
+  /** the tabs with counts; a local region's read names its region alone (`hk`, `kr`, `tw`) */
+  tabs: Array<{ id: TabId | "hk" | "kr" | "tw"; label: string; count: number }>;
   items: ExploreItem[];
   movers: Mover[];
   closing: ExploreItem[];
@@ -319,6 +321,9 @@ export interface Exploration {
   missing: ExploreMissing[];
   /** the China tab's read (china.ts): its sort, its count, the session and whether Tencent answered */
   china?: ChinaRead | undefined;
+  /** a local read's (China A, Hong Kong, Korea, Taiwan, a region's cash indices: local.ts): its venue, region, sort, count, session, status and
+   * note; China's answer carries it beside `china` */
+  local?: LocalRead | undefined;
   /** plain sentences for under the list, each under 160 characters: what the lists are made of (the sources' own words, and this file's
    * about Predictions) */
   notes: string[];
