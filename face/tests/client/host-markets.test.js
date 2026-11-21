@@ -938,10 +938,10 @@ test("a refused setWatch is the Account's sentence in the watchlist's words; the
 // ── China (spec 2026-10-31, plan 2026-11-01): the ranking, an A share's history, its quotes and its search, all the Account's ──
 
 // Stocks › China A's ranking read (market-view.js rankQueryOf)
-const CHINA = sort => `/data/market/explore?asset=stocks&region=cn&sort=${sort}&limit=20`;
+const CHINA = sort => `/data/market/explore?asset=stocks&form=spot&region=cn&sort=${sort}&limit=20`;
 // the market's China A answer for a sort: the stand-in's, read for that sort
 const ranked = sort => { const body = fx('explore-china'); body.china.sort = sort; return body; };
-const isChina = path => path.startsWith('/data/market/explore?asset=stocks&region=cn&');
+const isChina = path => path.startsWith('/data/market/explore?asset=stocks&form=spot&region=cn&');
 const chinaAnswer = path => (isChina(path) ? ranked(query(path).sort) : undefined);
 // the face's own wire, which nothing reads any more
 const faceWire = path => /^\/data\/(quotes|symbols|cn)\b/.test(path);
@@ -2116,26 +2116,18 @@ test("an event window's refusal lands failed with the market's words; read once 
   r.markets.close();
 });
 
-// Indices › China A (final review item 2): the market refuses a source with region cn, so the screen sends none there and
-// draws the tab's empty state, never the refusal
-test('Indices › China A asks with no source and draws the empty state, not the refusal', async () => {
-  const r = rig({ tab: 'indices', answer: path => {
-    if (!path.startsWith('/data/market/explore?')) return undefined;
-    const q = query(path);
-    if (q.region !== 'cn') return undefined;
-    // the market's own rule (market/src/reads.ts): a source beside region cn is refused; else no rows outside spot stocks
-    return q.source !== undefined ? refused(400, { ok: false, refusal: { code: 'E_MARKET_BAD_REQUEST', message: 'China is not part of a selected public source' } }) : NO_CONNECTED();
-  } });
+// Indices › China A on Spot is the market's cash-index read (rankQueryOf, `ix`): the host asks no explore for it until
+// the region-keyed ranking path routes it (Task 11); Perp there is the generic read with trade.xyz as its source
+test('Indices › China A asks no explore on Spot; its Perp asks region cn with trade.xyz', async () => {
+  const r = rig({ tab: 'indices', answer: path => (path.startsWith('/data/market/explore?') && query(path).region === 'cn' ? NO_CONNECTED() : undefined) });
   r.store.dispatch('setMarketsRegion', 'cn');
   r.markets.show(true);
   await settle();
+  assert.deepEqual(r.allReads.filter(p => p.includes('/explore?') && query(p).region === 'cn'), [], 'Spot: nothing asked yet');
+  r.store.dispatch('setMarketsForm', 'perp');
+  await settle();
   const cn = r.allReads.filter(p => p.includes('/explore?') && query(p).region === 'cn');
-  assert.ok(cn.length >= 2, 'both halves asked');
-  for (const p of cn) assert.equal(query(p).source, undefined, `${p}: no source with region cn`);
-  assert.equal(r.m().explore.indices.status, 'ready');
-  const state = { ...r.store.get(), route: { screen: 'markets' } };
-  const html = renderMarketsScreen(state);
-  assert.doesNotMatch(html, /China is not part of a selected public source/);
-  assert.match(html, /Nothing here with these filters\./);
+  assert.ok(cn.length >= 1);
+  for (const p of cn) assert.deepEqual([query(p).form, query(p).source], ['perp', 'trade-xyz'], p);
   r.markets.close();
 });

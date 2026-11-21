@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { emptyState } from '../../client/js/data/empty.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import {
-  MARKET_TABS, REGIONS, FORMS, TAB_SOURCES, SOURCE_FORMS, familiesOf, formsInView, exploreQueryOf, connectedQueryOf, rankQueryOf, filtersOf,
+  MARKET_TABS, REGIONS, FORMS, TAB_SOURCES, SOURCE_FORMS, familiesOf, formsInView, exploreQueryOf, connectedQueryOf, rankQueryOf, filtersOf, onLocal, onChinaA, noSpotSource,
   marketOriginOf, tableOf, pageOf, rowsOf,
 } from '../../client/js/host/market-view.js';
 import { t } from '../../client/js/i18n/words.js';
@@ -31,7 +31,7 @@ const REGISTRY = { ok: true, value: [
 
 test('the fixed lists: the tabs, the regions, the forms, the main sources and what each source carries', () => {
   assert.deepEqual(MARKET_TABS, ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'preipo', 'macro']);
-  assert.deepEqual(REGIONS, { live: ['us', 'cn'], later: ['hk', 'jp', 'kr', 'tw', 'in', 'eu'] });
+  assert.deepEqual(REGIONS, { stocks: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in'], indices: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in', 'eu'], later: { stocks: ['eu'] } });
   assert.deepEqual(FORMS, { live: ['spot', 'perp', 'token', 'event'], later: ['option'] });
   assert.deepEqual(Object.keys(TAB_SOURCES), ['crypto', 'stocks:us', 'stocks:cn', 'indices', 'commodities', 'fx', 'preipo', 'macro']);
   assert.deepEqual(TAB_SOURCES.preipo.main, ['hyperliquid-preipo', 'trade-xyz']);
@@ -72,8 +72,8 @@ test('All sources sends the tab’s whole list, never no source', () => {
   // a family: its own ids
   const okx = on('preipo', ['setMarketsSource', 'okx']);
   assert.equal(decoded(exploreQueryOf(okx.markets)).source, 'okx-preipo');
-  // Indices › China A asks with its region and answers its empty state (spec 5.2), never special-cased
-  assert.equal(decoded(exploreQueryOf(on('indices', ['setMarketsRegion', 'cn']).markets)).region, 'cn');
+  // a non-US region on Perp asks its region, trade.xyz alone (spec 5.4)
+  assert.deepEqual(decoded(exploreQueryOf(on('indices', ['setMarketsRegion', 'cn'], ['setMarketsForm', 'perp']).markets)), { asset: 'indices', sort: 'volume', limit: '200', region: 'cn', form: 'perp', source: 'trade-xyz' });
 });
 
 test('All sources asks the connected half by class alone; Main and a family ask it the same list', () => {
@@ -84,15 +84,65 @@ test('All sources asks the connected half by class alone; Main and a family ask 
   assert.equal(decoded(connectedQueryOf(on('stocks', ['setMarketsForm', 'token']).markets)).form, 'token', 'a Form picked switches to All sources and goes with it');
 });
 
-test('Indices › China A is Spot alone, as Stocks › China A is', () => {
+test('a non-US region offers Spot and Perp alone, Spot when none is stored; US keeps today’s', () => {
   const perp = on('indices', ['setMarketsForm', 'perp']);
   const cn = R.setMarketsRegion(perp, 'cn');
-  assert.deepEqual([cn.markets.region, cn.markets.form, cn.markets.source], ['cn', '', 'main']);
-  assert.deepEqual(formsInView(cn.markets), ['spot']);
-  assert.equal(R.setMarketsForm(cn, 'perp'), cn);
+  assert.deepEqual([cn.markets.region, cn.markets.form, cn.markets.source], ['cn', 'perp', 'main'], 'Perp is carried by every region');
+  assert.deepEqual(formsInView(cn.markets), ['spot', 'perp']);
+  assert.equal(R.setMarketsForm(cn, 'token'), cn);
   const spot = R.setMarketsForm(cn, 'spot');
-  assert.deepEqual([spot.markets.form, spot.markets.source], ['spot', 'main'], 'Spot is China A’s own: no switch to All sources');
-  assert.deepEqual(filtersOf(cn.markets).form.options.filter(o => !o.disabled).map(o => o.id), ['', 'spot']);
+  assert.deepEqual([spot.markets.form, spot.markets.source], ['spot', 'main'], 'no switch to All sources');
+  for (const region of ['cn', 'hk', 'jp', 'kr', 'tw', 'in']) {
+    const f = filtersOf(on('stocks', ['setMarketsRegion', region]).markets).form;
+    assert.deepEqual(f.options.map(o => [o.id, o.disabled]), [['spot', false], ['perp', false]], region);
+    assert.equal(f.value, 'spot', `${region}: a stored '' reads as Spot`);
+  }
+  assert.equal(filtersOf(on('indices', ['setMarketsRegion', 'eu']).markets).form.value, 'spot');
+  assert.deepEqual(formsInView(on('indices').markets), ['spot', 'perp', 'event'], 'Indices › US gains Spot, the cash levels');
+  assert.deepEqual(filtersOf(on('stocks').markets).form.options.map(o => o.id), ['', 'spot', 'perp', 'token', 'event', 'option'], 'Stocks › US keeps All');
+});
+
+test('onLocal: the region’s own read, by venue', () => {
+  const o = (tab, region, ...more) => onLocal(on(tab, ['setMarketsRegion', region], ...more).markets);
+  assert.deepEqual([o('stocks', 'cn'), o('stocks', 'hk'), o('stocks', 'kr'), o('stocks', 'tw')].map(l => [l.venue, l.region]), [['china', 'cn'], ['hk', 'hk'], ['kr', 'kr'], ['tw', 'tw']]);
+  assert.deepEqual(o('indices', 'eu'), { venue: 'ix', region: 'eu' });
+  assert.deepEqual(onLocal(on('indices', ['setMarketsForm', 'spot']).markets), { venue: 'ix', region: 'us' }, 'Indices › US › Spot');
+  assert.equal(onLocal(on('indices').markets), null, 'Indices › US on All is today’s');
+  assert.equal(onLocal(on('stocks', ['setMarketsForm', 'spot']).markets), null, 'Stocks › US is the generic read');
+  assert.equal(o('stocks', 'hk', ['setMarketsForm', 'perp']), null);
+  assert.equal(o('stocks', 'jp'), null);
+  assert.equal(o('stocks', 'in'), null);
+  assert.equal(onChinaA(on('stocks', ['setMarketsRegion', 'cn']).markets), true);
+  assert.equal(onChinaA(on('stocks', ['setMarketsRegion', 'hk']).markets), false);
+  assert.equal(onChinaA(on('indices', ['setMarketsRegion', 'cn']).markets), false, 'Indices › China A is the cash index read');
+});
+
+test('rankQueryOf and exploreQueryOf by region, form and tab', () => {
+  const kr = on('stocks', ['setMarketsRegion', 'kr']);
+  assert.equal(rankQueryOf(R.setMarketsSort(kr, 'movers').markets), 'asset=stocks&form=spot&region=kr&sort=movers&limit=20');
+  assert.equal(rankQueryOf(R.setMarketsSort(kr, 'closing').markets), 'asset=stocks&form=spot&region=kr&sort=volume&limit=20');
+  assert.equal(rankQueryOf(on('indices', ['setMarketsRegion', 'eu']).markets), 'asset=indices&form=spot&region=eu&sort=volume&limit=20');
+  assert.equal(rankQueryOf(on('indices', ['setMarketsForm', 'spot']).markets), 'asset=indices&form=spot&region=us&sort=volume&limit=20');
+  assert.equal(rankQueryOf(on('stocks').markets), null);
+  assert.equal(rankQueryOf(on('stocks', ['setMarketsRegion', 'jp']).markets), null);
+  assert.equal(exploreQueryOf(kr.markets), null, 'an own read asks no explore');
+  assert.equal(exploreQueryOf(on('stocks', ['setMarketsRegion', 'kr'], ['setMarketsForm', 'perp']).markets), 'asset=stocks&sort=volume&limit=200&region=kr&form=perp&source=trade-xyz');
+  assert.equal(exploreQueryOf(on('indices').markets), 'asset=indices&sort=volume&limit=200&region=us&source=trade-xyz', 'Indices › US on All sends today’s query, no form');
+  // Japan and India on Spot: the generic read, which answers no rows, and the empty state's line
+  assert.equal(exploreQueryOf(on('stocks', ['setMarketsRegion', 'jp']).markets), 'asset=stocks&sort=volume&limit=200&region=jp&form=spot');
+  assert.equal(noSpotSource(on('stocks', ['setMarketsRegion', 'in']).markets), true);
+  assert.equal(noSpotSource(on('stocks', ['setMarketsRegion', 'in'], ['setMarketsForm', 'perp']).markets), false);
+  assert.equal(noSpotSource(on('stocks', ['setMarketsRegion', 'kr']).markets), false);
+  assert.equal(t('markets.empty.noSpotSource'), 'No free source lists these shares; their perps are under Perp.');
+});
+
+test('the Source filter on a region’s own read is its one venue, fixed', () => {
+  const names = (tab, region) => filtersOf(on(tab, ['setMarketsRegion', region]).markets).source.options.map(o => o.label);
+  assert.deepEqual(names('stocks', 'hk').slice(2), ['Tencent']);
+  assert.deepEqual(names('stocks', 'kr').slice(2), ['Naver']);
+  assert.deepEqual(names('stocks', 'tw').slice(2), ['TWSE']);
+  assert.deepEqual(names('indices', 'jp').slice(2), ['Indices']);
+  assert.deepEqual(filtersOf(on('indices', ['setMarketsForm', 'spot']).markets).source.options.slice(2).map(o => o.label), ['Indices']);
 });
 
 test('the tab already open, with no search, keeps its filters', () => {
@@ -106,16 +156,15 @@ test('the tab already open, with no search, keeps its filters', () => {
 test('Stocks › China A is the rank read, never sorted by closing', () => {
   const cn = on('stocks', ['setMarketsRegion', 'cn']);
   assert.equal(exploreQueryOf(cn.markets), null);
-  assert.equal(rankQueryOf(R.setMarketsSort(cn, 'closing').markets), 'asset=stocks&region=cn&sort=volume&limit=20');
-  assert.equal(rankQueryOf(R.setMarketsSort(cn, 'movers').markets), 'asset=stocks&region=cn&sort=movers&limit=20');
+  assert.equal(rankQueryOf(R.setMarketsSort(cn, 'closing').markets), 'asset=stocks&form=spot&region=cn&sort=volume&limit=20');
+  assert.equal(rankQueryOf(R.setMarketsSort(cn, 'movers').markets), 'asset=stocks&form=spot&region=cn&sort=movers&limit=20');
   // the table offers its two sorts alone, and draws no rows of a ranking read for another sort
   const table = tableOf(R.setMarketsSort(cn, 'closing').markets, NOW);
   assert.deepEqual([table.china, table.sorts.map(s => s.id), table.sort], [true, ['volume', 'movers'], 'volume']);
-  // only Spot there: China A clears another Form, and greys every other
-  const perp = R.setMarketsRegion(on('stocks', ['setMarketsForm', 'perp']), 'cn');
-  assert.equal(perp.markets.form, '');
-  assert.deepEqual(formsInView(perp.markets), ['spot']);
-  assert.equal(R.setMarketsForm(perp, 'perp'), perp);
+  // Spot and Perp there: a Form China A does not carry is cleared
+  const token = R.setMarketsRegion(on('stocks', ['setMarketsForm', 'token']), 'cn');
+  assert.equal(token.markets.form, '');
+  assert.deepEqual(formsInView(token.markets), ['spot', 'perp']);
   assert.equal(R.setMarketsRegion(on('stocks', ['setMarketsForm', 'spot']), 'cn').markets.form, 'spot');
 });
 
@@ -129,7 +178,9 @@ test('a tab switch resets region, form and source; a region pick resets source o
   assert.deepEqual([picked.markets.region, picked.markets.form, picked.markets.source], ['us', 'spot', 'main']);
   // a region is Stocks' and Indices' alone, and one of the live regions alone
   assert.equal(R.setMarketsRegion(on('crypto'), 'cn').markets.region, 'us');
-  assert.equal(R.setMarketsRegion(on('stocks'), 'hk').markets.region, 'us');
+  assert.equal(R.setMarketsRegion(on('stocks'), 'hk').markets.region, 'hk');
+  assert.equal(R.setMarketsRegion(on('stocks'), 'eu').markets.region, 'us', 'Europe has no share source');
+  assert.equal(R.setMarketsRegion(on('indices'), 'eu').markets.region, 'eu');
   assert.equal(R.setMarketsTab(markets(), 'results').markets.tab, 'watchlist', 'a tab Markets does not have is no tab');
 });
 
@@ -160,13 +211,14 @@ test('Form options a selection does not carry read none here; Options reads piec
   assert.equal(form(on('crypto', ['setMarketsSource', 'okx'])).perp[0], true);
 });
 
-test('later regions are greyed piece 2, and there is no All region', () => {
+test('Europe on Stocks is greyed with its note, Indices lights all eight, and there is no All region', () => {
   const region = filtersOf(on('stocks').markets).region;
   assert.equal(region.value, 'us');
   assert.deepEqual(region.options.map(o => [o.id, o.disabled, o.note]), [
-    ['us', false, null], ['cn', false, null], ...REGIONS.later.map(id => [id, true, t('markets.filter.piece2')]),
+    ...['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in'].map(id => [id, false, null]), ['eu', true, 'no source for European shares'],
   ]);
-  assert.ok(filtersOf(on('indices').markets).region);
+  assert.equal(t('markets.filter.noEuShares'), 'no source for European shares');
+  assert.deepEqual(filtersOf(on('indices').markets).region.options.map(o => [o.id, o.disabled]), ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in', 'eu'].map(id => [id, false]));
   for (const tab of ['crypto', 'commodities', 'fx', 'preipo', 'macro']) assert.equal(filtersOf(on(tab).markets).region, undefined, tab);
 });
 

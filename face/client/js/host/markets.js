@@ -22,7 +22,7 @@ import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, chinaPairOf, rankOf, cnQuoteOf, cnHitsOf } from '../wire/china.js';
-import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, connectedQueryOf, rankQueryOf, onChinaA } from './market-view.js';
+import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, connectedQueryOf, chinaRankQueryOf, onChinaA } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
 import { venuesOf } from './account-view.js';
@@ -73,7 +73,7 @@ function exploreOf(m) {
   return query === null ? null : { tab: m.tab, query };
 }
 // what the screen reads now: the tab's explore query, or China A's ranking; a change of it reads again at once
-const shownOf = m => (onChinaA(m) ? `rank:${rankQueryOf(m)}` : `explore:${m.tab}:${exploreQueryOf(m)}`);
+const shownOf = m => (onChinaA(m) ? `rank:${chinaRankQueryOf(m)}` : `explore:${m.tab}:${exploreQueryOf(m)}`);
 // a rejection the proxy answered for an upstream not answering: its 503 `{unreachable}`, or no body at all — never a refusal
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const unreachable = body => body === undefined || body === null || (isRecord(body) && typeof body.unreachable === 'string');
@@ -200,7 +200,7 @@ export function startMarkets({
   function readRank() {
     const m = store.get().markets;
     const sort = m.sort === 'movers' ? 'movers' : 'volume';
-    fly('rank', `${EXPLORE}?${rankQueryOf(m)}`, (body, refused) => {
+    fly('rank', `${EXPLORE}?${chinaRankQueryOf(m)}`, (body, refused) => {
       const data = refused ? null : rankOf(body, sort);
       if (!data) { store.dispatch('rankFailed', { sort, at: now(), message: messageOf(body) }); return; }
       store.dispatch('rankLoaded', { sort, data, at: now() });

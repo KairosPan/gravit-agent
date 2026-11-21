@@ -25,7 +25,11 @@ export const CANDLE_RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', '
 /** The Markets screen's tabs, fixed (G1): the Watchlist, then one tab an underlying; a non-Watchlist tab's id is its asset. */
 export const MARKET_TABS = ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'preipo', 'macro'];
 /** The regions (G2): those read now, then those piece 2 brings (greyed). Only Stocks and Indices take a region. */
-export const REGIONS = { live: ['us', 'cn'], later: ['hk', 'jp', 'kr', 'tw', 'in', 'eu'] };
+export const REGIONS = {
+  stocks: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in'],
+  indices: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in', 'eu'],
+  later: { stocks: ['eu'] },
+};
 /** The forms (G3): those read now, then Options (piece 3, greyed). */
 export const FORMS = { live: ['spot', 'perp', 'token', 'event'], later: ['option'] };
 const REGIONED = new Set(['stocks', 'indices']);
@@ -59,12 +63,33 @@ const MARKET_ROWS = 200;           // the explore rows a tab's read asks for
 const RANK_LIMIT = 20;             // China A's ranking rows (host/markets.js RANK_ROWS)
 
 const tabOf = m => (MARKET_TABS.includes(m?.tab) ? m.tab : 'watchlist');
-const regionOf = m => (REGIONED.has(tabOf(m)) && REGIONS.live.includes(m?.region) ? m.region : 'us');
+const regionOf = m => (REGIONED.has(tabOf(m)) && REGIONS[tabOf(m)].includes(m?.region) ? m.region : 'us');
+// on a non-US region the Form is Spot or Perp, Spot when none is stored (spec §5.4); elsewhere the stored form or none
+const nonUs = m => REGIONED.has(tabOf(m)) && regionOf(m) !== 'us';
+const formOf = m => (nonUs(m) ? (m?.form === 'perp' ? 'perp' : 'spot') : FORMS.live.includes(m?.form) ? m.form : '');
+const SHARE_VENUES = { cn: 'china', hk: 'hk', kr: 'kr', tw: 'tw' };
+/** The region's own read the view is on (spec §5.6): Stocks cn/hk/kr/tw on Spot, its share venue; Indices on Spot (any region),
+ *  `ix`; else null (Japan and India on Spot have no source: the generic read, no rows). */
+export function onLocal(m) {
+  const tab = tabOf(m);
+  if (!REGIONED.has(tab) || formOf(m) !== 'spot') return null;
+  const region = regionOf(m);
+  if (tab === 'indices') return { venue: 'ix', region };
+  return SHARE_VENUES[region] ? { venue: SHARE_VENUES[region], region } : null;
+}
 /** Stocks › China A: the Tencent ranking, not an explore read. */
-export const onChinaA = m => tabOf(m) === 'stocks' && regionOf(m) === 'cn';
+export const onChinaA = m => onLocal(m)?.venue === 'china';
+/** Stocks on Japan or India › Spot: no free source lists those shares (their perps are under Perp). */
+export const noSpotSource = m => tabOf(m) === 'stocks' && ['jp', 'in'].includes(regionOf(m)) && formOf(m) === 'spot';
+/** The empty state's line on Japan and India › Spot, or null elsewhere. */
+export const noSpotSourceWord = m => (noSpotSource(m) ? t('markets.empty.noSpotSource') : null);
+const LOCAL_NAMES = { china: 'Tencent', hk: 'Tencent', kr: 'Naver', tw: 'TWSE' }; // en-kept: the providers' names
+const localName = venue => LOCAL_NAMES[venue] ?? t('markets.tab.indices');
 const sourcesOfTab = m => {
   const tab = tabOf(m);
   if (tab === 'watchlist') return { main: [], also: [] };
+  // a non-US share region's perps are trade.xyz's; its Spot is a read of its own, never a registered source (spec §5.6)
+  if (tab === 'stocks' && regionOf(m) !== 'us' && regionOf(m) !== 'cn') return { main: ['trade-xyz'], also: [] };
   return TAB_SOURCES[tab === 'stocks' ? `stocks:${regionOf(m)}` : tab] ?? { main: [], also: [] };
 };
 const familyKey = id => id.replace(/-preipo$/, '');
@@ -81,6 +106,9 @@ function familyLabel(id, registry) {
  *  family or families first; named from the registry's read, by id when there is none. */
 export function familiesOf(markets) {
   const m = isRecord(markets) ? markets : {};
+  // a view on a region's own read: its one source, by name, fixed
+  const local = onLocal(m);
+  if (local) return [{ id: local.venue, label: localName(local.venue), ids: [local.venue], main: true }];
   const { main, also } = sourcesOfTab(m);
   const registry = registryOf(m);
   const out = new Map();
@@ -104,8 +132,8 @@ function selectedIds(m) {
   return familiesOf(m).find(f => f.id === source)?.ids ?? main;
 }
 const formsOfIds = ids => FORMS.live.filter(f => ids.some(id => (SOURCE_FORMS[id] ?? []).includes(f)));
-// China A, on Stocks and on Indices alike, is Spot alone (the market answers no other form there, spec §5.2)
-const inRegion = (m, forms) => (REGIONED.has(tabOf(m)) && regionOf(m) === 'cn' ? ['spot'] : forms);
+// a non-US region on Stocks or Indices is Spot and Perp alone (spec §5.4); Indices › US also gains Spot, the cash levels
+const inRegion = (m, forms) => (nonUs(m) ? ['spot', 'perp'] : tabOf(m) === 'indices' && !forms.includes('spot') ? ['spot', ...forms] : forms);
 /** The forms the main sources carry (a Form outside them switches Source to All sources, G4). */
 export const mainFormsOf = markets => inRegion(markets, formsOfIds(sourcesOfTab(markets).main));
 /** The forms a Form pick may take now (G3): under Main or All sources every form the tab's sources carry, under a family its
@@ -130,11 +158,12 @@ export function exploreQueryOf(markets) {
   const m = isRecord(markets) ? markets : {};
   const tab = tabOf(m);
   if (tab === 'watchlist') return `limit=${MARKET_ROWS}`;
-  if (onChinaA(m)) return null;
-  const form = FORMS.live.includes(m.form) ? `&form=${m.form}` : '';
+  if (onLocal(m)) return null;
+  const form = formOf(m) ? `&form=${formOf(m)}` : '';
   const region = REGIONED.has(tab) ? `&region=${regionOf(m)}` : '';
-  // region cn names no public source (the market refuses one beside it, reads.ts): the class alone, which answers its empty state
-  const source = REGIONED.has(tab) && regionOf(m) === 'cn' ? '' : `&source=${selectedIds(m).join(',')}`;
+  // a non-US region names no public source on Spot (the market refuses one beside it, reads.ts): the class alone, which answers
+  // its empty state; its Perp is trade.xyz's, filtered by region
+  const source = nonUs(m) ? (formOf(m) === 'perp' ? '&source=trade-xyz' : '') : `&source=${selectedIds(m).join(',')}`;
   return `asset=${tab}&sort=${sortOf(m)}&limit=${MARKET_ROWS}${region}${form}${source}`;
 }
 /** The query the connected half takes: under All sources the tab's class with no source list, so every connected line of
@@ -146,10 +175,14 @@ export function connectedQueryOf(markets) {
   p.delete('source');
   return decodeURIComponent(p.toString());
 }
-/** China A's ranking read: by Biggest moves or Most traded, never Closing soonest (China refuses it). */
+/** A region's own ranking read (null off one): by Biggest moves or Most traded, never Closing soonest (China refuses it). */
+const rankQuery = (asset, region, markets) => `asset=${asset}&form=spot&region=${region}&sort=${markets?.sort === 'movers' ? 'movers' : 'volume'}&limit=${RANK_LIMIT}`;
 export function rankQueryOf(markets) {
-  return `asset=stocks&region=cn&sort=${markets?.sort === 'movers' ? 'movers' : 'volume'}&limit=${RANK_LIMIT}`;
+  const local = onLocal(markets);
+  return local ? rankQuery(local.venue === 'ix' ? 'indices' : 'stocks', local.region, markets) : null;
 }
+/** China A's ranking read whatever the view is on: the host reads China's state off it from another screen. */
+export const chinaRankQueryOf = markets => rankQuery('stocks', 'cn', markets);
 // a query without its sort: a sort change keeps the rows drawn while its own read is asked
 const unsorted = query => { const p = new URLSearchParams(query); p.delete('sort'); return p.toString(); };
 
@@ -179,7 +212,8 @@ export function filtersOf(markets) {
   const tab = tabOf(m);
   if (tab === 'watchlist') return null;
   const inView = formsInView(m);
-  const form = FORMS.live.includes(m.form) ? m.form : '';
+  const form = formOf(m);
+  const chipForm = nonUs(m) ? (m.form === 'perp' ? 'perp' : '') : form;
   const source = isSourceOf(m, m.source) ? m.source : 'main';
   const sourceLabel = sourceWordOfState({ ...m, source });
   return {
@@ -187,8 +221,8 @@ export function filtersOf(markets) {
       region: {
         value: regionOf(m),
         options: [
-          ...REGIONS.live.map(id => ({ id, label: regionWord(id), disabled: false, note: null })),
-          ...REGIONS.later.map(id => ({ id, label: regionWord(id), disabled: true, note: t('markets.filter.piece2') })),
+          ...REGIONS[tab].map(id => ({ id, label: regionWord(id), disabled: false, note: null })),
+          ...(REGIONS.later[tab] ?? []).map(id => ({ id, label: regionWord(id), disabled: true, note: t('markets.filter.noEuShares') })),
         ],
       },
     } : {}),
@@ -196,9 +230,9 @@ export function filtersOf(markets) {
       value: form,
       label: formWord(form),
       options: [
-        { id: '', label: formWord(''), disabled: false, note: null },
-        ...FORMS.live.map(id => ({ id, label: formWord(id), disabled: !inView.includes(id), note: inView.includes(id) ? null : t('markets.filter.noneHere') })),
-        ...FORMS.later.map(id => ({ id, label: formWord(id), disabled: true, note: t('markets.filter.piece3') })),
+        ...(nonUs(m) ? [] : [{ id: '', label: formWord(''), disabled: false, note: null }]),
+        ...(nonUs(m) ? inView : FORMS.live).map(id => ({ id, label: formWord(id), disabled: !inView.includes(id), note: inView.includes(id) ? null : t('markets.filter.noneHere') })),
+        ...(nonUs(m) ? [] : FORMS.later).map(id => ({ id, label: formWord(id), disabled: true, note: t('markets.filter.piece3') })),
       ],
     },
     source: {
@@ -211,7 +245,7 @@ export function filtersOf(markets) {
       ],
     },
     chips: [
-      ...(form ? [{ kind: 'form', label: formWord(form) }] : []),
+      ...(chipForm ? [{ kind: 'form', label: formWord(chipForm) }] : []),
       ...(source !== 'main' ? [{ kind: 'source', label: sourceLabel }] : []),
     ],
   };

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
  * direct-to-upstream fallback. Scoped to face/src and face/client on purpose:
  * face/plugins/ is Lunhui's, whose fetching moves in plan 2. */
 const FACE = join(dirname(fileURLToPath(import.meta.url)), "..");
-const MARKET_HOST = /gtimg\.cn|finance\.qq\.com|eastmoney\.com|51ifind\.com/;
+const MARKET_HOST = /gtimg\.cn|finance\.qq\.com|eastmoney\.com|51ifind\.com|naver\.com|twse\.com\.tw|sinajs\.cn/;
 
 function sources(dir: string): [string, string][] {
   const out: [string, string][] = [];

@@ -746,8 +746,8 @@ test('a popover lists its options, the greyed ones disabled with their note', ()
   assert.match(region, /data-action="mkFilter" data-value="region" aria-expanded="true" aria-haspopup="listbox">/);
   assert.match(region, /<div class="mk-pop" role="listbox" aria-label="Region">/);
   assert.deepEqual(optionsOf(region).map(o => [o.id, o.label, o.selected, o.disabled, o.note]), [
-    ['us', 'US', true, false, null], ['cn', 'China A', false, false, null], ['hk', 'Hong Kong', false, true, 'piece 2'], ['jp', 'Japan', false, true, 'piece 2'],
-    ['kr', 'Korea', false, true, 'piece 2'], ['tw', 'Taiwan', false, true, 'piece 2'], ['in', 'India', false, true, 'piece 2'], ['eu', 'Europe', false, true, 'piece 2'],
+    ['us', 'US', true, false, null], ['cn', 'China A', false, false, null], ['hk', 'Hong Kong', false, false, null], ['jp', 'Japan', false, false, null],
+    ['kr', 'Korea', false, false, null], ['tw', 'Taiwan', false, false, null], ['in', 'India', false, false, null], ['eu', 'Europe', false, true, 'no source for European shares'],
   ]);
   assert.ok(optionsOf(region).every(o => o.action === 'mkRegion'));
   // Form on Macro: every form but Event contract none here, Options piece 3, perp in its word

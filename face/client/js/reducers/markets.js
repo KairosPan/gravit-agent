@@ -181,7 +181,7 @@ export const reducers = {
   },
   setMarketsRegion(s, id) {
     const m = s.markets;
-    if (!['stocks', 'indices'].includes(m.tab) || !REGIONS.live.includes(id)) return s;
+    if (!['stocks', 'indices'].includes(m.tab) || !REGIONS[m.tab].includes(id)) return s;
     const next = { ...m, region: id, source: 'main', open: null };
     return mk(s, { region: id, source: 'main', open: null, form: formsInView(next).includes(m.form) ? m.form : '' });
   },
