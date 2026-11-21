@@ -1,6 +1,7 @@
 // face/client/js/reducers/messages.js — the conversation side on the host (spec 2026-10-19 §5, §7): routes, Details.
 // What the host says about a conversation lives in reducers/host.js; what the operator does with the page lives here.
 import { canonicalId, isAccountKey } from '../host/market-view.js';
+import { isLocalKey } from '../wire/local.js';
 import { onScreenId } from '../host/sessions.js';
 import { sizeOf, cleanFont } from '../prefs.js';
 import { toHash } from '../router.js';
@@ -49,11 +50,12 @@ export function landingOf(state, route) {
 export const reducers = {
   nav(state, route) {
     route = landingOf(state, route);
-    // a market id is the Account's key as it is (coin:BTC, event:predict:…), or an A share's or an old face id (cn:600519 from
-    // cn:sh600519, us:AAPL, crypto:BTC/USD) canonicalised; one that is neither opens Markets
+    // a market id is the Account's key as it is (coin:BTC, event:predict:…), a local market's key as it is (hk:00700, kr:005930,
+    // tw:2330, ix:jp:n225), or an A share's or an old face id (cn:600519 from cn:sh600519, us:AAPL, crypto:BTC/USD) canonicalised;
+    // one that is none of these opens Markets
     // — a stock's page keeps its event (router.js: a stock's id alone carries one)
     if (route.screen === 'markets' && route.id) {
-      const id = !String(route.id).startsWith('cn:') && isAccountKey(route.id) ? route.id : canonicalId(route.id);
+      const id = !String(route.id).startsWith('cn:') && (isAccountKey(route.id) || isLocalKey(route.id)) ? route.id : canonicalId(route.id);
       route = { screen: 'markets', id, ...(route.event && String(id).startsWith('stock:') ? { event: route.event } : {}) };
     }
     // (and the lightbox: an image belongs to the conversation it was opened in; and the shortcut sheet)

@@ -23,8 +23,10 @@ const BY_VENUE = Object.fromEntries(KEYS.map(k => [k.venue, k]));
 const MARKET_OF = { china: 'cn', hk: 'hk', kr: 'kr', tw: 'tw', ix: 'ix' };
 /** Each venue's provider id, and the name its quote is from when the market names none. */
 const PROVIDER_ID = { china: 'tencent', hk: 'tencent', kr: 'naver', tw: 'twse', ix: 'indices' };
-const NAMES = { china: 'Tencent', hk: 'Tencent', kr: 'Naver', tw: 'TWSE', ix: 'Indices' }; // en-kept: the providers' names
-const SHARE_VENUES = { cn: 'china', hk: 'hk', kr: 'kr', tw: 'tw' };
+/** Each venue's source by name, as a table and a page say it (the indices' each row's own `quoteFrom` names). */
+export const LOCAL_NAMES = { china: 'Tencent', hk: 'Tencent', kr: 'Naver', tw: 'TWSE', ix: 'Indices' }; // en-kept: the providers' names
+/** The share venue of each Stocks region that has its own read. */
+export const SHARE_VENUES = { cn: 'china', hk: 'hk', kr: 'kr', tw: 'tw' };
 
 const isRecord = v => !!v && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
@@ -114,7 +116,7 @@ export function localQuoteOf(row, now = Date.now()) {
     id, market: MARKET_OF[venue], symbol, name: str(m.name) || symbol,
     price: number(m.price), prev_close: number(facts.prevClose), change: number(m.change24h), change_pct: number(m.changePct24h),
     volume: number(facts.volume), as_of: asOf, received_at: new Date(now).toISOString(), volume_as_of: asOf,
-    source: str(m.quoteFrom) || NAMES[venue], feed: '', basis: 'previous_close',
+    source: str(m.quoteFrom) || LOCAL_NAMES[venue], feed: '', basis: 'previous_close',
     quote_status: facts.quoteStatus === 'delayed' ? 'delayed' : china || facts.quoteStatus === 'live' ? 'live' : 'unsaid',
     market_status: PHASE[facts.phase] ?? 'unknown', message: '', last_session: str(facts.lastSession) || null,
     open: number(facts.open), high: number(facts.high), low: number(facts.low), turnover: number(facts.turnover),

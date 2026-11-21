@@ -57,6 +57,7 @@ import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, wri
 import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
+import { isLocalKey } from './wire/local.js';
 import { makeEditor } from './composer/dom.js';
 import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt } from './composer/draft.js';
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
@@ -1087,11 +1088,12 @@ export function boot(win, host = {}) {
     // a market's page (an Account key): its market followed on the stream with its candles and compare rows, its asset sheet,
     // book, latest trades and a perpetual's funding (host/markets.js), and the holdings and the statement's lines about it read;
     // leaving it lets the market go
-    // an A share's page (a cn: id) too: its history at the Account's china venue, and nothing held or stated read for it
-    const pageId = route => (route?.screen === 'markets' && (isCnKey(route.id) || isAccountKey(route.id)) ? route.id : null);
+    // an A share's page (a cn: id) too: its history at the Account's china venue, and nothing held or stated read for it; and a
+    // Hong Kong, Korean or Taiwanese share's or a cash index's: its history and its price at the market, nothing else
+    const pageId = route => (route?.screen === 'markets' && (isLocalKey(route.id) || isAccountKey(route.id)) ? route.id : null);
     if (pageId(r) !== pageId(was)) {
       markets.page(pageId(r));
-      if (!isCnKey(pageId(r)) && isAccountKey(pageId(r))) { void account.loadHoldings(); void account.loadStatement(); }
+      if (!isLocalKey(pageId(r)) && isAccountKey(pageId(r))) { void account.loadHoldings(); void account.loadStatement(); }
     }
     // Trade entered on a market (#/trade/<id>), after a page left let its market go: the ticket on it — a buy, or the side a
     // market page's Buy or Sell asked for — unless one is open on it already

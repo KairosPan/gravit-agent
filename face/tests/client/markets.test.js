@@ -18,6 +18,7 @@ import { getJsonVia } from '../../client/js/app.js';
 import { withTable } from '../../client/js/i18n/words.js';
 import { ZH } from '../../client/js/i18n/zh.js';
 import { nyDay } from '../../client/js/host/event-window.js';
+import { localQuoteOf } from '../../client/js/wire/local.js';
 import { EVENT_VIEW_ID, EVENT_VIEW_WITH_B, WYNN_B_CASE } from './helpers/event-view.js';
 
 // the renderer's clock: the stand-in's day — its statement is from that morning, its events close after it
@@ -1362,9 +1363,9 @@ test("a local ranking's rows: a share's code and local name, its price and turno
   assert.deepEqual(rowIds(html), ['hk:00700', 'hk:09988']);
   const [name, px, move, turnover, source] = cells(rowOf(html, 'hk:00700'));
   assert.match(name, /<b>Tencent<\/b><span class="mk-sub">00700 · 騰訊控股<\/span>/);
-  assert.equal(px, 'HKD 400.00');
+  assert.equal(px, 'HK$400.00');
   assert.equal(text(move), '▲up 1.27%');
-  assert.equal(turnover, 'HKD 4.8B');
+  assert.equal(turnover, 'HK$4.8B');
   assert.equal(text(source), 'Tencent');
   assert.doesNotMatch(html, /mk-star/, 'no watchlist star on a Hong Kong row');
   // the cash indices: a level, no currency, its change %
@@ -1384,4 +1385,119 @@ test('Stocks › Japan and India on Spot: the empty line says no free source lis
     assert.match(html, /<p class="mk-empty">No free source lists these shares; their perps are under Perp\.<\/p>/, region);
   }
   assert.doesNotMatch(renderMarketsScreen(R.setMarketsForm(onRegion('stocks', 'jp'), 'perp'), NOW), /No free source/);
+});
+
+// ── a local market's page (spec 2026-11-20 §5.6): a Hong Kong, Korean or Taiwanese share's, a cash index's, the A share's kind ──
+
+const localQuote = (venue, symbol, market) => localQuoteOf({ venue, symbol, market }, NOW);
+const HK_FACTS = { prevClose: 395, open: 396, high: 402.4, low: 394.2, volume: 18_200_000, turnover: 7.3e9, lastSession: '2026-11-20', phase: 'midday', quoteStatus: 'unsaid' };
+const TENCENT_Q = localQuote('hk', '00700', { symbol: '00700', name: 'Tencent', price: 400, change24h: 5, changePct24h: 1.27, quoteAt: '2026-11-21T03:30:00Z', quoteFrom: 'Tencent', currency: 'HKD', local: HK_FACTS });
+const SAMSUNG_Q = localQuote('kr', '005930', { symbol: '005930', name: '삼성전자', price: 71500, change24h: -500, changePct24h: -0.69, quoteAt: '2026-11-21T05:00:00Z', quoteFrom: 'Naver · 15 min delayed', currency: 'KRW',
+  local: { prevClose: 72000, open: 71800, high: 72100, low: 71200, volume: 9_100_000, turnover: 1.23e12, lastSession: '2026-11-21', phase: 'trading', quoteStatus: 'delayed' } });
+const DAX_Q = localQuote('ix', 'eu:dax', { symbol: 'eu:dax', name: 'DAX', price: 18000.5, change24h: 12.5, changePct24h: 0.07, quoteAt: '2026-11-21T10:00:00Z', quoteFrom: 'Naver · 15 min delayed',
+  local: { prevClose: 17988, open: 17990, high: 18050.25, low: 17950, volume: null, turnover: null, lastSession: '2026-11-20', phase: 'closed', quoteStatus: 'delayed' } });
+const localPage = (id, quote, over = {}) => screen({ route: { screen: 'markets', id }, all: null, quotes: quote ? { [id]: quote } : {}, ...over }).html;
+const factsOf = html => [...html.matchAll(/<dt>([^<]+)<\/dt><dd>([^<]+)<\/dd>/g)].map(m => [m[1], m[2]]);
+
+test("a Hong Kong share's page: its price in HK$, the eight facts, its code and local name, Hand to gravit and no star", () => {
+  const route = R.nav(emptyState(), { screen: 'markets', id: 'hk:00700' }).route;
+  assert.deepEqual(route, { screen: 'markets', id: 'hk:00700' }, 'a local key opens its page as it is');
+  const ranked = R.rankLoaded(R.rankLoading(onRegion('stocks', 'hk'), { sort: 'volume', query: HK_QUERY }), { sort: 'volume', query: HK_QUERY, data: HK_RANK, at: NOW });
+  const s = R.quotesUpdated(R.nav(ranked, { screen: 'markets', id: 'hk:00700' }), { quotes: { 'hk:00700': TENCENT_Q }, connection: 'polling' });
+  const html = renderMarketsScreen(s, NOW);
+  assert.equal(marketPage('hk:00700', s, NOW), html);
+  assert.match(html, /<h1 class="head-title">Tencent<\/h1><span class="mk-sub">Hong Kong · 00700 · 騰訊控股<\/span>/);
+  assert.match(html, /<span class="mk-big">HK\$400\.00<\/span>/);
+  assert.deepEqual(factsOf(html), [['Previous close', 'HK$395.00'], ['Open', 'HK$396.00'], ['High', 'HK$402.40'], ['Low', 'HK$394.20'],
+    ['Volume', '18.2M shares'], ['Turnover', 'HK$7.3B'], ['Session', 'Lunch break'], ['Source', 'Tencent']]);
+  assert.match(html, /aria-label="Price history"/);
+  assert.match(html, /data-action="handToGravit" data-id="hk:00700"/);
+  assert.doesNotMatch(html, /toggleWatch|openTicket|You hold|Across venues|Limit up|P\/E/);
+  // reached cold, before any quote: its code alone, every fact —
+  const cold = localPage('hk:00700', null);
+  assert.match(cold, /<h1 class="head-title">00700<\/h1>/);
+  assert.ok(factsOf(cold).every(([, v]) => v === '—'), factsOf(cold).join());
+});
+
+test("a Korean share's price prints with no decimals; an index's level has no currency sign and no share facts", () => {
+  const kr = localPage('kr:005930', SAMSUNG_Q);
+  assert.match(kr, /<span class="mk-big">₩71,500<\/span>/);
+  assert.deepEqual(factsOf(kr), [['Previous close', '₩72,000'], ['Open', '₩71,800'], ['High', '₩72,100'], ['Low', '₩71,200'],
+    ['Volume', '9.1M shares'], ['Turnover', '₩1.2T'], ['Session', 'Open'], ['Source', 'Naver · 15 min delayed']]);
+  assert.match(kr, /<span class="mk-sub">Korea · 005930<\/span>/);
+  const dax = localPage('ix:eu:dax', DAX_Q);
+  assert.match(dax, /<h1 class="head-title">DAX<\/h1><span class="mk-sub">Index · Europe<\/span>/);
+  assert.match(dax, /<span class="mk-big">18,000\.50<\/span>/);
+  assert.deepEqual(factsOf(dax), [['Previous close', '17,988.00'], ['Open', '17,990.00'], ['High', '18,050.25'], ['Low', '17,950.00'],
+    ['Session', 'Closed'], ['Source', 'Naver · 15 min delayed']]);
+  assert.doesNotMatch(dax, /\$|₩|Turnover|Volume/);
+  // a Taiwanese share's price in NT$
+  const tw = localPage('tw:2330', localQuote('tw', '2330', { symbol: '2330', name: 'TSMC', price: 1025, change24h: 10, changePct24h: 0.99, quoteAt: '2026-11-21T03:00:00Z', quoteFrom: 'TWSE', currency: 'TWD', local: HK_FACTS }));
+  assert.match(tw, /<span class="mk-big">NT\$1,025\.00<\/span>/);
+});
+
+test("a local page's price history: a refusal's sentence in the chart area; 1D and 5D the sessions, longer the closes in its currency", () => {
+  const route = { screen: 'markets', id: 'hk:00700' };
+  const refused = screen({ route, all: null, quotes: { 'hk:00700': TENCENT_Q } }).s;
+  const failed = renderMarketsScreen(R.candlesFailed(R.candlesLoading(refused, { id: 'hk:00700', range: '1D' }), { id: 'hk:00700', range: '1D', at: NOW, message: 'Tencent has no minute chart for this share' }), NOW);
+  assert.match(section(failed, 'Price history'), /<p class="mk-note">Tencent has no minute chart for this share<\/p>/);
+  assert.match(section(failed, 'Price history'), /data-action="setRange" data-value="1D"[^>]*data-id="hk:00700"|data-id="hk:00700"[^>]*data-action="setRange"/);
+  const session = (date, n = 331) => ({ date, prec: 395, price: Array.from({ length: n }, (_, i) => 395 + (i % 9)), amount: Array.from({ length: n }, () => 1e6) });
+  const one = renderMarketsScreen(R.candlesLoaded(refused, { id: 'hk:00700', range: '1D', at: NOW, data: { ok: true, range: '1D', sessions: [session('2026-11-21', 120)] } }), NOW);
+  assert.match(section(one, 'Price history'), /class="mk-chart"[\s\S]*HK\$395\.00/);
+  const m1 = R.setRange(refused, { id: 'hk:00700', range: '1M' });
+  const month = renderMarketsScreen(R.candlesLoaded(m1, { id: 'hk:00700', range: '1M', at: NOW,
+    data: { ok: true, range: '1M', candles: [{ t: Date.parse('2026-11-19T07:00:00Z'), c: 390 }, { t: Date.parse('2026-11-20T07:00:00Z'), c: 395 }] } }), NOW);
+  assert.match(section(month, 'Price history'), /class="mk-chart"[\s\S]*<span>2026-11-20<\/span>/);
+  assert.match(section(month, 'Price history'), /HK\$395\.00/);
+});
+
+test("a search's Hong Kong and Korean hits are listed beside the A shares, each drawn as its region's share, its price in its currency", () => {
+  const hk = { key: 'hk:00700', kind: 'share', name: 'Tencent', nameLocal: '騰訊控股', base: '00700', currency: 'HKD', price: 400, changePct24h: 1.27, quoteFrom: 'Tencent', tabs: ['hk'], at: [] };
+  const kr = { key: 'kr:005930', kind: 'share', name: '삼성전자', base: '005930', currency: 'KRW', price: 71500, changePct24h: -0.69, quoteFrom: 'Naver', tabs: ['kr'], at: [] };
+  const body = fx('explore-search-china');
+  body.items.push(hk, kr);
+  const { s, html } = screen({ q: 'te', results: body });
+  const s2 = R.hitQuotesLoaded(s, { quotes: { 'hk:00700': { price: 400, change_pct: 1.27 }, 'kr:005930': { price: 71500, change_pct: -0.69 } } });
+  const drawn = renderMarketsScreen(s2, NOW);
+  assert.ok(rowIds(html).includes('cn:600519'));
+  assert.deepEqual(rowIds(drawn).filter(id => /^(hk|kr):/.test(id)), ['hk:00700', 'kr:005930']);
+  assert.match(rowOf(drawn, 'hk:00700'), /<b>Tencent<\/b><span class="mk-sub"><span class="mk-tag">Stocks<\/span> 00700 · 騰訊控股<\/span>/);
+  assert.equal(cells(rowOf(drawn, 'hk:00700'))[2], 'HK$400.00');
+  assert.equal(cells(rowOf(drawn, 'kr:005930'))[2], '₩71,500');
+  assert.match(rowOf(drawn, 'hk:00700'), /data-action="openMarket" data-id="hk:00700"/);
+  assert.doesNotMatch(rowOf(drawn, 'hk:00700'), /mk-star/, 'no star on a Hong Kong share');
+});
+
+test("a region's own table: Change and Turnover for its shares, Level, Change and Change % for its indices; its source named when it fails", () => {
+  const hk = renderMarketsScreen(R.rankLoaded(R.rankLoading(onRegion('stocks', 'hk'), { sort: 'volume', query: HK_QUERY }), { sort: 'volume', query: HK_QUERY, data: HK_RANK, at: NOW }), NOW);
+  assert.match(hk, /<th scope="col" class="r">Price<\/th><th scope="col" class="r mk-c-chg">Change<\/th><th scope="col" class="r mk-c-vol">Turnover<\/th>/);
+  const ix = renderMarketsScreen(R.rankLoaded(R.rankLoading(onRegion('indices', 'eu'), { sort: 'volume', query: EU_QUERY }), { sort: 'volume', query: EU_QUERY, data: EU_RANK, at: NOW }), NOW);
+  assert.match(ix, /<th scope="col" class="r">Level<\/th><th scope="col" class="r mk-c-chg">Change<\/th><th scope="col" class="r mk-c-vol">Change %<\/th>/);
+  const [, level, change, pct] = cells(rowOf(ix, 'ix:eu:dax'));
+  assert.deepEqual([level, text(change), text(pct)], ['18,000.50', '+12.50', '▲up 0.07%']);
+  // a failed read before any answer: the source named, no Back to the main sources
+  const down = renderMarketsScreen(R.rankFailed(R.rankLoading(onRegion('stocks', 'kr'), { sort: 'volume', query: KR_QUERY }), { sort: 'volume', query: KR_QUERY, at: NOW }), NOW);
+  assert.match(down, /<p class="mk-empty">Naver is not answering: Korean shares cannot be read now<\/p>/);
+  assert.doesNotMatch(down, /mkMain|Back to the main sources/);
+  const ixDown = renderMarketsScreen(R.rankFailed(R.rankLoading(onRegion('indices', 'eu'), { sort: 'volume', query: EU_QUERY }), { sort: 'volume', query: EU_QUERY, at: NOW }), NOW);
+  assert.match(ixDown, /<p class="mk-empty">The index sources are not answering: the indices cannot be read now<\/p>/);
+  // an answer with no rows: none, said once, no key
+  const none = renderMarketsScreen(R.rankLoaded(R.rankLoading(onRegion('stocks', 'hk'), { sort: 'volume', query: HK_QUERY }), { sort: 'volume', query: HK_QUERY, data: { ...HK_RANK, items: [] }, at: NOW }), NOW);
+  assert.match(none, /<p class="mk-empty">No markets<\/p>/);
+  assert.doesNotMatch(none, /mkMain/);
+  // the session's line above the table, in the region's own words
+  const closed = renderMarketsScreen(R.rankLoaded(R.rankLoading(onRegion('stocks', 'hk'), { sort: 'volume', query: HK_QUERY }), { sort: 'volume', query: HK_QUERY, data: { ...HK_RANK, session: { phase: 'closed', lastSession: '2026-11-20' } }, at: NOW }), NOW);
+  assert.match(closed, /<p class="mk-note">Closed · last session 11-20<\/p>/);
+  assert.doesNotMatch(closed, /Beijing/);
+});
+
+test("every word of a local page and table is in the Chinese table", () => {
+  const zh = f => withTable(ZH, f);
+  const page = zh(() => localPage('hk:00700', TENCENT_Q));
+  assert.match(page, /港币|HK\$/);
+  for (const [label] of zh(() => factsOf(localPage('hk:00700', TENCENT_Q)))) assert.match(label, CJK, label);
+  const down = zh(() => renderMarketsScreen(R.rankFailed(R.rankLoading(onRegion('stocks', 'kr'), { sort: 'volume', query: KR_QUERY }), { sort: 'volume', query: KR_QUERY, at: NOW }), NOW));
+  assert.match(down, /Naver/);
+  assert.match(text(down.match(/<p class="mk-empty">[^<]*<\/p>/)?.[0] ?? ''), CJK);
 });

@@ -32,14 +32,15 @@ const msOf = v => { const ms = number(v); return ms !== null && !Number.isNaN(ne
 /** A market's price history from the Account's candles read: its bars ({ t, o, h, l, c } — `t` a bar's start in ms — oldest
  *  first, as the Account sends them) drawn as their closes over the range, in the charts' box, the axis at the first and
  *  last bars' times; an event contract's closes, dollars a contract, in cents when the unit says so. A bar without a close or a
- *  time is left out; fewer than two draw nothing. */
-export function candlesSvg(candles, { unit, range, zone } = {}) {
+ *  time is left out; fewer than two draw nothing. `fmt`, a price's words in another currency (a local market's: HK$, ₩, NT$, an
+ *  index's bare level), over the unit's. */
+export function candlesSvg(candles, { unit, range, zone, fmt } = {}) {
   const kept = (Array.isArray(candles) ? candles : [])
     .map(b => ({ t: msOf(b?.t), c: number(b?.c) }))
     .filter(b => b.c !== null && b.t !== null);
   if (kept.length < 2) return '';
   const cents = unit === 'cents';
-  const f = cents ? v => `${Number(v.toFixed(1))}¢` : v => price(v, unit === 'cny' ? 'CNY' : 'USD');
+  const f = typeof fmt === 'function' ? fmt : cents ? v => `${Number(v.toFixed(1))}¢` : v => price(v, unit === 'cny' ? 'CNY' : 'USD');
   // an A share's bars (spec 2026-10-31 §5): their dates in the market's own zone, never the operator's clock
   const end = zone ? ms => dateIn(ms, zone) : clockWord;
   return drawn(kept.map(b => (cents ? b.c * 100 : b.c)), {
@@ -54,8 +55,10 @@ const SESSION = 242;   // an A-share session's minutes on the grid: 09:30–11:3
 
 /** An A share's last sessions minute by minute (5D, spec 2026-10-31 §5): every session on one fixed grid of 242 points each, so a
  *  session still trading fills only its part; the previous close before the first session dashed; a separator between sessions;
- *  every session's date (`MM-DD`) on the axis, the low and the high in yuan under it. Fewer than two prices draw nothing. */
-export function sessionsSvg(sessions) {
+ *  every session's date (`MM-DD`) on the axis, the low and the high in yuan under it. Fewer than two prices draw nothing. A local
+ *  market's (spec 2026-11-20 §5.6) on a grid of its own session's `minutes` (at least its longest session's points), its low and
+ *  high in its own words (`fmt`). */
+export function sessionsSvg(sessions, { minutes = SESSION, fmt } = {}) {
   const kept = (Array.isArray(sessions) ? sessions : []).filter(x => Array.isArray(x?.price) && x.price.length);
   const prices = kept.flatMap(x => x.price.map(Number)).filter(Number.isFinite);
   if (kept.length === 0 || prices.length < 2) return '';
@@ -63,14 +66,15 @@ export function sessionsSvg(sessions) {
   const lo = Math.min(...prices, ...(prec !== null ? [prec] : []));
   const hi = Math.max(...prices, ...(prec !== null ? [prec] : []));
   const span = hi - lo || 1;
-  const slots = Math.max(2, SESSION * kept.length);
+  const per = Math.max(minutes, ...kept.map(x => x.price.length));
+  const slots = Math.max(2, per * kept.length);
   const X = i => ((i * W) / (slots - 1)).toFixed(1);
   const Y = v => (H - 6 - ((v - lo) / span) * (H - 12)).toFixed(1);
-  const points = kept.flatMap((x, k) => x.price.map((v, i) => [k * SESSION + i, Number(v)])).filter(([, v]) => Number.isFinite(v));
+  const points = kept.flatMap((x, k) => x.price.map((v, i) => [k * per + i, Number(v)])).filter(([, v]) => Number.isFinite(v));
   const line = points.map(([i, v], n) => `${n ? 'L' : 'M'}${X(i)},${Y(v)}`).join('');
-  const seps = kept.slice(1).map((_, k) => `<line class="mk-chart-sep" x1="${X((k + 1) * SESSION)}" y1="0" x2="${X((k + 1) * SESSION)}" y2="${H}"></line>`).join('');
+  const seps = kept.slice(1).map((_, k) => `<line class="mk-chart-sep" x1="${X((k + 1) * per)}" y1="0" x2="${X((k + 1) * per)}" y2="${H}"></line>`).join('');
   const prev = prec !== null ? `<line class="mk-chart-prev" x1="0" y1="${Y(prec)}" x2="${W}" y2="${Y(prec)}"></line>` : '';
-  const f = v => price(v, 'CNY');
+  const f = typeof fmt === 'function' ? fmt : v => price(v, 'CNY');
   const day = d => (typeof d === 'string' ? d.slice(5) : '');
   const first = day(kept[0].date), last = day(kept.at(-1).date);
   const described = tn('markets.chart.sessions', kept.length, { first, last, low: f(lo), high: f(hi) });

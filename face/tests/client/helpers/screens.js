@@ -30,7 +30,8 @@ import { t, said } from '../../../client/js/i18n/words.js';
 import { listings, modulesListing } from './inventory.js';
 import { setMarkdown } from '../../../client/js/render/thread.js';
 import { reducers as R } from '../../../client/js/reducers/index.js';
-import { exploreQueryOf } from '../../../client/js/host/market-view.js';
+import { exploreQueryOf, rankQueryOf } from '../../../client/js/host/market-view.js';
+import { localQuoteOf } from '../../../client/js/wire/local.js';
 import { emptyState } from '../../../client/js/data/empty.js';
 import { MIN } from '../../../client/js/time.js';
 import { VIEW_1027 } from './lunhui-view.js';
@@ -489,6 +490,50 @@ export function namedStates() {
     // Markets by underlying (plan 2026-11-19 Task 8): each filter's popover open, the chips, the empty filtered tab, a search
     // naming each result's class
     ...marketsByUnderlyingStates(),
+    // Markets regions (plan 2026-11-21 Task 12): Hong Kong's own table, Europe's indices, Korea's read failed, Hong Kong closed and
+    // re-served as last read; a Hong Kong share's page with its facts and 1M closes, an index's page with a refused 1D; a search
+    // with Hong Kong and Korean hits beside an A share
+    ...marketsRegionsStates(),
+  ];
+}
+
+function marketsRegionsStates() {
+  const fx = name => JSON.parse(readFileSync(new URL(`../../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
+  const on = R.nav(emptyState(), { screen: 'markets', id: null });
+  const region = (tab, r) => R.setMarketsRegion(R.setMarketsTab(on, tab), r);
+  const rank = (st, venue, items, over = {}) => {
+    const query = rankQueryOf(st.markets);
+    const data = { ok: true, venue, query, sort: 'volume', total: items.length, asOf: '2026-11-21T02:30:00Z', session: { phase: 'trading', lastSession: '2026-11-20' },
+      status: { state: 'live', said: '' }, stale: false, items, ...over };
+    return R.rankLoaded(R.rankLoading(st, { sort: 'volume', query }), { sort: 'volume', query, data, at: NOW });
+  };
+  const hkItems = [
+    { id: 'hk:00700', symbol: '00700', name: 'Tencent', name_local: '騰訊控股', kind: 'share', price: 400, change_pct: 1.27, turnover: 4.8e9, currency: 'HKD', quote_from: 'Tencent' },
+    { id: 'hk:09988', symbol: '09988', name: 'Alibaba', kind: 'share', price: 80, change_pct: -0.5, turnover: 3e9, currency: 'HKD', quote_from: 'Tencent' }];
+  const euItems = [
+    { id: 'ix:eu:dax', symbol: 'dax', name: 'DAX', kind: 'index', price: 18000.5, change: 12.5, change_pct: 0.07, quote_from: 'Naver · 15 min delayed' },
+    { id: 'ix:eu:ftse', symbol: 'ftse', name: 'FTSE 100', kind: 'index', price: 8100.2, change: -20.1, change_pct: -0.25, quote_from: 'Eastmoney' }];
+  const hk = rank(region('stocks', 'hk'), 'hk', hkItems);
+  const kr = region('stocks', 'kr');
+  const krQuery = rankQueryOf(kr.markets);
+  const facts = { prevClose: 395, open: 396, high: 402.4, low: 394.2, volume: 18_200_000, turnover: 7.3e9, lastSession: '2026-11-20', phase: 'midday', quoteStatus: 'unsaid' };
+  const tencent = localQuoteOf({ venue: 'hk', symbol: '00700', market: { symbol: '00700', name: 'Tencent', price: 400, change24h: 5, changePct24h: 1.27, quoteAt: '2026-11-21T03:30:00Z', quoteFrom: 'Tencent', currency: 'HKD', local: facts } }, NOW);
+  const dax = localQuoteOf({ venue: 'ix', symbol: 'eu:dax', market: { symbol: 'eu:dax', name: 'DAX', price: 18000.5, change24h: 12.5, changePct24h: 0.07, quoteAt: '2026-11-21T10:00:00Z', quoteFrom: 'Naver · 15 min delayed',
+    local: { prevClose: 17988, open: 17990, high: 18050.25, low: 17950, volume: null, turnover: null, lastSession: '2026-11-20', phase: 'closed', quoteStatus: 'delayed' } } }, NOW);
+  const hkPage = R.setRange(R.quotesUpdated(R.nav(hk, { screen: 'markets', id: 'hk:00700' }), { quotes: { 'hk:00700': tencent }, connection: 'polling' }), { id: 'hk:00700', range: '1M' });
+  const ixPage = R.quotesUpdated(R.nav(on, { screen: 'markets', id: 'ix:eu:dax' }), { quotes: { 'ix:eu:dax': dax }, connection: 'polling' });
+  const search = fx('explore-search-china');
+  search.items.push({ key: 'hk:00700', kind: 'share', name: 'Tencent', nameLocal: '騰訊控股', base: '00700', currency: 'HKD', price: 400, changePct24h: 1.27, quoteFrom: 'Tencent', tabs: ['hk'], at: [] },
+    { key: 'kr:005930', kind: 'share', name: '삼성전자', base: '005930', currency: 'KRW', price: 71500, changePct24h: -0.69, quoteFrom: 'Naver', tabs: ['kr'], at: [] });
+  return [
+    ['markets-region-hk', hk],
+    ['markets-region-eu-indices', rank(region('indices', 'eu'), 'ix', euItems)],
+    ['markets-region-kr-down', R.rankFailed(R.rankLoading(kr, { sort: 'volume', query: krQuery }), { sort: 'volume', query: krQuery, at: NOW })],
+    ['markets-region-hk-closed-stale', rank(region('stocks', 'hk'), 'hk', hkItems, { session: { phase: 'closed', lastSession: '2026-11-20' }, stale: true })],
+    ['markets-page-hk', R.candlesLoaded(hkPage, { id: 'hk:00700', range: '1M', at: NOW,
+      data: { ok: true, range: '1M', candles: [{ t: Date.parse('2026-11-19T07:00:00Z'), c: 390 }, { t: Date.parse('2026-11-20T07:00:00Z'), c: 395 }] } })],
+    ['markets-page-index-refused', R.candlesFailed(R.candlesLoading(ixPage, { id: 'ix:eu:dax', range: '1D' }), { id: 'ix:eu:dax', range: '1D', at: NOW, message: 'No minute chart for this index' })],
+    ['markets-search-local', R.resultsLoaded(R.setMarketsQuery(R.setMarketsTab(on, 'stocks'), 'te'), { data: search, at: NOW })],
   ];
 }
 

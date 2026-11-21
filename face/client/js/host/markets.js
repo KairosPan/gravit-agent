@@ -1,8 +1,8 @@
 // face/client/js/host/markets.js — the Markets screen's impure half (spec 2026-10-22 §6.1): the markets through the face's
 // proxy into the store — explore for the tab on screen by its filters at once and every 20 s (Stocks › China A's: its ranking by
 // the sort in effect), the quotes of the rows in view (on a market's page, its own market's) every 5 s (twelve a call) and beside them the
-// A shares' (the cn page's first, then the cn rows in view), a market page's candles for its range (an A share's at venue
-// china) and its base's compare rows, and the page's market followed on its stream; one explore?q read for a search,
+// A shares' (the cn page's first, then the cn rows in view), a market page's candles for its range (a local market's at its
+// venue: an A share's at china, a Hong Kong, Korean or Taiwanese share's at hk, kr or tw, a cash index's at ix) and its base's compare rows, and the page's market followed on its stream; one explore?q read for a search,
 // its A shares the hits; the stars in this browser's two stores (the Account's keys under their own key, the A shares under the
 // face's) and, on a page that signs, an Account market's star as the Account's own signed setWatch (plan 2 Task 12); each old
 // us:/crypto: star asked of the Account once; and beside a market page's candles (an Account key's, never an A share's) its
@@ -390,10 +390,13 @@ export function startMarkets({
       else store.dispatch('candlesFailed', { id, range, at: now(), message: messageOf(body) });
     }, ['candlesLoading', { id, range }]);
   }
-  // an A share's history at the range, the market's at venue china (its 1D and 5D are sessions, the longer ranges candles); an
-  // answer for a range the page has left lands nowhere
-  function readCnCandles(id, range) {
-    const path = `/data/market/candles?venue=${CHINA_VENUE}&symbol=${encodeURIComponent(id.slice(3))}&range=${encodeURIComponent(range)}`;
+  // a local market's history at the range — an A share's at venue china, a Hong Kong, Korean or Taiwanese share's at its venue, a
+  // cash index's at venue ix (1D and 5D are sessions, the longer ranges candles) — a refusal landing with its sentence; an answer for
+  // a range the page has left lands nowhere
+  function readLocalCandles(id, range) {
+    const k = localKeyOf(id);
+    if (!k) return;
+    const path = `/data/market/candles?venue=${k.venue}&symbol=${encodeURIComponent(k.symbol)}&range=${encodeURIComponent(range)}`;
     fly(`candles:${id}`, path, (body, refused) => {
       if (rangeOf(id) !== range) return;
       if (!refused && body?.ok === true) store.dispatch('candlesLoaded', { id, range, data: body, at: now() });
@@ -730,13 +733,15 @@ export function startMarkets({
       localPage = isLocalKey(id) && !isCnKey(id) ? id : null;
       if (isCnKey(id)) {
         if (followed) unfollow();
-        readCnCandles(id, rangeOf(id));
+        readLocalCandles(id, rangeOf(id));
         readLocalQuotes(id);
         return;
       }
-      // a Hong Kong, Korean or Taiwanese share's page, or an index's: its price at once (its page is the A share's kind of page)
+      // a Hong Kong, Korean or Taiwanese share's page, or an index's: its history at its venue and its price at once (its page is
+      // the A share's kind of page)
       if (localPage) {
         if (followed) unfollow();
+        readLocalCandles(id, rangeOf(id));
         readLocalQuotes(id);
         return;
       }
@@ -755,9 +760,9 @@ export function startMarkets({
         store.dispatch('nav', plain);
         if (win?.location) win.location.hash = toHash(plain);
       }
-      if (isCnKey(id)) {
+      if (isLocalKey(id)) {
         store.dispatch('setRange', { id, range: value });
-        if (rangeOf(id) === value) readCnCandles(id, value);
+        if (rangeOf(id) === value) readLocalCandles(id, value);
         return;
       }
       if (!isAccountKey(id)) return;

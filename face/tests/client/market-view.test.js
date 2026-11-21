@@ -978,3 +978,21 @@ test("the Closed date is the session's, not a halted share's last trade (minor #
   const q = { price: 10, as_of: '2026-09-12T15:00:00+08:00', last_session: '2026-10-30', quote_status: 'live', market_status: 'closed' };
   assert.equal(cnStateWord(q, 'streaming'), 'Tencent · Closed · 10-30 15:00 Beijing');
 });
+
+test("localPageOf: a Hong Kong share's asset, quote, facts and history read; an index's facts without the share's; null for others", async () => {
+  const { localPageOf } = await import('../../client/js/host/market-view.js');
+  const quote = { id: 'hk:00700', market: 'hk', symbol: '00700', name: 'Tencent', price: 400, prev_close: 395, open: 396, high: 402.4, low: 394.2, volume: 18_200_000,
+    turnover: 7.3e9, currency: 'HKD', source: 'Tencent', market_status: 'open', quote_status: 'unsaid' };
+  const view = localPageOf({ quotes: { 'hk:00700': quote } }, 'hk:00700');
+  assert.deepEqual(view.asset, { id: 'hk:00700', venue: 'hk', kind: 'share', region: 'hk', symbol: '00700', name: 'Tencent', nameLocal: null, currency: 'HKD' });
+  assert.deepEqual(view.facts.map(f => [f.label, f.value, f.unit]), [['Previous close', 395, 'price'], ['Open', 396, 'price'], ['High', 402.4, 'price'], ['Low', 394.2, 'price'],
+    ['Volume', 18_200_000, 'shares'], ['Turnover', 7.3e9, 'amount'], ['Session', 'Open', 'word'], ['Source', 'Tencent', 'word']]);
+  assert.equal(view.range, '1D');
+  assert.deepEqual(view.history, { status: 'idle', message: null, current: false, sessions: null, candles: null });
+  const ix = localPageOf({ quotes: {} }, 'ix:jp:n225');
+  assert.deepEqual([ix.asset.kind, ix.asset.region, ix.asset.currency, ix.asset.name], ['index', 'jp', null, 'N225']);
+  assert.deepEqual(ix.facts.map(f => f.label), ['Previous close', 'Open', 'High', 'Low', 'Session', 'Source']);
+  assert.equal(localPageOf({}, 'cn:600519'), null, 'an A share has its own page');
+  assert.equal(localPageOf({}, 'stock:AAPL'), null);
+  assert.equal(localPageOf({}, 'hk:700'), null);
+});

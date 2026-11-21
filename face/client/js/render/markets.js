@@ -16,7 +16,7 @@
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
-import { chgHtml } from '../market-fmt.js';
+import { chgHtml, localPrice, localAmount } from '../market-fmt.js';
 import { fmtClock, fmtDate, rowTime, sameDay } from '../time.js';
 import { price, number } from '../wire/market-model.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
@@ -30,11 +30,13 @@ import {
   candleRanges, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
   chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf, marketOriginOf, noSpotSourceWord,
+  localPageOf, localWord, localDownWord, localRefreshWord, regionWord,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
 import { tradeableOf } from '../host/trade-view.js';
 import { isCnKey } from '../wire/china.js';
+import { isLocalKey } from '../wire/local.js';
 import { markOf } from '../host/desk-view.js';
 import { t, th, thn, sayOf } from '../i18n/words.js';
 
@@ -69,13 +71,13 @@ export function sourceBadge(origin, decorative = false) {
 const badgeFor = legs => sourceBadge(marketOriginOf(legs.find(l => l.connected) ?? legs.find(l => l.public)));
 
 const LOCAL_UNITS = new Set(['hkd', 'krw', 'twd']);
-/** A price in its unit's words: an event's in cents (62¢, 62.5¢), an A share's in yuan, a local share's in its currency, an index's
- *  level bare, anything else in dollars; none is —. */
+/** A price in its unit's words: an event's in cents (62¢, 62.5¢), an A share's in yuan, a local share's in its currency (HK$400.00,
+ *  ₩71,500, NT$1,025.00), an index's level bare, anything else in dollars; none is —. */
 export function priceWord(v, unit) {
   if (v === null || v === undefined) return EM;
   // a cash index's level: a number, no currency; a local share's price in its own currency (Hong Kong, Korea, Taiwan)
-  if (unit === 'level') return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (LOCAL_UNITS.has(unit)) return price(v, unit.toUpperCase());
+  if (unit === 'level') return localPrice(v, null);
+  if (LOCAL_UNITS.has(unit)) return localPrice(v, unit.toUpperCase());
   return unit === 'cents' ? `${Number(v.toFixed(1))}¢` : price(v, unit === 'cny' ? 'CNY' : 'USD');
 }
 
@@ -122,19 +124,37 @@ function nameCell(r, mark = null) {
 // a row's volume: an A share's turnover in yuan (China's rows), else the view's word in its unit
 const volumeCell = p => (p.volumeUnit === 'yuan' ? yuan(p.volume) : volumeWordOf(p));
 
-function row(r, markFor, starred) {
+// a cash index's change in points, signed; nothing given is —
+const pointsWord = v => (v === null || v === undefined ? EM : `${v > 0 ? '+' : ''}${localPrice(v, null)}`);
+
+// a row: its price, its move and its volume; a cash index's (on its region's own table) its level, its change in points and its
+// change in percent
+function row(r, markFor, starred, levels = false) {
+  const index = levels && r.kind === 'index';
+  const move = index ? `<span class="${tone(r.priced.change24h)}">${esc(pointsWord(r.priced.change24h))}</span>` : moveHtml(r.priced);
+  const third = index ? moveHtml(r.priced) : esc(volumeCell(r.priced));
   return `<tr data-id="${esc(r.id)}">${starred ? `<td>${r.noStar ? '' : starCell(r)}</td>` : ''}<td class="mk-c-name">${nameCell(r, markFor(r.id))}</td>` +
-    `<td class="r">${esc(priceWord(r.price, r.priced.unit))}</td><td class="r mk-c-chg">${moveHtml(r.priced)}</td>` +
-    `<td class="r mk-c-vol">${esc(volumeCell(r.priced))}</td><td class="r mk-c-st"><span class="mk-st">${esc(r.sourceWord)}</span></td></tr>`;
+    `<td class="r">${esc(priceWord(r.price, r.priced.unit))}</td><td class="r mk-c-chg">${move}</td>` +
+    `<td class="r mk-c-vol">${third}</td><td class="r mk-c-st"><span class="mk-st">${esc(r.sourceWord)}</span></td></tr>`;
 }
 
-// China's table says Today and Turnover where the Account's say 24h and Volume (spec 2026-10-31 §4); a table of Watchlist rows
-// alone draws no star column (G6), and no table draws a region's
-function table(rows, { china = false, markFor = () => null } = {}) {
+// the table's heads after Market: China's table says Today and Turnover where the Account's say 24h and Volume (spec 2026-10-31
+// §4); a region's own share table Change and Turnover; its cash indices' Level, Change and Change % (spec 2026-11-20 §5.6)
+function heads(local) {
+  if (local?.venue === 'ix') return [th('markets.head.level'), th('markets.head.change'), th('markets.head.changePct')];
+  if (local?.venue === 'china') return [th('markets.head.price'), th('markets.head.today'), th('markets.head.turnover')];
+  if (local) return [th('markets.head.price'), th('markets.head.change'), th('markets.head.turnover')];
+  return [th('markets.head.price'), '24h', th('markets.head.volume')];
+}
+
+// a table of Watchlist rows alone draws no star column (G6), and no table draws a region's
+function table(rows, { local = null, markFor = () => null } = {}) {
   const starred = rows.some(r => !r.noStar);
-  const head = `<tr>${starred ? `<th scope="col"><span class="sr-only">${th('markets.head.watch')}</span></th>` : ''}<th scope="col" class="mk-c-name">${th('markets.head.market')}</th><th scope="col" class="r">${th('markets.head.price')}</th>` +
-    `<th scope="col" class="r mk-c-chg">${china ? th('markets.head.today') : '24h'}</th><th scope="col" class="r mk-c-vol">${china ? th('markets.head.turnover') : th('markets.head.volume')}</th><th scope="col" class="r mk-c-st">${th('markets.head.source')}</th></tr>`;
-  return `<section class="cardbox mk-tcard" aria-label="${th('nav.markets')}"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, markFor, starred)).join('')}</tbody></table></div></section>`;
+  const [price, move, third] = heads(local);
+  const head = `<tr>${starred ? `<th scope="col"><span class="sr-only">${th('markets.head.watch')}</span></th>` : ''}<th scope="col" class="mk-c-name">${th('markets.head.market')}</th><th scope="col" class="r">${price}</th>` +
+    `<th scope="col" class="r mk-c-chg">${move}</th><th scope="col" class="r mk-c-vol">${third}</th><th scope="col" class="r mk-c-st">${th('markets.head.source')}</th></tr>`;
+  const levels = local?.venue === 'ix';
+  return `<section class="cardbox mk-tcard" aria-label="${th('nav.markets')}"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, markFor, starred, levels)).join('')}</tbody></table></div></section>`;
 }
 
 // where the rows would be when there are none (tableOf's `empty`, else the read they are from): the Watchlist with nothing
@@ -142,11 +162,13 @@ function table(rows, { china = false, markFor = () => null } = {}) {
 // is set (§5.3); Stocks › Japan or India on Spot, which no free source lists; China A's ranking; a search's answer with nothing in it; a read still on its way, or one that failed before it
 // answered
 function emptyHtml(view, m) {
-  const { read, searching, china, empty: kind, filters } = view;
+  const { read, searching, china, local, empty: kind, filters } = view;
   if (kind === 'watchlist') return empty(t('markets.empty.watchlist'));
   // Stocks › Japan or India on Spot: no free source lists those shares
   if (kind === 'noSpot') return empty(noSpotSourceWord(m) ?? '');
   if (china) return empty(read.status === 'error' ? t('markets.empty.china') : read.answered && read.status === 'ready' ? t('markets.none') : t('common.loading'));
+  // a region's own read (Hong Kong, Korea, Taiwan, the indices): its source named when it failed; no main sources to go back to
+  if (local) return empty(read.status === 'error' && !read.answered ? localDownWord(local.venue) : read.answered ? t('markets.none') : t('common.loading'));
   if (kind === 'filters') {
     const back = filters?.chips?.length ? ` <button type="button" class="mk-clear" data-action="mkMain">${th('markets.empty.back')}</button>` : '';
     return `<p class="mk-empty">${th('markets.empty.filters')}${back}</p>`; // words-order: the sentence, then its key
@@ -172,6 +194,15 @@ function chinaLines(read, data, session) {
     : data?.stale === true ? notAnsweringWord()
     : read.status === 'error' && read.answered ? t('markets.cn.refreshFailed') : '';
   return note(chinaWord(session)) + note(why);
+}
+
+// a region's own muted lines, as China's: its session's (Closed and the last session's day, the lunch break), then the market's
+// words when it says the read is stale, else the market not answering, else a refresh that failed over the rows kept, its source named
+function localLines(local, read, data, session) {
+  const why = data?.status?.state === 'stale' ? sayOf(data.status.said).trim()
+    : data?.stale === true ? t('markets.local.notAnswering')
+    : read.status === 'error' && read.answered ? localRefreshWord(local.venue) : '';
+  return note(localWord(session)) + note(why);
 }
 
 // the tab row (G1): the Watchlist first, a star with its word for a screen reader alone, filled while open; then a word a tab,
@@ -220,7 +251,7 @@ export function renderMarketsScreen(state, now) {
   const m = state.markets;
   const q = String(m.q ?? '').trim();
   const view = tableOf(m, now, state.account?.data);
-  const { rows, tabs, sorts, sort, read, china, session, searching, filters } = view;
+  const { rows, tabs, sorts, sort, read, china, local, session, searching, filters } = view;
   const tabWord = tabs.find(tab => tab.id === m.tab)?.label ?? '';
   // while searching (G5) the filters are set aside: the search's count and Back to <tab>, which ends it
   const left = searching
@@ -233,11 +264,11 @@ export function renderMarketsScreen(state, now) {
   const emptyBody = rows.length ? '' : emptyHtml(view, m);
   const cnSearch = cnSearchWord(m, searching);
   const cnDrawn = rows.some(r => r.source === 'face' && !r.notListed);
-  const chinaWords = china ? chinaLines(read, m.rank?.data, session) : '';
+  const chinaWords = china ? chinaLines(read, m.rank?.data, session) : local ? localLines(local, read, m.rank?.data, session) : '';
   // China's failure is said once, in the face's words: the route's own error text is not a sentence of the Account's
   const cnLine = cnSearch && !emptyBody.includes(`>${esc(cnSearch)}<`) ? cnSearch : '';
-  const words = chinaWords + note(china ? '' : read.message) + note(cnLine) + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
-  const body = rows.length ? table(rows, { china, markFor: id => markOf(state.desk?.data, id) }) : emptyBody;
+  const words = chinaWords + note(local ? '' : read.message) + note(cnLine) + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
+  const body = rows.length ? table(rows, { local, markFor: id => markOf(state.desk?.data, id) }) : emptyBody;
   return screenHtml(m, tabsHtml(tabs, m.tab), `${bar}${words}${body}`);
 }
 
@@ -289,6 +320,8 @@ export function marketPage(id, state, now) {
     const view = pageOf(state.markets, state.account, id, now);
     return view ? accountPage(id, view, state, now) : '';
   }
+  // a Hong Kong, Korean or Taiwanese share's page, a cash index's: the A share's kind of page, from its quote and its history
+  if (isLocalKey(id) && !isCnKey(id)) return localPage(id, state, now);
   const asset = faceAssetOf(state.markets, id);
   return asset?.market === 'cn' ? cnPage(asset, state, now) : '';
 }
@@ -525,4 +558,53 @@ function cnPage(asset, state, now) {
   const left = [section(th('markets.history.title'), cnHistory(view), seg(candleRanges(), view.range, 'setRange', { 'data-id': asset.id }))];
   const about = aboutHtml(state.conversations, asset, now);
   return pageHtml(who, keysHtml(asset.id, watched), top, left, about.length ? [section(th('markets.about'), feed(about))] : []);
+}
+
+// ---- a local market's page (spec 2026-11-20 §5.6): a Hong Kong, Korean or Taiwanese share's, a cash index's — the A share's kind of
+// page: its price in its currency (an index's level bare), its facts, its price history, Hand to gravit; no star, no ticket
+
+// a session's minutes on the chart's grid, by venue: HKEX 09:30–12:00 and 13:00–16:00, KRX 09:00–15:30, TWSE 09:00–13:30; an index
+// its longest session's points
+const SESSION_MINUTES = { hk: 331, kr: 391, tw: 271, ix: 0 };
+
+// a fact in its unit's words: a price in the market's currency (an index's level bare), a volume in shares, an amount in its currency,
+// a word as it is; none is —
+function localFactWord({ value: v, unit }, currency) {
+  if (v === null || v === undefined || v === '') return EM;
+  if (unit === 'price') return localPrice(v, currency);
+  if (unit === 'amount') return localAmount(v, currency);
+  if (unit === 'shares') return volumeWordOf({ volume: v, volumeUnit: 'shares' });
+  return String(v);
+}
+
+// its price history at its range: 1D and 5D the sessions on its session's grid, longer the closes on their (Beijing-stamped) dates, in
+// its currency; a refusal's sentence where the chart would be
+function localHistory(view) {
+  const h = view.history;
+  const fmt = v => localPrice(v, view.asset.currency);
+  const svg = !h.current ? ''
+    : view.range === '1D' || view.range === '5D' ? sessionsSvg(view.range === '1D' ? (h.sessions ?? []).slice(-1) : h.sessions, { minutes: SESSION_MINUTES[view.asset.venue] ?? 0, fmt })
+      : candlesSvg(h.candles, { zone: 'Asia/Shanghai', range: view.range, fmt });
+  const failed = h.status === 'error' ? note(h.message || t('markets.history.unavailable')) : '';
+  const drawnNow = h.current ? (svg || note(t('markets.history.none'))) : h.status === 'loading' ? note(t('common.loading')) : '';
+  return failed + drawnNow;
+}
+
+function localPage(id, state, now) {
+  const view = localPageOf(state.markets, id);
+  if (!view) return '';
+  const { asset, quote } = view;
+  const share = asset.kind === 'share';
+  const sub = (share ? [regionWord(asset.region), asset.symbol, asset.nameLocal] : [t('markets.local.index'), regionWord(asset.region)])
+    .filter(Boolean).join(' · '); // words-order: a market's facts under the visual separator
+  const who = `<div class="mk-who">${mkAv(Array.from(asset.name)[0] ?? asset.symbol, 'lg')}<div><h1 class="head-title">${esc(asset.name)}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
+  const priced = number(quote?.price) !== null;
+  const top = `<div class="mk-d-px"><span class="mk-big">${esc(localPrice(number(quote?.price), asset.currency))}</span>` +
+    `${priced ? `${chgHtml(number(quote.change_pct))}<span class="mk-basis">${esc(basisWord(quote))}</span>` : ''}</div>` +
+    `${planHtml(markOf(state.desk?.data, id))}` +
+    `<dl class="mk-facts">${view.facts.map(f => `<div><dt>${esc(f.label)}</dt><dd>${esc(localFactWord(f, asset.currency))}</dd></div>`).join('')}</dl>`;
+  const left = [section(th('markets.history.title'), localHistory(view), seg(candleRanges(), view.range, 'setRange', { 'data-id': id }))];
+  const keys = `<div class="mk-d-acts"><button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button></div>`; // words-order: an icon, then its word
+  const about = aboutHtml(state.conversations, { symbol: asset.symbol, name: asset.name }, now);
+  return pageHtml(who, keys, top, left, about.length ? [section(th('markets.about'), feed(about))] : []);
 }

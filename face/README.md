@@ -2335,10 +2335,11 @@ Watchlist. The tab row scrolls sideways on a narrow screen; nothing else does.
 Every tab but the Watchlist draws up to three filters as pills, each opening a popover of single
 choices (`client/js/render/markets.js`; the view is `filtersOf` in `client/js/host/market-view.js`):
 
-- **Region** (Stocks and Indices only): US by default, no "All"; US and China A, then Hong Kong,
-  Japan, Korea, Taiwan, India and Europe greyed `piece 2`. One region at a time; a tab switch goes
-  back to US; never a chip, and kept by the empty table's button. Stocks › China A is the Tencent
-  ranking (below); a region pick goes back to the main sources, and China A is Spot alone.
+- **Region** (Stocks and Indices only): US by default, no "All"; US, China A, Hong Kong, Japan,
+  Korea, Taiwan and India on both, Europe on Indices (greyed on Stocks: no source for European
+  shares). One region at a time; a tab switch goes back to US; never a chip. Stocks › China A is the
+  Tencent ranking (below); on a non-US region the Form is Spot or Perp (the region's own read, or
+  trade.xyz's perps of that region), and the other regions' Spot reads are below.
 - **Form**: All, Spot & shares, Perp, Tokenized, Event contract, and Options greyed `piece 3`; a
   form the tab's sources do not carry is greyed `none here` (read from `SOURCE_FORMS`, never from the
   rows). Picking a form the main sources lack switches Source to All sources, so the pick never
@@ -2469,6 +2470,32 @@ yet measured. Tencent's own words are Chinese and never reach the screen; every 
 market's enums and sentences. Until 2026-10-30 the iFinD QuantAPI quoted the A shares, with a token
 and a monthly quote quota; nothing in the face reads `IFIND_*` now — only the market does, for the Lunhui boards
 stand-in ("Lunhui analysis").
+
+#### Hong Kong, Korea, Taiwan and the cash indices (spec 2026-11-20 §5.6)
+
+One local path (`client/js/wire/local.js`, `localRowsOf` and `localPageOf` in
+`client/js/host/market-view.js`) draws China A and these the same way, each a read of its own and
+never a registered source: Stocks › Hong Kong is Tencent's ranking (Eastmoney's list behind it),
+Stocks › Korea Naver's (KOSPI, the top 200 by market value re-sorted), Stocks › Taiwan TWSE's (the
+200 busiest at the last close), and Indices on Spot, any region, the market's fixed list of cash
+indices, each row naming the source its level came from. The ranking is
+`/data/market/explore?asset=stocks|indices&form=spot&region=<r>&sort=volume|movers&limit=20`, the
+prices `/data/market/quotes?pairs=hk|00700,kr|005930,tw|2330,ix|eu:dax`, the history
+`/data/market/candles?venue=hk|kr|tw|ix&symbol=<symbol>&range=<range>` (1D and 5D minute sessions,
+longer ranges daily closes on their dates, or the market's refusal sentence where the chart would
+be). A share's table says **Change** and **Turnover**; the indices' **Level**, **Change** (points)
+and **Change %**. Prices are in the share's currency (`HK$400.00`, `₩71,500` with no decimals,
+`NT$1,025.00`), turnover compact (`HK$4.8B`, `₩1.2T`), an index level in points with no sign. The
+line above a table is the session in the region's words (`Closed · last session 11-20`, `Lunch
+break`); a failed read before any answer names its source (`Naver is not answering: Korean shares
+cannot be read now`), with no Back to the main sources. A row's name opens its page
+(`#/markets/hk:00700`, `kr:005930`, `tw:2330`, `ix:eu:dax`), the A share's kind of page: its price,
+its facts (previous close, open, high, low, then a share's volume and turnover, the session word and
+the source; an A share keeps its twelve), its price history by range, Hand to gravit. A search lists
+Hong Kong, Korean and Taiwanese hits beside the A shares. All of it is view-only: no star, no Buy or
+Sell, never in All, never in a dollar total. Each row's source words are the market's own: `real
+time` only where a source declares no delay, a declared delay in its own figure (`Naver · 15 min
+delayed`), a source that declares nothing by its name alone (`Tencent`).
 
 ### A market's page
 

@@ -2269,3 +2269,26 @@ test("China said not answering while Korea is on screen: China's state read agai
   assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id), ['kr:005930', 'kr:000660']);
   r.markets.close();
 });
+
+test("a Hong Kong share's page reads its history at venue hk; an index's at venue ix; a refusal lands with its sentence", async () => {
+  const r = rig({
+    answer: path => {
+      if (!path.startsWith('/data/market/candles?')) return path.startsWith('/data/market/quotes?') ? { ok: true, quotes: [] } : undefined;
+      const q = query(path);
+      if (q.range === '1D') return { ok: false, refusal: { code: 'E_MARKET_UNAVAILABLE', message: 'Tencent has no minute chart for this share' } };
+      return { ok: true, venue: q.venue, symbol: q.symbol, range: q.range, candles: [{ t: Date.parse('2026-11-19T07:00:00Z'), o: 1, h: 1, l: 1, c: 390 }, { t: Date.parse('2026-11-20T07:00:00Z'), o: 1, h: 1, l: 1, c: 395 }] };
+    },
+  });
+  r.markets.page('hk:00700');
+  assert.deepEqual(r.reads.slice(0, 2), ['/data/market/candles?venue=hk&symbol=00700&range=1D', '/data/market/quotes?pairs=hk%7C00700']);
+  await settle();
+  assert.deepEqual([r.m().candles['hk:00700'].status, r.m().candles['hk:00700'].message], ['error', 'Tencent has no minute chart for this share']);
+  r.markets.range('hk:00700', '1M');
+  assert.equal(r.reads.at(-1), '/data/market/candles?venue=hk&symbol=00700&range=1M');
+  await settle();
+  assert.equal(r.m().candles['hk:00700'].data.candles.length, 2);
+  r.markets.page('ix:eu:dax');
+  assert.equal(r.reads.find(p => p.includes('venue=ix')), '/data/market/candles?venue=ix&symbol=eu%3Adax&range=1D');
+  assert.deepEqual(r.follows, [], 'a local share follows nothing on the stream');
+  r.markets.close();
+});

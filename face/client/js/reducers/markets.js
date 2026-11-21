@@ -6,7 +6,7 @@
 import { ACCOUNT_SORT_IDS, CANDLE_RANGES, MARKET_TABS, REGIONS, onLocal, isAccountKey, formsInView, formsOfSource, mainFormsOf, isSourceOf } from '../host/market-view.js';
 import { number } from '../wire/market-model.js';
 import { isCnKey } from '../wire/china.js';
-import { LOCAL_VENUES, localProviderOf, venueOfMarket } from '../wire/local.js';
+import { LOCAL_VENUES, localProviderOf, venueOfMarket, isLocalKey } from '../wire/local.js';
 
 const mk = (s, patch) => ({ ...s, markets: { ...s.markets, ...patch } });
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -20,7 +20,7 @@ const read = (s, patch) => mk(s, { results: { ...s.markets.results, ...patch } }
 const EXPLORED = new Set(MARKET_TABS);
 // a market's history: an A share's (cn: and its six digits, never another cn: id) or another Account key's, at one of the
 // candle ranges
-const charted = (id, range) => (isCnKey(id) || (isAccountKey(id) && !String(id).startsWith('cn:'))) && CANDLE_RANGES.includes(range);
+const charted = (id, range) => (isLocalKey(id) || (isAccountKey(id) && !String(id).startsWith('cn:'))) && CANDLE_RANGES.includes(range);
 // a local ranking's two sorts
 const RANKED = new Set(['volume', 'movers']);
 const rank = (s, patch) => mk(s, { rank: { ...s.markets.rank, ...patch } });

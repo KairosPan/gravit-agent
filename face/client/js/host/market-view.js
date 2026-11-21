@@ -10,7 +10,8 @@
 // here. No DOM.
 import { normalizeAsset, number } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, isChiNext, cnHitsOf } from '../wire/china.js';
-import { localKeyOf } from '../wire/local.js';
+import { localKeyOf, isLocalKey, localHitsOf, LOCAL_NAMES, SHARE_VENUES } from '../wire/local.js';
+import { localAmount } from '../market-fmt.js';
 import { MIN, HOUR, DAY } from '../time.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
 import { t, isSaid, sayOf } from '../i18n/words.js';
@@ -68,7 +69,6 @@ const regionOf = m => (REGIONED.has(tabOf(m)) && REGIONS[tabOf(m)].includes(m?.r
 // on a non-US region the Form is Spot or Perp, Spot when none is stored (spec §5.4); elsewhere the stored form or none
 const nonUs = m => REGIONED.has(tabOf(m)) && regionOf(m) !== 'us';
 const formOf = m => (nonUs(m) ? (m?.form === 'perp' ? 'perp' : 'spot') : FORMS.live.includes(m?.form) ? m.form : '');
-const SHARE_VENUES = { cn: 'china', hk: 'hk', kr: 'kr', tw: 'tw' };
 /** The region's own read the view is on (spec §5.6): Stocks cn/hk/kr/tw on Spot, its share venue; Indices on Spot (any region),
  *  `ix`; else null (Japan and India on Spot have no source: the generic read, no rows). */
 export function onLocal(m) {
@@ -84,8 +84,8 @@ export const onChinaA = m => onLocal(m)?.venue === 'china';
 export const noSpotSource = m => tabOf(m) === 'stocks' && ['jp', 'in'].includes(regionOf(m)) && formOf(m) === 'spot';
 /** The empty state's line on Japan and India › Spot, or null elsewhere. */
 export const noSpotSourceWord = m => (noSpotSource(m) ? t('markets.empty.noSpotSource') : null);
-const LOCAL_NAMES = { china: 'Tencent', hk: 'Tencent', kr: 'Naver', tw: 'TWSE' }; // en-kept: the providers' names
-const localName = venue => LOCAL_NAMES[venue] ?? t('markets.tab.indices');
+// a venue's source by name; the indices' (each row naming its own) in the table's word
+const localName = venue => (venue === 'ix' ? t('markets.tab.indices') : LOCAL_NAMES[venue] ?? '');
 const sourcesOfTab = m => {
   const tab = tabOf(m);
   if (tab === 'watchlist') return { main: [], also: [] };
@@ -195,7 +195,8 @@ const formWords = () => ({
   '': t('markets.form.all'), spot: t('markets.form.spot'), perp: t('markets.form.perp'), token: t('markets.form.token'),
   event: t('markets.form.event'), option: t('markets.form.option'),
 });
-const regionWord = id => regionWords()[id] ?? id;
+/** A region's word (Hong Kong, Korea…), else its id. */
+export const regionWord = id => regionWords()[id] ?? id;
 const formWord = id => formWords()[id ?? ''] ?? id;
 const mainWord = m => t('markets.source.main', { names: familiesOf(m).filter(f => f.main).map(f => f.label).join(' + ') });
 function sourceWordOfState(m) {
@@ -368,8 +369,8 @@ export function volumeWordOf(priced) {
   if (volume === null) return '—';
   if (priced.volumeUnit === 'contracts') return t('markets.volume.contracts', { n: compact(volume) });
   if (priced.volumeUnit === 'shares') return t('markets.volume.shares', { n: compact(volume) });
-  // a share's turnover in its own currency (Hong Kong, Korea, Taiwan): its code before it, never a dollar sign
-  if (priced.volumeUnit === 'local') return typeof priced.currency === 'string' && priced.currency ? `${priced.currency} ${compact(volume)}` : compact(volume); // words-order: a currency code and its amount
+  // a share's turnover in its own currency (Hong Kong, Korea, Taiwan): its mark before it (HK$4.8B), never a dollar sign
+  if (priced.volumeUnit === 'local') return localAmount(volume, typeof priced.currency === 'string' && priced.currency ? priced.currency : null);
   return `$${compact(volume)}`;
 }
 
@@ -809,6 +810,23 @@ function cnRow(asset, markets, watched, atAccount = false) {
   };
 }
 
+// a search's Hong Kong, Korean or Taiwanese share, or its cash index (localHitsOf's hit and its price): drawn as its region's ranking
+// row is, no star, its class its tab's
+function localHitRow(hit, quote) {
+  const index = hit.venue === 'ix';
+  const symbol = index ? hit.symbol.slice(hit.symbol.indexOf(':') + 1) : hit.symbol;
+  const name = hit.name || symbol;
+  const currency = index ? null : hit.currency;
+  const unit = index ? 'level' : CURRENCY_UNITS[currency] ?? 'usd';
+  const priced = { price: number(quote?.price), unit, changePct: number(quote?.change_pct), change24h: null, volume: null, volumeUnit: index ? 'none' : 'local', currency, implied: null };
+  return {
+    id: hit.id, source: 'local', kind: index ? 'index' : 'share', name, tile: Array.from(name)[0] ?? symbol,
+    sub: index ? symbol.toUpperCase() : [symbol, hit.nameLocal].filter(Boolean).join(' · '), // words-order: a code and its local name under the visual separator
+    priced, price: priced.price, live: null, sourceWord: localName(hit.venue), closeTime: null, pastEnd: false, paper: false, watched: false,
+    atAccount: false, noStar: true, legs: [], tabs: [hit.venue], asset: index ? 'indices' : 'stocks', form: 'spot', unit, currency,
+  };
+}
+
 // an old us:/crypto: star the Account could not find: listed once, under its own muted line
 function notListedRow(asset) {
   const coin = asset.market === 'crypto';
@@ -929,13 +947,16 @@ function unsortedRowsOf(m, { searching, watchlist, slot }, now, atPage) {
   const atAccount = new Set(pageOnly);
   const quotes = isRecord(m.accountQuotes) ? m.accountQuotes : {};
   const row = item => { const key = str(item.key); return accountRow(item, quotes, isStarred.has(key) || atAccount.has(key), now, atAccount.has(key)); };
-  const dollars = body => itemsOf(body).filter(i => !isCnKey(i.key));
+  const dollars = body => itemsOf(body).filter(i => !isLocalKey(i.key));
   if (searching) {
     const cnListed = new Set(cnStars);
-    // the search's A shares: its cn items, drawn as the cn rows they are (their prices the hits' own), never as the Account's rows
+    // the search's A shares: its cn items, drawn as the cn rows they are (their prices the hits' own), never as the Account's rows;
+    // beside them its Hong Kong, Korean and Taiwanese shares and its cash indices, each its region's row
     const hits = cnHitsOf(m.results?.data).assets.map(a => cnRow(a, m, cnListed.has(a.id)));
+    const local = localHitsOf(m.results?.data);
+    const others = local.hits.filter(h => h.venue !== 'china').map(h => localHitRow(h, own(m.hitQuotes, h.id) ?? own(local.quotes, h.id)));
     const found = readable(m.results?.data) ? dollars(m.results.data).map(row) : [];
-    return [...found, ...hits].map(r => ({ ...r, className: classWordOf(r) }));
+    return [...found, ...hits, ...others].map(r => ({ ...r, className: classWordOf(r) }));
   }
   if (watchlist) {
     const lists = [...everyRow(bodyOf(reads, 'watchlist')), ...exploreRowsOf(m)];
@@ -1102,9 +1123,102 @@ export function cnPageOf(markets, id) {
   };
 }
 
+// ── a local market's page (spec 2026-11-20 §5.6): a Hong Kong, Korean or Taiwanese share's, a cash index's — the A share's kind of page ──
+
+// a share's currency by its venue, when no read names it
+const VENUE_CURRENCY = { hk: 'HKD', kr: 'KRW', tw: 'TWD' };
+
+/** A session's phase (a quote's `market_status`, a ranking's `phase`) in the region's word: Open, Lunch break, Closed; '' for none. */
+export function localSessionWord(phase) {
+  if (phase === 'open' || phase === 'trading') return t('markets.session.open');
+  if (phase === 'midday') return t('markets.session.midday');
+  if (phase === 'closed') return t('markets.cn.closed');
+  return '';
+}
+
+/** The line above a region's own table (not China A's, whose times are Beijing's: chinaWord), from its ranking's session: closed, the
+ *  last session's day; the lunch break; else nothing. */
+export function localWord(session) {
+  if (session?.phase === 'closed' && typeof session.lastSession === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(session.lastSession)) {
+    return t('markets.session.closedOn', { day: session.lastSession.slice(5) });
+  }
+  if (session?.phase === 'closed') return t('markets.cn.closed');
+  if (session?.phase === 'midday') return t('markets.session.midday');
+  return '';
+}
+
+/** Where a region's rows would be when its read failed before it answered: its source named, and what cannot be read. */
+export function localDownWord(venue) {
+  const source = localName(venue);
+  switch (venue) {
+    case 'hk': return t('markets.local.downHk', { source });
+    case 'kr': return t('markets.local.downKr', { source });
+    case 'tw': return t('markets.local.downTw', { source });
+    case 'ix': return t('markets.local.downIx');
+    default: return t('markets.unavailable');
+  }
+}
+/** A refresh of a region's ranking that failed over the rows kept, its source named. */
+export const localRefreshWord = venue => t('markets.local.refreshFailed', { source: localName(venue) });
+
+// a local key's asset as its page names it: the ranking's row, else the search's hit, else its quote (their names kept), else its code
+function localAssetOf(m, id) {
+  const k = localKeyOf(id);
+  if (!k || k.venue === 'china') return null;
+  const index = k.venue === 'ix';
+  const ranked = records(rankOf(m)?.items).find(i => i.id === id);
+  const hit = localHitsOf(m.results?.data).hits.find(h => h.id === id);
+  const quote = own(m.quotes, id);
+  const code = index ? k.symbol.slice(k.symbol.indexOf(':') + 1) : k.symbol;
+  const name = str(ranked?.name) || str(hit?.name) || (isRecord(quote) ? str(quote.name) : '') || (index ? code.toUpperCase() : code);
+  const nameLocal = str(ranked?.name_local) || str(hit?.nameLocal) || null;
+  const currency = index ? null : str(isRecord(quote) ? quote.currency : '') || str(ranked?.currency) || str(hit?.currency) || VENUE_CURRENCY[k.venue];
+  return { id, venue: k.venue, kind: index ? 'index' : 'share', region: index ? k.symbol.slice(0, k.symbol.indexOf(':')) : k.venue, symbol: code, name, nameLocal, currency };
+}
+
+// a local page's facts, in the order the page draws them: a share's prices, volume and turnover, then the session and the source; an
+// index's without the share's volume and turnover
+const localFacts = share => [
+  [t('markets.cnFact.prevClose'), 'prev_close', 'price'], [t('markets.cnFact.open'), 'open', 'price'], [t('markets.cnFact.high'), 'high', 'price'], [t('markets.cnFact.low'), 'low', 'price'],
+  ...(share ? [[t('markets.cnFact.volume'), 'volume', 'shares'], [t('markets.cnFact.turnover'), 'turnover', 'amount']] : []),
+];
+
+/** A Hong Kong, Korean or Taiwanese share's page, or a cash index's (spec 2026-11-20 §5.6), or null for any other id: its asset
+ *  (`{ id, venue, kind, region, symbol, name, nameLocal, currency }`, an index's currency null), its quote (the quotes poll's, else its
+ *  search hit's price), its facts `{ label, value, unit }` — `price` in its currency (an index's level bare), `shares`, `amount` in its
+ *  currency, `word` — the range kept (1D until one is chosen) and its history read, as the A share's (cnPageOf). */
+export function localPageOf(markets, id) {
+  const m = isRecord(markets) ? markets : {};
+  const asset = localAssetOf(m, id);
+  if (!asset) return null;
+  const quote = own(m.quotes, id) ?? own(m.hitQuotes, id) ?? null;
+  const chart = own(m.candles, id);
+  const range = isRecord(chart) && CANDLE_RANGES.includes(chart.range) ? chart.range : '1D';
+  const data = isRecord(chart) && chart.data?.ok === true ? chart.data : null;
+  const current = data !== null && data.range === range;
+  const q = isRecord(quote) ? quote : {};
+  return {
+    asset, quote, range,
+    facts: [
+      ...localFacts(asset.kind === 'share').map(([label, key, unit]) => ({ label, value: number(q[key]), unit })),
+      { label: t('markets.fact.session'), value: localSessionWord(q.market_status) || null, unit: 'word' },
+      { label: t('markets.head.source'), value: str(q.source) || null, unit: 'word' },
+    ],
+    history: {
+      status: str(chart?.status) || 'idle', message: chart?.status === 'error' ? str(chart.message) || null : null, current,
+      sessions: current && Array.isArray(data.sessions) ? data.sessions : null, candles: current && Array.isArray(data.candles) ? data.candles : null,
+    },
+  };
+}
+
 /** What Hand to gravit names a market by, `{ symbol, name }`: an Account key by its page's item — its base, else its name, and its
  *  name — a face id by its asset's symbol and name; null for a key no read lists, or an id that is neither. */
 export function handWordsOf(markets, account, id, now = Date.now()) {
+  // a Hong Kong, Korean or Taiwanese share, a cash index: its page's asset, by its code and its name
+  if (isLocalKey(id) && !isCnKey(id)) {
+    const asset = localPageOf(markets, id)?.asset;
+    return asset ? { symbol: asset.symbol, name: asset.name } : null;
+  }
   if (!isCnKey(id) && isAccountKey(id)) {
     const item = pageOf(markets, account, id, now)?.item;
     const name = str(item?.name);
