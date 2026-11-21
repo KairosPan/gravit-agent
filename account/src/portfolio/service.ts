@@ -1074,8 +1074,9 @@ export class PortfolioService {
       if (scope === "more" && ["hyperliquid", "trade-xyz"].includes(id)) return no("E_ACCOUNT_BAD_ACTION", { message: "the source is not available in this market scope" });
       selected.push(s);
     }
-    // China A is the market's: nothing connected here is listed in cn, so the question is answered with no rows before any venue is read
-    if (region === "cn") return { asOf: new Date(this.realNow()).toISOString(), tabs: [], items: [], movers: [], closing: [], mostTraded: [], missing: [], notes: [] };
+    // China A (cn's shares on Stocks Spot, either left out, as the market's reads take it) is the market's: nothing connected here lists an A
+    // share, so that question is answered with no rows before any venue is read; cn's perps (trade.xyz's) are read as any other class
+    if (region === "cn" && (asset ?? "stocks") === "stocks" && (form ?? "spot") === "spot") return { asOf: new Date(this.realNow()).toISOString(), tabs: [], items: [], movers: [], closing: [], mostTraded: [], missing: [], notes: [] };
     // by underlying (a class, or two or more sources): a connected venue whose id is a listed source's counts as that source's (spec §5.2)
     const byClass = asset !== undefined || form !== undefined || region !== undefined || sources.length > 1;
     const connected = scopedExploreVenues(this.exploreVenues(), scope, selected, byClass);

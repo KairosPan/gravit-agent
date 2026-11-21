@@ -104,12 +104,21 @@ describe("a connected venue's own reads (GET /api/account/connected/…)", () =>
     } finally { await srv.close(); }
   });
 
-  it("answers no rows for region=cn", async () => {
-    const { srv, get } = await boot();
+  it("answers no rows for China A (region=cn on Stocks Spot), and reads the connected perps for region=cn&form=perp", async () => {
+    const perp = (base: string, category: string): Listing => ({ ...btc, symbol: `${base}/USDC:USDC`, base, quote: "USDC", kind: "perp", category, name: `${base} perp` }) as Listing;
+    let read = 0;
+    const xyz: PublicSource = { ...fake, id: "trade-xyz", listings: async () => { read++; return [perp("xyz:CAMBRICON", "stocks"), perp("xyz:SMSN", "stocks"), perp("BTC", "crypto")]; } };
+    const { srv, get } = await boot([xyz]);
     try {
-      const r = await get("/api/account/connected/explore?asset=stocks&region=cn");
-      expect(r.status).toBe(200);
-      expect(r.body).toMatchObject({ ok: true, items: [], tabs: [], movers: [], closing: [], mostTraded: [], missing: [] });
+      for (const q of ["asset=stocks&region=cn", "region=cn", "asset=stocks&form=spot&region=cn"]) {
+        const r = await get(`/api/account/connected/explore?${q}`);
+        expect(r.status, q).toBe(200);
+        expect(r.body, q).toMatchObject({ ok: true, items: [], tabs: [], movers: [], closing: [], mostTraded: [], missing: [] });
+      }
+      expect(read).toBe(0);
+      const perps = await get("/api/account/connected/explore?asset=stocks&form=perp&region=cn");
+      expect(perps.status).toBe(200);
+      expect(perps.body.items.map((i: { key: string }) => i.key)).toEqual(["perp:xyz:CAMBRICON"]);
     } finally { await srv.close(); }
   });
 
