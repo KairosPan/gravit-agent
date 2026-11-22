@@ -170,7 +170,21 @@ describe("the Taiwan source", () => {
     expect(n.sent[0]).toContain("tse_2330.tw|tse_2317.tw");
     expect(q.get("2330")).toMatchObject({ price: 2000, quote: "TWD", currency: "TWD", quoteFrom: "TWSE · real time", changePct24h: -4.76,
       local: { prevClose: 2100, volume: 75207000, quoteStatus: "live", lastSession: "2026-11-20" } });
+    // no day table kept yet: price x shares, and a quote asks no table of its own
+    expect(q.get("2330")!.local.turnover).toBe(150414000000);
+    expect(n.sent.some((u) => u.includes("STOCK_DAY_ALL"))).toBe(false);
+    // once the ranking has read the day table, outside the session the turnover is its TradeValue for the same date, as the list shows it
+    answered(await s.rank("volume"));
+    const again = answered(await s.quotes(["2330"]));
+    expect(again.get("2330")!.local.turnover).toBe(177284650683);
     expect(refused(await s.quotes(Array.from({ length: 31 }, (_, i) => String(1000 + i)))).code).toBe("E_ACCOUNT_BAD_ACTION");
+  });
+
+  it("in session a quote's turnover is price x shares so far (the day table is the last close's)", async () => {
+    const n = net(routes());
+    const q = answered(await taiwanSource({ http: n.http, clock: () => MON_10 }).quotes(["2330"]));
+    expect(q.get("2330")!.local.turnover).toBe(100 * lotsOf("2330") * 1000);
+    expect(n.sent.some((u) => u.includes("STOCK_DAY_ALL"))).toBe(false);
   });
 
   it("history 1M: two month asks (the fixture answers both), bars deduped and oldest first", async () => {

@@ -432,3 +432,23 @@ test('each contract and its page carry a small accessible, local source mark', a
   assert.match(renderMarketsScreen(s, NOW), /mk-pg-head[\s\S]*?mk-source-xyz" role="img" aria-label="trade.xyz"/);
   assert.equal(sourceBadge('<img src=x>'), '');
 });
+
+test('an empty answer names the sources that did not answer, the market’s words under each; Indices’ Spot reads Spot', async () => {
+  const { renderMarketsScreen } = await import('../../client/js/render/markets.js');
+  const stocks = on('stocks');
+  const why = 'Cboe refuses this network: the server in front of it answered HTTP 403';
+  const down = { ...body(), missing: [{ venue: 'cboe', venueName: 'US stocks', why, connected: false, code: 'E_VENUE_GEOBLOCKED' }] };
+  const s = landed(stocks, down);
+  const view = tableOf(s.markets, NOW);
+  assert.equal(view.empty, 'filters');
+  assert.deepEqual(view.missing, [{ name: 'US stocks', why }]);
+  const html = renderMarketsScreen(s, NOW);
+  assert.match(html, /<p class="mk-empty">US stocks did not answer, so its markets are not listed\.<\/p><p class="mk-note">Cboe refuses this network: the server in front of it answered HTTP 403<\/p><p class="mk-empty">Nothing here with these filters\./);
+  // an empty answer with every source answering names none
+  assert.deepEqual(tableOf(landed(stocks, body()).markets, NOW).missing, []);
+  // Indices: Spot is a cash index's level, its own word; Stocks keep Spot & shares
+  const ix = on('indices', ['setMarketsForm', 'spot']);
+  assert.equal(filtersOf(ix.markets).form.label, 'Spot');
+  assert.equal(filtersOf(ix.markets).form.options.find(o => o.id === 'spot').label, 'Spot');
+  assert.equal(filtersOf(on('stocks').markets).form.options.find(o => o.id === 'spot').label, 'Spot & shares');
+});

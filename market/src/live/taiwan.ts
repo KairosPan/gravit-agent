@@ -235,7 +235,14 @@ export function taiwanSource(deps: { http?: CnHttp; clock?: () => number } = {})
     if (!codes.length) return new Map();
     const got = await quoteKeeper.ask([...codes].sort().join(","), () => readQuotes(codes), isMarkets);
     if (!isMarkets(got)) return got;
-    return new Map(codes.flatMap((c) => (got.has(c) ? [[c, got.get(c)!] as const] : [])));
+    // outside the session a share's turnover is the kept day table's TradeValue for its last session (as the ranking shows it; a quote asks
+    // no table of its own); in session, with no table kept, or one of another day or without the code, it stays price x shares so far
+    const day = localSession(SESSIONS.tw, now()).phase === "trading" ? null : table?.day ?? null;
+    const valued = (c: string, m: LocalMarket): LocalMarket => {
+      const value = day && m.local.lastSession === day.date ? day.rows.find((r) => r.code === c)?.tradeValue ?? null : null;
+      return value === null ? m : { ...m, local: { ...m.local, turnover: value } };
+    };
+    return new Map(codes.flatMap((c) => (got.has(c) ? [[c, valued(c, got.get(c)!)] as const] : [])));
   }
 
   // ---- history ---------------------------------------------------------------------------------------------------------------------

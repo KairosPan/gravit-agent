@@ -220,6 +220,8 @@ export function filtersOf(markets) {
   const chipForm = nonUs(m) ? (m.form === 'perp' ? 'perp' : '') : form;
   const source = isSourceOf(m, m.source) ? m.source : 'main';
   const sourceLabel = sourceWordOfState({ ...m, source });
+  // on Indices Spot is a cash index's level, not a share: its own word
+  const formLabel = id => (tab === 'indices' && id === 'spot' ? t('markets.form.spotIndex') : formWord(id));
   return {
     ...(REGIONED.has(tab) ? {
       region: {
@@ -232,11 +234,11 @@ export function filtersOf(markets) {
     } : {}),
     form: {
       value: form,
-      label: formWord(form),
+      label: formLabel(form),
       options: [
-        ...(nonUs(m) ? [] : [{ id: '', label: formWord(''), disabled: false, note: null }]),
-        ...(nonUs(m) ? inView : FORMS.live).map(id => ({ id, label: formWord(id), disabled: !inView.includes(id), note: inView.includes(id) ? null : t('markets.filter.noneHere') })),
-        ...(nonUs(m) ? [] : FORMS.later).map(id => ({ id, label: formWord(id), disabled: true, note: t('markets.filter.piece3') })),
+        ...(nonUs(m) ? [] : [{ id: '', label: formLabel(''), disabled: false, note: null }]),
+        ...(nonUs(m) ? inView : FORMS.live).map(id => ({ id, label: formLabel(id), disabled: !inView.includes(id), note: inView.includes(id) ? null : t('markets.filter.noneHere') })),
+        ...(nonUs(m) ? [] : FORMS.later).map(id => ({ id, label: formLabel(id), disabled: true, note: t('markets.filter.piece3') })),
       ],
     },
     source: {
@@ -249,7 +251,7 @@ export function filtersOf(markets) {
       ],
     },
     chips: [
-      ...(chipForm ? [{ kind: 'form', label: formWord(chipForm) }] : []),
+      ...(chipForm ? [{ kind: 'form', label: formLabel(chipForm) }] : []),
       ...(source !== 'main' ? [{ kind: 'source', label: sourceLabel }] : []),
     ],
   };
@@ -920,7 +922,8 @@ function shownRead(m, reads) {
  *    one for these filters is out).
  *  - local: onLocal's view (`{ venue, region }`) while not searching, else null; china: whether that is China A.
  *  - empty: `'watchlist'` on an empty Watchlist, `'noSpot'` on Stocks › Japan or India on Spot (no free source lists them),
- *    `'filters'` on a tab whose read answered with no rows, else null. */
+ *    `'filters'` on a tab whose read answered with no rows, else null.
+ *  - missing: on an empty `'filters'` answer, each source the answer says did not answer (`{ name, why }`, the market's words). */
 export function tableOf(markets, now = Date.now(), page = null) {
   const m = isRecord(markets) ? markets : {};
   const searching = !blank(m.q);
@@ -947,9 +950,13 @@ export function tableOf(markets, now = Date.now(), page = null) {
     : { status: str(slot?.status) || 'idle', answered: isRecord(slot) && slot.data != null,
       message: (isSaid(slot?.message) ? sayOf(slot.message) : str(slot?.message)) || null };
   const empty = rows.length > 0 || searching ? null : watchlist ? 'watchlist' : noSpotSource(m) ? 'noSpot' : read.answered ? 'filters' : null;
+  // an empty answer whose sources did not answer: each named with the market's own words, so an empty table is not taken for the filters'
+  const missing = empty === 'filters' && isRecord(slot?.data)
+    ? records(slot.data.missing).map(x => ({ name: str(x.venueName) || str(x.venue), why: str(x.why) })).filter(x => x.name)
+    : [];
   return {
     rows: local ? rows : sorted(rows, sort), sorts, sort, tabs: marketTabs(), filters: searching ? null : filtersOf(m), read,
-    china, local, session: local && rankFits(rankOf(m), m) ? rankOf(m)?.session ?? null : null, searching, empty,
+    china, local, session: local && rankFits(rankOf(m), m) ? rankOf(m)?.session ?? null : null, searching, empty, missing,
   };
 }
 

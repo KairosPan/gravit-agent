@@ -171,7 +171,10 @@ function emptyHtml(view, m) {
   if (local) return empty(read.status === 'error' && !read.answered ? localDownWord(local.venue) : read.answered ? t('markets.none') : t('common.loading'));
   if (kind === 'filters') {
     const back = filters?.chips?.length ? ` <button type="button" class="mk-clear" data-action="mkMain">${th('markets.empty.back')}</button>` : '';
-    return `<p class="mk-empty">${th('markets.empty.filters')}${back}</p>`; // words-order: the sentence, then its key
+    // a source that did not answer is the likelier reason than the filters: named first, the market's own words under it
+    const down = (view.missing ?? []).map(x => `<p class="mk-empty">${esc(t('markets.empty.missing', { source: x.name }))}</p>` + // words-order: the sentence, then the market's words
+      (x.why ? `<p class="mk-note">${esc(x.why)}</p>` : '')).join('');
+    return `${down}<p class="mk-empty">${th('markets.empty.filters')}${back}</p>`; // words-order: the sentence, then its key
   }
   if (read.answered) return empty(t('markets.none'));
   if (read.status !== 'error') return empty(searching ? t('markets.search.searching') : t('common.loading'));
