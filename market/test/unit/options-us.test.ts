@@ -40,6 +40,8 @@ const SUNDAY = Date.parse("2026-11-22T06:00:00Z");
 const MONDAY_SESSION = Date.parse("2026-11-23T15:00:00Z");
 
 beforeEach(() => { vi.useFakeTimers(); });
+/** a read that may wait out the 3 s spacing (the stocks-then-etf fallback) */
+async function settle<T>(p: Promise<T>): Promise<T> { await vi.advanceTimersByTimeAsync(4_000); return p; }
 afterEach(() => { vi.useRealTimers(); });
 
 describe("parsing", () => {
@@ -150,7 +152,7 @@ describe("a chain", () => {
   it("a ticker Nasdaq has no options for is refused in the market's words", async () => {
     vi.setSystemTime(SUNDAY);
     const n = net(fixtures);
-    const r = await usOptions({ http: n.http }).chain("BRK.A");
+    const r = await settle(usOptions({ http: n.http }).chain("BRK.A"));
     expect(refusedWith(r)).toBe("Nasdaq lists no options for BRK.A");
   });
 
@@ -197,6 +199,50 @@ describe("a chain", () => {
     expect(n.sent.length).toBe(4);
   });
 
+  it("a 451 is said plainly and pauses nothing; a 'paused' throw from the shared guard is a refusal", async () => {
+    vi.setSystemTime(SUNDAY);
+    const m = net(() => reply("", 451));
+    const src = usOptions({ http: m.http });
+    expect(refusedWith(await src.chain("AAPL"))).toBe("Nasdaq refuses this place (HTTP 451): its options cannot be read from here");
+    await src.chain("MSFT");
+    expect(m.sent.length).toBe(2);
+    const paused: CnHttp = async () => { throw new Error("paused"); };
+    expect(refusedWith(await usOptions({ http: paused }).chain("AAPL"))).toMatch(/Nasdaq refused this place \(lately\)/);
+  });
+
+  it("expiries already settled, or outside the current ranges, are not listed", async () => {
+    vi.setSystemTime(SUNDAY);
+    const src = usOptions({ http: net(fixtures).http });
+    const c = answered(await src.chain("AAPL", "2026-12-02"));
+    expect(c.expiries).toContain("2026-11-23");
+    vi.setSystemTime(Date.parse("2026-12-03T00:00:00Z")); // December 2 settled at 16:00 New York
+    const d = answered(await src.chain("AAPL"));
+    expect(d.expiry).toBe("2026-12-04");
+    expect(d.expiries).not.toContain("2026-11-23");
+    expect(d.expiries).not.toContain("2026-12-02");
+    expect(d.expiries).toContain("2026-12-04");
+  });
+
+  it("a month that answers no options for a ticker that has them: no such expiry", async () => {
+    vi.setSystemTime(SUNDAY);
+    const n = net((url) => (url.includes("fromdate=2027-01-15") ? reply(text("nasdaq-none")) : fixtures(url)));
+    expect(refusedWith(await usOptions({ http: n.http }).chain("AAPL", "2027-01-15"))).toBe("Nasdaq lists no AAPL expiry on 2027-01-15");
+  });
+
+  it("a ticker outside the list is asked as a share, then as an ETF 3 s later", async () => {
+    vi.setSystemTime(SUNDAY);
+    const n = net((url) => (url.includes("/GLD/") && url.includes("assetclass=stocks") ? reply(text("nasdaq-none")) : fixtures(url)));
+    const src = usOptions({ http: n.http });
+    const p = src.chain("GLD", "2026-12-02");
+    await vi.advanceTimersByTimeAsync(4_000);
+    const c = answered(await p);
+    expect(c.underlying).toBe("GLD");
+    expect(n.sent[0]!.url).toContain("assetclass=stocks");
+    expect(n.sent[1]!.url).toContain("assetclass=etf");
+    expect(n.sent[1]!.at - n.sent[0]!.at).toBeGreaterThanOrEqual(SUMMARY_GAP_MS);
+    expect(n.sent[2]!.url).toContain("assetclass=etf&limit=60&offset=0&fromdate=2026-12-02");
+  });
+
   it("has: the listed tickers, and a ticker a chain found options for", async () => {
     vi.setSystemTime(SUNDAY);
     const src = usOptions({ http: net(fixtures).http });
@@ -204,7 +250,7 @@ describe("a chain", () => {
     expect(src.has("AMD")).toBe(false);
     answered(await src.chain("AMD", "2026-12-02"));
     expect(src.has("AMD")).toBe(true);
-    await src.chain("BRK.A");
+    await settle(src.chain("BRK.A"));
     expect(src.has("BRK.A")).toBe(false);
   });
 });
@@ -225,13 +271,15 @@ describe("summaries", () => {
       return fixtures(url);
     };
     const src = usOptions({ http, quote });
-    const first = src.summaries();
-    await vi.advanceTimersByTimeAsync(600);
-    const r = answered(await first);
-    expect(r.items.length).toBeGreaterThanOrEqual(1);
-    expect(r.items.length).toBeLessThan(10);
+    // a cold start answers at once: nothing kept, the queue reading in the background
+    const r = answered(await src.summaries());
+    expect(r.items).toEqual([]);
     expect((r as any).partial).toBe(true);
-    expect((r as any).note).toMatch(/of 10 read/);
+    expect((r as any).note).toBe("0 of 10 read");
+    await vi.advanceTimersByTimeAsync(600);
+    const some = answered(await src.summaries());
+    expect(some.items.length).toBe(1);
+    expect((some as any).note).toBe("1 of 10 read");
     await vi.advanceTimersByTimeAsync(60_000);
     expect(sent.length).toBe(10);
     expect(most).toBe(1);
@@ -282,6 +330,46 @@ describe("summaries", () => {
     expect(n.sent.length).toBe(10);
     vi.setSystemTime(MONDAY_SESSION + 11 * 60_000 + 30_000);
     answered(await src.summaries());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(n.sent.length).toBe(20);
+  });
+
+  it("all past their keep: answered at once, flagged stale, while the queue reads them again", async () => {
+    vi.setSystemTime(MONDAY_SESSION);
+    let slow = false;
+    const n = net((url) => fixtures(url));
+    const http: CnHttp = async (url, init) => {
+      if (slow) await new Promise((r) => setTimeout(r, 5_000));
+      return n.http(url, init);
+    };
+    const src = usOptions({ http, quote });
+    void src.summaries();
+    await vi.advanceTimersByTimeAsync(60_000);
+    slow = true;
+    vi.setSystemTime(MONDAY_SESSION + 11 * 60_000);
+    const r = answered(await src.summaries());
+    expect(r.stale).toBe(true);
+    expect(r.items.length).toBe(10);
+    expect((r as any).note).toBe("0 of 10 read");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(n.sent.length).toBe(20);
+  });
+
+  it("outside a session each summary is kept until the next US open", async () => {
+    vi.setSystemTime(SUNDAY);
+    const n = net(fixtures);
+    const src = usOptions({ http: n.http, quote });
+    void src.summaries();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(n.sent.length).toBe(10);
+    vi.setSystemTime(Date.parse("2026-11-23T14:00:00Z")); // Monday 09:00 New York
+    const r = answered(await src.summaries());
+    expect(r.items.length).toBe(10);
+    expect(r.stale).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(n.sent.length).toBe(10);
+    vi.setSystemTime(Date.parse("2026-11-23T14:31:00Z")); // past the open
+    void src.summaries();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(n.sent.length).toBe(20);
   });

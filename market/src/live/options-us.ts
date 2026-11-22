@@ -3,8 +3,8 @@
  * figures alone (`nearestOnly`): the volume and open interest of its calls and puts summed from Nasdaq's default page (near the money as
  * Nasdaq filters it). Its price and day change are the market's US quote line's (`quote`, injected; when it refuses the row lists without
  * them), never Nasdaq's. The ten are read one at a time, at least SUMMARY_GAP_MS apart, by one queue: a `summaries()` call answers what is
- * kept (flagged partial, "n of 10 read", while the queue is still reading) and starts the queue if it is not running; it waits only for the
- * queue's next answer when nothing at all is kept. Each summary is kept 10 min in a US session, until the next US open outside it; one past
+ * kept (flagged partial, "n of 10 read", while the queue is still reading) and starts the queue if it is not running; it never waits for
+ * the queue (on a cold start it answers no items, "0 of 10 read"). Each summary is kept 10 min in a US session, until the next US open outside it; one past
  * its keep is still shown, flagged stale, for STALE_KEEP_MS. A chain (`chain`) asks the month range Nasdaq's `filterlist` names for the
  * expiry (`money=all&type=all`, 60 rows a page, paged with `offset`, at most CHAIN_PAGES pages, said in the chain's note when cut) and keeps
  * that expiry's rows; its price is Nasdaq's "LAST TRADE" line, the line's date kept as words. Every page is kept 60 s in a US session, until
@@ -17,7 +17,7 @@ import { realCnHttp, type CnHttp } from "./cn-http.ts";
 import { NASDAQ_HOST, PAUSE_MS, politeHosts, retryOnce } from "./local-http.ts";
 import { SESSIONS } from "./local-session.ts";
 import { rankTtlMs, type LocalStatus } from "./local.ts";
-import { atmStrike, defaultExpiry, VENUE_NAMES, type OptionChain, type OptionLeg, type OptionSummary } from "./options.ts";
+import { atmStrike, defaultExpiry, settleMs, VENUE_NAMES, type OptionChain, type OptionLeg, type OptionSummary } from "./options.ts";
 
 export const US_OPTION_UNDERLYINGS = ["SPY", "QQQ", "IWM", "AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "META", "GOOGL"] as const;
 /** Nasdaq's asset class for these is `etf`; every other ticker is asked as `stocks` first, then as `etf` when Nasdaq lists no options */
@@ -153,6 +153,9 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
   const none = new Set<string>();
   /** every expiry group seen per ticker, so the chain's list grows as months are read */
   const seen = new Map<string, Set<string>>();
+  /** when Nasdaq was last asked for a nearest page: the summaries' queue and the stocks-then-etf fallback keep SUMMARY_GAP_MS from it */
+  let lastAsk = Number.NEGATIVE_INFINITY;
+  const sleep = (ms: number): Promise<void> => new Promise((r) => { const h = setTimeout(r, ms); (h as { unref?: () => void }).unref?.(); });
 
   const unreachable = (): Refusal => no("E_VENUE_UNREACHABLE", { venue: "nasdaq", message: `${NAME} is not answering: its options cannot be read now` });
   const refused = (why: string): Refusal =>
@@ -193,7 +196,10 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
   /** the ticker's nearest page (Nasdaq's default), under the asset class it answers to; "none" when Nasdaq lists no options for it */
   async function nearest(t: string): Promise<{ page: Page; cls: AssetClass } | "none" | Refusal> {
     const classes: AssetClass[] = classOf.has(t) ? [classOf.get(t)!] : ETFS.has(t) ? ["etf"] : ["stocks", "etf"];
-    for (const cls of classes) {
+    for (const [i, cls] of classes.entries()) {
+      // the etf ask after a stocks ask that found no options keeps the queue's spacing
+      if (i > 0) { const wait = lastAsk + SUMMARY_GAP_MS - now(); if (wait > 0) await sleep(wait); }
+      lastAsk = now();
       const r = await ask(nasdaqNearestUrl(t, cls));
       note(t, r);
       if (isRefusal(r)) return r;
@@ -213,10 +219,12 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
     if (n === "none") return noOptions(t);
     if (isRefusal(n)) return n;
     const { page, cls } = n;
+    /** the ranges' bounds and the groups seen, each inside one of the nearest page's current ranges and not yet settled (16:00 New York) */
     const listed = (): string[] => {
       const out = new Set<string>(seen.get(t) ?? []);
       for (const [a, b] of page.ranges) { out.add(a); out.add(b); }
-      return [...out].sort();
+      const t0 = now();
+      return [...out].filter((e) => page.ranges.some(([a, b]) => a <= e && e <= b) && settleMs(e, "nasdaq") >= t0).sort();
     };
     const chosen = expiry ?? defaultExpiry(listed(), now(), "nasdaq") ?? listed()[0];
     if (chosen === undefined) return noOptions(t);
@@ -241,7 +249,8 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
         break;
       }
       pages++;
-      if (r.kind === "none") { if (pages === 1) return noOptions(t); break; }
+      // the ticker has options (its nearest page listed them): a month that answers none has no such expiry
+      if (r.kind === "none") { if (pages === 1) return badAction(`${NAME} lists no ${t} expiry on ${chosen}`); break; }
       at = Math.min(at, r.at);
       lastTrade = parseLastTrade(r.lastTrade) ?? lastTrade;
       lastTotal = r.total;
@@ -270,12 +279,8 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
   const summariesKept = new Map<string, Kept>();
   const summaryTtl = (at: number): number => Math.max(rankTtlMs(SESSIONS.us, at, SUMMARY_KEEP_MS), SUMMARY_KEEP_MS);
   const fresh = (k: Kept | undefined, t: number): boolean => !!k && t - k.at < summaryTtl(k.at);
-  let lastAsk = Number.NEGATIVE_INFINITY;
   let lastFailure: Refusal | null = null;
   let running: Promise<void> | null = null;
-  let waiters: Array<() => void> = [];
-  const wake = (): void => { const w = waiters; waiters = []; for (const f of w) f(); };
-  const sleep = (ms: number): Promise<void> => new Promise((r) => { const h = setTimeout(r, ms); (h as { unref?: () => void }).unref?.(); });
 
   async function readOne(t: string): Promise<Refusal | null> {
     const n = await nearest(t);
@@ -304,19 +309,16 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
         if (fresh(summariesKept.get(t), now())) continue;
         const wait = lastAsk + SUMMARY_GAP_MS - now();
         if (wait > 0) await sleep(wait);
-        lastAsk = now();
         const r = await readOne(t);
         lastFailure = r;
-        wake();
         if (r) break;
       }
-    })().catch(() => { /* every ask answers a refusal instead of throwing */ }).finally(() => { running = null; wake(); });
+    })().catch(() => { /* every ask answers a refusal instead of throwing */ }).finally(() => { running = null; });
   }
 
   async function summaries(): Promise<{ items: OptionSummary[]; asOf: string; stale?: true; partial?: true; note?: string } | Refusal> {
+    // never waits for the queue: what is kept is answered, and the queue reads the rest in the background
     start();
-    const freshCount = (): number => US_OPTION_UNDERLYINGS.filter((t) => fresh(summariesKept.get(t), now())).length;
-    if (freshCount() === 0 && running) await new Promise<void>((r) => waiters.push(r));
     const t = now();
     const shown: Array<{ core: SummaryCore; at: number; stale: boolean }> = [];
     let read = 0;
