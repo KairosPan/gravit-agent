@@ -880,6 +880,8 @@ export function expiryWord(day) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str(day));
   return m ? fmtDate(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12).getTime()) : '';
 }
+/** The units a leg is priced in dollars by: Nasdaq's USD, a linear option's USDC or USDT. */
+export const DOLLAR_UNITS = new Set(['USD', 'USDC', 'USDT']);
 const OPTION_VENUE_NAMES = { deribit: 'Deribit', okx: 'OKX', nasdaq: 'Nasdaq' }; // en-kept: the venues' names
 const optionVenueName = v => (v === 'nasdaq' ? t('markets.option.venuesStocks') : OPTION_VENUE_NAMES[v] ?? v);
 // a compact count: 1.2k, 3.4M
@@ -915,8 +917,8 @@ function optionRowOf(item) {
   };
 }
 // a search's option rows, when they answer the query typed now
-const optionHitsOf = m => (isRecord(m.optionHits) && str(m.optionHits.q) === str(m.q).trim() && readable(m.optionHits.data)
-  ? itemsOf(m.optionHits.data).filter(i => i.kind === 'optionChain' && optionKeyOf(i.key)) : []);
+const optionHitsOf = m => (isRecord(m.optionHits) && str(m.optionHits.q) === str(m.q).trim()
+  ? [m.optionHits.crypto, m.optionHits.stocks].flatMap(itemsOf).filter(i => i.kind === 'optionChain' && optionKeyOf(i.key)) : []);
 // every option row the slice's reads carry: the options views', a search's
 const optionItemsOf = m => [...exploreRowsOf(m), ...optionHitsOf(m)].filter(i => i.kind === 'optionChain');
 
@@ -965,11 +967,14 @@ export function optionPageOf(markets, id) {
   const data = isRecord(kept.data) ? kept.data : null;
   const asked = chainQueryOf(m, id);
   // the chain kept is this page's when it is for the underlying, the venue and the expiry asked (the nearest when none is)
-  const chain = data && data.underlying === underlying && data.venue === pick.venue && (pick.expiry === null || data.expiry === pick.expiry) ? data : null;
+  // the chain kept at this underlying and venue, whatever its expiry: its expiry tabs and its price stay drawn while another expiry is
+  // read, or after its read failed, so any expiry can be picked again
+  const atVenue = data && data.underlying === underlying && data.venue === pick.venue ? data : null;
+  const chain = atVenue && (pick.expiry === null || atVenue.expiry === pick.expiry) ? atVenue : null;
   const askedNow = kept.query === asked;
   const status = chain && !(askedNow && kept.status === 'error') ? 'ready' : askedNow ? str(kept.status) || 'idle' : 'idle';
   const message = askedNow && kept.status === 'error' ? (isSaid(kept.message) ? sayOf(kept.message) : str(kept.message)) || null : null;
-  const price = chain?.price ?? number(row?.price);
+  const price = (chain ?? atVenue)?.price ?? number(row?.price);
   const atm = chain?.atmStrike ?? null;
   const rows = (chain?.strikes ?? []).map(s => ({
     strike: s.strike, atm: atm !== null && s.strike === atm, call: s.call, put: s.put,
@@ -979,9 +984,10 @@ export function optionPageOf(markets, id) {
   return {
     id, underlying, name: t('markets.option.name', { underlying }), crypto, price, changePct: number(row?.changePct24h),
     venues: venues.map(v => ({ id: v, label: optionVenueName(v) })), venue: pick.venue, switchable: crypto && venues.length > 1,
-    expiries: (chain?.expiries ?? []).map(e => ({ id: e, label: expiryWord(e) })), expiry: pick.expiry ?? chain?.expiry ?? null,
-    chain, rows, unit, coinPriced: chain !== null && unit !== '' && unit !== 'USD', status, message, failedOver: chain !== null && kept.status === 'error' && askedNow,
-    quoteFrom: str(chain?.quoteFrom) || str(row?.quoteFrom), lastTrade: str(chain?.lastTrade), note: str(chain?.note),
+    expiries: (atVenue?.expiries ?? []).map(e => ({ id: e, label: expiryWord(e) })), expiry: pick.expiry ?? atVenue?.expiry ?? null,
+    // prices in a coin (an inverse option's) carry their dollars under them; a USD, USDC or USDT leg is dollar-priced
+    chain, rows, unit, coinPriced: chain !== null && unit !== '' && !DOLLAR_UNITS.has(unit), status, message, failedOver: chain !== null && kept.status === 'error' && askedNow,
+    quoteFrom: str((chain ?? atVenue)?.quoteFrom) || str(row?.quoteFrom), lastTrade: str((chain ?? atVenue)?.lastTrade), note: str(chain?.note),
   };
 }
 

@@ -518,7 +518,7 @@ function marketsOptionsStates() {
     return s;
   };
   const search = R.optionHitsLoaded(R.resultsLoaded(R.setMarketsQuery(R.setMarketsTab(on, 'stocks'), 'nvda'), { data: { ok: true, items: [], movers: [], closing: [], mostTraded: [], tabs: [], missing: [], notes: [] }, at: NOW }),
-    { q: 'nvda', data: { ...usOptionsList(), items: usOptionsList().items.filter(i => i.base === 'NVDA') } });
+    { q: 'nvda', asset: 'stocks', data: { ...usOptionsList(), items: usOptionsList().items.filter(i => i.base === 'NVDA') } });
   return [
     ['markets-options-crypto', crypto],
     ['markets-options-us', list('stocks', usOptionsList())],

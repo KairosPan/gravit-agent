@@ -800,8 +800,7 @@ test("typing in the search box searches; a star watches and writes the face's ke
   assert.equal(reads.some(p => p.startsWith('/data/market/explore?q=')), false, 'nothing searched before the wait');
   timers.run(300);
   await settle();
-  assert.deepEqual(reads.filter(p => p.startsWith('/data/market/explore?q=')), ['/data/market/explore?q=600&form=option&limit=20', '/data/market/explore?q=600&limit=200'],
-    "one read of every market, the Account's, beside the market's option rows for it");
+  assert.deepEqual(reads.filter(p => p.startsWith('/data/market/explore?q=')), ['/data/market/explore?q=600&limit=200'], "one read of every market, the Account's");
   assert.match(f.html(), /<tr data-id="cn:600519">/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
   // an A share is an Account key: its star is kept in this browser's Account store (the page does not sign), never the cn list
@@ -1982,7 +1981,7 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   assert.notDeepEqual(second, first, 'a keystroke restarts it');
   timers.run(300);
   await settle();
-  assert.deepEqual(searched(), ['/data/market/explore?q=BTC&form=option&limit=20', '/data/market/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last — the A shares' and the option rows with it");
+  assert.deepEqual(searched(), ['/data/market/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last — the A shares' with it");
   // a wait cut short by Back to the tab: the search goes blank at once, and the wait never searches
   mq.value = 'ETH';
   f.fire('root', 'input', { target: mq });
@@ -1990,14 +1989,14 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   assert.equal(store.get().markets.q, '');
   assert.equal(mq.value, '');
   assert.equal(timers.delays().includes(300), false, 'the wait is cancelled');
-  assert.equal(searched().length, 2, 'ETH never searched (the two reads are BTC\'s)');
+  assert.equal(searched().length, 1, 'ETH never searched');
   // a box emptied by hand searches blank at once too
   mq.value = 'SOL';
   f.fire('root', 'input', { target: mq });
   mq.value = '';
   f.fire('root', 'input', { target: mq });
   assert.equal(timers.delays().includes(300), false);
-  assert.equal(searched().length, 2);
+  assert.equal(searched().length, 1);
   store.timers.clear();
 });
 

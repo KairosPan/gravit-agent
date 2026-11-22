@@ -43,6 +43,7 @@ export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 export const CHAIN_MS = 15_000;
 // the option rows a search asks the market for (explore?q=…&form=option): one row an underlying
 export const OPTION_HITS = 20;
+const OPTION_HIT_ASKS = [['crypto', 'asset=crypto'], ['stocks', 'asset=stocks&region=us']];
 // Longer than the explore proxies' 10 s bound, but shorter than the next poll. A browser request can otherwise stay
 // pending before reaching the proxy and hold the host's same-path deduplication lock forever.
 export const EXPLORE_TIMEOUT_MS = 15_000;
@@ -688,7 +689,7 @@ export function startMarkets({
     if (shown && shownOf(store.get().markets) !== readShownOf) retab();
     // the search ended (Back to <tab>, another tab pressed): its read in the air lands nowhere
     const searching = !blank(store.get().markets.q);
-    if (wasSearching && !searching) { halves.forget('results'); drop('optionHits'); }
+    if (wasSearching && !searching) { halves.forget('results'); drop('optionHits:crypto'); drop('optionHits:stocks'); }
     wasSearching = searching;
     if (waiting !== null) open(waiting);
     // a venue or an expiry picked on a chain's page (or a row that names its venues landing): its chain read at once, its poll over
@@ -724,6 +725,8 @@ export function startMarkets({
       armQuotes();
       armChain();
       readOnce();
+      // back from a hidden spell: the chain on screen read at once, as the other reads are
+      if (chainPage !== null) readChain();
     },
     /** The query typed: the Account's search (explore?q=, the latest one lands) into results — its A shares the hits, with the
      *  prices the search carries. */
@@ -733,14 +736,18 @@ export function startMarkets({
       store.dispatch('setMarketsQuery', q);
       if (blank(q)) {
         halves.forget('results');
-        drop('optionHits');
+        drop('optionHits:crypto');
+        drop('optionHits:stocks');
         return;
       }
-      // the market's option rows for it, one row an underlying (no chain is read for a search): what the options views list
+      // the market's option rows for it, one row an underlying (no chain is read for a search): what the options views list, one
+      // read an asset (Ruling R7: never form=option without an asset, whose sort would compare dollars with contracts)
       const hitsQ = q.trim();
-      fly('optionHits', `${EXPLORE}?q=${encodeURIComponent(hitsQ)}&form=option&limit=${OPTION_HITS}`, (body, refused) => {
-        store.dispatch('optionHitsLoaded', { q: hitsQ, data: !refused && answered(body, 'items') ? body : null });
-      });
+      for (const [asset, scope] of OPTION_HIT_ASKS) {
+        fly(`optionHits:${asset}`, `${EXPLORE}?${scope}&form=option&q=${encodeURIComponent(hitsQ)}&limit=${OPTION_HITS}`, (body, refused) => {
+          store.dispatch('optionHitsLoaded', { q: hitsQ, asset, data: !refused && answered(body, 'items') ? body : null });
+        });
+      }
       // a new query forgets what the last one kept (explore-halves.js)
       // every market, whatever the tab and its filters (G5)
       halves.read('results', `q=${encodeURIComponent(q.trim())}&limit=${ROWS}`, {

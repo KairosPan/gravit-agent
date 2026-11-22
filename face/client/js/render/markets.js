@@ -30,7 +30,7 @@ import {
   candleRanges, localCandleRanges, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
   chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf, marketOriginOf, noSpotSourceWord,
-  localPageOf, localWord, localDownWord, localRefreshWord, localStateWord, regionWord, optionPageOf, compactNumber,
+  localPageOf, localWord, localDownWord, localRefreshWord, localStateWord, regionWord, optionPageOf, compactNumber, DOLLAR_UNITS,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
@@ -652,8 +652,9 @@ function localPage(id, state, now) {
 // prices are in the coin, its dollars under each (spec: the source's own figures; the dollars the market's, coin × the underlying). A
 // refusal is the page's sentence in place of the table.
 
-// a leg's price: in dollars (a US leg's) with its mark, in the coin or USDC as a bare number (the head says the unit); none is —
-const legPrice = (v, unit) => (v === null ? EM : unit === 'USD' ? price(v, 'USD') : Number(v).toLocaleString('en-US', { maximumFractionDigits: unit === 'USDC' || unit === 'USDT' ? 2 : 4 }));
+// a leg's price: in dollars (a US leg's, a USDC or USDT leg's) with its mark, in the coin as a bare number (the note says the unit);
+// none is —
+const legPrice = (v, unit) => (v === null ? EM : DOLLAR_UNITS.has(unit) ? price(v, 'USD') : Number(v).toLocaleString('en-US', { maximumFractionDigits: 4 }));
 const dollars = v => (v === null || v === undefined ? '' : price(v, 'USD'));
 // a leg's change: its percent where the source gives one, else its change in the leg's unit, signed; none is —
 function legChange(l) {
@@ -667,10 +668,12 @@ const compactCount = v => (v === null || v === undefined ? EM : compactNumber(v)
 function legCells(l, itm, coin) {
   const c = cls('r', itm && 'mk-itm');
   if (!l) return Array.from({ length: 7 }, () => `<td class="${c}"></td>`).join('');
-  const px = (v, usd) => `<td class="${c}">${esc(legPrice(v, l.unit))}${coin && usd ? `<span class="mk-usd">${esc(usd)}</span>` : ''}</td>`;
+  // a dollar-priced leg (USD, USDC, USDT) has no second dollar line
+  const under = coin && !DOLLAR_UNITS.has(l.unit);
+  const px = (v, usd) => `<td class="${c}">${esc(legPrice(v, l.unit))}${under && usd ? `<span class="mk-usd">${esc(usd)}</span>` : ''}</td>`;
   return px(l.bid, dollars(l.usd?.bid)) + px(l.ask, dollars(l.usd?.ask)) + px(l.last, dollars(l.usd?.last)) +
     `<td class="${c}">${legChange(l)}</td><td class="${c}">${esc(compactCount(l.volume))}</td><td class="${c}">${esc(compactCount(l.openInterest))}</td>` +
-    `<td class="${c}">${esc(l.iv === null ? '' : `${l.iv.toFixed(1)}%`)}</td>`;
+    `<td class="${c}">${esc(l.iv === null ? EM : `${l.iv.toFixed(1)}%`)}</td>`;
 }
 function chainTable(view) {
   const side = () => [th('markets.book.bid'), th('markets.book.ask'), th('markets.option.last'), th('markets.head.change'), th('markets.head.volume'), th('markets.option.oi'), th('markets.option.iv')]

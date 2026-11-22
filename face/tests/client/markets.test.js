@@ -1711,7 +1711,7 @@ test("a US share's page carries Options, to its chain's page; a coin's does not"
 test('a search lists the option rows the market found for it, each named Options, opening its chain', () => {
   let s = R.setMarketsQuery(R.setMarketsTab(R.nav(emptyState(), { screen: 'markets', id: null }), 'stocks'), 'nvda');
   s = R.resultsLoaded(s, { data: { ...fx('explore-all'), items: [itemOf(fx('explore-all'), 'stock:NVDA')] }, at: NOW });
-  s = R.optionHitsLoaded(s, { q: 'nvda', data: { ...usOptionsList(), items: usOptionsList().items.filter(i => i.base === 'NVDA') } });
+  s = R.optionHitsLoaded(s, { q: 'nvda', asset: 'stocks', data: { ...usOptionsList(), items: usOptionsList().items.filter(i => i.base === 'NVDA') } });
   const html = renderMarketsScreen(s, NOW);
   assert.deepEqual(rowIds(html), ['stock:NVDA', 'opt:NVDA']);
   assert.match(rowOf(html, 'opt:NVDA'), /data-action="openMarket" data-id="opt:NVDA"/);
@@ -1719,4 +1719,39 @@ test('a search lists the option rows the market found for it, each named Options
   assert.match(rowOf(html, 'opt:NVDA'), /<span class="mk-tag">Options<\/span>/);
   // hits for another query are not this one's
   assert.ok(!rowIds(renderMarketsScreen(R.setMarketsQuery(s, 'nvd'), NOW)).includes('opt:NVDA'));
+});
+
+test("an expiry picked whose read fails: the tabs and the venue switch stay, the strikes give way to the sentence, the old expiry can be picked again", () => {
+  const { s } = chainPage('opt:BTC', { list: cryptoOptionsList(), chain: btcChain() });
+  const picked = R.chainPicked(s, { underlying: 'BTC', expiry: '2026-11-28' });
+  const query = MV.chainQueryOf(picked.markets, 'opt:BTC');
+  const tabsOf = html => [...html.matchAll(/aria-pressed="(true|false)" data-action="optExpiry" data-value="([^"]+)"/g)].map(m => [m[2], m[1]]);
+  const asking = renderMarketsScreen(R.chainLoading(picked, { query }), NOW);
+  assert.equal(tabsOf(asking).length, 5, 'the tabs while Nov 28 is read');
+  assert.deepEqual(tabsOf(asking).find(([e]) => e === '2026-11-28'), ['2026-11-28', 'true']);
+  assert.match(asking, /data-action="optVenue"/);
+  assert.match(asking, /<p class="mk-empty">Loading…<\/p>/);
+  const failed = renderMarketsScreen(R.chainFailed(R.chainLoading(picked, { query }), { query, at: NOW, message: 'Deribit is paused for 15 minutes' }), NOW);
+  assert.equal(tabsOf(failed).length, 5, 'the tabs after it failed');
+  assert.match(failed, /data-action="optVenue"/);
+  assert.match(failed, /<p class="mk-empty">Deribit is paused for 15 minutes<\/p>/);
+  assert.doesNotMatch(failed, /mk-chain"/);
+  assert.match(failed, /<span class="mk-big">\$60,487\.12<\/span>/, "the price kept from the venue's last chain");
+  // Nov 23 picked again: its chain, kept, is drawn at once
+  const back = R.chainPicked(R.chainFailed(R.chainLoading(picked, { query }), { query, at: NOW, message: 'x' }), { underlying: 'BTC', expiry: '2026-11-23' });
+  assert.match(renderMarketsScreen(back, NOW), /mk-chain"/);
+});
+
+test('a USDC-settled leg is dollar-priced: no dollars under it, no coin note; a missing IV is —', () => {
+  const linear = btcChain();
+  linear.underlying = 'SOL';
+  for (const k of linear.strikes) for (const l of [k.call, k.put]) { l.unit = 'USDC'; l.bid *= 1000; l.ask *= 1000; }
+  linear.strikes[0].call.iv = undefined;
+  const { html } = chainPage('opt:SOL', { chain: linear });
+  const chain = html.match(/<table class="mk-t mk-chain">[\s\S]*?<\/table>/)[0];
+  assert.doesNotMatch(chain, /mk-usd/);
+  assert.doesNotMatch(html, /Prices in/);
+  assert.match(chain, /<td class="r mk-itm">\$40\.50<\/td>/, "in dollars, its mark");
+  const first = [...chain.matchAll(/<tr( class="mk-atm")?>(<td[\s\S]*?)<\/tr>/g)][0][2];
+  assert.equal(text([...first.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)][6][1]), '—');
 });

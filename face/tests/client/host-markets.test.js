@@ -132,7 +132,7 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
     explore: {}, located: {}, results: IDLE, accountQuotes: {}, candles: {}, compare: {}, watch: [], watchError: null, asked: {},
     watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
     rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null }, depth: {}, event: {},
-    chain: { status: 'idle', query: null, data: null, at: null, message: null }, chainPick: null, optionHits: { q: '', data: null },
+    chain: { status: 'idle', query: null, data: null, at: null, message: null }, chainPick: null, optionHits: { q: '', crypto: null, stocks: null },
   }, 'the slice the host starts from');
   // two quiet stocks past the fixture's twelve rows: Most traded puts them last, so the first twelve rows leave them out
   const quiet = (symbol, usd) => ({
@@ -1878,7 +1878,7 @@ test('a search asks q with no tab and no filter', async () => {
   r.markets.show(true);
   await settle();
   r.markets.search('600519');
-  assert.deepEqual(r.allReads.filter(p => query(p).q === '600519'), ['/data/market/explore?q=600519&form=option&limit=20', '/data/market/explore?q=600519&limit=200', '/data/account/connected/explore?q=600519&limit=200'],
+  assert.deepEqual(r.allReads.filter(p => query(p).q === '600519'), ['/data/market/explore?asset=crypto&form=option&q=600519&limit=20', '/data/market/explore?asset=stocks&region=us&form=option&q=600519&limit=20', '/data/market/explore?q=600519&limit=200', '/data/account/connected/explore?q=600519&limit=200'],
     "the search's option rows, then the search on both halves");
   assert.deepEqual([r.m().tab, r.m().form], ['indices', 'perp']);
   r.markets.close();
@@ -2383,14 +2383,16 @@ test("a chain's page reads its chain at once and every 15 s while on screen; lea
   r.fire(CHAIN_MS);
   assert.equal(chains().length, 2);
   r.markets.show(true);
+  assert.equal(chains().length, 3, 'back on screen: read at once');
+  await settle();
   r.fire(CHAIN_MS);
-  assert.equal(chains().length, 3);
+  assert.equal(chains().length, 4);
   await settle();
   // left: the chain and the picks go, and no beat reads it
   r.markets.page(null);
   assert.deepEqual([r.m().chain.status, r.m().chain.query, r.m().chainPick], ['idle', null, null]);
   r.fire(CHAIN_MS);
-  assert.equal(chains().length, 3);
+  assert.equal(chains().length, 4);
   r.markets.close();
 });
 
@@ -2448,19 +2450,22 @@ test("a US ticker's chain is Nasdaq's; a ticker it lists no options for lands th
 test('a search asks the market for its option rows too, and lists "NVDA options"', async () => {
   const r = rig({ tab: 'stocks', answer: path => {
     const q = query(path);
-    if (q.q === 'nvda' && q.form === 'option') return { ...usOptionsList(), items: usOptionsList().items.filter(i => i.base === 'NVDA') };
+    if (q.q === 'nvda' && q.form === 'option' && q.asset === 'stocks' && q.region === 'us') return { ...usOptionsList(), items: usOptionsList().items.filter(i => i.base === 'NVDA') };
+    if (q.q === 'nvda' && q.form === 'option' && q.asset === 'crypto') return { ...cryptoOptionsList(), items: [] };
+    if (q.form === 'option' && q.q !== undefined) throw new Error(`an option search with no asset: ${path}`);
     if (q.q === 'nvda') return { ...fx('explore-all'), items: [] };
     return path.startsWith('/data/market/explore?') ? { ok: true, items: [] } : undefined;
   } });
   r.markets.show(true);
   await settle();
   r.markets.search('nvda');
-  assert.ok(r.allReads.includes('/data/market/explore?q=nvda&form=option&limit=20'), 'one read of the option rows, the market alone');
+  assert.deepEqual(r.allReads.filter(p => p.includes('form=option')), ['/data/market/explore?asset=crypto&form=option&q=nvda&limit=20', '/data/market/explore?asset=stocks&region=us&form=option&q=nvda&limit=20'],
+    'one read an asset (Ruling R7), the market alone');
   assert.equal(r.allReads.some(p => p.startsWith('/data/account/connected/explore?') && p.includes('form=option')), false);
   await settle();
   assert.deepEqual(rowsOf(r.m(), NOW).map(x => [x.id, x.name]), [['opt:NVDA', 'NVDA options']]);
   // the search ended: its option rows go with it
   r.markets.search('');
-  assert.deepEqual(r.m().optionHits, { q: '', data: null });
+  assert.deepEqual(r.m().optionHits, { q: '', crypto: null, stocks: null });
   r.markets.close();
 });

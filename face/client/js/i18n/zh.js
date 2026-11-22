@@ -1459,7 +1459,7 @@ export const ZH = Object.freeze({
   'markets.option.puts': '看跌',
   'markets.option.strike': '行权价',
   'markets.option.last': '最新',
-  'markets.option.oi': '持仓量',
+  'markets.option.oi': '未平仓量',
   'markets.option.iv': '隐含波动率',
   'markets.option.atm': '平值',
   'markets.option.chain': '期权链',

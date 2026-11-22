@@ -78,8 +78,13 @@ export const reducers = {
     if (named(expiry) && expiry !== was.expiry) return mk(s, { chainPick: { ...was, expiry } });
     return s;
   },
-  // a search's option rows (explore?q=…&form=option, the market's), kept with the query they answer
-  optionHitsLoaded: (s, { q, data = null } = {}) => (typeof q === 'string' ? mk(s, { optionHits: { q, data } }) : s),
+  // a search's option rows (explore?asset=crypto|stocks&form=option&q=…, the market's: one read an asset), kept with the query they
+  // answer; another query's rows go
+  optionHitsLoaded(s, { q, asset, data = null } = {}) {
+    if (typeof q !== 'string' || !['crypto', 'stocks'].includes(asset)) return s;
+    const kept = s.markets.optionHits?.q === q ? s.markets.optionHits : { q, crypto: null, stocks: null };
+    return mk(s, { optionHits: { ...kept, [asset]: data } });
+  },
 
   // the A shares: the cn watchlist as stored; their quotes by cn id (the Account's, host/markets.js merges them) and the state of
   // that read; China's state as the Account says it (its ranking's status, or a refused quote's), the only setter of the
@@ -212,7 +217,7 @@ export const reducers = {
   setMarketsTab(s, tab) {
     // the tab already open, no search: as it is, its filters kept
     if (!MARKET_TABS.includes(tab) || (tab === s.markets.tab && blank(s.markets.q))) return s;
-    return mk(s, { ...onTab(tab), region: 'us', form: '', source: 'main', open: null, q: '', results: { ...IDLE }, optionHits: { q: '', data: null } });
+    return mk(s, { ...onTab(tab), region: 'us', form: '', source: 'main', open: null, q: '', results: { ...IDLE }, optionHits: { q: '', crypto: null, stocks: null } });
   },
   setMarketsRegion(s, id) {
     const m = s.markets;
@@ -259,6 +264,6 @@ export const reducers = {
     const m = s.markets;
     if (v === m.q) return s;
     // a search closes a filter's popover (the filters are not drawn while it shows), so Back to <tab> finds it closed
-    return blank(v) && !blank(m.q) ? mk(s, { q: v, results: { ...IDLE }, optionHits: { q: '', data: null } }) : mk(s, blank(v) ? { q: v } : { q: v, open: null });
+    return blank(v) && !blank(m.q) ? mk(s, { q: v, results: { ...IDLE }, optionHits: { q: '', crypto: null, stocks: null } }) : mk(s, blank(v) ? { q: v } : { q: v, open: null });
   },
 };
