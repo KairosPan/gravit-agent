@@ -16,7 +16,7 @@
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
-import { chgHtml, localPrice, localAmount } from '../market-fmt.js';
+import { chgHtml, localPrice, localAmount, computePrice } from '../market-fmt.js';
 import { fmtClock, fmtDate, rowTime, sameDay } from '../time.js';
 import { price, number } from '../wire/market-model.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
@@ -31,6 +31,7 @@ import {
   connectionWord, watchWord, basisWord, watchedOf,
   chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf, marketOriginOf, noSpotSourceWord,
   localPageOf, localWord, localDownWord, localRefreshWord, localStateWord, regionWord, optionPageOf, compactNumber, DOLLAR_UNITS,
+  computePageOf, computeCandleRanges,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
@@ -38,6 +39,7 @@ import { tradeableOf } from '../host/trade-view.js';
 import { isCnKey } from '../wire/china.js';
 import { isLocalKey } from '../wire/local.js';
 import { isOptionKey, OPTION_COINS } from '../wire/options.js';
+import { isComputeKey, ORNN } from '../wire/compute.js';
 import { markOf } from '../host/desk-view.js';
 import { t, th, thn, sayOf } from '../i18n/words.js';
 
@@ -78,6 +80,8 @@ export function priceWord(v, unit) {
   if (v === null || v === undefined) return EM;
   // a cash index's level: a number, no currency; a local share's price in its own currency (Hong Kong, Korea, Taiwan)
   if (unit === 'level') return localPrice(v, null);
+  // a compute index's settle: in dollars, three significant digits under $1
+  if (unit === 'compute') return computePrice(v);
   if (LOCAL_UNITS.has(unit)) return localPrice(v, unit.toUpperCase());
   return unit === 'cents' ? `${Number(v.toFixed(1))}¢` : price(v, unit === 'cny' ? 'CNY' : 'USD');
 }
@@ -130,18 +134,24 @@ const pointsWord = v => (v === null || v === undefined ? EM : `${v > 0 ? '+' : '
 
 // a row: its price, its move and its volume; a cash index's (on its region's own table) its level, its change in points and its
 // change in percent
-function row(r, markFor, starred, levels = false) {
+// an index's unit after its price (/GPU·hr, /M tokens)
+const perUnitHtml = r => (r.perUnit ? ` <span class="mk-unit">${esc(r.perUnit)}</span>` : ''); // words-order: a price, then its unit
+function row(r, markFor, starred, levels = false, settleHead = false) {
   const index = levels && r.kind === 'index';
-  const move = index ? `<span class="${tone(r.priced.change24h)}">${esc(pointsWord(r.priced.change24h))}</span>` : moveHtml(r.priced);
+  // an index's change is from the previous settle: said by its column's head on Compute's own table, else beside it
+  const basis = r.kind === 'computeIndex' && !settleHead ? ` <span class="mk-basis">${th('markets.compute.change')}</span>` : ''; // words-order: a change, then what it is against
+  const move = index ? `<span class="${tone(r.priced.change24h)}">${esc(pointsWord(r.priced.change24h))}</span>` : moveHtml(r.priced) + basis;
   const third = index ? moveHtml(r.priced) : esc(volumeCell(r.priced));
   return `<tr data-id="${esc(r.id)}">${starred ? `<td>${r.noStar ? '' : starCell(r)}</td>` : ''}<td class="mk-c-name">${nameCell(r, markFor(r.id))}</td>` +
-    `<td class="r">${esc(priceWord(r.price, r.priced.unit))}</td><td class="r mk-c-chg">${move}</td>` +
+    `<td class="r">${esc(priceWord(r.price, r.priced.unit))}${perUnitHtml(r)}</td><td class="r mk-c-chg">${move}</td>` +
     `<td class="r mk-c-vol">${third}</td><td class="r mk-c-st"><span class="mk-st">${esc(r.sourceWord)}</span></td></tr>`;
 }
 
 // the table's heads after Market: China's table says Today and Turnover where the Account's say 24h and Volume (spec 2026-10-31
 // §4); a region's own share table Change and Turnover; its cash indices' Level, Change and Change % (spec 2026-11-20 §5.6)
-function heads(local) {
+function heads(local, compute = false) {
+  // Compute's own table (Spot): its indices' change from the previous settle
+  if (compute) return [th('markets.head.price'), th('markets.compute.change'), th('markets.head.volume')];
   if (local?.venue === 'ix') return [th('markets.head.level'), th('markets.head.change'), th('markets.head.changePct')];
   if (local?.venue === 'china') return [th('markets.head.price'), th('markets.head.today'), th('markets.head.turnover')];
   if (local) return [th('markets.head.price'), th('markets.head.change'), th('markets.head.turnover')];
@@ -149,13 +159,15 @@ function heads(local) {
 }
 
 // a table of Watchlist rows alone draws no star column (G6), and no table draws a region's
-function table(rows, { local = null, markFor = () => null } = {}) {
+function table(rows, { local = null, markFor = () => null, compute = false } = {}) {
   const starred = rows.some(r => !r.noStar);
-  const [price, move, third] = heads(local);
+  // Compute's head says what an index's change is against when every row is an index
+  const settleHead = compute && rows.every(r => r.kind === 'computeIndex');
+  const [price, move, third] = heads(local, settleHead);
   const head = `<tr>${starred ? `<th scope="col"><span class="sr-only">${th('markets.head.watch')}</span></th>` : ''}<th scope="col" class="mk-c-name">${th('markets.head.market')}</th><th scope="col" class="r">${price}</th>` +
     `<th scope="col" class="r mk-c-chg">${move}</th><th scope="col" class="r mk-c-vol">${third}</th><th scope="col" class="r mk-c-st">${th('markets.head.source')}</th></tr>`;
   const levels = local?.venue === 'ix';
-  return `<section class="cardbox mk-tcard" aria-label="${th('nav.markets')}"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, markFor, starred, levels)).join('')}</tbody></table></div></section>`;
+  return `<section class="cardbox mk-tcard" aria-label="${th('nav.markets')}"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, markFor, starred, levels, settleHead)).join('')}</tbody></table></div></section>`;
 }
 
 // an options view's table (spec 2026-11-22 §5.4): a row an underlying — its price with its day change, its nearest expiry, its volume,
@@ -296,9 +308,11 @@ export function renderMarketsScreen(state, now) {
   const cnLine = cnSearch && !emptyBody.includes(`>${esc(cnSearch)}<`) ? cnSearch : '';
   const words = chinaWords + note(local ? '' : read.message) + note(cnLine) + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
   const body = rows.length
-    ? view.options ? optionTable(rows) + optionNotes(view) : table(rows, { local, markFor: id => markOf(state.desk?.data, id) })
-    // an options view with no rows still says the market's notes (a list read in part, each source's figures)
-    : emptyBody + (view.options ? view.notes.map(note).join('') + (view.stale ? note(t('markets.asOfLast')) : '') : '');
+    ? view.options ? optionTable(rows) + optionNotes(view)
+      // Compute: its rows, then the market's notes under them (what its indices are, a source read in part), as an options view's
+      : table(rows, { local, markFor: id => markOf(state.desk?.data, id), compute: view.compute }) + (view.compute ? optionNotes(view) : '')
+    // an options view or Compute with no rows still says the market's notes (a list read in part, each source's figures)
+    : emptyBody + (view.options || view.compute ? view.notes.map(note).join('') + (view.stale ? note(t('markets.asOfLast')) : '') : '');
   return screenHtml(m, tabsHtml(tabs, m.tab), `${bar}${words}${body}`);
 }
 
@@ -352,6 +366,8 @@ function partBody(r, lines, none, unavailable) {
 export function marketPage(id, state, now) {
   // an option chain's page: its strikes at the venue and expiry picked
   if (isOptionKey(id)) return optionPage(id, state);
+  // an index's page: its settles and its quote at the market
+  if (isComputeKey(id)) return computePage(id, state, now);
   if (!isCnKey(id) && isAccountKey(id)) {
     const view = pageOf(state.markets, state.account, id, now);
     return view ? accountPage(id, view, state, now) : '';
@@ -706,4 +722,40 @@ function optionPage(id, state) {
   return `<main class="main mkts mk-page"><a id="page-back" class="back-link page-back" href="#/markets">${th('markets.back')}</a><div class="mk-pg">` +
     `<header class="mk-pg-head">${who}${keys}</header><div class="mk-pg-top">${top}</div>` +
     section(th('markets.option.chain'), `<div class="mk-chain-picks">${venue}${tabs}</div>${body}`) + '</div></main>';
+}
+
+// ---- an index's page (spec 2026-11-22-markets-compute §5): Ornn's GPU rental or token price index — the latest settle with its unit and the
+// change from the previous settle, the source line, the facts (the settle and its date, the previous settle, the 30-day high and low, a
+// GPU's current value and its time), the market's notes, the daily settles over 1M or 3M; Hand to gravit, no star, no ticket
+
+// a fact in its words: a price in dollars, with its settle's date or its value's time after it; none is —
+function computeFactWord(f, now) {
+  if (f.value === null || f.value === undefined) return EM;
+  const at = f.at ? when(f.at, now) : '';
+  return [computePrice(f.value), f.date ?? '', at].filter(Boolean).join(' · '); // words-order: a price, then its date or time, under the visual separator
+}
+function computeHistory(view) {
+  const h = view.history;
+  // a daily settle's date as Ornn stamps it (UTC), never the operator's clock
+  const svg = h.current ? candlesSvg(h.candles, { zone: 'UTC', range: view.range, fmt: computePrice }) : '';
+  const failed = h.status === 'error' ? note(h.message || t('markets.history.unavailable')) : '';
+  const drawnNow = h.current ? (svg ? svg + note(h.note) : note(t('markets.history.none'))) : h.status === 'loading' ? note(t('common.loading')) : '';
+  return failed + drawnNow;
+}
+function computePage(id, state, now) {
+  const view = computePageOf(state.markets, id);
+  if (!view) return '';
+  const sub = [view.kind, ORNN].join(' · '); // words-order: an index's kind and its source under the visual separator
+  const who = `<div class="mk-who">${mkAv(view.name.split(' ')[0], 'lg')}<div><h1 class="head-title">${esc(view.name)}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
+  const moved = view.changePct !== null && view.changePct !== undefined;
+  // the quote not read: the market's sentence when it refused before any answer, else nothing until it answers
+  const down = view.quote.status === 'error' ? note(view.quote.message || t('markets.compute.unavailable')) : '';
+  const top = `<div class="mk-d-px"><span class="mk-big">${esc(computePrice(view.price))}</span><span class="mk-unit">${esc(view.perUnit)}</span>` +
+    `${moved ? `${chgHtml(view.changePct)}<span class="mk-basis">${th('markets.compute.change')}</span>` : ''}</div>` +
+    `${view.sourceLine ? `<p class="mk-asof">${esc(view.sourceLine)}</p>` : ''}${down}${view.notes.map(note).join('')}${planHtml(markOf(state.desk?.data, id))}` +
+    (view.facts.length ? `<dl class="mk-facts">${view.facts.map(f => `<div><dt>${esc(f.label)}</dt><dd>${esc(computeFactWord(f, now))}</dd></div>`).join('')}</dl>` : '');
+  const left = [section(th('markets.history.title'), computeHistory(view), seg(computeCandleRanges(), view.range, 'setRange', { 'data-id': id }))];
+  const keys = `<div class="mk-d-acts"><button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button></div>`; // words-order: an icon, then its word
+  const about = aboutHtml(state.conversations, { name: view.name }, now);
+  return pageHtml(who, keys, top, left, about.length ? [section(th('markets.about'), feed(about))] : []);
 }

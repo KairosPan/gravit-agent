@@ -1128,6 +1128,9 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .mk-d-px { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .mk-big { font-size: calc(28px * var(--fs)); font-weight: 800; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .mk-basis { color: var(--dim); font-size: calc(13px * var(--fs)); }
+/* a compute index's unit after its price (/GPU·hr, /M tokens): on its row and, set against the big price, on its page */
+.mk-unit { color: var(--dim); font-size: calc(12px * var(--fs)); white-space: nowrap; }
+.mk-d-px .mk-unit { margin-left: -6px; font-size: calc(15px * var(--fs)); }
 /* an event's outcomes under its price, a chip each: Yes 62¢ · No 38¢ */
 .mk-outs { display: flex; gap: 8px; flex-wrap: wrap; }
 .mk-out { padding: 4px 12px; border-radius: var(--radius-pill); background: var(--surface-2); font-size: calc(14px * var(--fs)); font-weight: 600; font-variant-numeric: tabular-nums; }

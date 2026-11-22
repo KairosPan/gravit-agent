@@ -30,10 +30,11 @@ const REGISTRY = { ok: true, value: [
 ] };
 
 test('the fixed lists: the tabs, the regions, the forms, the main sources and what each source carries', () => {
-  assert.deepEqual(MARKET_TABS, ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'preipo', 'macro']);
+  assert.deepEqual(MARKET_TABS, ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'compute', 'fx', 'preipo', 'macro']);
   assert.deepEqual(REGIONS, { stocks: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in'], indices: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in', 'eu'], later: { stocks: ['eu'] } });
   assert.deepEqual(FORMS, { live: ['spot', 'perp', 'token', 'event', 'option'], later: [] });
-  assert.deepEqual(Object.keys(TAB_SOURCES), ['crypto', 'stocks:us', 'stocks:cn', 'indices', 'commodities', 'fx', 'preipo', 'macro']);
+  assert.deepEqual(Object.keys(TAB_SOURCES), ['crypto', 'stocks:us', 'stocks:cn', 'indices', 'commodities', 'compute', 'fx', 'preipo', 'macro']);
+  assert.deepEqual(TAB_SOURCES.compute, { main: ['kalshi', 'polymarket'], also: ['polymarket-us'] });
   assert.deepEqual(TAB_SOURCES.preipo.main, ['hyperliquid-preipo', 'trade-xyz']);
   assert.deepEqual(TAB_SOURCES['stocks:cn'], { main: ['china'], also: [] });
   // every source a tab names says what it carries
@@ -458,7 +459,7 @@ test('Options: pickable on Crypto and Stocks (US), none here elsewhere; its read
   const opt = (tab, ...steps) => on(tab, ...steps, ['setMarketsForm', 'option']);
   const entry = (s, id) => filtersOf(s.markets).form.options.find(o => o.id === id);
   for (const tab of ['crypto', 'stocks']) assert.deepEqual([entry(on(tab), 'option').disabled, entry(on(tab), 'option').note], [false, null], tab);
-  for (const tab of ['indices', 'commodities', 'fx', 'preipo', 'macro']) assert.deepEqual([entry(on(tab), 'option').disabled, entry(on(tab), 'option').note], [true, t('markets.filter.noneHere')], tab);
+  for (const tab of ['indices', 'commodities', 'compute', 'fx', 'preipo', 'macro']) assert.deepEqual([entry(on(tab), 'option').disabled, entry(on(tab), 'option').note], [true, t('markets.filter.noneHere')], tab);
   assert.equal(opt('indices').markets.form, '', 'a pick on Indices is refused');
   assert.equal(entry(on('stocks', ['setMarketsRegion', 'hk']), 'option'), undefined, 'a non-US region lists Spot and Perp alone');
   assert.deepEqual(formsInView(on('stocks', ['setMarketsRegion', 'hk']).markets), ['spot', 'perp']);
@@ -484,4 +485,71 @@ test('Options: pickable on Crypto and Stocks (US), none here elsewhere; its read
   assert.deepEqual(filtersOf(opt('crypto').markets).chips, [{ kind: 'form', label: t('markets.form.option') }]);
   // leaving Options for another Form works from a fixed Source too
   assert.equal(R.setMarketsForm(R.setMarketsSource(opt('crypto'), 'options'), 'perp').markets.form, 'perp');
+});
+
+// ── Compute (spec 2026-11-22-markets-compute §5): Ornn's indices on Spot, the events on them on Event ──
+
+test('Compute: after Commodities in both tables; Spot and Event live, every other form none here', async () => {
+  const { ZH } = await import('../../client/js/i18n/zh.js');
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const labels = () => tableOf(markets().markets, NOW).tabs.map(x => x.label);
+  assert.deepEqual(labels().slice(4, 6), ['Commodities', 'Compute']);
+  assert.deepEqual(withTable(ZH, labels).slice(4, 6), [ZH['markets.tab.commodities'], '算力']);
+  const options = filtersOf(on('compute').markets).form.options.map(o => [o.id, o.disabled, o.note]);
+  assert.deepEqual(options, [['', false, null], ['spot', false, null], ['perp', true, t('markets.filter.noneHere')], ['token', true, t('markets.filter.noneHere')],
+    ['event', false, null], ['option', true, t('markets.filter.noneHere')]]);
+  assert.deepEqual(formsInView(on('compute').markets), ['spot', 'event']);
+  assert.equal(on('compute', ['setMarketsForm', 'perp']).markets.form, '', 'a form Compute lacks is refused');
+  assert.equal(on('compute', ['setMarketsForm', 'event']).markets.source, 'main', 'Event is a main form: no switch to All sources');
+});
+
+test('Compute queries: Spot names no source and never Closing soonest; Event the event sources; no form the both, no source', () => {
+  const q = (...steps) => decoded(exploreQueryOf(on('compute', ...steps).markets));
+  assert.equal(exploreQueryOf(on('compute').markets), 'asset=compute&sort=volume&limit=200');
+  assert.equal(exploreQueryOf(on('compute', ['setMarketsForm', 'spot']).markets), 'asset=compute&sort=volume&limit=200&form=spot');
+  assert.deepEqual(q(['setMarketsForm', 'event']), { asset: 'compute', sort: 'volume', limit: '200', form: 'event', source: 'kalshi,polymarket' });
+  assert.deepEqual(q(['setMarketsForm', 'event'], ['setMarketsSource', 'all']).source, 'kalshi,polymarket,polymarket-us');
+  // Closing soonest, kept from Event: asked by volume on Spot and with no form (the market refuses it beside spot rows); movers kept
+  const closing = ['setMarketsSort', 'closing'];
+  assert.equal(q(['setMarketsForm', 'event'], closing).sort, 'closing');
+  assert.equal(q(['setMarketsForm', 'event'], closing, ['setMarketsForm', 'spot']).sort, 'volume');
+  assert.equal(q(['setMarketsForm', 'event'], closing, ['setMarketsForm', '']).sort, 'volume');
+  assert.equal(q(['setMarketsSort', 'movers'], ['setMarketsForm', 'spot']).sort, 'movers');
+  // the connected half: none on Spot or with no form (no connected venue lists an index); Event's as Macro's
+  assert.equal(connectedQueryOf(on('compute').markets), null);
+  assert.equal(connectedQueryOf(on('compute', ['setMarketsForm', 'spot']).markets), null);
+  assert.equal(connectedQueryOf(on('compute', ['setMarketsForm', 'event']).markets), exploreQueryOf(on('compute', ['setMarketsForm', 'event']).markets));
+  assert.equal(onLocal(on('compute', ['setMarketsForm', 'spot']).markets), null);
+});
+
+test('Compute Source: Spot one fixed entry, Ornn; Event the event sources; a family left behind on Spot', () => {
+  const sourced = (...steps) => filtersOf(on('compute', ...steps).markets).source;
+  assert.deepEqual(familiesOf(on('compute', ['setMarketsForm', 'spot']).markets).map(f => f.label), ['Ornn']);
+  assert.equal(sourced(['setMarketsForm', 'spot']).label, 'Main · Ornn');
+  assert.deepEqual(familiesOf(on('compute').markets).map(f => f.label), [t('markets.compute.sources')]);
+  const ev = R.marketSourcesLoaded(on('compute', ['setMarketsForm', 'event']), { data: REGISTRY, at: NOW });
+  assert.deepEqual(familiesOf(ev.markets).map(f => f.label), ['Kalshi', 'Polymarket', 'polymarket-us']);
+  const kalshi = R.setMarketsSource(ev, 'kalshi');
+  assert.equal(kalshi.markets.source, 'kalshi');
+  assert.equal(decoded(exploreQueryOf(kalshi.markets)).source, 'kalshi');
+  assert.deepEqual([R.setMarketsForm(kalshi, 'spot').markets.source, R.setMarketsForm(kalshi, '').markets.source], ['main', 'main'], 'the fixed Source resets a family');
+});
+
+test('Compute rows: Spot the indices in the market\'s order, two sorts, no star; no form the spot rows then the events', async () => {
+  const { computeSpot, computeAll, computeEvents } = await import('./helpers/compute.js');
+  const spot = landed(on('compute', ['setMarketsForm', 'spot']), computeSpot());
+  const view = tableOf(spot.markets, NOW);
+  assert.deepEqual(view.rows.slice(0, 4).map(r => [r.id, r.kind, r.name, r.price, r.noStar, r.perUnit]), [
+    ['cmp:b300', 'computeIndex', 'B300', 11.51, true, '/GPU·hr'], ['cmp:b200', 'computeIndex', 'B200', 9.09, true, '/GPU·hr'],
+    ['cmp:h200', 'computeIndex', 'H200', 6, true, '/GPU·hr'], ['cmp:h100', 'computeIndex', 'H100 SXM', 2.89, true, '/GPU·hr']]);
+  assert.equal(view.rows.at(-1).perUnit, '/M tokens');
+  assert.deepEqual(view.sorts.map(x => x.id), ['volume', 'movers'], 'never Closing soonest beside spot rows');
+  assert.deepEqual(view.rows.find(r => r.id === 'cmp:h100').priced, { price: 2.89, unit: 'compute', changePct: -1.03, change24h: -0.03, volume: null, volumeUnit: 'none', implied: null });
+  const all = tableOf(landed(on('compute'), computeAll()).markets, NOW);
+  assert.equal(all.rows.at(-1).kind, 'event', 'the events after the indices, whatever their volume');
+  assert.equal(all.rows.filter(r => r.kind === 'computeIndex').length, 9);
+  assert.deepEqual(all.sorts.map(x => x.id), ['volume', 'movers']);
+  const ev = tableOf(landed(on('compute', ['setMarketsForm', 'event']), computeEvents()).markets, NOW);
+  assert.deepEqual(ev.rows.map(r => [r.kind, r.priced.unit]), [['event', 'cents']]);
+  assert.deepEqual(ev.sorts.map(x => x.id), ['volume', 'movers', 'closing'], 'Event offers Closing soonest');
 });

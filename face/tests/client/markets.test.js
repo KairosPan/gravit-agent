@@ -125,11 +125,11 @@ test('the table: the tabs, rows with source words, cents for an event, contracts
   assert.match(html, /^<main class="main mkts">/);
   assert.match(html, /<h1 class="head-title">Markets<\/h1>/);
   assert.match(html, /id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery" value=""/);
-  // the tabs: the Watchlist's star, then the seven classes, Crypto pressed, no counts
+  // the tabs: the Watchlist's star, then the eight classes, Crypto pressed, no counts
   const tabs = [...html.matchAll(/<button type="button" class="mk-tab" data-action="mkTab" data-value="([^"]+)" aria-pressed="(true|false)">([^<]+)<\/button>/g)].map(m => [m[1], m[2], m[3]]);
   assert.deepEqual(tabs, [
     ['crypto', 'true', 'Crypto'], ['stocks', 'false', 'Stocks'], ['indices', 'false', 'Indices'], ['commodities', 'false', 'Commodities'],
-    ['fx', 'false', 'FX'], ['preipo', 'false', 'Pre-IPO'], ['macro', 'false', 'Macro &amp; events'],
+    ['compute', 'false', 'Compute'], ['fx', 'false', 'FX'], ['preipo', 'false', 'Pre-IPO'], ['macro', 'false', 'Macro &amp; events'],
   ]);
   assert.match(html, /<th scope="col" class="r">Price<\/th><th scope="col" class="r mk-c-chg">24h<\/th><th scope="col" class="r mk-c-vol">Volume<\/th><th scope="col" class="r mk-c-st">Source<\/th>/);
   // every row of the tab, each by its key, in the view's order: Most traded, the events' smaller volumes last
@@ -714,15 +714,15 @@ test("a search closes an open filter's popover, so Back to <tab> finds it closed
   assert.equal(R.setMarketsQuery(s, '  ').markets.open, 'source');
 });
 
-test('the tab row: the star first with its word for a screen reader, then the seven classes, no counts', () => {
+test('the tab row: the star first with its word for a screen reader, then the eight classes, no counts', () => {
   const html = screen({ tab: 'watchlist' }).html;
   const row = html.match(/<div class="mk-tabs" role="group" aria-label="Markets">([\s\S]*?)<\/div>/)[1];
   const tabs = [...row.matchAll(/data-value="([^"]+)" aria-pressed="(true|false)"/g)].map(m => [m[1], m[2]]);
-  assert.deepEqual(tabs, [['watchlist', 'true'], ['crypto', 'false'], ['stocks', 'false'], ['indices', 'false'], ['commodities', 'false'], ['fx', 'false'], ['preipo', 'false'], ['macro', 'false']]);
+  assert.deepEqual(tabs, [['watchlist', 'true'], ['crypto', 'false'], ['stocks', 'false'], ['indices', 'false'], ['commodities', 'false'], ['compute', 'false'], ['fx', 'false'], ['preipo', 'false'], ['macro', 'false']]);
   // the star: its icon and its word for a screen reader alone, no word on screen
   assert.match(row, /^<button type="button" class="mk-tab mk-tab-star" data-action="mkTab" data-value="watchlist" aria-pressed="true" title="Watchlist"><svg [^>]*>[\s\S]*?<\/svg><span class="sr-only">Watchlist<\/span><\/button>/);
   const words = [...row.matchAll(/class="mk-tab" data-action="mkTab" data-value="[^"]+" aria-pressed="(?:true|false)">([^<]+)<\/button>/g)].map(m => m[1]);
-  assert.deepEqual(words, ['Crypto', 'Stocks', 'Indices', 'Commodities', 'FX', 'Pre-IPO', 'Macro &amp; events']);
+  assert.deepEqual(words, ['Crypto', 'Stocks', 'Indices', 'Commodities', 'Compute', 'FX', 'Pre-IPO', 'Macro &amp; events']);
   assert.doesNotMatch(text(row), /\d/, 'no count after a name');
   // another tab open: the star not pressed (the CSS fills it while pressed)
   assert.match(screen().html, /class="mk-tab mk-tab-star" data-action="mkTab" data-value="watchlist" aria-pressed="false"/);
@@ -1130,7 +1130,7 @@ test('Markets lists no Desk tab, and setMarketsTab with desk leaves the tab as i
   const { s } = screen({ tab: 'watchlist' });
   const html = renderMarketsScreen(R.deskLoaded(s, { data: deskStatus(), at: DESK_NOW }), DESK_NOW);
   const tabs = [...html.matchAll(/data-action="mkTab" data-value="([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(tabs, ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'preipo', 'macro']);
+  assert.deepEqual(tabs, ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'compute', 'fx', 'preipo', 'macro']);
   assert.doesNotMatch(html, /data-action="deskPause"/, 'no Pause on Markets');
   assert.equal(R.setMarketsTab(s, 'desk'), s, 'desk is no tab of Markets');
   assert.equal(R.setMarketsTab(s, 'desk').markets.tab, 'watchlist');
@@ -1780,4 +1780,100 @@ test('a USDC-settled leg is dollar-priced: no dollars under it, no coin note; a 
   assert.match(chain, /<td class="r mk-itm">\$40\.50<\/td>/, "in dollars, its mark");
   const first = [...chain.matchAll(/<tr( class="mk-atm")?>(<td[\s\S]*?)<\/tr>/g)][0][2];
   assert.equal(text([...first.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)][6][1]), '—');
+});
+
+// ── Compute (spec 2026-11-22-markets-compute §5): Ornn's indices, each price with its unit, and a page per index ──
+
+const { computeSpot, computeAll, computeEvents, h100Quote, deepseekQuote, h100History } = await import('./helpers/compute.js');
+const computeOn = (form, data) => {
+  let s = R.setMarketsTab(R.nav(emptyState(), { screen: 'markets', id: null }), 'compute');
+  if (form) s = R.setMarketsForm(s, form);
+  return data ? R.exploreLoaded(s, { tab: 'compute', data, at: NOW, query: exploreQueryOf(s.markets) }) : s;
+};
+
+test('Compute › Spot: each row its price and unit — "H100 SXM $2.89 /GPU·hr", "DeepSeek tokens $0.0338 /M tokens" — no star', () => {
+  const html = renderMarketsScreen(computeOn('spot', computeSpot()), NOW);
+  const said = id => { const [name, px] = cells(rowOf(html, id)); return `${name.match(/<b>([^<]*)<\/b>/)?.[1] ?? ''} ${text(px)}`; };
+  assert.equal(said('cmp:h100'), 'H100 SXM $2.89 /GPU·hr');
+  assert.equal(said('cmp:tok-deepseek'), 'DeepSeek tokens $0.0338 /M tokens');
+  assert.equal(text(cells(rowOf(html, 'cmp:tok-anthropic'))[1]), '$0.766 /M tokens');
+  assert.doesNotMatch(html, /mk-star|toggleWatch/, 'no watchlist star on an index');
+  assert.match(html, /data-action="openMarket" data-id="cmp:h100"/);
+  assert.match(html, /<th scope="col" class="r mk-c-chg">vs previous settle<\/th>/, 'the change is against the previous settle');
+  assert.equal(text(cells(rowOf(html, 'cmp:h100'))[2]), '▼down 1.03%');
+  assert.equal(text(cells(rowOf(html, 'cmp:h100'))[4]), 'Ornn · settle 2026-11-21');
+  assert.match(html, /<p class="mk-note">Compute: Ornn/, "the market's note under the rows");
+  assert.doesNotMatch(html, /data-value="closing"/);
+  // zh: the units in Chinese
+  const zh = withTable(ZH, () => renderMarketsScreen(computeOn('spot', computeSpot()), NOW));
+  assert.equal(text(cells(rowOf(zh, 'cmp:h100'))[1]), '$2.89 每 GPU·小时');
+  assert.equal(text(cells(rowOf(zh, 'cmp:tok-deepseek'))[1]), '$0.0338 每百万 token');
+});
+
+test('Compute with no form: the indices then a compute event; under Event the event row in cents', () => {
+  const html = renderMarketsScreen(computeOn('', computeAll()), NOW);
+  const ids = rowIds(html);
+  assert.equal(ids.length, 10);
+  assert.match(ids.at(-1), /^pm:0x/);
+  assert.match(rowOf(html, 'cmp:h100'), /<span class="mk-basis">vs previous settle<\/span>/, 'beside the events, each index says what its change is against');
+  const ev = renderMarketsScreen(computeOn('event', computeEvents()), NOW);
+  const [eventId] = rowIds(ev);
+  assert.match(text(rowOf(ev, eventId)), /Will the Ornn H100 Index hit \$2\.25/);
+  assert.ok(cells(rowOf(ev, eventId)).some(c => c === '14¢'), 'its price in cents');
+});
+
+const computePageState = (id, { quote = null, quoteFailed = null, candles = null, rows = true } = {}) => {
+  let s = R.nav(rows ? computeOn('spot', computeSpot()) : computeOn('spot'), { screen: 'markets', id });
+  if (quote) s = R.computeQuoteLoaded(s, { id, data: quote, at: NOW });
+  if (quoteFailed) s = R.computeQuoteFailed(R.computeQuoteLoading(s, { id }), { id, at: NOW, message: quoteFailed });
+  if (candles) s = R.candlesLoaded(R.candlesLoading(s, { id, range: candles.range }), { id, range: candles.range, data: candles, at: NOW });
+  return s;
+};
+
+test("an index's page: its settle with its unit and the change vs the previous settle, the facts, the GPU's current value, 1M and 3M", async () => {
+  const { computeQuoteOf } = await import('../../client/js/wire/compute.js');
+  const route = R.nav(emptyState(), { screen: 'markets', id: 'cmp:h100' }).route;
+  assert.deepEqual(route, { screen: 'markets', id: 'cmp:h100' }, 'an index key opens its page as it is');
+  const s = computePageState('cmp:h100', { quote: computeQuoteOf(h100Quote()), candles: h100History('3M') });
+  const html = renderMarketsScreen(s, NOW);
+  assert.equal(marketPage('cmp:h100', s, NOW), html);
+  assert.match(html, /<h1 class="head-title">H100 SXM<\/h1><span class="mk-sub">GPU rental index · Ornn<\/span>/);
+  assert.match(html, /<span class="mk-big">\$2\.89<\/span><span class="mk-unit">\/GPU·hr<\/span>/);
+  assert.match(html, /<span class="mk-basis">vs previous settle<\/span>/);
+  assert.match(html, /<p class="mk-asof">Ornn · settle 2026-11-21<\/p>/);
+  assert.deepEqual(factsOf(html).slice(0, 4), [['Latest settle', '$2.89 · 2026-11-21'], ['Previous settle', '$2.92'], ['30-day high', '$2.95'], ['30-day low', '$2.81']]);
+  assert.equal(factsOf(html)[4][0], 'Current value');
+  assert.match(factsOf(html)[4][1], /^\$2\.69 · /, 'the current value with its time');
+  assert.match(html, /class="mk-chart"/);
+  assert.match(html, /<p class="mk-note">Ornn&#39;s free history is three months<\/p>|<p class="mk-note">Ornn's free history is three months<\/p>/);
+  assert.match(html, /data-value="1M"/);
+  assert.match(html, /data-value="3M"/);
+  assert.doesNotMatch(html, /data-value="1D"|data-value="1Y"/, 'Ornn gives three months of daily settles');
+  assert.match(html, /data-action="handToGravit" data-id="cmp:h100"/);
+  assert.doesNotMatch(html, /toggleWatch|openTicket/);
+  // zh
+  const zh = withTable(ZH, () => renderMarketsScreen(s, NOW));
+  assert.match(zh, /<span class="mk-unit">每 GPU·小时<\/span>/);
+  assert.match(zh, /<p class="mk-asof">Ornn · 结算 2026-11-21<\/p>/);
+});
+
+test("the current value not answering: its sentence, the settle facts still drawn (Review Focus 5); a token's page has none", async () => {
+  const { computeQuoteOf } = await import('../../client/js/wire/compute.js');
+  const html = renderMarketsScreen(computePageState('cmp:h100', { quote: computeQuoteOf(h100Quote({ current: null })) }), NOW);
+  assert.match(html, /<p class="mk-note">Ornn&#39;s current value did not answer: the latest settle is shown<\/p>|<p class="mk-note">Ornn's current value did not answer: the latest settle is shown<\/p>/);
+  assert.deepEqual(factsOf(html), [['Latest settle', '$2.89 · 2026-11-21'], ['Previous settle', '$2.92'], ['30-day high', '$2.95'], ['30-day low', '$2.81']]);
+  const tok = renderMarketsScreen(computePageState('cmp:tok-deepseek', { quote: computeQuoteOf(deepseekQuote()) }), NOW);
+  assert.match(tok, /<span class="mk-big">\$0\.0338<\/span><span class="mk-unit">\/M tokens<\/span>/);
+  assert.match(tok, /<span class="mk-sub">Token price index · Ornn<\/span>/);
+  assert.deepEqual(factsOf(tok).map(([k]) => k), ['Latest settle', 'Previous settle', '30-day high', '30-day low']);
+  assert.doesNotMatch(tok, /Current value|did not answer|not answering/);
+  // reached cold: the row's price before the quote; with no row, its id
+  const cold = renderMarketsScreen(computePageState('cmp:h100'), NOW);
+  assert.match(cold, /<h1 class="head-title">H100 SXM<\/h1>/);
+  assert.match(cold, /<span class="mk-big">\$2\.89<\/span>/);
+  const none = renderMarketsScreen(computePageState('cmp:b300', { rows: false }), NOW);
+  assert.match(none, /<h1 class="head-title">B300<\/h1>/);
+  // the quote refused before any answer: the market's sentence
+  const refused = renderMarketsScreen(computePageState('cmp:h100', { quoteFailed: 'Ornn is not answering: its indices cannot be read now' }), NOW);
+  assert.match(refused, /<p class="mk-note">Ornn is not answering: its indices cannot be read now<\/p>/);
 });

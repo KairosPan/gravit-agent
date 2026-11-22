@@ -59,6 +59,7 @@ import { isAccountKey, handWordsOf, watchedOf, chainPickOf } from './host/market
 import { isCnKey } from './wire/china.js';
 import { isLocalKey } from './wire/local.js';
 import { isOptionKey, optionKeyOf } from './wire/options.js';
+import { isComputeKey } from './wire/compute.js';
 import { makeEditor } from './composer/dom.js';
 import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt } from './composer/draft.js';
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
@@ -1092,7 +1093,8 @@ export function boot(win, host = {}) {
     // an A share's page (a cn: id) too: its history at the Account's china venue, and nothing held or stated read for it; and a
     // Hong Kong, Korean or Taiwanese share's or a cash index's: its history and its price at the market, nothing else
     // and an option chain's (opt:<U>): its chain at the venue and expiry picked, read again on its beat
-    const pageId = route => (route?.screen === 'markets' && (isLocalKey(route.id) || isAccountKey(route.id) || isOptionKey(route.id)) ? route.id : null);
+    // and an index's (cmp:<id>): its settles and its quote at the market, the quote read again every minute
+    const pageId = route => (route?.screen === 'markets' && (isLocalKey(route.id) || isAccountKey(route.id) || isOptionKey(route.id) || isComputeKey(route.id)) ? route.id : null);
     if (pageId(r) !== pageId(was)) {
       markets.page(pageId(r));
       if (!isLocalKey(pageId(r)) && isAccountKey(pageId(r))) { void account.loadHoldings(); void account.loadStatement(); }

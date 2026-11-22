@@ -3,10 +3,11 @@
 // its base's compare rows, the Account keys starred and what each old us:/crypto: star was found as; the A shares' quotes, their
 // search hits' prices and China's state, the Account's too — and the screen's own view of it: the tab, its Region, Form and
 // Source and the popover open, the sort, the query, a page's range
-import { ACCOUNT_SORT_IDS, CANDLE_RANGES, MARKET_TABS, REGIONS, onLocal, isAccountKey, formsInView, formsOfSource, mainFormsOf, isSourceOf } from '../host/market-view.js';
+import { ACCOUNT_SORT_IDS, CANDLE_RANGES, MARKET_TABS, REGIONS, onLocal, isAccountKey, formsInView, formsOfSource, mainFormsOf, isSourceOf, computeFixed } from '../host/market-view.js';
 import { number } from '../wire/market-model.js';
 import { isCnKey } from '../wire/china.js';
 import { LOCAL_VENUES, localProviderOf, venueOfMarket, isLocalKey } from '../wire/local.js';
+import { isComputeKey } from '../wire/compute.js';
 
 const mk = (s, patch) => ({ ...s, markets: { ...s.markets, ...patch } });
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -20,7 +21,7 @@ const read = (s, patch) => mk(s, { results: { ...s.markets.results, ...patch } }
 const EXPLORED = new Set(MARKET_TABS);
 // a market's history: an A share's (cn: and its six digits, never another cn: id) or another Account key's, at one of the
 // candle ranges
-const charted = (id, range) => (isLocalKey(id) || (isAccountKey(id) && !String(id).startsWith('cn:'))) && CANDLE_RANGES.includes(range);
+const charted = (id, range) => (isLocalKey(id) || isComputeKey(id) || (isAccountKey(id) && !String(id).startsWith('cn:'))) && CANDLE_RANGES.includes(range);
 // a local ranking's two sorts
 const RANKED = new Set(['volume', 'movers']);
 const rank = (s, patch) => mk(s, { rank: { ...s.markets.rank, ...patch } });
@@ -78,6 +79,11 @@ export const reducers = {
     if (named(expiry) && expiry !== was.expiry) return mk(s, { chainPick: { ...was, expiry } });
     return s;
   },
+  // an index's quote (spec 2026-11-22-markets-compute §5, wire/compute.js computeQuoteOf's), by its key: a failed read keeps the quote it
+  // had, with the market's sentence when it refused (`message`, else null)
+  computeQuoteLoading: (s, { id } = {}) => (isComputeKey(id) ? keyed(s, 'computeQuotes', id, { status: 'loading' }) : s),
+  computeQuoteLoaded: (s, { id, data, at = null } = {}) => (isComputeKey(id) && isRecord(data) ? keyed(s, 'computeQuotes', id, { status: 'ready', data, at, message: null }) : s),
+  computeQuoteFailed: (s, { id, at = null, message = null } = {}) => (isComputeKey(id) ? keyed(s, 'computeQuotes', id, { status: 'error', at, message }) : s),
   // a search's option rows (explore?asset=crypto|stocks&form=option&q=…, the market's: one read an asset), kept with the query they
   // answer; another query's rows go
   optionHitsLoaded(s, { q, asset, data = null } = {}) {
@@ -232,7 +238,8 @@ export const reducers = {
     const was = m.source === 'options' ? 'main' : m.source;
     let source = id !== '' && was === 'main' && !mainFormsOf({ ...m, source: was, form: id === 'option' ? '' : m.form }).includes(id) ? 'all' : was;
     // a view on a region's own read has one fixed source: a family picked before does not wait to reappear
-    if (onLocal({ ...m, form: id }) || id === 'option') source = 'main';
+    // and so has Compute on Spot or with no form (spec 2026-11-22-markets-compute §5)
+    if (onLocal({ ...m, form: id }) || id === 'option' || computeFixed({ ...m, form: id })) source = 'main';
     return mk(s, { form: id, source, open: null });
   },
   setMarketsSource(s, v) {

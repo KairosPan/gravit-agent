@@ -80,6 +80,8 @@ export function emptyState() {
       // venue and expiry picked on it (null: the defaults); the option rows a search found (explore?q=…&form=option), by the query
       chain: { status: 'idle', query: null, data: null, at: null, message: null }, chainPick: null,
       optionHits: { q: '', crypto: null, stocks: null },
+      // an index's quote on its page (spec 2026-11-22-markets-compute §5), by its key: { status, data, at, message }
+      computeQuotes: {},
     },
     // the Account (host/account.js): its page with the sentence of its last refusal, its other reads, the history curve's
     // range, the Statement drawer, and the venue whose Details drawer is open (its id); and the connect sheet's reads — where

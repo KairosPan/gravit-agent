@@ -1014,3 +1014,27 @@ test("a local page's ranges are its market's: Korea and the indices from 1M (3M 
   assert.equal(localPageOf({ quotes: {}, candles: { 'tw:2330': { range: '1D' } } }, 'tw:2330').range, '3M');
   assert.equal(localPageOf({ quotes: {}, candles: { 'ix:jp:n225': { range: '1Y' } } }, 'ix:jp:n225').range, '1Y');
 });
+
+test("an index key: its wire, its quote, Hand to gravit's words; its page before and after its quote", async () => {
+  const { computeKeyOf, computePairOf, computeQuoteOf, computeRangeOf } = await import('../../client/js/wire/compute.js');
+  const { computePageOf, handWordsOf } = await import('../../client/js/host/market-view.js');
+  const { reducers: R } = await import('../../client/js/reducers/index.js');
+  const { emptyState } = await import('../../client/js/data/empty.js');
+  const { h100Quote, deepseekQuote } = await import('./helpers/compute.js');
+  assert.deepEqual([computeKeyOf('cmp:h100'), computeKeyOf('cmp:tok-open'), computeKeyOf('cmp:x'), computeKeyOf('h100')], [{ id: 'h100', gpu: true }, { id: 'tok-open', gpu: false }, null, null]);
+  assert.equal(computePairOf('cmp:rtxpro6000'), 'ornn|rtxpro6000');
+  assert.deepEqual([computeRangeOf('1M'), computeRangeOf('1Y'), computeRangeOf(undefined)], ['1M', '3M', '3M']);
+  const q = computeQuoteOf(h100Quote());
+  assert.deepEqual(q, { id: 'cmp:h100', name: 'H100 SXM', unit: '$/GPU·hr', price: 2.89, change: -0.03, changePct: -1.03, prevSettle: 2.92, high30: 2.95, low30: 2.81,
+    settleDate: '2026-11-21', quoteFrom: 'Ornn · settle 2026-11-21', current: { value: 2.69, at: '2026-11-22T05:01:30.556Z' }, note: null });
+  assert.equal(computeQuoteOf(h100Quote({ current: null })).current, null);
+  assert.equal('current' in computeQuoteOf(deepseekQuote()), false, 'a token has no current value');
+  assert.equal(computeQuoteOf({ venue: 'ornn', symbol: 'h100', refusal: { message: 'no' } }), null);
+  assert.equal(computeQuoteOf({ venue: 'hk', symbol: '00700', market: {} }), null);
+  const cold = computePageOf(emptyState().markets, 'cmp:b300');
+  assert.deepEqual([cold.name, cold.price, cold.facts, cold.range, cold.perUnit, cold.sourceLine], ['B300', null, [], '3M', '/GPU·hr', 'Ornn']);
+  assert.equal(computePageOf(emptyState().markets, 'stock:AAPL'), null);
+  const s = R.computeQuoteLoaded(emptyState(), { id: 'cmp:h100', data: q, at: NOW });
+  assert.deepEqual(handWordsOf(s.markets, null, 'cmp:h100'), { symbol: 'H100 SXM', name: 'H100 SXM' });
+  assert.equal(R.computeQuoteLoaded(emptyState(), { id: 'cmp:nope', data: q, at: NOW }).markets.computeQuotes['cmp:nope'], undefined);
+});

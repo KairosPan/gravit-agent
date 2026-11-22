@@ -12,6 +12,7 @@ import { normalizeAsset, number } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, isChiNext, cnHitsOf } from '../wire/china.js';
 import { localKeyOf, isLocalKey, localHitsOf, LOCAL_NAMES, SHARE_VENUES } from '../wire/local.js';
 import { optionKeyOf, OPTION_COINS } from '../wire/options.js';
+import { computeKeyOf, isComputeKey, computeRangeOf, COMPUTE_RANGES, ORNN } from '../wire/compute.js';
 import { localAmount } from '../market-fmt.js';
 import { MIN, HOUR, DAY, fmtDate } from '../time.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
@@ -26,7 +27,7 @@ export const CANDLE_RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', '
 // ── Markets by underlying (spec 2026-11-19 G1–G8, §5.3): the tabs, Region, Form and Source, and the main sources ──
 
 /** The Markets screen's tabs, fixed (G1): the Watchlist, then one tab an underlying; a non-Watchlist tab's id is its asset. */
-export const MARKET_TABS = ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'preipo', 'macro'];
+export const MARKET_TABS = ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'compute', 'fx', 'preipo', 'macro'];
 /** The regions (G2): those read now, then those piece 2 brings (greyed). Only Stocks and Indices take a region. */
 export const REGIONS = {
   stocks: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in'],
@@ -43,6 +44,8 @@ export const TAB_SOURCES = {
   'stocks:cn': { main: ['china'], also: [] },
   indices: { main: ['trade-xyz'], also: ['kalshi'] },
   commodities: { main: ['trade-xyz'], also: [] },
+  // Compute's events (its Event form): the event sources, as Macro's; its Spot is Ornn's indices, the market's own read (no source)
+  compute: { main: ['kalshi', 'polymarket'], also: ['polymarket-us'] },
   fx: { main: ['trade-xyz'], also: [] },
   preipo: {
     main: ['hyperliquid-preipo', 'trade-xyz'],
@@ -71,9 +74,16 @@ const regionOf = m => (REGIONED.has(tabOf(m)) && REGIONS[tabOf(m)].includes(m?.r
 const nonUs = m => REGIONED.has(tabOf(m)) && regionOf(m) !== 'us';
 // Options are on Crypto and on US stocks; no other tab, no other region lists a chain (spec 2026-11-22 §5.4)
 const optionsHere = m => tabOf(m) === 'crypto' || (tabOf(m) === 'stocks' && regionOf(m) === 'us');
-const formOf = m => (nonUs(m) ? (m?.form === 'perp' ? 'perp' : 'spot') : m?.form === 'option' ? (optionsHere(m) ? 'option' : '') : FORMS.live.includes(m?.form) ? m.form : '');
+// Compute (spec 2026-11-22-markets-compute §5) is Spot (Ornn's indices) and Event (the questions on them) alone
+const COMPUTE_FORMS = ['spot', 'event'];
+const formOf = m => (nonUs(m) ? (m?.form === 'perp' ? 'perp' : 'spot')
+  : tabOf(m) === 'compute' ? (COMPUTE_FORMS.includes(m?.form) ? m.form : '')
+  : m?.form === 'option' ? (optionsHere(m) ? 'option' : '') : FORMS.live.includes(m?.form) ? m.form : '');
 /** Whether the view is on option chains: its Source is the one fixed entry naming the option venues. */
 export const onOptions = m => formOf(isRecord(m) ? m : {}) === 'option';
+/** Whether the view is on Compute with its Source fixed: Spot (Ornn's indices, the market's own read, no source) or no form (the indices
+ *  and the questions on them, which no source list may narrow); on Event the event sources are picked as Macro's. */
+export const computeFixed = m => tabOf(m) === 'compute' && formOf(isRecord(m) ? m : {}) !== 'event';
 // a share's currency by its venue, when no read names it
 const VENUE_CURRENCY = { hk: 'HKD', kr: 'KRW', tw: 'TWD' };
 /** The region's own read the view is on (spec §5.6): Stocks cn/hk/kr/tw on Spot, its share venue; Indices on Spot (any region),
@@ -120,6 +130,8 @@ export function familiesOf(markets) {
   const local = onLocal(m);
   if (local) return [{ id: local.venue, label: localName(local.venue), ids: [local.venue], main: true }];
   if (onOptions(m)) return [{ id: 'options', label: optionVenues(m), ids: [], main: true }];
+  // Compute on Spot: Ornn alone; with no form, Ornn and the event sources the market's own search reads
+  if (computeFixed(m)) return [formOf(m) === 'spot' ? { id: 'ornn', label: ORNN, ids: ['ornn'], main: true } : { id: 'compute', label: t('markets.compute.sources'), ids: [], main: true }];
   const { main, also } = sourcesOfTab(m);
   const registry = registryOf(m);
   const out = new Map();
@@ -146,7 +158,9 @@ function selectedIds(m) {
 const withOptions = (m, forms) => (nonUs(m) || !optionsHere(m) ? forms : [...forms, 'option']);
 const formsOfIds = ids => FORMS.live.filter(f => ids.some(id => (SOURCE_FORMS[id] ?? []).includes(f)));
 // a non-US region on Stocks or Indices is Spot and Perp alone (spec §5.4); Indices › US also gains Spot, the cash levels
-const inRegion = (m, forms) => (nonUs(m) ? ['spot', 'perp'] : tabOf(m) === 'indices' && !forms.includes('spot') ? ['spot', ...forms] : forms);
+// Compute is Spot (its indices, no source's) and its sources' Event
+const inRegion = (m, forms) => (nonUs(m) ? ['spot', 'perp'] : tabOf(m) === 'compute' ? ['spot', ...forms.filter(f => f === 'event')]
+  : tabOf(m) === 'indices' && !forms.includes('spot') ? ['spot', ...forms] : forms);
 /** The forms the main sources carry (a Form outside them switches Source to All sources, G4). */
 export const mainFormsOf = markets => withOptions(markets, inRegion(markets, formsOfIds(sourcesOfTab(markets).main)));
 /** The forms a Form pick may take now (G3): under Main or All sources every form the tab's sources carry, under a family its
@@ -179,6 +193,9 @@ export function exploreQueryOf(markets) {
   // the options read: the market's own, by underlying; no source (its venues are fixed), the region only on Stocks; sorted by volume or
   // movers alone (the market refuses Closing soonest, kept from an Event view: then by volume)
   if (onOptions(m)) return `asset=${tab}&form=option&sort=${sortOf(m) === 'movers' ? 'movers' : 'volume'}&limit=${MARKET_ROWS}${tab === 'stocks' ? '&region=us' : ''}`;
+  // Compute on Spot or with no form: the market's own read of Ornn's indices, no source, by Most traded or Biggest moves alone (it refuses
+  // Closing soonest wherever spot rows are in the answer, kept from Event: then by volume); on Event the generic path below
+  if (computeFixed(m)) return `asset=compute&sort=${sortOf(m) === 'movers' ? 'movers' : 'volume'}&limit=${MARKET_ROWS}${formOf(m) ? '&form=spot' : ''}`;
   const form = formOf(m) ? `&form=${formOf(m)}` : '';
   const region = REGIONED.has(tab) ? `&region=${regionOf(m)}` : '';
   // a non-US region names no public source on Spot (the market refuses one beside it, reads.ts): the class alone, which answers
@@ -192,6 +209,8 @@ export function exploreQueryOf(markets) {
 export function connectedQueryOf(markets) {
   // no connected venue lists an option chain: the options read is the market's alone
   if (onOptions(markets)) return null;
+  // nor an index: Compute's Spot and its formless read are the market's alone (its Event is asked as Macro's)
+  if (computeFixed(markets)) return null;
   const query = exploreQueryOf(markets);
   if (query === null || tabOf(markets) === 'watchlist' || markets?.source !== 'all') return query;
   const p = new URLSearchParams(query);
@@ -241,7 +260,8 @@ export function filtersOf(markets) {
   const source = isSourceOf(m, m.source) ? m.source : 'main';
   const sourceLabel = sourceWordOfState({ ...m, source });
   // on Indices Spot is a cash index's level, not a share: its own word
-  const formLabel = id => (tab === 'indices' && id === 'spot' ? t('markets.form.spotIndex') : formWord(id));
+  // and on Compute an index's settle: Spot
+  const formLabel = id => ((tab === 'indices' || tab === 'compute') && id === 'spot' ? t('markets.form.spotIndex') : formWord(id));
   return {
     ...(REGIONED.has(tab) ? {
       region: {
@@ -996,6 +1016,79 @@ export function optionPageOf(markets, id) {
   };
 }
 
+// ── Compute (spec 2026-11-22-markets-compute §5): Ornn's index rows, each priced with its unit; an index's page ──
+
+// an index's unit after its price, in the table's words (`/GPU·hr`, `/M tokens`): the market's unit, else its kind's
+const perUnitOf = (unit, gpu) => (unit === '$/GPU·hr' || (unit !== '$/M tokens' && gpu) ? t('markets.compute.perGpuHour') : t('markets.compute.perMTokens'));
+// where an index's settle is from, in the table's words: the market's `Ornn · settle <date>` (and its ` · stale`) said in the language on
+// screen; any other words of the market's as they came
+function computeSourceWord(quoteFrom) {
+  const hit = /^Ornn · settle (\d{4}-\d{2}-\d{2})( · stale)?$/.exec(str(quoteFrom));
+  if (!hit) return str(quoteFrom) || ORNN;
+  const source = t('markets.compute.source', { date: hit[1] });
+  return hit[2] ? `${source} · ${t('markets.quote.stale')}` : source; // words-order: a source, then its state, under the visual separator
+}
+// an index's kind in a word
+const indexKind = gpu => (gpu ? t('markets.compute.gpuIndex') : t('markets.compute.tokenIndex'));
+/** An index row (an explore item of kind computeIndex) as the table draws it: its name, its kind's word, the latest settle in dollars
+ *  (`priced.unit` 'compute') with its unit after it (`perUnit`), the change from the previous settle (none until the market has read the
+ *  index's history), where its settle is from; no volume, no star (a view-only index is no market to watch). */
+function computeRowOf(item) {
+  const k = computeKeyOf(item.key);
+  const name = str(item.name) || k.id.toUpperCase();
+  const priced = { price: number(item.price), unit: 'compute', changePct: number(item.changePct24h), change24h: number(item.change24h), volume: null, volumeUnit: 'none', implied: null };
+  return {
+    id: item.key, source: 'compute', kind: 'computeIndex', name, tile: name.split(' ')[0], sub: indexKind(k.gpu),
+    priced, price: priced.price, perUnit: perUnitOf(str(item.unit), k.gpu), live: null, sourceWord: computeSourceWord(item.quoteFrom),
+    closeTime: null, pastEnd: false, paper: false, watched: false, atAccount: false, noStar: true, legs: [], tabs: [], asset: 'compute', form: 'spot', region: null,
+  };
+}
+// every index row the slice's reads carry (Compute's, a search's)
+const computeItemsOf = m => exploreRowsOf(m).filter(i => i.kind === 'computeIndex' && isComputeKey(i.key));
+
+/** An index's page (`#/markets/cmp:<id>`), or null for an id that is none: its name and kind, its unit; the latest settle and the change
+ *  from the previous one — its quote's (the page's own read, every minute), else its row's; the facts `{ label, value, unit, date?, at? }`
+ *  — the latest settle and its date, the previous settle, the 30-day high and low, and a GPU's current value with its time while the
+ *  current host answers; the notes under them (the market's, a GPU's current value not answering in the face's words when the market
+ *  says none); the source line (`Ornn · settle <date>`); the quote read's state; the range kept (1M or 3M, 3M until one is chosen) and its
+ *  history read, as a local page's. */
+export function computePageOf(markets, id) {
+  const m = isRecord(markets) ? markets : {};
+  const k = computeKeyOf(id);
+  if (!k) return null;
+  const row = computeItemsOf(m).find(i => i.key === id);
+  const kept = own(m.computeQuotes, id);
+  const q = isRecord(kept?.data) ? kept.data : null;
+  const name = str(q?.name) || str(row?.name) || k.id.toUpperCase();
+  const price = q?.price ?? number(row?.price);
+  const chart = own(m.candles, id);
+  const range = computeRangeOf(isRecord(chart) ? chart.range : undefined);
+  const data = isRecord(chart) && chart.data?.ok === true ? chart.data : null;
+  const current = data !== null && data.range === range;
+  const facts = q ? [
+    { label: t('markets.compute.latestSettle'), value: q.price, unit: 'price', date: q.settleDate },
+    { label: t('markets.compute.prevSettle'), value: q.prevSettle, unit: 'price' },
+    { label: t('markets.compute.high30'), value: q.high30, unit: 'price' },
+    { label: t('markets.compute.low30'), value: q.low30, unit: 'price' },
+    ...(k.gpu && q.current ? [{ label: t('markets.compute.current'), value: q.current.value, unit: 'price', at: q.current.at }] : []),
+  ] : [];
+  // the market's note (a history or a current value that did not answer); a GPU's current value missing with none said, the face's
+  const notes = q ? [q.note || (k.gpu && q.current === null ? t('markets.compute.currentDown') : '')].filter(Boolean) : [];
+  return {
+    id, name, gpu: k.gpu, kind: indexKind(k.gpu), perUnit: perUnitOf(str(q?.unit) || str(row?.unit), k.gpu),
+    price, changePct: q ? q.changePct : number(row?.changePct24h), facts, notes,
+    sourceLine: computeSourceWord(q?.quoteFrom || row?.quoteFrom),
+    quote: { status: str(kept?.status) || 'idle', answered: q !== null, message: kept?.status === 'error' ? (isSaid(kept.message) ? sayOf(kept.message) : str(kept.message)) || null : null },
+    range,
+    history: {
+      status: str(chart?.status) || 'idle', message: chart?.status === 'error' ? str(chart.message) || null : null, current,
+      candles: current && Array.isArray(data.candles) ? data.candles : null, note: current ? str(data.note) : '',
+    },
+  };
+}
+/** An index page's range seg items, `[label, id]`: 1M and 3M alone. */
+export const computeCandleRanges = () => candleRanges().filter(([, r]) => COMPUTE_RANGES.includes(r));
+
 // an old us:/crypto: star the Account could not find: listed once, under its own muted line
 function notListedRow(asset) {
   const coin = asset.market === 'crypto';
@@ -1036,7 +1129,7 @@ export function sortsOf(rows, kept) {
 // the Markets tabs' words (Trade's are accountTabs's)
 const marketTabWords = () => ({
   watchlist: t('markets.tab.watchlist'), crypto: t('markets.tab.crypto'), stocks: t('markets.tab.stocks'), indices: t('markets.tab.indices'),
-  commodities: t('markets.tab.commodities'), fx: t('markets.tab.fx'), preipo: t('markets.tab.preipo'), macro: t('markets.tab.macro'),
+  commodities: t('markets.tab.commodities'), compute: t('markets.tab.compute'), fx: t('markets.tab.fx'), preipo: t('markets.tab.preipo'), macro: t('markets.tab.macro'),
 });
 const tabWord = id => marketTabWords()[id] ?? id;
 /** Markets' tabs as `{ id, label }` (G1): fixed, no counts. */
@@ -1059,7 +1152,9 @@ function shownRead(m, reads) {
  *    un-starred), the A shares starred and an old us:/crypto: star the Account could not find, each `noStar`; on any other tab
  *    the rows of its own read once that read is for the filters on screen (a read for other filters is never drawn under
  *    these: Review Focus), sorted by the sort in effect.
- *  - sorts: a region's own read and the Watchlist offer Most traded and Biggest moves; elsewhere Closing soonest too where a row closes.
+ *    On Compute (Spot or no form) its indices in the market's order, then (no form) the questions on them.
+ *  - sorts: a region's own read, the Watchlist and Compute's indices offer Most traded and Biggest moves; elsewhere Closing soonest too
+ *    where a row closes.
  *  - tabs: marketTabs's; filters: filtersOf's, none while searching.
  *  - read: `{ status, answered, message }` of the rows' read — the search's, the ranking's, the tab's own (`loading` while the
  *    one for these filters is out).
@@ -1084,7 +1179,11 @@ export function tableOf(markets, now = Date.now(), page = null) {
   const rankAsked = isRecord(m.rank) && m.rank.sort === rankSort && rankFor ? { ...m.rank, data: null } : null;
   const slot = searching ? m.results : local ? (rankShown ? m.rank : rankAsked) : shownRead(m, reads);
   const rows = local ? localRowsOf(m, atPage) : unsortedRowsOf(m, { searching, watchlist, slot }, now, atPage);
-  const twoSorts = !!local || watchlist;
+  // Compute on Spot or with no form: its indices in the market's order, then (no form) the questions on them; Most traded and Biggest
+  // moves alone (the market refuses Closing soonest beside spot rows)
+  const compute = !searching && tab === 'compute';
+  const computeOwn = compute && computeFixed(m);
+  const twoSorts = !!local || watchlist || computeOwn;
   const { sorts, sort } = twoSorts
     ? { sorts: accountSorts().filter(s => s.id !== 'closing'), sort: m.sort === 'movers' ? 'movers' : 'volume' }
     : sortsOf(rows, m.sort);
@@ -1097,13 +1196,15 @@ export function tableOf(markets, now = Date.now(), page = null) {
   // an options view: its rows in the market's order (it sorts them itself, by dollars or contracts within an asset), its notes (what
   // each source's figures are, a list read in part) and the sources that did not answer, each the market's words, under the rows
   const options = !searching && onOptions(m);
-  const optionsRead = options && isRecord(slot?.data);
+  // Compute's notes too (what its indices are, a source read in part, the questions' search)
+  const optionsRead = (options || compute) && isRecord(slot?.data);
   const missing = (empty === 'filters' || optionsRead) && isRecord(slot?.data)
     ? records(slot.data.missing).map(x => ({ name: str(x.venueName) || str(x.venue), why: str(x.why) })).filter(x => x.name)
     : [];
   return {
-    rows: local || options ? rows : sorted(rows, sort), sorts, sort, tabs: marketTabs(), filters: searching ? null : filtersOf(m), read,
-    china, local, session: local && rankFits(rankOf(m), m) ? rankOf(m)?.session ?? null : null, searching, empty, missing, options,
+    rows: local || options ? rows : computeOwn ? [...rows.filter(r => r.source === 'compute'), ...sorted(rows.filter(r => r.source !== 'compute'), sort)] : sorted(rows, sort),
+    sorts, sort, tabs: marketTabs(), filters: searching ? null : filtersOf(m), read,
+    china, local, session: local && rankFits(rankOf(m), m) ? rankOf(m)?.session ?? null : null, searching, empty, missing, options, compute, computeOwn,
     notes: optionsRead && Array.isArray(slot.data.notes) ? slot.data.notes.filter(n => typeof n === 'string' && n.trim()) : [],
     stale: optionsRead && slot.data.stale === true,
   };
@@ -1128,6 +1229,7 @@ function unsortedRowsOf(m, { searching, watchlist, slot }, now, atPage) {
   const quotes = isRecord(m.accountQuotes) ? m.accountQuotes : {};
   const row = item => {
     if (item.kind === 'optionChain' && optionKeyOf(item.key)) return optionRowOf(item);
+    if (item.kind === 'computeIndex' && isComputeKey(item.key)) return computeRowOf(item);
     const key = str(item.key);
     return accountRow(item, quotes, isStarred.has(key) || atAccount.has(key), now, atAccount.has(key));
   };
@@ -1408,6 +1510,9 @@ export function localPageOf(markets, id) {
 /** What Hand to gravit names a market by, `{ symbol, name }`: an Account key by its page's item — its base, else its name, and its
  *  name — a face id by its asset's symbol and name; null for a key no read lists, or an id that is neither. */
 export function handWordsOf(markets, account, id, now = Date.now()) {
+  // an index: its name (H100 SXM, DeepSeek tokens)
+  const index = computePageOf(markets, id);
+  if (index) return { symbol: index.name, name: index.name };
   // an option chain: its underlying, and the chains' name
   const option = optionKeyOf(id);
   if (option) return { symbol: option.underlying, name: t('markets.option.name', { underlying: option.underlying }) };

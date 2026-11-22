@@ -24,6 +24,15 @@ export function localPrice(v, currency) {
   return `${v < 0 ? '-' : ''}${markOf(currency)}${figure}`;
 }
 
+/** A compute index's price in dollars (spec 2026-11-22-markets-compute §5): under $1 three significant digits ($0.0338, $0.766), else two
+ *  places ($2.89, $1,234.50); nothing given is —. */
+export function computePrice(v) {
+  if (!finite(v)) return '—';
+  const abs = Math.abs(v);
+  const figure = abs > 0 && abs < 1 ? abs.toPrecision(3) : abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${v < 0 ? '-' : ''}$${figure}`;
+}
+
 const SIZES = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'k']];
 /** An amount in its currency, compact (a session's turnover: HK$4.8B, ₩1.2T, NT$35.1B); with no currency the figure alone; nothing
  *  given is —. */

@@ -133,6 +133,7 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
     watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
     rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null }, depth: {}, event: {},
     chain: { status: 'idle', query: null, data: null, at: null, message: null }, chainPick: null, optionHits: { q: '', crypto: null, stocks: null },
+    computeQuotes: {},
   }, 'the slice the host starts from');
   // two quiet stocks past the fixture's twelve rows: Most traded puts them last, so the first twelve rows leave them out
   const quiet = (symbol, usd) => ({
@@ -2483,4 +2484,96 @@ test('a search asks the market for its option rows too, and lists "NVDA options"
   r.markets.search('');
   assert.deepEqual(r.m().optionHits, { q: '', crypto: null, stocks: null });
   r.markets.close();
+});
+
+
+// ---- Compute (spec 2026-11-22-markets-compute §5): Ornn's indices, and a page per index
+
+const { computeSpot, h100Quote, h100History } = await import('./helpers/compute.js');
+const { COMPUTE_QUOTE_MS } = await import('../../client/js/host/markets.js');
+const COMPUTE_SPOT = '/data/market/explore?asset=compute&sort=volume&limit=200&form=spot';
+const H100_CANDLES = range => `/data/market/candles?venue=ornn&symbol=h100&range=${range}`;
+const H100_QUOTE = '/data/market/quotes?pairs=ornn%7Ch100';
+function computeAnswer(path) {
+  if (path === COMPUTE_SPOT) return computeSpot();
+  if (path.startsWith('/data/market/candles?venue=ornn')) { const q = query(path); return { ...h100History(q.range), symbol: q.symbol }; }
+  if (path.startsWith('/data/market/quotes?pairs=ornn')) return { ok: true, quotes: [h100Quote()] };
+  return undefined;
+}
+
+test('Compute › Spot asks the market alone, no source: no connected venue lists an index', async () => {
+  const r = rig({ tab: 'compute', answer: computeAnswer });
+  r.store.dispatch('setMarketsForm', 'spot');
+  r.markets.show(true);
+  await settle();
+  assert.deepEqual(r.allReads.filter(p => p.includes('asset=compute')), [COMPUTE_SPOT]);
+  assert.equal(rowsOf(r.m(), NOW).find(x => x.id === 'cmp:h100').price, 2.89);
+  r.fire(QUOTES_MS);
+  assert.equal(r.reads.some(p => p.includes('quotes') && p.includes('ornn')), false, 'the list is priced by its read: no quote asked for its rows');
+  r.markets.close();
+});
+
+test("an index's page asks its 3M settles at venue ornn and its quote, and the quote again every minute while on screen", async () => {
+  const r = rig({ answer: computeAnswer });
+  r.markets.show(true);
+  await settle();
+  r.store.dispatch('nav', { screen: 'markets', id: 'cmp:h100' });
+  r.markets.page('cmp:h100');
+  assert.deepEqual(r.reads.filter(p => p.includes('ornn')), [H100_CANDLES('3M'), H100_QUOTE]);
+  await settle();
+  assert.equal(r.m().candles['cmp:h100'].data.candles.length, 3);
+  assert.deepEqual([r.m().computeQuotes['cmp:h100'].status, r.m().computeQuotes['cmp:h100'].data.price, r.m().computeQuotes['cmp:h100'].data.current.value], ['ready', 2.89, 2.69]);
+  const html = renderMarketsScreen(r.store.get(), NOW);
+  assert.match(html, /<dt>Previous settle<\/dt><dd>\$2\.92<\/dd>/);
+  assert.equal(COMPUTE_QUOTE_MS, 60_000, 'the settle is read hourly at the market, the current value kept 5 min: never faster than a minute');
+  const quotes = () => r.reads.filter(p => p === H100_QUOTE).length;
+  r.fire(QUOTES_MS);
+  assert.equal(quotes(), 1, 'not on the 5 s beat');
+  r.fire(COMPUTE_QUOTE_MS);
+  assert.equal(quotes(), 2, 'again after a minute');
+  await settle();
+  r.markets.show(false);
+  r.fire(COMPUTE_QUOTE_MS);
+  assert.equal(quotes(), 2, 'hidden: no beat');
+  r.markets.show(true);
+  assert.equal(quotes(), 3, 'back on screen: at once');
+  await settle();
+  // a range Ornn gives; one it does not is never asked
+  r.markets.range('cmp:h100', '1M');
+  assert.equal(r.reads.at(-1), H100_CANDLES('1M'));
+  const before = r.reads.length;
+  r.markets.range('cmp:h100', '1Y');
+  r.markets.range('cmp:h100', '1D');
+  assert.equal(r.reads.length, before);
+  await settle();
+  r.markets.page(null);
+  r.fire(COMPUTE_QUOTE_MS);
+  assert.equal(quotes(), 3, 'left: no beat');
+  assert.deepEqual(r.follows.filter(f => f.length), [], 'an index follows nothing on the stream');
+  r.markets.close();
+});
+
+test("an answer for an index or a range left behind, landing late, is dropped", async () => {
+  const slow = { candles: deferred(), quote: deferred() };
+  const r = rig({
+    answer: path => (path === H100_CANDLES('3M') ? slow.candles.promise : path === H100_QUOTE ? slow.quote.promise : computeAnswer(path)),
+  });
+  r.markets.page('cmp:h100');
+  r.markets.page('cmp:b200');
+  slow.candles.resolve(h100History('3M'));
+  slow.quote.resolve({ ok: true, quotes: [h100Quote()] });
+  await settle();
+  assert.equal(r.m().candles['cmp:h100']?.data ?? null, null, "H100's settles, landing on B200's page, are not kept");
+  assert.equal(r.m().computeQuotes['cmp:h100']?.data ?? null, null);
+  // a range left behind: the 3M answer after 1M was picked lands nowhere
+  const late = deferred();
+  const r2 = rig({ answer: path => (path === H100_CANDLES('3M') ? late.promise : computeAnswer(path)) });
+  r2.markets.page('cmp:h100');
+  r2.markets.range('cmp:h100', '1M');
+  await settle();
+  late.resolve(h100History('3M'));
+  await settle();
+  assert.equal(r2.m().candles['cmp:h100'].range, '1M');
+  assert.equal(r2.m().candles['cmp:h100'].data.range, '1M');
+  for (const x of [r, r2]) x.markets.close();
 });

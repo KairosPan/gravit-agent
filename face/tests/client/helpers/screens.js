@@ -34,6 +34,8 @@ import { exploreQueryOf, rankQueryOf, chainQueryOf } from '../../../client/js/ho
 import { optionChainOf } from '../../../client/js/wire/options.js';
 import { cryptoOptionsList, usOptionsList, btcChain, NO_OPTIONS } from './options.js';
 import { localQuoteOf } from '../../../client/js/wire/local.js';
+import { computeQuoteOf } from '../../../client/js/wire/compute.js';
+import { computeSpot, computeAll, h100Quote, deepseekQuote, h100History } from './compute.js';
 import { emptyState } from '../../../client/js/data/empty.js';
 import { MIN } from '../../../client/js/time.js';
 import { VIEW_1027 } from './lunhui-view.js';
@@ -499,6 +501,28 @@ export function namedStates() {
     // Markets options (plan 2026-11-22 Task 8): Crypto's and US stocks' option rows with the market's notes; BTC's chain at Deribit
     // (the venue switch, the expiry tabs, the ATM strike, the money shaded); a ticker Nasdaq lists no options for; a search's option row
     ...marketsOptionsStates(),
+    // Markets compute (plan 2026-11-22-markets-compute Task 5): Compute › Spot's indices, each price with its unit, the market's note under
+    // them; no form, the indices then a question on one; H100's page with its facts, current value and 3M settles; its current value not
+    // answering; a token's page
+    ...marketsComputeStates(),
+  ];
+}
+
+function marketsComputeStates() {
+  const on = R.setMarketsTab(R.nav(emptyState(), { screen: 'markets', id: null }), 'compute');
+  const list = (st, body) => R.exploreLoaded(st, { tab: 'compute', data: body, at: NOW, query: exploreQueryOf(st.markets) });
+  const spot = list(R.setMarketsForm(on, 'spot'), computeSpot());
+  const page = (id, quote, candles = null) => {
+    let s = R.computeQuoteLoaded(R.nav(spot, { screen: 'markets', id }), { id, data: computeQuoteOf(quote), at: NOW });
+    if (candles) s = R.candlesLoaded(R.candlesLoading(s, { id, range: candles.range }), { id, range: candles.range, data: candles, at: NOW });
+    return s;
+  };
+  return [
+    ['markets-compute-spot', spot],
+    ['markets-compute-all', list(on, computeAll())],
+    ['markets-page-compute-h100', page('cmp:h100', h100Quote(), h100History('3M'))],
+    ['markets-page-compute-current-down', page('cmp:h100', h100Quote({ current: null }))],
+    ['markets-page-compute-token', page('cmp:tok-deepseek', deepseekQuote())],
   ];
 }
 

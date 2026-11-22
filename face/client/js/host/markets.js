@@ -2,7 +2,8 @@
 // proxy into the store — explore for the tab on screen by its filters at once and every 20 s (Stocks › China A's: its ranking by
 // the sort in effect), the quotes of the rows in view (on a market's page, its own market's) every 5 s (twelve a call) and beside them the
 // A shares' (the cn page's first, then the cn rows in view), a market page's candles for its range (a local market's at its
-// venue: an A share's at china, a Hong Kong, Korean or Taiwanese share's at hk, kr or tw, a cash index's at ix) and its base's compare rows, and the page's market followed on its stream; one explore?q read for a search,
+// venue: an A share's at china, a Hong Kong, Korean or Taiwanese share's at hk, kr or tw, a cash index's at ix, a compute index's at ornn
+// with its quote every minute) and its base's compare rows, and the page's market followed on its stream; one explore?q read for a search,
 // its A shares the hits; the stars in this browser's two stores (the Account's keys under their own key, the A shares under the
 // face's) and, on a page that signs, an Account market's star as the Account's own signed setWatch (plan 2 Task 12); each old
 // us:/crypto: star asked of the Account once; and beside a market page's candles (an Account key's, never an A share's) its
@@ -24,6 +25,7 @@ import {
 import { CHINA_VENUE, isCnKey } from '../wire/china.js';
 import { localKeyOf, isLocalKey, localPairOf, localRankOf, localQuoteOf, localHitsOf, venueOfMarket } from '../wire/local.js';
 import { optionKeyOf, optionChainOf } from '../wire/options.js';
+import { computeKeyOf, computePairOf, computeQuoteOf, computeRangeOf, COMPUTE_RANGES } from '../wire/compute.js';
 import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, connectedQueryOf, chinaRankQueryOf, rankQueryOf, onLocal, onChinaA, localRangeOf, localRangesOf, chainQueryOf } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
@@ -41,6 +43,9 @@ const notAnswering = (venue = CHINA_VENUE) => ({ state: 'unavailable', said: ven
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 // an option chain's page reads its chain again on the face's keep of it (the proxy's 15 s), while the page is on screen
 export const CHAIN_MS = 15_000;
+// an index's page (spec 2026-11-22-markets-compute §5) reads its quote again every minute while on screen: the market reads the settles
+// hourly and keeps a GPU's current value five minutes, so no faster
+export const COMPUTE_QUOTE_MS = 60_000;
 // the option rows a search asks the market for (explore?q=…&form=option): one row an underlying
 export const OPTION_HITS = 20;
 const OPTION_HIT_ASKS = [['crypto', 'asset=crypto'], ['stocks', 'asset=stocks&region=us']];
@@ -111,6 +116,8 @@ export function startMarkets({
   let chainPage = null;      // an option chain's page on screen (`opt:<U>`): its chain read, and read again every CHAIN_MS
   let chainAsked = null;     // the options read that page last asked (chainQueryOf's): a pick that changes it reads at once
   let chainTimer = null;
+  let computePage = null;    // an index's page on screen (`cmp:<id>`): its settles and its quote, the quote again every COMPUTE_QUOTE_MS
+  let computeTimer = null;
   const kinds = new Map();   // a kind of read → { flight, path, seq, cancel }
   const signing = new Set(); // the Account keys whose setWatch is in the air
   const located = new Map(); // last exact-key lookup, independently of the selected scope; failures retry on a later poll
@@ -365,6 +372,48 @@ export function startMarkets({
     if (exploreTimer !== null) { cancelTimer(exploreTimer); exploreTimer = null; }
     if (quotesTimer !== null) { cancelTimer(quotesTimer); quotesTimer = null; }
     stopChain();
+    stopCompute();
+  }
+
+  // ---- an index's page (spec 2026-11-22-markets-compute §5): its daily settles at venue ornn for its range (1M or 3M), and its quote —
+  // the latest settle, the previous one, the 30-day range, a GPU's current value — at once on entering and every COMPUTE_QUOTE_MS while
+  // the page is on screen. An answer for an index or a range the page has left lands nowhere
+  function readComputeCandles(id, range) {
+    const k = computeKeyOf(id);
+    if (!k) return;
+    fly(`candles:${id}`, `/data/market/candles?venue=ornn&symbol=${encodeURIComponent(k.id)}&range=${encodeURIComponent(range)}`, (body, refused) => {
+      if (computePage !== id || rangeOf(id) !== range) return;
+      if (!refused && body?.ok === true) store.dispatch('candlesLoaded', { id, range, data: body, at: now() });
+      else store.dispatch('candlesFailed', { id, range, at: now(), message: messageOf(body) });
+    }, ['candlesLoading', { id, range }]);
+  }
+  function readComputeQuote() {
+    const id = computePage;
+    const pair = computePairOf(id);
+    if (!pair) return;
+    fly('computeQuote', `${QUOTES}?pairs=${encodeURIComponent(pair)}`, (body, refused) => {
+      if (computePage !== id) return;
+      const row = !refused && answered(body, 'quotes') ? body.quotes.find(q => `${q?.venue}|${q?.symbol}` === pair) : undefined;
+      const data = computeQuoteOf(row);
+      if (data) store.dispatch('computeQuoteLoaded', { id, data, at: now() });
+      else store.dispatch('computeQuoteFailed', { id, at: now(), message: words(row?.refusal?.message) ?? messageOf(body) });
+    }, ['computeQuoteLoading', { id }]);
+  }
+  function armCompute() {
+    if (computeTimer !== null || closed || !shown || computePage === null) return;
+    computeTimer = schedule(() => { computeTimer = null; if (closed || !shown || computePage === null) return; armCompute(); readComputeQuote(); }, COMPUTE_QUOTE_MS);
+  }
+  function stopCompute() {
+    if (computeTimer !== null) { cancelTimer(computeTimer); computeTimer = null; }
+  }
+  // the index's page left: its reads in the air land nowhere, and its beat stops
+  function leaveCompute() {
+    if (computePage === null) return;
+    const id = computePage;
+    computePage = null;
+    stopCompute();
+    drop('computeQuote');
+    drop(`candles:${id}`);
   }
 
   // ---- an option chain's page (spec 2026-11-22 §5.4): its chain at the venue and expiry picked (chainQueryOf's), at once on entering
@@ -413,6 +462,7 @@ export function startMarkets({
     const candles = store.get().markets.candles;
     const range = Object.hasOwn(candles, id) ? candles[id]?.range : undefined;
     if (isLocalKey(id) && !isCnKey(id)) return localRangeOf(id, range);
+    if (computeKeyOf(id)) return computeRangeOf(range);
     return named(range) ? range : '1D';
   }
   // Keyed first: read `r` (candles, book, trades) at a page's line. A connected line asks the account's connected route; the
@@ -726,9 +776,11 @@ export function startMarkets({
       armExplore();
       armQuotes();
       armChain();
+      armCompute();
       readOnce();
-      // back from a hidden spell: the chain on screen read at once, as the other reads are
+      // back from a hidden spell: the chain on screen read at once, as the other reads are; an index's quote too
       if (chainPage !== null) readChain();
+      if (computePage !== null) readComputeQuote();
     },
     /** The query typed: the Account's search (explore?q=, the latest one lands) into results — its A shares the hits, with the
      *  prices the search carries. */
@@ -812,7 +864,18 @@ export function startMarkets({
       waiting = null;
       if (id !== depthId) leaveDepth();
       if (id !== chainPage) leaveChain();
+      if (id !== computePage) leaveCompute();
       localPage = isLocalKey(id) && !isCnKey(id) ? id : null;
+      // an index's page: its settles and its quote now, the quote on its beat; nothing followed
+      if (computeKeyOf(id)) {
+        if (followed) unfollow();
+        if (computePage === id) return;
+        computePage = id;
+        readComputeCandles(id, rangeOf(id));
+        readComputeQuote();
+        armCompute();
+        return;
+      }
       // an option chain's page: its chain read now and on its beat; nothing followed
       if (optionKeyOf(id)) {
         if (followed) unfollow();
@@ -850,6 +913,13 @@ export function startMarkets({
         const plain = { screen: 'markets', id };
         store.dispatch('nav', plain);
         if (win?.location) win.location.hash = toHash(plain);
+      }
+      if (computeKeyOf(id)) {
+        // Ornn gives three months of daily settles: 1M and 3M alone are asked
+        if (!COMPUTE_RANGES.includes(value)) return;
+        store.dispatch('setRange', { id, range: value });
+        if (rangeOf(id) === value && computePage === id) readComputeCandles(id, value);
+        return;
       }
       if (isLocalKey(id)) {
         // a range the market refuses for this market (an index's 1D, Taiwan's 5Y…) is never asked

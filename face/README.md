@@ -2328,7 +2328,7 @@ keys are absent, not disabled, and the device line under the Account head says w
 Markets is organised by underlying (spec `docs/superpowers/specs/2026-11-19-markets-by-underlying-design.md`,
 G1–G8). One row of tabs under the search box (`Search markets`): the **Watchlist** first, a
 five-pointed star with no word on screen (`Watchlist` to a screen reader and on hover; filled
-while open), then **Crypto · Stocks · Indices · Commodities · FX · Pre-IPO · Macro & events**. The
+while open), then **Crypto · Stocks · Indices · Commodities · Compute · FX · Pre-IPO · Macro & events**. The
 list is fixed and no tab carries a count; an empty one shows its empty state. Markets opens on the
 Watchlist. The tab row scrolls sideways on a narrow screen; nothing else does.
 
@@ -2533,6 +2533,38 @@ its dollars under each (`Prices in BTC, US dollars under each`); a USD, USDC or 
 dollar-priced, with no second line. Back on screen after a hidden spell, the chain is read at once. A refusal is the page's sentence in place of the table (`Nasdaq lists no
 options for BRK.A`). A US share's page (`stock:<T>`) carries an **Options** key to `#/markets/opt:<T>`.
 All of it is view-only.
+
+#### Compute (spec 2026-11-22-markets-compute §5)
+
+The **Compute** tab (`算力`) is Ornn's GPU rental and token price indices — seven GPUs in $/GPU·hr, the
+four labs' and the two classes' tokens in $/M tokens — and the prediction-market questions on them
+(`client/js/wire/compute.js`; `computePageOf`, `computeFixed` and the index rows in
+`client/js/host/market-view.js`). Its Form offers **Spot** and **Event contract**, every other form
+greyed `none here`. On Spot and with no form the list is the market's own read, asked of the market
+alone with no source (`connectedQueryOf` answers null): `/data/market/explore?asset=compute&sort=volume|movers&limit=200`
+(`&form=spot` on Spot; no form adds the events after the indices), its Source one fixed entry
+(`Ornn`; with no form `Ornn + event contracts`), its sorts Most traded and Biggest moves alone — never
+Closing soonest, which the market refuses wherever index rows are in the answer (one kept from Event
+is asked by volume). On Event the questions are read as Macro's, by the event sources (`Kalshi`,
+`Polymarket`; All sources adds Polymarket US), Closing soonest offered. An index row is its name, its
+kind (`GPU rental index`, `Token price index`), the latest settle with its unit after it (`$2.89
+/GPU·hr`, `$0.0338 /M tokens`: under $1 three significant digits, `computePrice` in
+`client/js/market-fmt.js`), the change from the previous settle (the head says `vs previous settle`;
+beside events each row says it), no volume, and `Ornn · settle <date>`; no star. The market's notes
+and any source that did not answer are said under the rows, in its words.
+
+A row opens its index's page, `#/markets/cmp:<id>` (`cmp:h100`, `cmp:tok-deepseek`, the thirteen ids
+the market lists). It reads `/data/market/candles?venue=ornn&symbol=<id>&range=1M|3M` (3M first; Ornn's
+free history is three months, so no other range is offered) and
+`/data/market/quotes?pairs=ornn%7C<id>` at once, the quote again every minute while the page is on
+screen (`COMPUTE_QUOTE_MS`: the market reads the settles hourly and keeps a GPU's current value five
+minutes) and at once after a hidden spell; an answer for an index or a range the page has left is
+dropped. The page: the settle with its unit and the change `vs previous settle`, the source line
+(`Ornn · settle 2026-11-21`), the facts — the latest settle and its date, the previous settle, the
+30-day high and low, and for a GPU its current value with its time — then the daily settles on
+their UTC dates with the market's three-month note, and Hand to gravit. A GPU's current value not
+answering leaves the settle facts drawn under the market's sentence (`Ornn's current value did not
+answer: the latest settle is shown`). All of it is view-only: no star, no Buy or Sell, never in All.
 
 ### A market's page
 

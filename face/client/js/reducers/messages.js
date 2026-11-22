@@ -3,6 +3,7 @@
 import { canonicalId, isAccountKey } from '../host/market-view.js';
 import { isLocalKey } from '../wire/local.js';
 import { isOptionKey } from '../wire/options.js';
+import { isComputeKey } from '../wire/compute.js';
 import { onScreenId } from '../host/sessions.js';
 import { sizeOf, cleanFont } from '../prefs.js';
 import { toHash } from '../router.js';
@@ -52,11 +53,11 @@ export const reducers = {
   nav(state, route) {
     route = landingOf(state, route);
     // a market id is the Account's key as it is (coin:BTC, event:predict:…), a local market's key as it is (hk:00700, kr:005930,
-    // tw:2330, ix:jp:n225), an option chain's (opt:BTC, opt:AAPL), or an A share's or an old face id (cn:600519 from cn:sh600519, us:AAPL, crypto:BTC/USD) canonicalised;
+    // tw:2330, ix:jp:n225), an option chain's (opt:BTC, opt:AAPL), an index's (cmp:h100), or an A share's or an old face id (cn:600519 from cn:sh600519, us:AAPL, crypto:BTC/USD) canonicalised;
     // one that is none of these opens Markets
     // — a stock's page keeps its event (router.js: a stock's id alone carries one)
     if (route.screen === 'markets' && route.id) {
-      const id = !String(route.id).startsWith('cn:') && (isAccountKey(route.id) || isLocalKey(route.id) || isOptionKey(route.id)) ? route.id : canonicalId(route.id);
+      const id = !String(route.id).startsWith('cn:') && (isAccountKey(route.id) || isLocalKey(route.id) || isOptionKey(route.id) || isComputeKey(route.id)) ? route.id : canonicalId(route.id);
       route = { screen: 'markets', id, ...(route.event && String(id).startsWith('stock:') ? { event: route.event } : {}) };
     }
     // (and the lightbox: an image belongs to the conversation it was opened in; and the shortcut sheet)

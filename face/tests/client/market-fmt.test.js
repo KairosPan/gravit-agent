@@ -13,7 +13,7 @@ test('a change: an arrow and words for screen readers; one decimal from 1%, two 
 });
 
 test('only what the screens import stays: the stand-in prices, cents, volumes and countdowns left with Trade', () => {
-  assert.deepEqual(Object.keys(fmt).sort(), ['chgHtml', 'localAmount', 'localPrice']);
+  assert.deepEqual(Object.keys(fmt).sort(), ['chgHtml', 'computePrice', 'localAmount', 'localPrice']);
 });
 
 test('a local price in its currency: HK$ and NT$ to two places, the won with none, the yuan as ever; an index level bare', () => {
@@ -38,4 +38,17 @@ test('a local amount, compact, in its currency: a turnover of billions or trilli
   assert.equal(localAmount(999_960, 'TWD'), 'NT$1M');
   assert.equal(localAmount(5e9, null), '5B');
   assert.equal(localAmount(null, 'HKD'), '—');
+});
+
+test("a compute index's price in dollars: under $1 three significant digits (Review Focus 3), else two places", () => {
+  const { computePrice } = fmt;
+  assert.equal(computePrice(0.033822), '$0.0338');
+  assert.equal(computePrice(0.7656), '$0.766');
+  assert.equal(computePrice(0.68), '$0.680');
+  assert.equal(computePrice(2.89), '$2.89');
+  assert.equal(computePrice(11.5), '$11.50');
+  assert.equal(computePrice(1234.5), '$1,234.50');
+  assert.equal(computePrice(-0.03), '-$0.0300');
+  assert.equal(computePrice(0), '$0.00');
+  assert.equal(computePrice(null), '—');
 });
