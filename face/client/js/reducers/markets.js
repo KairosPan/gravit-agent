@@ -202,9 +202,11 @@ export const reducers = {
   setMarketsForm(s, id) {
     const m = s.markets;
     if (m.tab === 'watchlist' || (id !== '' && !formsInView(m).includes(id))) return s;
-    let source = id !== '' && m.source === 'main' && !mainFormsOf(m).includes(id) ? 'all' : m.source;
+    // the options view's one fixed Source ('options') is left behind with it
+    const was = m.source === 'options' ? 'main' : m.source;
+    let source = id !== '' && was === 'main' && !mainFormsOf({ ...m, source: was, form: id === 'option' ? '' : m.form }).includes(id) ? 'all' : was;
     // a view on a region's own read has one fixed source: a family picked before does not wait to reappear
-    if (onLocal({ ...m, form: id })) source = 'main';
+    if (onLocal({ ...m, form: id }) || id === 'option') source = 'main';
     return mk(s, { form: id, source, open: null });
   },
   setMarketsSource(s, v) {
@@ -220,7 +222,7 @@ export const reducers = {
   },
   // a chip removed: the Form back to all, the Source back to Main (with a Form the main sources do not carry)
   clearMarketsChip(s, kind) {
-    if (kind === 'form') return s.markets.form ? mk(s, { form: '' }) : s;
+    if (kind === 'form') return s.markets.form ? mk(s, { form: '', ...(s.markets.source === 'options' ? { source: 'main' } : {}) }) : s;
     if (kind === 'source') return s.markets.source !== 'main' ? reducers.setMarketsSource(s, 'main') : s;
     return s;
   },

@@ -62,14 +62,14 @@ const register = (): { routes: WebRoute[]; registrar: { register(route: WebRoute
   return { routes, registrar: { register: (route: WebRoute) => { routes.push(route); } } };
 };
 
-test("mounts eight routes under /data/market and nothing else", () => {
+test("mounts nine routes under /data/market and nothing else", () => {
   const { routes, registrar } = register();
   const proxy = registerMarketProxy(registrar, { url: "http://127.0.0.1:9" });
   assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), [
     "exact /data/market/explore", "exact /data/market/quotes", "exact /data/market/candles", "exact /data/market/book",
-    "exact /data/market/trades", "exact /data/market/sources", "exact /data/market/stream", "exact /data/market/stream/markets",
+    "exact /data/market/trades", "exact /data/market/sources", "exact /data/market/options", "exact /data/market/stream", "exact /data/market/stream/markets",
   ]);
-  const names = ["explore", "quotes", "candles", "book", "trades", "sources"] as const;
+  const names = ["explore", "quotes", "candles", "book", "trades", "sources", "options"] as const;
   assert.deepEqual(MARKET_READS.map((r) => [r.face, r.upstream]), names.map((n) => [`/data/market/${n}`, `/api/${n}`]));
   for (const [i, n] of names.entries()) {
     const r = MARKET_READS[i]!;
@@ -80,10 +80,10 @@ test("mounts eight routes under /data/market and nothing else", () => {
   /* the market's own tables, the values the account's public reads had before plan A2's Task 7 removed them */
   assert.deepEqual(MARKET_QUERY, {
     explore: ["tab", "q", "key", "sort", "limit", "scope", "source", "asset", "form", "region"], quotes: ["pairs"], candles: ["venue", "symbol", "interval", "range", "before", "since", "limit"],
-    book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"], sources: [],
+    book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"], sources: [], options: ["underlying", "venue", "expiry"],
   });
-  assert.deepEqual(MARKET_TTL_MS, { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000, sources: 30_000 });
-  assert.deepEqual(MARKET_ABORT_MS, { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000, sources: 7_000 });
+  assert.deepEqual(MARKET_TTL_MS, { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000, sources: 30_000, options: 15_000 });
+  assert.deepEqual(MARKET_ABORT_MS, { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000, sources: 7_000, options: 15_000 });
   assert.equal(MARKET_READS[1]!.long?.get("pairs"), 2_000, "pairs keeps its own 2 000");
   assert.ok(!routes.some((r) => /account/.test(r.path)), "nothing under the market says account");
   proxy.dispose();
@@ -112,10 +112,14 @@ test("a read goes to the market's own path with its rebuilt query", async () => 
       "/api/trades?venue=okx&symbol=BTC%2FUSDT&limit=50",
       "/api/quotes?pairs=china%7C600519",
     ]);
+    const opt = await call(routes, "/data/market/options?underlying=BTC&venue=deribit");
+    assert.equal(opt.status, 200);
+    assert.equal((await call(routes, "/data/market/options?underlying=BTC&venue=deribit&x=1")).status, 400, "another query name is refused");
+    assert.ok(market.seen.some((s) => s.path === "/api/options?underlying=BTC&venue=deribit"), "the options read is forwarded");
     const foreign = await call(routes, "/data/market/explore?q=BTC", { host: "127.0.0.1:3090", origin: "https://evil.example" });
     assert.equal(foreign.status, 403, "the fence");
     assert.equal((await call(routes, "/data/market/explore", HOST, "POST")).status, 405);
-    assert.equal(market.seen.length, 5);
+    assert.equal(market.seen.length, 6);
   } finally {
     await market.close();
   }

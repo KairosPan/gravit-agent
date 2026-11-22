@@ -40,7 +40,7 @@ test("the Markets screen under the Chinese table: the star's word, the tabs, the
   const stocks = R.openMarketsFilter(R.setMarketsTab(R.nav(emptyState(), { screen: 'markets', id: null }), 'stocks'), 'form');
   const html = withTable(ZH, () => renderMarketsScreen(stocks, Date.parse('2026-11-19T15:00:00Z')));
   assert.match(html, /class="mk-tab mk-tab-star" data-action="mkTab" data-value="watchlist" aria-pressed="false" title="自选"><svg [^>]*>[\s\S]*?<\/svg><span class="sr-only">自选<\/span>/);
-  for (const word of ['宏观与事件', '加密', '股票', '商品', '外汇', '地区', '形式', '来源', '主要来源', '美国', '现货与股票', '永续', '代币化', '事件合约', '期权', '第三部分']) assert.ok(html.includes(word), word);
+  for (const word of ['宏观与事件', '加密', '股票', '商品', '外汇', '地区', '形式', '来源', '主要来源', '美国', '现货与股票', '永续', '代币化', '事件合约', '期权']) assert.ok(html.includes(word), word);
   const shown = html.replace(/<[^>]+>/g, '\n');
   const english = Object.entries(EN)
     .filter(([key]) => /^markets\.(tab\.(watchlist|crypto|stocks|indices|commodities|fx|macro)|filter\.|region\.|form\.|source\.|chip\.|empty\.(filters|back|watchlist)|search\.back)/.test(key))

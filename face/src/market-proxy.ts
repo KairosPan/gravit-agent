@@ -25,7 +25,7 @@ import type { RouteRegistrar } from "./static.ts";
 import { mountReads, mountStream, type UpstreamRead, type UpstreamRouteRead, type UpstreamSettings } from "./upstream-proxy.ts";
 
 /** The market's public reads and source directory, in the order they are mounted. */
-const READ_NAMES = ["explore", "quotes", "candles", "book", "trades", "sources"] as const;
+const READ_NAMES = ["explore", "quotes", "candles", "book", "trades", "sources", "options"] as const;
 type MarketReadName = typeof READ_NAMES[number];
 /** `pairs` carries twelve `venue|symbol` markets: its bound is its own, as the account's `quotes` has it. */
 const LONG_VALUES: Readonly<Partial<Record<MarketReadName, ReadonlyMap<string, number>>>> = { quotes: new Map([["pairs", 2_000]]) };
@@ -40,15 +40,16 @@ export const MARKET_QUERY: Readonly<Record<MarketReadName, readonly string[]>> =
   book: ["venue", "symbol", "depth"],
   trades: ["venue", "symbol", "limit"],
   sources: [],
+  options: ["underlying", "venue", "expiry"],
 };
 
 /** How long one answer is served without asking again, per read. */
-export const MARKET_TTL_MS: Readonly<Record<MarketReadName, number>> = { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000, sources: 30_000 };
+export const MARKET_TTL_MS: Readonly<Record<MarketReadName, number>> = { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000, sources: 30_000, options: 15_000 };
 
 /** How long the market may take, headers and body, per read: a first candles view waits for a source. */
-export const MARKET_ABORT_MS: Readonly<Record<MarketReadName, number>> = { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000, sources: 7_000 };
+export const MARKET_ABORT_MS: Readonly<Record<MarketReadName, number>> = { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000, sources: 7_000, options: 15_000 };
 
-/** explore, quotes, candles, book, trades, sources: face `/data/market/<r>` → `/api/<r>`, with the read's query names, TTL and
+/** explore, quotes, candles, book, trades, sources, options: face `/data/market/<r>` → `/api/<r>`, with the read's query names, TTL and
  * abort. */
 export const MARKET_READS: readonly UpstreamRead[] = READ_NAMES.map((name) => ({
   face: `/data/market/${name}`,
@@ -62,7 +63,7 @@ export const MARKET_READS: readonly UpstreamRead[] = READ_NAMES.map((name) => ({
 /** A malformed request's answer, in the market's words. */
 const INVALID = '{"ok":false,"error":"invalid market request"}';
 
-/** Mount the market's eight routes on the host webserver. `url` defaults to `FACE_MARKET_URL` or
+/** Mount the market's nine routes on the host webserver. `url` defaults to `FACE_MARKET_URL` or
  * `http://127.0.0.1:4821`; `disabled` is the composed `mcp-market` row's. `explore`, `quotes` and `candles` are those reads
  * in-process, through the same caches their routes are served from; `dispose` forgets every kept answer and aborts
  * every open stream's upstream. */

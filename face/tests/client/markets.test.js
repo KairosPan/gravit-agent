@@ -751,11 +751,11 @@ test('a popover lists its options, the greyed ones disabled with their note', ()
     ['kr', 'Korea', false, false, null], ['tw', 'Taiwan', false, false, null], ['in', 'India', false, false, null], ['eu', 'Europe', false, true, 'no source for European shares'],
   ]);
   assert.ok(optionsOf(region).every(o => o.action === 'mkRegion'));
-  // Form on Macro: every form but Event contract none here, Options piece 3, perp in its word
+  // Form on Macro: every form but Event contract none here, Options none here, perp in its word
   const form = optionsOf(renderMarketsScreen(open(screen({ tab: 'macro' }).s, 'form'), NOW));
   assert.deepEqual(form.map(o => [o.action, o.id, o.label, o.selected, o.disabled, o.note]), [
     ['mkForm', '', 'All', true, false, null], ['mkForm', 'spot', 'Spot &amp; shares', false, true, 'none here'], ['mkForm', 'perp', 'Perp', false, true, 'none here'],
-    ['mkForm', 'token', 'Tokenized', false, true, 'none here'], ['mkForm', 'event', 'Event contract', false, false, null], ['mkForm', 'option', 'Options', false, true, 'piece 3'],
+    ['mkForm', 'token', 'Tokenized', false, true, 'none here'], ['mkForm', 'event', 'Event contract', false, false, null], ['mkForm', 'option', 'Options', false, true, 'none here'],
   ]);
   // Source on Crypto: Main, All sources, then each source, the main one marked main
   const source = optionsOf(renderMarketsScreen(open(screen().s, 'source'), NOW));

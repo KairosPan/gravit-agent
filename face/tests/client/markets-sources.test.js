@@ -32,7 +32,7 @@ const REGISTRY = { ok: true, value: [
 test('the fixed lists: the tabs, the regions, the forms, the main sources and what each source carries', () => {
   assert.deepEqual(MARKET_TABS, ['watchlist', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'preipo', 'macro']);
   assert.deepEqual(REGIONS, { stocks: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in'], indices: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in', 'eu'], later: { stocks: ['eu'] } });
-  assert.deepEqual(FORMS, { live: ['spot', 'perp', 'token', 'event'], later: ['option'] });
+  assert.deepEqual(FORMS, { live: ['spot', 'perp', 'token', 'event', 'option'], later: [] });
   assert.deepEqual(Object.keys(TAB_SOURCES), ['crypto', 'stocks:us', 'stocks:cn', 'indices', 'commodities', 'fx', 'preipo', 'macro']);
   assert.deepEqual(TAB_SOURCES.preipo.main, ['hyperliquid-preipo', 'trade-xyz']);
   assert.deepEqual(TAB_SOURCES['stocks:cn'], { main: ['china'], also: [] });
@@ -210,21 +210,22 @@ test('picking a Form the main sources do not carry switches Source to All source
   const macro = on('macro');
   assert.equal(R.setMarketsForm(macro, 'perp'), macro);
   assert.equal(R.setMarketsForm(macro, 'option'), macro);
+  assert.equal(R.setMarketsForm(on('indices'), 'option').markets.form, '', 'no options on Indices');
   // a family that does not carry the Form set clears it; Main again clears one the main sources lack
   assert.deepEqual([R.setMarketsSource(spot, 'hyperliquid').markets.form, R.setMarketsSource(spot, 'okx').markets.form], ['', 'spot']);
   assert.deepEqual([R.setMarketsSource(spot, 'main').markets.source, R.setMarketsSource(spot, 'main').markets.form], ['main', '']);
   assert.equal(R.setMarketsSource(spot, 'nowhere'), spot, 'a source the tab does not list is no Source');
 });
 
-test('Form options a selection does not carry read none here; Options reads piece 3', () => {
+test('Form options a selection does not carry read none here; Options is live on Crypto and US stocks', () => {
   const form = s => Object.fromEntries(filtersOf(s.markets).form.options.map(o => [o.id, [o.disabled, o.note]]));
   const none = t('markets.filter.noneHere');
   assert.deepEqual(form(on('crypto')), {
-    '': [false, null], spot: [false, null], perp: [false, null], token: [true, none], event: [false, null], option: [true, t('markets.filter.piece3')],
+    '': [false, null], spot: [false, null], perp: [false, null], token: [true, none], event: [false, null], option: [false, null],
   }, 'under Main every form the tab carries is pickable (Spot switches to All sources)');
   assert.deepEqual(formsInView(on('macro').markets), ['event']);
-  assert.deepEqual(formsInView(on('stocks').markets), ['spot', 'perp', 'token']);
-  assert.deepEqual(formsInView(on('crypto', ['setMarketsSource', 'okx']).markets), ['spot'], 'a family carries its own');
+  assert.deepEqual(formsInView(on('stocks').markets), ['spot', 'perp', 'token', 'option']);
+  assert.deepEqual(formsInView(on('crypto', ['setMarketsSource', 'okx']).markets), ['spot', 'option'], 'a family carries its own, and Options are the market\'s own read');
   assert.equal(form(on('crypto', ['setMarketsSource', 'okx'])).perp[0], true);
 });
 
@@ -451,4 +452,31 @@ test('an empty answer names the sources that did not answer, the market’s word
   assert.equal(filtersOf(ix.markets).form.label, 'Spot');
   assert.equal(filtersOf(ix.markets).form.options.find(o => o.id === 'spot').label, 'Spot');
   assert.equal(filtersOf(on('stocks').markets).form.options.find(o => o.id === 'spot').label, 'Spot & shares');
+});
+
+test('Options: pickable on Crypto and Stocks (US), none here elsewhere; its read names the underlying and no source', () => {
+  const opt = (tab, ...steps) => on(tab, ...steps, ['setMarketsForm', 'option']);
+  const entry = (s, id) => filtersOf(s.markets).form.options.find(o => o.id === id);
+  for (const tab of ['crypto', 'stocks']) assert.deepEqual([entry(on(tab), 'option').disabled, entry(on(tab), 'option').note], [false, null], tab);
+  for (const tab of ['indices', 'commodities', 'fx', 'preipo', 'macro']) assert.deepEqual([entry(on(tab), 'option').disabled, entry(on(tab), 'option').note], [true, t('markets.filter.noneHere')], tab);
+  assert.equal(opt('indices').markets.form, '', 'a pick on Indices is refused');
+  assert.equal(entry(on('stocks', ['setMarketsRegion', 'hk']), 'option'), undefined, 'a non-US region lists Spot and Perp alone');
+  assert.deepEqual(formsInView(on('stocks', ['setMarketsRegion', 'hk']).markets), ['spot', 'perp']);
+  assert.equal(opt('stocks', ['setMarketsRegion', 'hk']).markets.form, '');
+  assert.equal(R.setMarketsRegion(opt('stocks'), 'hk').markets.form, '', 'a non-US region clears Options');
+  assert.deepEqual(decoded(exploreQueryOf(opt('crypto').markets)), { asset: 'crypto', form: 'option', sort: 'volume', limit: '200' });
+  assert.match(exploreQueryOf(opt('crypto').markets), /^asset=crypto&form=option&sort=volume&limit=\d+$/);
+  assert.deepEqual(decoded(exploreQueryOf(opt('stocks').markets)), { asset: 'stocks', form: 'option', sort: 'volume', limit: '200', region: 'us' });
+  assert.equal(onLocal(opt('stocks').markets), null);
+  // any Source on Crypto, the family reset to Main by the pick; then one fixed Source entry naming the venues
+  const okx = on('crypto', ['setMarketsSource', 'okx']);
+  assert.equal(R.setMarketsForm(okx, 'option').markets.source, 'main');
+  assert.equal(R.setMarketsForm(on('crypto', ['setMarketsSource', 'all']), 'option').markets.source, 'main');
+  assert.deepEqual(familiesOf(opt('crypto').markets).map(f => f.label), ['Deribit · OKX']);
+  assert.deepEqual(familiesOf(opt('stocks').markets).map(f => f.label), ['Nasdaq']);
+  assert.equal(filtersOf(opt('crypto').markets).source.label, 'Main · Deribit · OKX');
+  assert.equal(R.setMarketsSource(opt('crypto'), 'hyperliquid').markets.source, 'main', 'no other family on an options view');
+  assert.deepEqual(filtersOf(opt('crypto').markets).chips, [{ kind: 'form', label: t('markets.form.option') }]);
+  // leaving Options for another Form works from a fixed Source too
+  assert.equal(R.setMarketsForm(R.setMarketsSource(opt('crypto'), 'options'), 'perp').markets.form, 'perp');
 });
