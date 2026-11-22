@@ -1,5 +1,5 @@
 /** `/data/market/<read>` (plan A2 Task 5): the market's public reads and its push channel through the face, on the
- * proxy core the account's half is built on (src/upstream-proxy.ts) — eight exact routes, each read at the market's
+ * proxy core the account's half is built on (src/upstream-proxy.ts) — nine exact routes, each read at the market's
  * own `/api/<read>` with its rebuilt query, the market not answering as 503 `unreachable` with a kept answer re-served
  * stale, a disabled `mcp-market` row disabling the market half alone, and the stream piped from `/api/stream` with
  * its follows posted to `/api/stream/markets`. The market and the account are stub servers on ephemeral loopback
@@ -83,7 +83,7 @@ test("mounts nine routes under /data/market and nothing else", () => {
     book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"], sources: [], options: ["underlying", "venue", "expiry"],
   });
   assert.deepEqual(MARKET_TTL_MS, { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000, sources: 30_000, options: 15_000 });
-  assert.deepEqual(MARKET_ABORT_MS, { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000, sources: 7_000, options: 15_000 });
+  assert.deepEqual(MARKET_ABORT_MS, { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000, sources: 7_000, options: 25_000 });
   assert.equal(MARKET_READS[1]!.long?.get("pairs"), 2_000, "pairs keeps its own 2 000");
   assert.ok(!routes.some((r) => /account/.test(r.path)), "nothing under the market says account");
   proxy.dispose();

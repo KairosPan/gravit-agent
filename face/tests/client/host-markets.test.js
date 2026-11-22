@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startMarkets, EXPLORE_MS, EXPLORE_TIMEOUT_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS, BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT, CHAIN_MS } from '../../client/js/host/markets.js';
+import { startMarkets, EXPLORE_MS, EXPLORE_TIMEOUT_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS, BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT, CHAIN_MS, CHAIN_TIMEOUT_MS } from '../../client/js/host/markets.js';
 import { rowsOf, pageOf, tableOf, cnStateWord } from '../../client/js/host/market-view.js';
 import { renderMarketsScreen } from '../../client/js/render/markets.js';
 import { STORAGE_KEY, ACCOUNT_WATCH_KEY, readAccountWatch, saveAccountWatch } from '../../client/js/wire/market-model.js';
@@ -2393,6 +2393,21 @@ test("a chain's page reads its chain at once and every 15 s while on screen; lea
   assert.deepEqual([r.m().chain.status, r.m().chain.query, r.m().chainPick], ['idle', null, null]);
   r.fire(CHAIN_MS);
   assert.equal(chains().length, 4);
+  r.markets.close();
+});
+
+test("a chain's read waits past the options proxy's 25 s bound, not the explore reads' 15 s", async () => {
+  const r = rig({ answer: path => (optionsAt(path) ? new Promise(() => {}) : undefined) });
+  r.markets.show(true);
+  await settle();
+  r.markets.page('opt:AAPL');
+  assert.ok(CHAIN_TIMEOUT_MS > 25_000);
+  r.fire(EXPLORE_TIMEOUT_MS);
+  await settle();
+  assert.equal(r.m().chain.status, 'loading', 'still waited for at 15 s');
+  r.fire(CHAIN_TIMEOUT_MS);
+  await settle();
+  assert.equal(r.m().chain.status, 'error', 'given up at its own bound');
   r.markets.close();
 });
 

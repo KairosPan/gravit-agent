@@ -47,6 +47,8 @@ const OPTION_HIT_ASKS = [['crypto', 'asset=crypto'], ['stocks', 'asset=stocks&re
 // Longer than the explore proxies' 10 s bound, but shorter than the next poll. A browser request can otherwise stay
 // pending before reaching the proxy and hold the host's same-path deduplication lock forever.
 export const EXPLORE_TIMEOUT_MS = 15_000;
+// an option chain's read: longer than the options proxy's 25 s bound (the market pages a Nasdaq expiry for up to 20 s of it)
+export const CHAIN_TIMEOUT_MS = 30_000;
 export const WATCH_LIMIT = 100;   // either list's: the cn list's, the Account keys' cap
 // a region's own rows one ranking read asks for (market-view.js rankQueryOf's limit)
 export const RANK_ROWS = 20;
@@ -143,7 +145,7 @@ export function startMarkets({
     if (bounded) deadline = schedule(() => {
       finish({ unreachable: 'timeout', error: said('markets.loadTimedOut') }, true);
       controller?.abort();
-    }, EXPLORE_TIMEOUT_MS);
+    }, path.startsWith(`${OPTIONS}?`) ? CHAIN_TIMEOUT_MS : EXPLORE_TIMEOUT_MS);
     if (loading) store.dispatch(...loading);
   }
   const inAir = kind => (kinds.get(kind)?.flight ?? null) !== null;

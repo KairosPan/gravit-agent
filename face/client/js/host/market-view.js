@@ -176,8 +176,9 @@ export function exploreQueryOf(markets) {
   const tab = tabOf(m);
   if (tab === 'watchlist') return `limit=${MARKET_ROWS}`;
   if (onLocal(m)) return null;
-  // the options read: the market's own, by underlying; no source (its venues are fixed), the region only on Stocks
-  if (onOptions(m)) return `asset=${tab}&form=option&sort=${sortOf(m)}&limit=${MARKET_ROWS}${tab === 'stocks' ? '&region=us' : ''}`;
+  // the options read: the market's own, by underlying; no source (its venues are fixed), the region only on Stocks; sorted by volume or
+  // movers alone (the market refuses Closing soonest, kept from an Event view: then by volume)
+  if (onOptions(m)) return `asset=${tab}&form=option&sort=${sortOf(m) === 'movers' ? 'movers' : 'volume'}&limit=${MARKET_ROWS}${tab === 'stocks' ? '&region=us' : ''}`;
   const form = formOf(m) ? `&form=${formOf(m)}` : '';
   const region = REGIONED.has(tab) ? `&region=${regionOf(m)}` : '';
   // a non-US region names no public source on Spot (the market refuses one beside it, reads.ts): the class alone, which answers
@@ -976,13 +977,17 @@ export function optionPageOf(markets, id) {
   const message = askedNow && kept.status === 'error' ? (isSaid(kept.message) ? sayOf(kept.message) : str(kept.message)) || null : null;
   const price = (chain ?? atVenue)?.price ?? number(row?.price);
   const atm = chain?.atmStrike ?? null;
+  // the money is shaded at the price the at-the-money strike was read at: the expiry's own underlying price where the chain carries
+  // one (a crypto chain's), else the chain's price
+  const money = chain?.expiryPrice ?? price;
   const rows = (chain?.strikes ?? []).map(s => ({
     strike: s.strike, atm: atm !== null && s.strike === atm, call: s.call, put: s.put,
-    callItm: price !== null && s.strike < price, putItm: price !== null && s.strike > price,
+    callItm: money !== null && s.strike < money, putItm: money !== null && s.strike > money,
   }));
   const unit = (chain?.strikes ?? []).map(s => s.call?.unit || s.put?.unit).find(Boolean) ?? '';
   return {
-    id, underlying, name: t('markets.option.name', { underlying }), crypto, price, changePct: number(row?.changePct24h),
+    // the day change is the row's: a coin's own; a US row's is the US stocks line's, not Nasdaq's last trade drawn beside it, so none
+    id, underlying, name: t('markets.option.name', { underlying }), crypto, price, changePct: crypto ? number(row?.changePct24h) : null,
     venues: venues.map(v => ({ id: v, label: optionVenueName(v) })), venue: pick.venue, switchable: crypto && venues.length > 1,
     expiries: (atVenue?.expiries ?? []).map(e => ({ id: e, label: expiryWord(e) })), expiry: pick.expiry ?? atVenue?.expiry ?? null,
     // prices in a coin (an inverse option's) carry their dollars under them; a USD, USDC or USDT leg is dollar-priced

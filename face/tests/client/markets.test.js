@@ -1579,6 +1579,12 @@ test('an options view: a row an underlying with its price and change, nearest ex
   assert.match(html, /<p class="mk-note">Crypto options: Deribit&#39;s figures where Deribit lists the coin/);
 });
 
+test("an options view with no rows yet still says the market's notes: the list read in part", () => {
+  const html = renderMarketsScreen(optionsTab('stocks', usOptionsList({ items: [], notes: ['US options: 0 of 10 read'], stale: true })), NOW);
+  assert.match(html, /<p class="mk-note">US options: 0 of 10 read<\/p>/);
+  assert.match(html, /<p class="mk-note">As of the last read<\/p>/);
+});
+
 test('a US options view: contracts, the nearest expiry said on each row, the list read in part said under it', () => {
   const html = renderMarketsScreen(optionsTab('stocks', usOptionsList()), NOW);
   const nvda = cells(rowOf(html, 'opt:NVDA'));
@@ -1659,7 +1665,22 @@ test("a US chain's page: Nasdaq, no venue switch, dollars and the change in doll
   assert.match(chain, /class="up">\+\$0\.45</);
   assert.doesNotMatch(html, /Prices in/);
   // ATM 345 against 342.56: the 345 put is in the money, the 340 call is
-  assert.match(chain, /<tr class="mk-atm">/);
+  assert.match(chain, /<tr class="mk-atm">/);  // the day change beside Nasdaq's last trade would be the US stocks line's: none drawn
+  assert.doesNotMatch(html, /mk-basis">24h/);
+  assert.equal(MV.optionPageOf(chainPage('opt:AAPL', { list: usOptionsList(), tab: 'stocks', chain: aaplChain() }).s.markets, 'opt:AAPL').changePct, null);
+});
+
+test("a crypto chain's money is shaded at the expiry's own underlying price, the one its ATM strike was read at", () => {
+  // the index 60,487 but the expiry's price 59,000: the 60,000 call is out of the money and the 60,000 put in it
+  const { html } = chainPage('opt:BTC', { list: cryptoOptionsList(), chain: { ...btcChain(), expiryPrice: 59000 } });
+  const chain = html.match(/<table class="mk-t mk-chain">[\s\S]*?<\/table>/)[0];
+  const rows = [...chain.matchAll(/<tr( class="mk-atm")?>(<td[\s\S]*?)<\/tr>/g)];
+  const tds = r => [...r.matchAll(/<td class="([^"]*)">/g)].map(m => m[1]);
+  const k60 = tds(rows[1][2]);
+  assert.ok(k60.slice(0, 7).every(c => !c.includes('mk-itm')), 'the 60,000 call above 59,000');
+  assert.ok(k60.slice(7).every(c => c.includes('mk-itm')), 'the 60,000 put above 59,000');
+  // the change beside a coin's price is its own row's
+  assert.match(html, /mk-basis">24h/);
 });
 
 test("a ticker Nasdaq lists no options for: the market's sentence in place of the table, never a table that looks loading", () => {
@@ -1703,6 +1724,11 @@ test("a US share's page carries Options, to its chain's page; a coin's does not"
   const aapl = screen({ route: { screen: 'markets', id: 'stock:AAPL' }, account: true }).html;
   assert.match(aapl, /<a class="btn" href="#\/markets\/opt:AAPL">Options<\/a>/);
   assert.doesNotMatch(screen({ route: { screen: 'markets', id: 'coin:BTC' }, account: true }).html, /#\/markets\/opt:/);
+  // a US ticker spelled as a coin the market reads options on (a fund's stock:BTC) would open the coin's chain: none
+  const named = base => ({ ...itemOf(fx('explore-all'), 'stock:AAPL'), key: `stock:${base}`, base, name: `${base} Trust` });
+  const all = { ...fx('explore-all'), items: [...fx('explore-all').items, ...['BTC', 'ETH', 'SOL', 'GLD'].map(named)] };
+  for (const id of ['stock:BTC', 'stock:ETH', 'stock:SOL']) assert.doesNotMatch(screen({ route: { screen: 'markets', id }, all, account: true }).html, /#\/markets\/opt:/, id);
+  assert.match(screen({ route: { screen: 'markets', id: 'stock:GLD' }, all, account: true }).html, /href="#\/markets\/opt:GLD">Options</, 'any other ticker has it');
   assert.match(withTable(ZH, () => screen({ route: { screen: 'markets', id: 'stock:AAPL' }, account: true }).html), /href="#\/markets\/opt:AAPL">期权<\/a>/);
   // the route keeps the chain's key
   assert.equal(R.nav(emptyState(), { screen: 'markets', id: 'opt:AAPL' }).route.id, 'opt:AAPL');

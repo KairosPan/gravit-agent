@@ -2,10 +2,11 @@
  * own reads - the market service in the repo's `market/` (127.0.0.1:4821),
  * through its MCP server `market/src/mcp.ts` (`npm run market:mcp`, stdio).
  *
- * The market holds no wallet, and its server holds no state and no key: six
+ * The market holds no wallet, and its server holds no state and no key: seven
  * reads, `market_explore`, `market_quotes`, `market_candles`, `market_book`,
- * `market_akshare` (AKShare for A shares) and `market_wencai` (iFinD 问财, whose
- * token the market alone holds), each marked read-only. Under the server name
+ * `market_option_chain` (one option chain, view-only), `market_akshare` (AKShare
+ * for A shares) and `market_wencai` (iFinD 问财, whose token the market alone
+ * holds), each marked read-only. Under the server name
  * `market` they are `mcp__market__…`, which is not under the seat's prefix, so
  * Gate 2 never cards one (src/orders.ts). What the owner connected, and every
  * write, stays the seat's (src/account-seat.ts).

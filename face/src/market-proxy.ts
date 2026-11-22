@@ -4,8 +4,8 @@
  * as the account's half (src/upstream-proxy.ts: the fence, 405, the rebuilt query, the kept-answer cache, stale
  * re-serve, the unreachable codes, the piped stream and the POST rules).
  *
- * Eight exact routes, mapped one to one onto the market's own paths:
- * - six reads ({@link MARKET_READS}): `explore`, `quotes`, `candles`, `book`, `trades` and `sources`, each
+ * Nine exact routes, mapped one to one onto the market's own paths:
+ * - seven reads ({@link MARKET_READS}): `explore`, `quotes`, `candles`, `book`, `trades`, `sources` and `options`, each
  *   `/data/market/<read>` → `/api/<read>`, their query names, TTLs and aborts the market's own
  *   ({@link MARKET_QUERY}, {@link MARKET_TTL_MS}, {@link MARKET_ABORT_MS}; the account's public reads they came from
  *   are gone since plan A2's Task 7), `pairs` with its own 2 000 characters;
@@ -46,8 +46,9 @@ export const MARKET_QUERY: Readonly<Record<MarketReadName, readonly string[]>> =
 /** How long one answer is served without asking again, per read. */
 export const MARKET_TTL_MS: Readonly<Record<MarketReadName, number>> = { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000, sources: 30_000, options: 15_000 };
 
-/** How long the market may take, headers and body, per read: a first candles view waits for a source. */
-export const MARKET_ABORT_MS: Readonly<Record<MarketReadName, number>> = { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000, sources: 7_000, options: 15_000 };
+/** How long the market may take, headers and body, per read: a first candles view waits for a source; an option chain is waited
+ * for longer than the market's own 20 s wait for it (market/src/reads.ts HISTORY_WAIT_MS: a Nasdaq expiry is paged). */
+export const MARKET_ABORT_MS: Readonly<Record<MarketReadName, number>> = { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000, sources: 7_000, options: 25_000 };
 
 /** explore, quotes, candles, book, trades, sources, options: face `/data/market/<r>` → `/api/<r>`, with the read's query names, TTL and
  * abort. */

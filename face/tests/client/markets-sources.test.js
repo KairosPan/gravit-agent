@@ -467,6 +467,11 @@ test('Options: pickable on Crypto and Stocks (US), none here elsewhere; its read
   assert.deepEqual(decoded(exploreQueryOf(opt('crypto').markets)), { asset: 'crypto', form: 'option', sort: 'volume', limit: '200' });
   assert.match(exploreQueryOf(opt('crypto').markets), /^asset=crypto&form=option&sort=volume&limit=\d+$/);
   assert.deepEqual(decoded(exploreQueryOf(opt('stocks').markets)), { asset: 'stocks', form: 'option', sort: 'volume', limit: '200', region: 'us' });
+  // a sort kept from another view: Closing soonest (Crypto › Event's) is asked by volume, never sent (the market refuses it); movers kept
+  const closing = on('crypto', ['setMarketsForm', 'event'], ['setMarketsSort', 'closing'], ['setMarketsForm', 'option']);
+  assert.equal(closing.markets.sort, 'closing', 'the sort itself is kept for the views that take it');
+  assert.equal(decoded(exploreQueryOf(closing.markets)).sort, 'volume');
+  assert.equal(decoded(exploreQueryOf(on('crypto', ['setMarketsSort', 'movers'], ['setMarketsForm', 'option']).markets)).sort, 'movers');
   assert.equal(onLocal(opt('stocks').markets), null);
   // any Source on Crypto, the family reset to Main by the pick; then one fixed Source entry naming the venues
   const okx = on('crypto', ['setMarketsSource', 'okx']);

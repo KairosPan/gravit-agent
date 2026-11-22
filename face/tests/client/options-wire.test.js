@@ -2,6 +2,8 @@
 // market's shapes (tests/client/helpers/options.js, after market/src/live/options.ts).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { optionKeyOf, isOptionKey, optionChainOf, OPTION_COINS } from '../../client/js/wire/options.js';
 import { btcChain, aaplChain, chainAnswer, noOptionsBody } from './helpers/options.js';
 
@@ -39,4 +41,16 @@ test('optionChainOf: the chain as the market gives it, a figure it does not give
   const odd = btcChain();
   odd.strikes.push({ strike: '--', call: null });
   assert.equal(optionChainOf(chainAnswer(odd)).strikes.length, 3);
+});
+
+test("optionChainOf keeps the expiry's own underlying price a crypto chain carries; none is null", () => {
+  assert.equal(optionChainOf(chainAnswer({ ...btcChain(), expiryPrice: 59000 })).expiryPrice, 59000);
+  assert.equal(optionChainOf(chainAnswer(aaplChain())).expiryPrice, null);
+});
+
+test("OPTION_COINS is the market's own list (market/src/reads.ts OPTION_COINS)", () => {
+  const src = readFileSync(fileURLToPath(new URL('../../../market/src/reads.ts', import.meta.url)), 'utf8');
+  const m = /const OPTION_COINS: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(src);
+  assert.ok(m, "the market's OPTION_COINS line");
+  assert.deepEqual(OPTION_COINS, [...m[1].matchAll(/"([A-Z0-9]+)"/g)].map(x => x[1]));
 });

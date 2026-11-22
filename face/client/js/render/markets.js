@@ -37,7 +37,7 @@ import { intradaySvg } from './lunhui/intraday.js';
 import { tradeableOf } from '../host/trade-view.js';
 import { isCnKey } from '../wire/china.js';
 import { isLocalKey } from '../wire/local.js';
-import { isOptionKey } from '../wire/options.js';
+import { isOptionKey, OPTION_COINS } from '../wire/options.js';
 import { markOf } from '../host/desk-view.js';
 import { t, th, thn, sayOf } from '../i18n/words.js';
 
@@ -297,7 +297,8 @@ export function renderMarketsScreen(state, now) {
   const words = chinaWords + note(local ? '' : read.message) + note(cnLine) + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
   const body = rows.length
     ? view.options ? optionTable(rows) + optionNotes(view) : table(rows, { local, markFor: id => markOf(state.desk?.data, id) })
-    : emptyBody;
+    // an options view with no rows still says the market's notes (a list read in part, each source's figures)
+    : emptyBody + (view.options ? view.notes.map(note).join('') + (view.stale ? note(t('markets.asOfLast')) : '') : '');
   return screenHtml(m, tabsHtml(tabs, m.tab), `${bar}${words}${body}`);
 }
 
@@ -326,9 +327,10 @@ const pageHtml = (who, keys, top, left, right) => {
 const ticketKey = (id, side, word) => `<button type="button" class="btn" data-action="openTicket" data-id="${esc(id)}" data-side="${side}">${word}</button>`;
 // the page's keys: Buy, and Sell where it is held, when `trade` is given (an Account market on a page that signs); Hand to
 // gravit; Watch — and a perpetual's Leverage… (`leverage`, its seed) where it is given
-// a US share's page leads to its option chain (any ticker: the chain's page says when Nasdaq lists none)
+// a US share's page leads to its option chain (any ticker: the chain's page says when Nasdaq lists none) — but a ticker spelled as a
+// coin the market reads options on (stock:BTC, a fund's) would open the coin's chain, so it has none
 const US_TICKER = /^stock:([A-Z.]{1,6})$/;
-const optionsKey = id => { const m = US_TICKER.exec(id); return m ? `<a class="btn" href="#/markets/opt:${esc(m[1])}">${th('markets.form.option')}</a>` : ''; };
+const optionsKey = id => { const m = US_TICKER.exec(id); return m && !OPTION_COINS.includes(m[1]) ? `<a class="btn" href="#/markets/opt:${esc(m[1])}">${th('markets.form.option')}</a>` : ''; };
 const keysHtml = (id, watched, trade = null, leverage = null) => `<div class="mk-d-acts">${trade ? ticketKey(id, 'buy', th('trade.buy')) + (trade.held ? ticketKey(id, 'sell', th('trade.sell')) : '') : ''}` +
   `${leverage ? marketKey('leverage', leverage, t('account.key.leverage'), 'btn') : ''}${optionsKey(id)}` +
   `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button>` + // words-order: an icon, then its word

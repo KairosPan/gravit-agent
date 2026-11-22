@@ -3,7 +3,8 @@
 // give null, never 0. Pure: no DOM, no fetch.
 import { number } from './market-model.js';
 
-/** The coins the market reads options on at Deribit and OKX (market/src/reads.ts OPTION_COINS): a chain page of any other underlying
+/** The coins the market reads options on at Deribit and OKX (market/src/reads.ts OPTION_COINS, the same list: options-wire.test.js
+ *  reads both): a chain page of any other underlying
  *  with no row to say otherwise is a US ticker's, at Nasdaq. */
 export const OPTION_COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'AVAX', 'TRX', 'HYPE'];
 /** The option venues, as the market names them. */
@@ -55,6 +56,8 @@ export function optionChainOf(body) {
     underlying, venue: v.venue, venueName: str(v.venueName), price: number(v.price), asOf: str(v.asOf), quoteFrom: str(v.quoteFrom),
     lastTrade: str(v.lastTrade), note: str(v.note), expiries: v.expiries.filter(e => typeof e === 'string' && DAY.test(e)),
     expiry: DAY.test(str(v.expiry)) ? v.expiry : '', atmStrike: number(v.atmStrike), strikes,
+    // the expiry's own underlying price the ATM strike was read at (a crypto chain's), null where the chain's price is it
+    expiryPrice: number(v.expiryPrice),
     // the proxy re-serving its kept answer (the market not answering): the chain as last read
     stale: body.stale === true,
   };
