@@ -35,6 +35,8 @@ export interface OptionChain {
   expiry: string;
   atmStrike: number | null;
   strikes: Array<{ strike: number; call?: OptionLeg | undefined; put?: OptionLeg | undefined }>;
+  /** a partial read said in words (Nasdaq's paging stopped short) */
+  note?: string | undefined;
 }
 
 export interface OptionSummary {
