@@ -1,11 +1,13 @@
 /** Ornn's compute price indices, keyless: the daily GPU rental indices ($/GPU·hr) and the token price indices ($/M tokens, per lab and per
  * class), from one fixed list. Three latest-index asks (GPU daily-all, the labs, the classes) are each kept an hour; a failed ask answers its
  * last good read, flagged stale, for ten minutes past that read's keep, then its rows are left out with the read's note naming them (and when
- * no ask has anything, the read is refused). A failed ask is not asked again for a minute. A row's price is its latest settle; its change is
+ * no ask has anything, the read is refused). A failed ask is not asked again for ten minutes. A row's price is its latest settle; its change is
  * the latest settle less the previous one, from the row's history: the list never waits for a history, it starts the missing ones in the
  * background, one at a time, one that answers per row per settle (a failed one tried again after an hour), and shows a row's change once its history has answered. A history is kept until
  * 24 h after its last point (at least an hour); a GPU's current (intraday) value from api.ornnai.com is read only by `quote`, kept five
- * minutes, and its host failing leaves the rest of the quote answered with a note. Every row is view-only (venue `ornn`), never in `all` and
+ * minutes, and its host failing leaves the rest of the quote answered with a note. A quote waits at most ORNN_QUOTE_PART_MS for a history
+ * or a current value and ORNN_QUOTE_MS in all (under the face's seven-second cut): one late or failed is null in the answer and is not
+ * asked again for ten minutes (a late read still lands in its keep when it answers). Every row is view-only (venue `ornn`), never in `all` and
  * never a dollar volume; nothing Ornn does not give is computed but the change, said as such. Both hosts are in the shared guard
  * (local-http.ts LOCAL_HOSTS), so a 403, 429 or 3xx pauses that host for every ask. */
 import { isRefusal, type Refusal } from "../core/errors.ts";
@@ -50,8 +52,13 @@ export const ORNN_NAME = "Ornn";
 export const ORNN_LIST_TTL_MS = 3_600_000;
 /** a failed latest-index ask answers its last good read, flagged stale, for this long past that read's keep */
 export const ORNN_STALE_MS = 600_000;
-/** a failed latest-index ask is not asked again for this long (its last good read, or nothing, answers) */
-export const ORNN_FAIL_HOLD_MS = 60_000;
+/** a failed latest-index ask is not asked again for this long (its last good read, or nothing, answers); nor a quote's history or current
+ * value that failed or was late */
+export const ORNN_FAIL_HOLD_MS = 600_000;
+/** a quote waits this long for a row's history and a GPU's current value (both asked at once) */
+export const ORNN_QUOTE_PART_MS = 3_000;
+/** a quote's whole wait, its latest-index read included: under the face's seven-second cut of /api/quotes (face/src/market-proxy.ts) */
+export const ORNN_QUOTE_MS = 5_000;
 /** a GPU's current value is kept five minutes */
 export const ORNN_CURRENT_TTL_MS = 300_000;
 /** a history is kept until 24 h after its last point, and at least an hour */
@@ -98,6 +105,13 @@ const str = (v: unknown): string | null => (typeof v === "string" && v.length ? 
 const round = (v: number, places: number): number => Math.round(v * 10 ** places) / 10 ** places;
 const dayOf = (iso: string): string | null => (/^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : null);
 const utcDate = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+/** a timer that answers LATE after `ms`, and its clearing */
+const LATE: unique symbol = Symbol("late");
+function lateAfter(ms: number): { late: Promise<typeof LATE>; clear: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<typeof LATE>((go) => { timer = setTimeout(() => go(LATE), ms); });
+  return { late, clear: () => clearTimeout(timer) };
+}
 function rowsOf(body: string): unknown[] {
   const v = JSON.parse(body) as { success?: unknown; data?: unknown };
   if (v.success === false || !Array.isArray(v.data)) throw new Error("shape");
@@ -188,6 +202,8 @@ export function ornnSource(deps: { http?: CnHttp; clock?: () => number; paceMs?:
   // ---- histories ---------------------------------------------------------------------------------------------------------------------
   const histories = new Map<string, { at: number; points: Point[] }>();
   const historyFlights = new Map<string, Promise<Point[] | null>>();
+  /** when a row's history last failed (or was late for a quote): not asked again for ORNN_FAIL_HOLD_MS */
+  const historyFailedAt = new Map<string, number>();
   /** each row's change for a settle (`<id>|<date>`), from its history; a row with a history and no previous point is kept as null */
   const changes = new Map<string, ReturnType<typeof changeOf>>();
   /** the rows whose background history read is under way for a settle (`<id>|<date>`: "pending"), or failed (the time it failed): a read
@@ -202,18 +218,21 @@ export function ornnSource(deps: { http?: CnHttp; clock?: () => number; paceMs?:
     const dates = `startDate=${utcDate(start)}&endDate=${utcDate(end)}`;
     return i.kind === "lab" ? `${LABS_URL}?lab=${encodeURIComponent(i.ornn)}&${dates}` : `${CLASSES_URL}?class=${encodeURIComponent(i.ornn)}&${dates}`;
   }
-  /** a row's history: kept, or read (one flight); null when Ornn does not answer it */
+  /** a row's history: kept, or read (one flight); null when Ornn does not answer it, and for ORNN_FAIL_HOLD_MS after it failed */
   async function pointsOf(i: OrnnIndex): Promise<Point[] | null> {
     const hit = histories.get(i.id);
     if (hit && now() - hit.at < historyKeep(hit.points, hit.at)) return hit.points;
+    const failed = historyFailedAt.get(i.id);
+    if (failed !== undefined && now() - failed < ORNN_FAIL_HOLD_MS) return null;
     let flight = historyFlights.get(i.id);
     if (!flight) {
       flight = get(historyUrl(i)).then((body) => {
         const points = parseHistory(body, i.kind);
-        if (!points.length) return null;
+        if (!points.length) throw new Error("empty");
         histories.set(i.id, { at: now(), points });
+        historyFailedAt.delete(i.id);
         return points;
-      }).catch(() => null).finally(() => historyFlights.delete(i.id));
+      }).catch(() => { historyFailedAt.set(i.id, now()); return null; }).finally(() => historyFlights.delete(i.id));
       historyFlights.set(i.id, flight);
     }
     return flight;
@@ -314,19 +333,24 @@ export function ornnSource(deps: { http?: CnHttp; clock?: () => number; paceMs?:
   // ---- quote -------------------------------------------------------------------------------------------------------------------------
   const currents = new Map<string, { at: number; value: { value: number; at: string } }>();
   const currentFlights = new Map<string, Promise<{ value: number; at: string } | null>>();
+  /** when a GPU's current value last failed (or was late for a quote): null, unasked, for ORNN_FAIL_HOLD_MS */
+  const currentFailedAt = new Map<string, number>();
   async function currentOf(i: OrnnIndex): Promise<{ value: number; at: string } | null> {
     const hit = currents.get(i.id);
     if (hit && now() - hit.at < ORNN_CURRENT_TTL_MS) return hit.value;
+    const failed = currentFailedAt.get(i.id);
+    if (failed !== undefined && now() - failed < ORNN_FAIL_HOLD_MS) return null;
     let flight = currentFlights.get(i.id);
     if (!flight) {
       flight = get(CURRENT_URL(i.ornn)).then((body) => {
         const v = JSON.parse(body) as { success?: unknown; data?: { index_value?: unknown; last_updated?: unknown } };
         const value = num(v.data?.index_value), at = str(v.data?.last_updated);
-        if (v.success === false || value === null || at === null) return null;
+        if (v.success === false || value === null || at === null) throw new Error("shape");
         const answer = { value, at };
         currents.set(i.id, { at: now(), value: answer });
+        currentFailedAt.delete(i.id);
         return answer;
-      }).catch(() => null).finally(() => currentFlights.delete(i.id));
+      }).catch(() => { currentFailedAt.set(i.id, now()); return null; }).finally(() => currentFlights.delete(i.id));
       currentFlights.set(i.id, flight);
     }
     return flight;
@@ -335,12 +359,27 @@ export function ornnSource(deps: { http?: CnHttp; clock?: () => number; paceMs?:
   async function quote(id: string): Promise<OrnnMarket | Refusal> {
     const i = ORNN_INDICES.find((x) => x.id === id);
     if (!i) return badAction("no such Ornn index");
-    const r = await read();
-    if (isRefusal(r)) return r;
-    const got = settleOf(r, i);
-    if (!got) return unreachable(`Ornn did not answer ${i.name}'s settle`);
+    // the whole wait, and each part's: a late read is still under way and lands in its keep when it answers
+    const whole = lateAfter(ORNN_QUOTE_MS);
+    const part = lateAfter(ORNN_QUOTE_PART_MS);
+    let got: { s: Settle; stale: boolean } | null, points: Point[] | null | typeof LATE, current: { value: number; at: string } | null | undefined | typeof LATE;
+    try {
+      const r = await Promise.race([read(), whole.late]);
+      if (r === LATE) return unreachable("Ornn is not answering: its indices cannot be read now");
+      if (isRefusal(r)) return r;
+      got = settleOf(r, i);
+      if (!got) return unreachable(`Ornn did not answer ${i.name}'s settle`);
+      [points, current] = await Promise.all([
+        Promise.race([pointsOf(i), part.late, whole.late]),
+        i.kind === "gpu" ? Promise.race([currentOf(i), part.late, whole.late]) : Promise.resolve(undefined),
+      ]);
+    } finally {
+      whole.clear(); part.clear();
+    }
+    // late: null in this answer, and held as a failure while its read is under way (its answer clears the hold, its failure renews it)
+    if (points === LATE) { if (historyFlights.has(i.id)) historyFailedAt.set(i.id, now()); points = null; }
+    if (current === LATE) { if (currentFlights.has(i.id)) currentFailedAt.set(i.id, now()); current = null; }
     const { s, stale } = got;
-    const [points, current] = await Promise.all([pointsOf(i), i.kind === "gpu" ? currentOf(i) : Promise.resolve(undefined)]);
     const ch = points ? changeOf(s, points) : null;
     if (points) changes.set(`${i.id}|${s.date}`, ch);
     const upTo = points ? points.filter((p) => p.date <= s.date).map((p) => p.value) : [];

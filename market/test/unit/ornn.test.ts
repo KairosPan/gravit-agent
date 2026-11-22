@@ -4,7 +4,7 @@ import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import type { CnHttp, CnReply } from "../../src/live/cn-http.ts";
 import { localHosts, LOCAL_HOSTS } from "../../src/live/local-http.ts";
 import {
-  ORNN_CURRENT_TTL_MS, ORNN_FAIL_HOLD_MS, ORNN_HISTORY_AFTER_MS, ORNN_HISTORY_MIN_MS, ORNN_HISTORY_RETRY_MS, ORNN_HOSTS, ORNN_INDICES, ORNN_LIST_TTL_MS, ORNN_STALE_MS, ornnSource, type OrnnMarket,
+  ORNN_CURRENT_TTL_MS, ORNN_FAIL_HOLD_MS, ORNN_QUOTE_MS, ORNN_QUOTE_PART_MS, ORNN_HISTORY_AFTER_MS, ORNN_HISTORY_MIN_MS, ORNN_HISTORY_RETRY_MS, ORNN_HOSTS, ORNN_INDICES, ORNN_LIST_TTL_MS, ORNN_STALE_MS, ornnSource, type OrnnMarket,
 } from "../../src/live/ornn.ts";
 
 const fxText = (n: string): string => readFileSync(new URL(`../fixtures/ornn/${n}`, import.meta.url), "utf8");
@@ -23,7 +23,7 @@ const CLASS_HIST = "weight-class?class=closed&";
 const H100_NOW = "api.ornnai.com/api/gpu/H100%20SXM";
 
 /** routes matched in order by a substring of the URL; the first that matches answers (a function may change its answer between asks) */
-type Route = [string, CnReply | (() => CnReply)];
+type Route = [string, CnReply | (() => CnReply | Promise<CnReply>)];
 function net(routes: Route[]) {
   const sent: string[] = [];
   const http: CnHttp = async (url) => {
@@ -354,7 +354,7 @@ describe("review round 1", () => {
     expect(n.count(H100_HIST)).toBe(3);
   });
 
-  it("a failed latest-index ask is not sent again within a minute, and is after", async () => {
+  it("a failed latest-index ask is not sent again within ten minutes, and is after", async () => {
     const n = net([[DAILY, json({}, 500)], ...base()]);
     let t = T0;
     const s = ornnSource({ http: n.http, clock: () => t, paceMs: 0 });
@@ -364,5 +364,116 @@ describe("review round 1", () => {
     expect(n.count(DAILY)).toBe(1);
     t += 1; await s.rows("volume");
     expect(n.count(DAILY)).toBe(2);
+  });
+});
+
+describe("review: a hanging host and the failure holds", () => {
+  /** a host that never answers */
+  const hang = (): Promise<CnReply> => new Promise<CnReply>(() => {});
+  /** whether a promise has settled after the fake clock moves `ms` */
+  async function settledAfter(p: Promise<unknown>, ms: number): Promise<boolean> {
+    let done = false;
+    void p.then(() => { done = true; }, () => { done = true; });
+    await vi.advanceTimersByTimeAsync(ms);
+    return done;
+  }
+
+  it("ten minutes is the hold, five minutes the current's keep, and a quote's budget is under the face's seven seconds", () => {
+    expect(ORNN_FAIL_HOLD_MS).toBe(600_000);
+    expect(ORNN_QUOTE_PART_MS).toBe(3_000);
+    expect(ORNN_QUOTE_MS).toBe(5_000);
+    expect(ORNN_QUOTE_MS).toBeLessThan(7_000);
+  });
+
+  it("a hanging current host: the quote answers within the budget with the settle and the note; a second quote within five minutes asks nothing", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const n = net([[H100_NOW, hang], ...base()]);
+      let t = T0;
+      const s = ornnSource({ http: n.http, clock: () => t, paceMs: 0 });
+      const p = s.quote("h100");
+      expect(await settledAfter(p, ORNN_QUOTE_PART_MS - 1)).toBe(false);
+      expect(await settledAfter(p, 1)).toBe(true);
+      const q = answered(await p) as OrnnMarket;
+      expect(q.price).toBe(2.89);
+      expect(q.local).toMatchObject({ prevClose: 2.9, lastSession: "2026-11-21" });
+      expect(q.current).toBeNull();
+      expect(q.note).toMatch(/current value did not answer/);
+      expect(n.count(H100_NOW)).toBe(1);
+      t += ORNN_CURRENT_TTL_MS - 1;
+      const again = s.quote("h100");
+      expect(await settledAfter(again, 0)).toBe(true);
+      expect((answered(await again) as OrnnMarket).current).toBeNull();
+      expect(n.count(H100_NOW)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a hanging history host: the quote answers within the budget with the settle, the current value and the note", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const n = net([[H100_HIST, hang], ...base()]);
+      const s = ornnSource({ http: n.http, clock: () => T0, paceMs: 0 });
+      const p = s.quote("h100");
+      expect(await settledAfter(p, ORNN_QUOTE_PART_MS)).toBe(true);
+      const q = answered(await p) as OrnnMarket;
+      expect(q.price).toBe(2.89);
+      expect(q.current).toEqual({ value: 2.69, at: "2026-11-22T05:01:30.556Z" });
+      expect(q.local.prevClose).toBeNull();
+      expect(q.note).toMatch(/history did not answer/);
+      // held: a second quote asks no history
+      const again = s.quote("h100");
+      expect(await settledAfter(again, 0)).toBe(true);
+      expect(n.count(H100_HIST)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("history and current both hanging: the quote still answers at the part's budget", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const n = net([[H100_HIST, hang], [H100_NOW, hang], ...base()]);
+      const s = ornnSource({ http: n.http, clock: () => T0, paceMs: 0 });
+      const p = s.quote("h100");
+      expect(await settledAfter(p, ORNN_QUOTE_PART_MS)).toBe(true);
+      const q = answered(await p) as OrnnMarket;
+      expect(q.price).toBe(2.89);
+      expect(q.current).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a hanging list host on a cold start: the quote is refused at the quote's budget, not the read's timeout", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const n = net([[DAILY, hang], ...base()]);
+      const s = ornnSource({ http: n.http, clock: () => T0, paceMs: 0 });
+      const p = s.quote("h100");
+      expect(await settledAfter(p, ORNN_QUOTE_MS - 1)).toBe(false);
+      expect(await settledAfter(p, 1)).toBe(true);
+      expect(isRefusal(await p)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a failed current value and a failed history in the quote path are not asked again for ten minutes, and are after", async () => {
+    const n = net([[H100_NOW, json({}, 500)], [H100_HIST, json({}, 500)], ...base()]);
+    let t = T0;
+    const s = ornnSource({ http: n.http, clock: () => t, paceMs: 0 });
+    await s.quote("h100");
+    expect([n.count(H100_NOW), n.count(H100_HIST)]).toEqual([1, 1]);
+    t += ORNN_FAIL_HOLD_MS - 1;
+    const held = answered(await s.quote("h100")) as OrnnMarket;
+    expect(held.current).toBeNull();
+    expect(held.note).toMatch(/history did not answer/);
+    expect(isRefusal(await s.history("h100", "1M"))).toBe(true);
+    expect([n.count(H100_NOW), n.count(H100_HIST)]).toEqual([1, 1]);
+    t += 1;
+    await s.quote("h100");
+    expect([n.count(H100_NOW), n.count(H100_HIST)]).toEqual([2, 2]);
   });
 });
