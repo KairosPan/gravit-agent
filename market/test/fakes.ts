@@ -4,6 +4,7 @@ import type { ExploreItem } from "../src/live/explore.ts";
 import type { ChinaHistory, ChinaMarket, ChinaSource } from "../src/live/china.ts";
 import { indexRow, shareRow, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource } from "../src/live/local.ts";
 import type { CryptoOptions, UsOptions, WorldIndices } from "../src/core.ts";
+import type { OrnnHistory, OrnnMarket, OrnnRows, OrnnSource } from "../src/live/ornn.ts";
 import type { OptionChain, OptionSummary, OptionVenue } from "../src/live/options.ts";
 import type { Refusal } from "../src/core/errors.ts";
 import type { RegionId } from "../src/live/categories.ts";
@@ -119,6 +120,36 @@ export function fakeIndices() {
     },
     async history(id, range) { calls.history.push([id, range]); return { venue: "ix", venueName: "Eastmoney", symbol: id, range, candles: [], source: "Eastmoney" } as LocalHistory; },
     status: () => ({ state: "live", said: "Indices · answering" }),
+  };
+  return { source, calls };
+}
+
+/** Ornn's indices with H100 and Anthropic's tokens, every ask recorded */
+export function fakeOrnn(o: Partial<Pick<OrnnSource, "rows" | "history" | "quote">> = {}) {
+  const calls = { rows: [] as LocalSort[], history: [] as Array<[string, string]>, quote: [] as string[] };
+  const row = (id: string, name: string, unit: string, price: number, changePct: number): ExploreItem => ({
+    key: `cmp:${id}`, kind: "computeIndex", name, unit, base: id, asset: "compute", form: "spot", price, change24h: price * changePct / 100, changePct24h: changePct,
+    quoteFrom: "Ornn · settle 2026-11-21", tabs: [],
+    at: [{ venue: "ornn", venueName: "Ornn", symbol: id, connected: false, canTrade: false, public: true, price, quoteFrom: "Ornn · settle 2026-11-21" }],
+  }) as ExploreItem;
+  const source: OrnnSource = {
+    async rows(sort) {
+      calls.rows.push(sort);
+      if (o.rows) return o.rows(sort);
+      const items = [row("h100", "H100 SXM", "$/GPU·hr", 2.89, 0.5), row("tok-anthropic", "Anthropic tokens", "$/M tokens", 9.1, -2)];
+      if (sort === "movers") items.reverse();
+      return { items, asOf: new Date(READ_AT).toISOString() } satisfies OrnnRows;
+    },
+    async history(id, range) {
+      calls.history.push([id, range]);
+      return o.history ? o.history(id, range) : ({ venue: "ornn", venueName: "Ornn", symbol: id, range, candles: [], source: "Ornn" } as OrnnHistory);
+    },
+    async quote(id) {
+      calls.quote.push(id);
+      return o.quote ? o.quote(id) : ({ symbol: id, name: id, kind: "spot", base: id, quote: "USD", unit: "$/GPU·hr", open: false, types: [], price: 2.89, quoteFrom: "Ornn · settle 2026-11-21",
+        local: { prevClose: 2.87, open: null, high: 3, low: 2.5, volume: null, turnover: null, lastSession: "2026-11-21", phase: "closed", quoteStatus: "unsaid" }, current: null } as OrnnMarket);
+    },
+    status: () => ({ state: "live", said: "Ornn · answering" }),
   };
   return { source, calls };
 }

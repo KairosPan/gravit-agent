@@ -209,6 +209,19 @@ describe("market:mcp", () => {
     }
   });
 
+  it("market_explore names compute (Ornn's GPU and token indices, events under form=event); quotes and candles name venue ornn", async () => {
+    const { tools } = await client.listTools();
+    const explore = tools.find((t) => t.name === "market_explore")!;
+    expect((explore.inputSchema.properties!.asset as { enum: string[] }).enum).toContain("compute");
+    expect(explore.description).toContain("`asset=compute` is Ornn's compute price indices: GPU rental in $/GPU·hr and token prices in $/M tokens (`unit`), daily settles, view-only");
+    expect(explore.description).toMatch(/`form=event` the prediction-market questions on them/);
+    for (const name of ["market_quotes", "market_candles"]) {
+      const d = tools.find((t) => t.name === name)!.description ?? "";
+      expect(d, name).toContain("`ornn`");
+      expect(d, name).toMatch(/`(ornn\|)?h100`/);
+    }
+  });
+
   it("market_candles answers a public source's history", async () => {
     const r = await client.callTool({ name: "market_candles", arguments: { venue: "fake", symbol: "BTC/USDT", interval: "1h", range: "1D" } });
     expect(r.isError).toBeFalsy();

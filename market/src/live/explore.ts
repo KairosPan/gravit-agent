@@ -315,8 +315,8 @@ export interface ExploreMissing extends CompareMissing {
 
 export interface Exploration {
   asOf: string;
-  /** the tabs with counts; a local region's read names its region alone (`hk`, `kr`, `tw`) */
-  tabs: Array<{ id: TabId | "hk" | "kr" | "tw"; label: string; count: number }>;
+  /** the tabs with counts; a local region's read names its region alone (`hk`, `kr`, `tw`), Compute's read its asset (`compute`) */
+  tabs: Array<{ id: TabId | "hk" | "kr" | "tw" | "compute"; label: string; count: number }>;
   items: ExploreItem[];
   movers: Mover[];
   closing: ExploreItem[];

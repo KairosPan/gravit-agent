@@ -1,6 +1,6 @@
 /** THE MARKET'S CORE: what the market's routes answer from — the keyless public sources (each read through the market's own read cache,
  * read-cache.ts keptSource), the stream hub (the venues' streams joined with the US shares' background reader), China, a coin's price,
- * Hong Kong, Korea and Taiwan's shares and the world's cash indices, the option chains (crypto: Deribit and OKX; US: Nasdaq), Nasdaq's headlines, Lunhui's relay and iFinD client, and the AKShare sidecar. `createMarketCore` takes each as it is handed (a test's fakes; absent: none);
+ * Hong Kong, Korea and Taiwan's shares and the world's cash indices, the option chains (crypto: Deribit and OKX; US: Nasdaq), Ornn's compute indices, Nasdaq's headlines, Lunhui's relay and iFinD client, and the AKShare sidecar. `createMarketCore` takes each as it is handed (a test's fakes; absent: none);
  * `realMarketCore` is the main's, built over the real network. It holds no wallet, no home and no key, and writes nothing to disk. */
 import { createAkshare, akshareCommand, type Akshare } from "./live/akshare.ts";
 import { chinaSource, type ChinaSource } from "./live/china.ts";
@@ -12,6 +12,7 @@ import { hongKongSource } from "./live/hongkong.ts";
 import { koreaSource } from "./live/korea.ts";
 import { quoteWord, type LocalSource } from "./live/local.ts";
 import { cryptoOptions } from "./live/options-crypto.ts";
+import { ornnSource, type OrnnSource } from "./live/ornn.ts";
 import { usOptions, type UsQuote } from "./live/options-us.ts";
 import { taiwanSource } from "./live/taiwan.ts";
 import { worldIndices } from "./live/world-indices.ts";
@@ -53,6 +54,8 @@ export interface MarketCoreOptions {
   usOptions?: UsOptions | ((quote: UsQuote) => UsOptions) | undefined;
   /** a US share's headlines (absent: none — GET /api/news refuses) */
   news?: NewsSource | undefined;
+  /** Ornn's compute price indices, GPU rental and token prices (absent: none — Compute's indices refuse; its events still answer) */
+  ornn?: OrnnSource | undefined;
   /** a coin's price in dollars (absent: none, every asset undefined) */
   price?: Price | undefined;
   /** Lunhui's reach behind /api/cn/* (absent: both routes answer `off`) */
@@ -75,6 +78,7 @@ export interface MarketCore {
   readonly cryptoOptions: CryptoOptions | undefined;
   readonly usOptions: UsOptions | undefined;
   readonly news: NewsSource | undefined;
+  readonly ornn: OrnnSource | undefined;
   readonly price: Price;
   readonly cn: MarketCoreOptions["cn"];
   readonly akshare: Akshare | undefined;
@@ -127,6 +131,7 @@ function coreOver(cache: ReadCache, o: MarketCoreOptions): MarketCore {
     cryptoOptions: o.cryptoOptions,
     usOptions: us,
     news: o.news,
+    ornn: o.ornn,
     price: o.price ?? noPrice,
     cn: o.cn,
     akshare: o.akshare,
@@ -166,7 +171,7 @@ export function restAnswers(cache: ReadCache, venue: HubVenue): boolean {
 /** THE MAIN'S CORE, over the real network: every keyless source, the venues' streams joined with each source's own background reader
  * (the US stocks line's), Tencent's China, Hong Kong, Korea, Taiwan and the world's indices (one Eastmoney client between Hong Kong's backup
  * and the indices', and one polite guard over the other local hosts, so a pause of a host holds for every source that asks it), the option
- * chains over that same guard (Deribit, OKX, Nasdaq; the US list priced by the US stocks line), the exchanges' prices, Lunhui's relay and iFinD (its token from this process's environment),
+ * chains and Ornn's compute indices over that same guard (Deribit, OKX, Nasdaq, Ornn; the US list priced by the US stocks line), the exchanges' prices, Lunhui's relay and iFinD (its token from this process's environment),
  * and the AKShare sidecar (MARKET_AKSHARE_BIN), started on first use. No socket opens and no child starts until something is asked */
 export function realMarketCore(): MarketCore {
   const cache = new ReadCache();
@@ -174,7 +179,7 @@ export function realMarketCore(): MarketCore {
   const feeds = sources.flatMap((x) => (x.feed ? [x.feed] : []));
   const hub = joinHubs(new StreamHub({ answers: (v) => restAnswers(cache, v) }), ...feeds);
   const em = eastmoney();
-  // one polite guard over Tencent's, Naver's, TWSE's and the option venues' hosts: a host that pauses for one source is paused for every source that asks it
+  // one polite guard over Tencent's, Naver's, TWSE's, the option venues' and Ornn's hosts: a host that pauses for one source is paused for every source that asks it
   const local = localHosts(realCnHttp);
   const ifind = createIfind({ env: () => process.env, http: cnHosts(realCnHttp, [IFIND_HOST]) });
   return coreOver(cache, {
@@ -188,6 +193,7 @@ export function realMarketCore(): MarketCore {
     cryptoOptions: cryptoOptions({ http: local }),
     usOptions: (quote) => usOptions({ http: local, quote }),
     news: nasdaqNews(),
+    ornn: ornnSource({ http: local }),
     price: publicPrices(),
     cn: { relay: createCnRelay(realCnHttp), ifind, wencai: createWencai({ picker: ifind, configured: () => ifind.configured(), perDay: wencaiPerDay(process.env) }) },
     akshare: createAkshare({ command: akshareCommand() }),

@@ -6,7 +6,7 @@ import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import type { ExchangeClient, OpenExchange } from "../../src/live/exchange.ts";
 import { exchangeTickers, kalshiPublic, polymarketPublic, PUBLIC_HOSTS } from "../../src/live/public-markets.ts";
 import type { Http } from "../../src/live/types.ts";
-import { CHINA_SEARCH_WAIT_MS, COIN_CHANGE_WAIT_MS, historyAsk, marketReads, mountReads, NEWS_PER_SYMBOL, OPTION_LIST_WAIT_MS, type CandlesView } from "../../src/reads.ts";
+import { CHINA_SEARCH_WAIT_MS, COIN_CHANGE_WAIT_MS, COMPUTE_EVENT_KEEP_MS, COMPUTE_EVENT_WAIT_MS, historyAsk, marketReads, mountReads, NEWS_PER_SYMBOL, OPTION_LIST_WAIT_MS, type CandlesView } from "../../src/reads.ts";
 import type { Headline, NewsSource } from "../../src/live/news.ts";
 import { CHINA_NOTE, chinaSource, type ChinaHistory, type ChinaMarket, type ChinaRead, type ChinaSource, type ChinaStatus } from "../../src/live/china.ts";
 import type { CnHttp, CnReply } from "../../src/live/cn-http.ts";
@@ -18,7 +18,7 @@ import { no } from "../../src/refuse.ts";
 import { startMarketServer, type MarketServerHandle } from "../../src/server.ts";
 import type { Listing, PublicSource } from "../../src/live/public-markets.ts";
 import { HK_NOTE } from "../../src/live/hongkong.ts";
-import { chainOf, fakeChina, fakeCryptoOptions, fakeHub, fakeIndices, fakeLocal, fakeSource, fakeUsOptions, listing, READ_AT } from "../fakes.ts";
+import { chainOf, fakeChina, fakeCryptoOptions, fakeHub, fakeIndices, fakeLocal, fakeOrnn, fakeSource, fakeUsOptions, listing, READ_AT } from "../fakes.ts";
 import { OPTION_QUOTE_KEEP_MS } from "../../src/core.ts";
 import { usOptions, type UsQuote } from "../../src/live/options-us.ts";
 
@@ -217,7 +217,7 @@ describe("the market's refusals say nothing of an account", () => {
   it("a pair that is not China's, in quotes: E_VENUE_RAIL_CLOSED, priced in explore", async () => {
     const { get } = await market();
     const [pub] = (await get("/api/quotes?pairs=fake|BTC/USDT")).body.quotes as Array<Record<string, any>>;
-    expect(pub!.refusal).toMatchObject({ code: "E_VENUE_RAIL_CLOSED", venue: "fake", message: '"fake" is priced in explore: the market quotes A shares (venue "china"), Hong Kong, Korean and Taiwanese shares (hk, kr, tw) and the cash indices (ix)' });
+    expect(pub!.refusal).toMatchObject({ code: "E_VENUE_RAIL_CLOSED", venue: "fake", message: '"fake" is priced in explore: the market quotes A shares (venue "china"), Hong Kong, Korean and Taiwanese shares (hk, kr, tw), the cash indices (ix) and Ornn\'s compute indices (ornn)' });
   });
 
   it("China not read: its sentence unchanged, its code the market's", async () => {
@@ -688,7 +688,7 @@ describe("China in the market's reads", () => {
       expect(s.calls.quotes).toEqual([["600519", "688981", "000002"]]);
       expect(got.map((r) => [r.venue, r.symbol, r.market ? "market" : r.refusal!.message])).toEqual([
         ["china", "600519", "market"],
-        ["nowhere", "BTC/USDT", '"nowhere" is priced in explore: the market quotes A shares (venue "china"), Hong Kong, Korean and Taiwanese shares (hk, kr, tw) and the cash indices (ix)'],
+        ["nowhere", "BTC/USDT", '"nowhere" is priced in explore: the market quotes A shares (venue "china"), Hong Kong, Korean and Taiwanese shares (hk, kr, tw), the cash indices (ix) and Ornn\'s compute indices (ornn)'],
         ["china", "688981", "market"],
         ["china", "60051", "an A share is its six digits"],
         ["china", "000002", "no A-share quote for 000002"],
@@ -1435,5 +1435,211 @@ describe("option chains in the market's reads", () => {
     let none: UsQuote | undefined;
     createMarketCore({ sources: [fakeSource()], usOptions: (q) => { none = q; return fakeUsOptions().source; } });
     expect(await none!("AAPL")).toBeNull();
+  });
+});
+
+/** COMPUTE IN THE MARKET'S READS: Ornn's indices on Compute Spot, the events on them (the market's own search for "Ornn" over the event
+ * sources, kept ten minutes, only the rows classOf calls compute), both with no form, and their quotes and charts — each over its fake */
+describe("compute in the market's reads", () => {
+  const answered = <T,>(v: T | Refusal): T => { if (isRefusal(v)) throw new Error(`refused: ${v.code} ${v.message}`); return v; };
+  const refused = (v: unknown): Refusal => { if (!isRefusal(v)) throw new Error(`answered: ${JSON.stringify(v).slice(0, 160)}`); return v; };
+  const later = new Date(Date.now() + 30 * 86_400_000).toISOString();
+  const H100Q = "Will the Ornn H100 Index hit $2.25 (LOW) by December 31, 2026?";
+  const SERIESB = "Will Ornn raise a Series B in 2026?";
+  const event = (n: number, title: string, category: string): Listing => {
+    const id = `0x${String(n).repeat(64).slice(0, 64)}`;
+    return listing(`${id}:Yes`, 0.4, { kind: "event", base: "Yes", quote: "USDC", outcome: "Yes", category, closeTime: later, group: { id, title }, name: `${title} Yes` });
+  };
+  /** an event venue that records each search and finds the two Ornn questions and one other */
+  function events(o: { listings?: (q: string) => Promise<Listing[]> } = {}) {
+    const asked: string[] = [];
+    const rows = [event(1, H100Q, "Crypto"), event(2, SERIESB, "Business"), event(3, "Will Bitcoin reach $150k in 2026?", "Crypto")];
+    const source: PublicSource = {
+      ...fakeSource({ id: "polymarket" }), name: "Polymarket", kind: "events", connectTo: "polymarket", connector: "live:exchange:polymarket",
+      listings: async ({ q }) => {
+        asked.push(q ?? "");
+        if (o.listings) return o.listings(q ?? "");
+        const Q = (q ?? "").toLowerCase();
+        return rows.filter((r) => !Q || (r.group?.title ?? "").toLowerCase().includes(Q)).map((r) => ({ ...r }));
+      },
+    };
+    return { source, asked };
+  }
+  function computeMarket(o: { ornn?: ReturnType<typeof fakeOrnn> | null; events?: ReturnType<typeof events> } = {}) {
+    const ornn = o.ornn === null ? undefined : (o.ornn ?? fakeOrnn());
+    const ev = o.events ?? events();
+    const reads = marketReads(createMarketCore({ sources: [fakeSource({ id: "okx" }), ev.source], ...(ornn ? { ornn: ornn.source } : {}) }));
+    return { reads, ornn, ev };
+  }
+  const names = (x: { items: ExploreItem[] }) => x.items.map((i) => i.name);
+
+  it("asset=compute&form=spot is Ornn's rows, by volume or movers, never the event search", async () => {
+    const r = computeMarket();
+    const got = answered(await r.reads.explore({ asset: "compute", form: "spot" }));
+    expect(got.items.map((i) => i.key)).toEqual(["cmp:h100", "cmp:tok-anthropic"]);
+    expect(got.items[0]).toMatchObject({ unit: "$/GPU·hr", asset: "compute", form: "spot" });
+    expect(got.tabs).toEqual([{ id: "compute", label: "Compute", count: 2 }]);
+    expect(got.notes[0]).toMatch(/^Compute: Ornn's/);
+    expect(got.missing).toEqual([]);
+    const movers = answered(await r.reads.explore({ asset: "compute", form: "spot", sort: "movers", limit: 1 }));
+    expect(movers.items.map((i) => i.key)).toEqual(["cmp:tok-anthropic"]);
+    expect(r.ornn!.calls.rows).toEqual(["volume", "movers"]);
+    expect(r.ev.asked).toEqual([]);
+  });
+
+  it("refuses the closing sort and a source list beside Compute's indices, and says when Compute is not read", async () => {
+    const r = computeMarket();
+    expect(refused(await r.reads.explore({ asset: "compute", form: "spot", sort: "closing" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Compute's indices are sorted by volume or movers" });
+    expect(refused(await r.reads.explore({ asset: "compute", form: "spot", source: "okx" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Compute's indices are not part of a selected public source" });
+    expect(refused(await r.reads.explore({ asset: "compute", source: "okx,polymarket" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Compute's indices are not part of a selected public source" });
+    expect(r.ornn!.calls.rows).toEqual([]);
+    const none = computeMarket({ ornn: null });
+    expect(refused(await none.reads.explore({ asset: "compute", form: "spot" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Compute's indices are not read by this market" });
+  });
+
+  it("asset=compute&form=event asks the market's search for Ornn and keeps only the rows classOf calls compute, kept ten minutes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const r = computeMarket();
+      const got = answered(await r.reads.explore({ asset: "compute", form: "event" }));
+      expect(names(got)).toEqual([H100Q]);
+      expect(got.items[0]).toMatchObject({ kind: "event", asset: "compute", form: "event" });
+      expect(got.tabs).toEqual([{ id: "compute", label: "Compute", count: 1 }]);
+      expect(r.ev.asked).toEqual(["Ornn"]);
+      expect(r.ornn!.calls.rows).toEqual([]);
+      // a search within the kept answer, another limit: the same one search
+      expect(names(answered(await r.reads.explore({ asset: "compute", form: "event", q: "h100", limit: 5 })))).toEqual([H100Q]);
+      expect(names(answered(await r.reads.explore({ asset: "compute", form: "event", q: "rtx" })))).toEqual([]);
+      vi.setSystemTime(Date.now() + COMPUTE_EVENT_KEEP_MS - 1_000);
+      answered(await r.reads.explore({ asset: "compute", form: "event" }));
+      expect(r.ev.asked).toEqual(["Ornn"]);
+      vi.setSystemTime(Date.now() + 2_000);
+      answered(await r.reads.explore({ asset: "compute", form: "event" }));
+      expect(r.ev.asked).toEqual(["Ornn", "Ornn"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("asset=compute&form=event with a source list searches only those sources", async () => {
+    const r = computeMarket();
+    expect(answered(await r.reads.explore({ asset: "compute", form: "event", source: "okx" })).items).toEqual([]);
+    expect(r.ev.asked).toEqual([]);
+    expect(names(answered(await r.reads.explore({ asset: "compute", form: "event", source: "polymarket" })))).toEqual([H100Q]);
+    expect(r.ev.asked).toEqual(["Ornn"]);
+  });
+
+  it("asset=compute with no form is the spot rows, then the events", async () => {
+    const r = computeMarket();
+    const got = answered(await r.reads.explore({ asset: "compute" }));
+    expect(got.items.map((i) => i.form)).toEqual(["spot", "spot", "event"]);
+    expect(names(got)).toEqual(["H100 SXM", "Anthropic tokens", H100Q]);
+    expect(got.tabs).toEqual([{ id: "compute", label: "Compute", count: 3 }]);
+    expect(answered(await r.reads.explore({ asset: "compute", limit: 2 })).items.map((i) => i.form)).toEqual(["spot", "spot"]);
+    expect(refused(await r.reads.explore({ asset: "compute", sort: "closing" }))).toMatchObject({ message: "Compute's indices are sorted by volume or movers" });
+    expect(r.ev.asked).toEqual(["Ornn"]);
+  });
+
+  it("a late event search is in missing and the spot rows answer; a refused Ornn is in missing and the events answer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const slow = computeMarket({ events: events({ listings: () => new Promise<never>(() => {}) }) });
+      const asked = slow.reads.explore({ asset: "compute" });
+      await vi.advanceTimersByTimeAsync(COMPUTE_EVENT_WAIT_MS + 10);
+      const x = answered(await asked);
+      expect(x.items.map((i) => i.key)).toEqual(["cmp:h100", "cmp:tok-anthropic"]);
+      // the search's own per-venue wait (exploreAcross, 4 s): no event venue answered, so the search is refused, said in missing with the
+      // venue's words, and never kept
+      expect(x.missing).toEqual([expect.objectContaining({ venue: "compute-events", venueName: "The search for Ornn's events", connected: false, code: "E_VENUE_UNREACHABLE",
+        why: expect.stringMatching(/^No event venue answered the search for Ornn: Polymarket did not answer/) })]);
+    } finally {
+      vi.useRealTimers();
+    }
+    // a search no venue answered is not kept: the next ask searches again
+    let tries = 0;
+    const flaky = computeMarket({ events: events({ listings: async (q) => { tries += 1; if (tries === 1) throw new Error("socket hang up"); return q === "Ornn" ? [event(1, H100Q, "Crypto")] : []; } }) });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      expect(answered(await flaky.reads.explore({ asset: "compute", form: "event" })).missing).toEqual([expect.objectContaining({ venue: "compute-events", code: "E_VENUE_UNREACHABLE" })]);
+      // past the source's own short hold of a failed read (20 s), well inside the ten-minute keep of an answered search
+      vi.setSystemTime(Date.now() + 30_000);
+      expect(names(answered(await flaky.reads.explore({ asset: "compute", form: "event" })))).toEqual([H100Q]);
+      expect(flaky.ev.asked).toEqual(["Ornn", "Ornn"]);
+    } finally {
+      vi.useRealTimers();
+    }
+    const down = computeMarket({ ornn: fakeOrnn({ rows: async () => no("E_VENUE_UNREACHABLE", { venue: "ornn", message: "Ornn is not answering: its indices cannot be read now" }) }) });
+    const y = answered(await down.reads.explore({ asset: "compute" }));
+    expect(names(y)).toEqual([H100Q]);
+    expect(y.missing).toEqual([expect.objectContaining({ venue: "ornn", venueName: "Ornn", connected: false, why: "Ornn is not answering: its indices cannot be read now", code: "E_VENUE_UNREACHABLE" })]);
+    expect(refused(await down.reads.explore({ asset: "compute", form: "spot" }))).toMatchObject({ code: "E_VENUE_UNREACHABLE" });
+    const unread = computeMarket({ ornn: null });
+    const z = answered(await unread.reads.explore({ asset: "compute" }));
+    expect(names(z)).toEqual([H100Q]);
+    expect(z.missing).toEqual([expect.objectContaining({ venue: "ornn", why: "Compute's indices are not read by this market" })]);
+    expect(names(answered(await unread.reads.explore({ asset: "compute", form: "event" })))).toEqual([H100Q]);
+  });
+
+  it("the search for Ornn is asked only on Compute: never for another asset, a region or a form Compute has not", async () => {
+    const r = computeMarket();
+    answered(await r.reads.explore({ asset: "macro", form: "event" }));
+    answered(await r.reads.explore({ asset: "crypto", form: "spot" }));
+    expect(answered(await r.reads.explore({ asset: "compute", region: "us" })).items).toEqual([]);
+    expect(answered(await r.reads.explore({ asset: "compute", form: "perp" })).items).toEqual([]);
+    expect(r.ev.asked.filter((q) => q === "Ornn")).toEqual([]);
+    expect(r.ornn!.calls.rows).toEqual([]);
+  });
+
+  it("an Ornn question found by a search on All is compute, never macro", async () => {
+    const r = computeMarket();
+    const all = answered(await r.reads.explore({ q: "Ornn" }));
+    expect(all.items.find((i) => i.name === H100Q)).toMatchObject({ asset: "compute", form: "event" });
+    expect(all.items.find((i) => i.name === SERIESB)).toMatchObject({ asset: "macro", form: "event" });
+  });
+
+  it("quotes: ornn|<id> is Ornn's quote, an unknown id refused in the market's words", async () => {
+    const r = computeMarket();
+    const got = answered(await r.reads.quotes([{ venue: "ornn", symbol: "h100" }, { venue: "ornn", symbol: "H100" }, { venue: "ornn", symbol: "tok-anthropic" }, { venue: "ornn", symbol: "h999" }]));
+    expect(got[0]).toMatchObject({ venue: "ornn", symbol: "h100", market: { symbol: "h100", price: 2.89, unit: "$/GPU·hr", quoteFrom: "Ornn · settle 2026-11-21" } });
+    expect(got[1]).toMatchObject({ venue: "ornn", symbol: "h100", market: { symbol: "h100" } });
+    expect(got[2]).toMatchObject({ venue: "ornn", symbol: "tok-anthropic", market: {} });
+    expect(got[3]).toMatchObject({ venue: "ornn", symbol: "h999", refusal: { code: "E_MARKET_BAD_REQUEST", venue: "ornn", message: expect.stringMatching(/^an Ornn index is one of a100, b200, .*tok-open$/) } });
+    expect(r.ornn!.calls.quote).toEqual(["h100", "tok-anthropic"]);
+    const refusedQuote = computeMarket({ ornn: fakeOrnn({ quote: async () => no("E_VENUE_UNREACHABLE", { venue: "ornn", message: "Ornn is not answering" }) }) });
+    expect(answered(await refusedQuote.reads.quotes([{ venue: "ornn", symbol: "h100" }]))[0]).toMatchObject({ refusal: { code: "E_VENUE_UNREACHABLE" } });
+    const none = computeMarket({ ornn: null });
+    expect(answered(await none.reads.quotes([{ venue: "ornn", symbol: "h100" }]))[0]).toMatchObject({ refusal: { code: "E_MARKET_BAD_REQUEST", message: "Compute's indices are not read by this market" } });
+  });
+
+  it("candles: venue ornn by range only; an unknown id, a page or a bad range refused in the market's words", async () => {
+    const r = computeMarket();
+    expect(answered(await r.reads.candles("ornn", "h100", "", { range: "3M" }))).toMatchObject({ venue: "ornn", venueName: "Ornn", symbol: "h100", range: "3M" });
+    expect(answered(await r.reads.candles("ornn", "TOK-OPEN", "", { range: "1M" }))).toMatchObject({ symbol: "tok-open" });
+    expect(refused(await r.reads.candles("ornn", "h100", "", { range: "1M", before: "1700000000000" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", venue: "ornn", message: "an Ornn index's history is read by range" });
+    expect(refused(await r.reads.candles("ornn", "h100", "", { range: "2Y" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: expect.stringContaining("a range is one of") });
+    expect(refused(await r.reads.candles("ornn", "h999", "", { range: "1M" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: expect.stringMatching(/^an Ornn index is one of /) });
+    expect(r.ornn!.calls.history).toEqual([["h100", "3M"], ["tok-open", "1M"]]);
+    expect(refused(await computeMarket({ ornn: null }).reads.candles("ornn", "h100", "", { range: "1M" }))).toMatchObject({ message: "Compute's indices are not read by this market" });
+  });
+
+  it("over HTTP: /api/explore?asset=compute, /api/quotes?pairs=ornn|h100 and /api/candles?venue=ornn", async () => {
+    const ornn = fakeOrnn();
+    const core = createMarketCore({ sources: [fakeSource()], ornn: ornn.source });
+    const srv = await startMarketServer({ port: 0, mount: (app) => mountReads(app, core, marketReads(core)) });
+    servers.push(srv);
+    const get = async (path: string) => { const res = await fetch(`${srv.url}${path}`); return { status: res.status, body: (await res.json()) as Record<string, any> }; };
+    const ex = await get("/api/explore?asset=compute&form=spot");
+    expect(ex.status).toBe(200);
+    expect(ex.body.items.map((i: ExploreItem) => i.key)).toEqual(["cmp:h100", "cmp:tok-anthropic"]);
+    const q = await get("/api/quotes?pairs=ornn|h100,ornn|nope");
+    expect(q.status).toBe(200);
+    expect(q.body.quotes[0]).toMatchObject({ venue: "ornn", symbol: "h100", market: { price: 2.89 } });
+    expect(q.body.quotes[1].refusal.message).toMatch(/^an Ornn index is one of/);
+    const c = await get("/api/candles?venue=ornn&symbol=h100&range=1M");
+    expect(c.status).toBe(200);
+    expect(c.body).toMatchObject({ ok: true, venue: "ornn", symbol: "h100", range: "1M" });
+    const page = await get("/api/candles?venue=ornn&symbol=h100&range=1M&before=1700000000000");
+    expect(page.status).toBe(409);
+    expect(page.body.refusal.message).toBe("an Ornn index's history is read by range");
   });
 });

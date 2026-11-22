@@ -1,18 +1,20 @@
 /** THE MARKET'S PUBLIC READS, the face's Markets reads: what there is to trade (explore), a fresh price for a few A shares (quotes), one
  * market's price history (candles), its order book (book) and its latest trades (trades) — under names without "account", proxied by the
  * face under /data/market (face/src/market-proxy.ts) and read by gravit through market:mcp. Each answers from the keyless public sources,
- * China, and the local regions (Hong Kong, Korea, Taiwan, the world's cash indices: live/local.ts) alone: the market keeps no venue
+ * China, the local regions (Hong Kong, Korea, Taiwan, the world's cash indices: live/local.ts) and Ornn's compute indices alone: the market keeps no venue
  * connected (a connected venue's own reads are the account's, /api/account/connected/…), no
  * list of where the user can connect, and no market-down hold (the market never sees itself down).
  *
  *   GET  /api/explore   ?scope= &source= &tab= &q= &key= &sort= &limit=  Exploration; or by underlying, ?asset= &form= &region= with
  *                       &source=<id>,<id>… (never beside scope or tab), region=cn being the China read, region=hk|kr|tw on Stocks Spot that
  *                       region's ranking, asset=indices&form=spot a region's cash indices, form=option the option chains (one row an
- *                       underlying: asset=crypto Deribit's and OKX's, asset=stocks&region=us Nasdaq's ten; never in any other answer)
+ *                       underlying: asset=crypto Deribit's and OKX's, asset=stocks&region=us Nasdaq's ten; never in any other answer),
+ *                       asset=compute Ornn's indices (form=spot), the events on them (form=event: the market's own search for "Ornn"), or
+ *                       both (no form)
  *   GET  /api/quotes    ?pairs=<venue>|<symbol>,… (or ?pair= each)  {quotes: [{venue, symbol, market? | refusal?}]}: A shares (china), Hong
- *                       Kong, Korean and Taiwanese shares (hk, kr, tw) and the cash indices (ix)
+ *                       Kong, Korean and Taiwanese shares (hk, kr, tw), the cash indices (ix) and Ornn's compute indices (ornn)
  *   GET  /api/candles   ?venue= &symbol= &interval= &range= &since= &before= &limit=   CandlesView, or an A share's ChinaHistory, or a local
- *                       region's LocalHistory (hk, kr, tw, ix: by range)
+ *                       region's LocalHistory (hk, kr, tw, ix: by range), or an Ornn index's daily settles (ornn: by range)
  *   GET  /api/book      ?venue= &symbol= &depth=                  BookView
  *   GET  /api/trades    ?venue= &symbol= &limit=                  TradesView
  *   GET  /api/options   ?underlying= &venue=deribit|okx|nasdaq &expiry=YYYY-MM-DD       {value: OptionChain}: one chain, view-only
@@ -24,7 +26,7 @@ import type express from "express";
 import { isRefusal, type Refusal } from "./core/errors.ts";
 import { no } from "./refuse.ts";
 import type { MarketCore } from "./core.ts";
-import { ASSET_IDS, FORM_IDS, REGION_IDS, TABS, type AssetId, type FormId, type RegionId, type TabId } from "./live/categories.ts";
+import { ASSET_IDS, classOf, FORM_IDS, REGION_IDS, TABS, type AssetId, type FormId, type RegionId, type TabId } from "./live/categories.ts";
 import { CHINA_ID, CHINA_NAME, CHINA_NOTE, type ChinaHistory, type ChinaMarket } from "./live/china.ts";
 import type { ChinaRange } from "./live/cn-history.ts";
 import { RANK_ROWS } from "./live/cn-rank.ts";
@@ -33,6 +35,7 @@ import { hkCode } from "./live/hk-parse.ts";
 import { krCode } from "./live/kr-parse.ts";
 import { twCode } from "./live/tw-parse.ts";
 import { WORLD_INDICES } from "./live/world-indices.ts";
+import { ORNN_INDICES, ORNN_NAME, ORNN_VENUE, type OrnnHistory } from "./live/ornn.ts";
 import type { LocalHistory, LocalMarket, LocalVenue } from "./live/local.ts";
 import { NEWS_ID, NEWS_KEEP_MS, NEWS_NAME, type Headline } from "./live/news.ts";
 import { US_TICKER } from "./live/us-quotes.ts";
@@ -49,7 +52,7 @@ export interface MarketReads {
   /** `source` is one source's id or a comma list of them; `asset`, `form` and `region` (categories.ts) ask by underlying */
   explore(o: { scope?: string | undefined; source?: string | undefined; tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined; asset?: string | undefined; form?: string | undefined; region?: string | undefined }): Promise<Exploration | Refusal>;
   quotes(pairs: Array<{ venue: string; symbol: string }>): Promise<Array<{ venue: string; symbol: string; market?: Market; refusal?: Refusal }> | Refusal>;
-  candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; since?: string | number | undefined; limit?: string | number | undefined }): Promise<CandlesView | ChinaHistory | LocalHistory | Refusal>;
+  candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; since?: string | number | undefined; limit?: string | number | undefined }): Promise<CandlesView | ChinaHistory | LocalHistory | OrnnHistory | Refusal>;
   book(venue: string, symbol: string, depth?: number): Promise<BookView | Refusal>;
   trades(venue: string, symbol: string, limit?: number): Promise<TradesView | Refusal>;
   /** each US share's latest headlines (at most NEWS_PER_SYMBOL, newest first, none older than `since`), a feed that refuses under
@@ -187,6 +190,31 @@ const OPTION_EXPIRY = /^\d{4}-\d{2}-\d{2}$/;
  * that comes late is still kept by its source for the next ask; coin changes that come late leave the rows without a change */
 export const OPTION_LIST_WAIT_MS = 6_000;
 export const COIN_CHANGE_WAIT_MS = 3_000;
+
+/** COMPUTE'S WORDS (Ornn's indices, live/ornn.ts): the explore refusals and notes, how an index is named in a pair or a chart, its refusals */
+const ORNN_IDS = ORNN_INDICES.map((i) => i.id);
+const COMPUTE_WORDS = {
+  label: "Compute",
+  notRead: "Compute's indices are not read by this market",
+  notSource: "Compute's indices are not part of a selected public source",
+  sorted: "Compute's indices are sorted by volume or movers",
+  bad: `an Ornn index is one of ${ORNN_IDS.join(", ")}`,
+  history: "an Ornn index's history is read by range",
+  note: "Compute: Ornn's GPU rental ($/GPU·hr) and token ($/M tokens) price indices, daily settles, view-only; the change is the latest settle less the previous one; no venue here trades them.",
+  eventsNote: "Compute's events: the prediction-market questions on Ornn's indices that a search for Ornn finds, kept ten minutes.",
+  eventsVenue: "compute-events",
+  eventsName: "The search for Ornn's events",
+} as const;
+/** an Ornn index as a pair or a chart names it: its id from the market's list (ornn.ts ORNN_INDICES), lower-cased */
+const ornnCode = (s: string): string | null => {
+  const id = s.trim().toLowerCase();
+  return (ORNN_IDS as readonly string[]).includes(id) ? id : null;
+};
+/** COMPUTE'S EVENTS: the market's own search for "Ornn" (the q path a user's search takes, over the event sources), kept ten minutes and
+ * waited for six seconds — late or refused, it is `missing` and the rest of the answer stands */
+export const COMPUTE_EVENT_QUERY = "Ornn";
+export const COMPUTE_EVENT_KEEP_MS = 600_000;
+export const COMPUTE_EVENT_WAIT_MS = 6_000;
 
 /** how long a chart's first view may take (Nasdaq's whole history of a share is about ten seconds), and one page scrolled left */
 export const HISTORY_WAIT_MS = 20_000;
@@ -427,6 +455,69 @@ export function marketReads(core: MarketCore): MarketReads {
     return { asOf, tabs, items: rows.slice(0, limit), ...empty, missing, notes, ...(stale ? { stale: true as const } : {}) };
   }
 
+  /** COMPUTE'S EVENTS: the market's own search for "Ornn" over the event sources (or the sources listed), the generic q path, kept
+   * COMPUTE_EVENT_KEEP_MS — only the rows classOf calls compute events (an Ornn index's question), whatever category the venue files them
+   * under. Waited for COMPUTE_EVENT_WAIT_MS: a late search is still kept for the next ask; one no venue answered is a refusal, not kept */
+  function computeEvents(ids: string[], sort: string | undefined): Promise<Exploration | Refusal> {
+    const search = cache.get(`compute-events|${ids.join(",")}|${sort ?? ""}`, COMPUTE_EVENT_KEEP_MS, async () => {
+      const pub = core.sources().filter((s) => (ids.length ? ids.includes(s.id) : s.kind === "events"));
+      const found = await exploreAcross({ connected: [], public: pub }, { q: COMPUTE_EVENT_QUERY, limit: 200, clock: now, ...(sort ? { sort: sort as ExploreSort } : {}) });
+      // no venue answered: a refusal, never kept, so the next ask searches again
+      const missed = new Set(found.missing.filter((m) => !m.symbol).map((m) => m.venue));
+      if (pub.length && !found.items.length && pub.every((x) => missed.has(x.id))) {
+        return no("E_VENUE_UNREACHABLE", { venue: COMPUTE_WORDS.eventsVenue, message: `No event venue answered the search for Ornn: ${found.missing.map((m) => `${m.venueName} ${m.why}`).join("; ")}`.slice(0, 200) });
+      }
+      return found;
+    });
+    return within(COMPUTE_EVENT_WAIT_MS, search, COMPUTE_WORDS.eventsVenue, COMPUTE_WORDS.eventsName);
+  }
+
+  /** COMPUTE (asset=compute): Ornn's indices on Spot (ornn.ts: kept by the source, never here), the events on them on Event (computeEvents),
+   * both with no form — the spot rows first. With no form, a refused or unread Ornn is `missing` and the events answer, a late or refused
+   * search is `missing` and the spot rows answer. `q` keeps the rows whose name, id or key holds it; `key` one row */
+  async function exploreCompute(form: "spot" | "event" | undefined, ids: string[], q: string, key: string, sort: string | undefined, limit: number): Promise<Exploration | Refusal> {
+    const wantSpot = form !== "event";
+    const wantEvents = form !== "spot";
+    if (wantSpot && ids.length) return no("E_MARKET_BAD_REQUEST", { venue: ORNN_VENUE, message: COMPUTE_WORDS.notSource });
+    if (wantSpot && sort === "closing") return no("E_MARKET_BAD_REQUEST", { venue: ORNN_VENUE, message: COMPUTE_WORDS.sorted });
+    const ornn = core.ornn;
+    if (form === "spot" && !ornn) return no("E_MARKET_BAD_REQUEST", { venue: ORNN_VENUE, message: COMPUTE_WORDS.notRead });
+    const [spot, events] = await Promise.all([
+      wantSpot && ornn ? ornn.rows(sort === "movers" ? "movers" : "volume").catch((err: unknown) => thrownBy(ORNN_VENUE, ORNN_NAME, err)) : undefined,
+      wantEvents ? computeEvents(ids, sort) : undefined,
+    ]);
+    if (form === "spot" && spot && isRefusal(spot)) return spot;
+    const missing: ExploreMissing[] = [];
+    const notes: string[] = [];
+    const items: ExploreItem[] = [];
+    let asOf = new Date(now()).toISOString();
+    let stale = false;
+    if (wantSpot) {
+      notes.push(COMPUTE_WORDS.note);
+      if (!ornn) missing.push({ venue: ORNN_VENUE, venueName: ORNN_NAME, connected: false, why: COMPUTE_WORDS.notRead });
+      else if (spot && isRefusal(spot)) missing.push({ venue: ORNN_VENUE, venueName: ORNN_NAME, connected: false, why: spot.message, code: spot.code });
+      else if (spot) {
+        items.push(...spot.items);
+        asOf = spot.asOf;
+        if (spot.note) notes.push(`Ornn: ${spot.note}`.slice(0, 159));
+        if (spot.stale) stale = true;
+      }
+    }
+    if (wantEvents && events) {
+      if (isRefusal(events)) missing.push({ venue: COMPUTE_WORDS.eventsVenue, venueName: COMPUTE_WORDS.eventsName, connected: false, why: events.message, code: events.code });
+      else {
+        notes.push(COMPUTE_WORDS.eventsNote);
+        missing.push(...events.missing);
+        items.push(...events.items.filter((i) => { const c = classOf(i); return c.asset === "compute" && c.form === "event"; }));
+        if (!wantSpot) asOf = events.asOf;
+      }
+    }
+    const Q = q.toLowerCase();
+    const kept = items.filter((i) => (!Q || [i.name, i.base, i.key].some((f) => typeof f === "string" && f.toLowerCase().includes(Q))) && (!key || i.key === key));
+    return { asOf, tabs: [{ id: "compute", label: COMPUTE_WORDS.label, count: kept.length }], items: kept.slice(0, limit), movers: [], closing: [], mostTraded: [], missing, notes,
+      ...(stale ? { stale: true as const } : {}) };
+  }
+
   /** a venue and a market as the book and the trades take them (as `candles` does): a venue's id, and the market as plain text */
   function oneMarket(venue: string, symbol: string): { id: string; sym: string } | Refusal {
     const id = venue.trim();
@@ -489,6 +580,9 @@ export function marketReads(core: MarketCore): MarketReads {
         if (asset === undefined) return no("E_MARKET_BAD_REQUEST", { message: OPTION_WORDS.asset });
         return exploreOptions(asset as AssetId, region as RegionId | undefined, q, key, sort, limit);
       }
+      // COMPUTE is Ornn's indices (Spot) and the events on them (Event), its own read, never in All: any other form or a region is the
+      // generic path below, which classOf filters to nothing
+      if (asset === "compute" && region === undefined && (form === undefined || form === "spot" || form === "event")) return exploreCompute(form, ids, q, key, sort, limit);
       // THE LOCAL READS BY UNDERLYING: a region's shares on Stocks Spot (either left out) are its own source's — China A's (cn), Hong Kong's,
       // Korea's, Taiwan's — and a region's cash indices (Indices Spot) the world indices'; never beside a source list. Every other region and
       // form (perps on these regions, Stocks Spot on jp, in, eu) is the generic path below, which classOf already filters
@@ -551,7 +645,8 @@ export function marketReads(core: MarketCore): MarketReads {
     },
 
     /** a fresh price for each of a few A shares, from China's source in ONE read, and for Hong Kong, Korean and Taiwanese shares and the
-     * cash indices, one read per venue (a code typed short is answered at its own: hk|700 at 00700). Any other pair is refused by name: a
+     * cash indices, one read per venue (a code typed short is answered at its own: hk|700 at 00700), and for Ornn's indices one read per
+     * index (ornn|h100: the latest settle, the previous one, the 30-day range, a GPU's current value). Any other pair is refused by name: a
      * public market's price is in explore's rows, and a connected venue's quote is the account's (/api/account/connected/quotes) */
     async quotes(pairs) {
       if (!pairs.length || pairs.length > 12) return no("E_MARKET_BAD_REQUEST", { message: "quotes are asked for 1 to 12 markets at once, each venue|symbol" });
@@ -567,7 +662,23 @@ export function marketReads(core: MarketCore): MarketReads {
         const codes = [...new Set(pairs.filter((p) => p.venue === v).flatMap((p) => { const c = LOCAL_WORDS[v].code(p.symbol); return c ? [c] : []; }))];
         if (src && codes.length) locals.set(v, src.quotes(codes).catch(() => no("E_VENUE_UNREACHABLE", { venue: v, message: `${LOCAL_WORDS[v].label} is not answering: no quote could be read now` })));
       }
+      // Ornn's indices, one quote per index asked (each kept by the source)
+      const ornn = core.ornn;
+      const ornnQuotes = new Map<string, ReturnType<NonNullable<typeof ornn>["quote"]>>();
+      if (ornn) {
+        for (const p of pairs) {
+          const id = p.venue === ORNN_VENUE ? ornnCode(p.symbol) : null;
+          if (id && !ornnQuotes.has(id)) ornnQuotes.set(id, ornn.quote(id).catch((err: unknown) => thrownBy(ORNN_VENUE, ORNN_NAME, err)));
+        }
+      }
       return Promise.all(pairs.map(async (p) => {
+        if (p.venue === ORNN_VENUE) {
+          if (!ornn) return { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: ORNN_VENUE, message: COMPUTE_WORDS.notRead }) };
+          const id = ornnCode(p.symbol);
+          if (!id) return { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: ORNN_VENUE, message: COMPUTE_WORDS.bad }) };
+          const got = await ornnQuotes.get(id)!;
+          return isRefusal(got) ? { venue: ORNN_VENUE, symbol: id, refusal: got } : { venue: ORNN_VENUE, symbol: id, market: got };
+        }
         if (isLocalVenue(p.venue)) {
           const v = p.venue;
           const w = LOCAL_WORDS[v];
@@ -587,7 +698,7 @@ export function marketReads(core: MarketCore): MarketReads {
           const m = got.get(p.symbol);
           return m ? { ...p, market: m } : { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: `no A-share quote for ${p.symbol}` }) };
         }
-        return { ...p, refusal: no("E_VENUE_RAIL_CLOSED", { venue: p.venue, message: `"${p.venue}" is priced in explore: the market quotes A shares (venue "china"), Hong Kong, Korean and Taiwanese shares (hk, kr, tw) and the cash indices (ix)` }) };
+        return { ...p, refusal: no("E_VENUE_RAIL_CLOSED", { venue: p.venue, message: `"${p.venue}" is priced in explore: the market quotes A shares (venue "china"), Hong Kong, Korean and Taiwanese shares (hk, kr, tw), the cash indices (ix) and Ornn's compute indices (ornn)` }) };
       }));
     },
 
@@ -620,6 +731,17 @@ export function marketReads(core: MarketCore): MarketReads {
         const code = w.code(sym);
         if (!code) return no("E_MARKET_BAD_REQUEST", { venue: id, message: w.bad });
         return src.history(code, range as CandleRange);
+      }
+      // an Ornn index's history is its daily settles, by range, as a local region's
+      if (id === ORNN_VENUE) {
+        const ornn = core.ornn;
+        if (!ornn) return no("E_MARKET_BAD_REQUEST", { venue: id, message: COMPUTE_WORDS.notRead });
+        if ([ask.before, ask.since].some((x) => x !== undefined && String(x).trim() !== "")) return no("E_MARKET_BAD_REQUEST", { venue: id, message: COMPUTE_WORDS.history });
+        const range = (ask.range ?? "").trim();
+        if (!(CANDLE_RANGES as readonly string[]).includes(range)) return no("E_MARKET_BAD_REQUEST", { venue: id, message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
+        const code = ornnCode(sym);
+        if (!code) return no("E_MARKET_BAD_REQUEST", { venue: id, message: COMPUTE_WORDS.bad });
+        return ornn.history(code, range as CandleRange);
       }
       const asked = historyAsk(interval, ask);
       if (isRefusal(asked)) return asked;
