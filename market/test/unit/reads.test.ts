@@ -1074,7 +1074,7 @@ describe("explore by underlying", () => {
 
   it("refuses an unknown asset, form or region", async () => {
     const { get } = await market();
-    for (const [query, words] of [["asset=bonds", "crypto, stocks, indices, commodities, fx, preipo, macro"], ["form=swap", "spot, perp, token, event, option"], ["region=mars", "us, cn, hk, jp, kr, tw, in, eu"]]) {
+    for (const [query, words] of [["asset=bonds", "crypto, stocks, indices, commodities, compute, fx, preipo, macro"], ["form=swap", "spot, perp, token, event, option"], ["region=mars", "us, cn, hk, jp, kr, tw, in, eu"]]) {
       const got = await get(`/api/explore?${query}`);
       expect(got.status, query).toBe(409);
       expect(got.body.refusal).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: expect.stringContaining(words!) });

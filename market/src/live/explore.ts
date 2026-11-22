@@ -113,9 +113,9 @@ export interface ExploreSources {
   public?: PublicSource[] | undefined;
 }
 
-export type ExploreKind = "coin" | "stock" | "perp" | "event" | "rwa" | "ashare" | "share" | "index" | "optionChain";
+export type ExploreKind = "coin" | "stock" | "perp" | "event" | "rwa" | "ashare" | "share" | "index" | "optionChain" | "computeIndex";
 /** the kinds a dollar row is made of: an event is priced per contract, an A share (china.ts) in CNY and never in `exploreAcross` */
-type DollarKind = Exclude<ExploreKind, "event" | "ashare" | "share" | "index" | "optionChain">;
+type DollarKind = Exclude<ExploreKind, "event" | "ashare" | "share" | "index" | "optionChain" | "computeIndex">;
 export type ExploreSort = "volume" | "movers" | "closing";
 
 export interface ExploreOptions {
@@ -228,6 +228,8 @@ export interface ExploreItem {
   key: string;
   kind: ExploreKind;
   name: string;
+  /** a compute index row's unit in words ($/GPU·hr, $/M tokens; live/ornn) */
+  unit?: string | undefined;
   /** the one name for the thing (BTC, AAPL); an event has none */
   base?: string | undefined;
   /** dollars; an event's is its first outcome's; an A share's (kind ashare) is in CNY, as `currency` says */

@@ -68,8 +68,8 @@ export function perpCategoryTab(category?: string): TabId | undefined {
 /** WHAT A ROW IS, three ways (classOf): the underlying it stands for (its asset), how it is held (its form) and, for shares and indices,
  * the market they are listed in (its region). An asset the row does not say — a perpetual whose source gives no known category — is none,
  * never a guess. In the order the screen shows them. */
-export type AssetId = "crypto" | "stocks" | "indices" | "commodities" | "fx" | "preipo" | "macro";
-export const ASSET_IDS: readonly AssetId[] = ["crypto", "stocks", "indices", "commodities", "fx", "preipo", "macro"];
+export type AssetId = "crypto" | "stocks" | "indices" | "commodities" | "compute" | "fx" | "preipo" | "macro";
+export const ASSET_IDS: readonly AssetId[] = ["crypto", "stocks", "indices", "commodities", "compute", "fx", "preipo", "macro"];
 export type FormId = "spot" | "perp" | "token" | "event" | "option";
 export const FORM_IDS: readonly FormId[] = ["spot", "perp", "token", "event", "option"];
 export type RegionId = "us" | "cn" | "hk" | "jp" | "kr" | "tw" | "in" | "eu";
@@ -101,9 +101,12 @@ const CRYPTO_WORDS: ReadonlySet<string> = new Set(["crypto", "crypto prices", "b
 const INDEX_WORDS: ReadonlySet<string> = new Set(["indices", "indicies"]);
 const COMMODITY_WORDS: ReadonlySet<string> = new Set(["commodities", "oil", "gold"]);
 
+/** a question about one of Ornn's compute price indices ("Will the Ornn H100 Index hit $2.25 …"): compute, whatever category the venue files it under */
+const ORNN_INDEX = /\bOrnn\b[^?]{0,40}\bIndex\b/i;
+
 /** a row's asset, form and region, from what the row already carries: its kind, key, base, category and event (structural, so this file
  * imports nothing from explore.ts) */
-export function classOf(i: { key: string; kind: string; base?: string | undefined; category?: string | undefined; event?: { id: string } | undefined }): Classified {
+export function classOf(i: { key: string; kind: string; name?: string | undefined; base?: string | undefined; category?: string | undefined; event?: { id: string } | undefined }): Classified {
   switch (i.kind) {
     case "coin":
       return { asset: "crypto", form: "spot" };
@@ -121,6 +124,8 @@ export function classOf(i: { key: string; kind: string; base?: string | undefine
       const region = REGION_IDS.find((id) => i.key.startsWith(`ix:${id}:`));
       return { asset: "indices", form: "spot", ...(region ? { region } : {}) };
     }
+    case "computeIndex":
+      return { asset: "compute", form: "spot" };
     case "perp": {
       const tab = i.key.startsWith("preipo:") ? "preipo" : perpCategoryTab(i.category);
       const asset = ASSET_IDS.find((id) => id === tab);
@@ -134,6 +139,7 @@ export function classOf(i: { key: string; kind: string; base?: string | undefine
     case "event": {
       const word = typeof i.category === "string" ? normalWords(i.category) : "";
       const series = i.key.startsWith("kalshi:") ? (i.event?.id ?? i.key.slice("kalshi:".length)).split("-")[0]!.toUpperCase() : "";
+      if (ORNN_INDEX.test(i.name ?? "")) return { asset: "compute", form: "event" };
       if (isIpoCategory([i.category])) return { asset: "preipo", form: "event" };
       if (CRYPTO_SERIES.has(series) || CRYPTO_WORDS.has(word)) return { asset: "crypto", form: "event" };
       if (INDEX_SERIES.has(series) || INDEX_WORDS.has(word)) return { asset: "indices", form: "event", region: "us" };
