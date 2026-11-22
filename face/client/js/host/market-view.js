@@ -44,8 +44,9 @@ export const TAB_SOURCES = {
   'stocks:cn': { main: ['china'], also: [] },
   indices: { main: ['trade-xyz'], also: ['kalshi'] },
   commodities: { main: ['trade-xyz'], also: [] },
-  // Compute's events (its Event form): the event sources, as Macro's; its Spot is Ornn's indices, the market's own read (no source)
-  compute: { main: ['kalshi', 'polymarket'], also: ['polymarket-us'] },
+  // Compute's events (its Event form): the market's three event sources on Main — the ones its formless view searches, so both views share
+  // one search for Ornn (market/src/reads.ts computeEvents); its Spot is Ornn's indices, the market's own read (no source)
+  compute: { main: ['kalshi', 'polymarket', 'polymarket-us'], also: [] },
   fx: { main: ['trade-xyz'], also: [] },
   preipo: {
     main: ['hyperliquid-preipo', 'trade-xyz'],
@@ -82,7 +83,7 @@ const formOf = m => (nonUs(m) ? (m?.form === 'perp' ? 'perp' : 'spot')
 /** Whether the view is on option chains: its Source is the one fixed entry naming the option venues. */
 export const onOptions = m => formOf(isRecord(m) ? m : {}) === 'option';
 /** Whether the view is on Compute with its Source fixed: Spot (Ornn's indices, the market's own read, no source) or no form (the indices
- *  and the questions on them, which no source list may narrow); on Event the event sources are picked as Macro's. */
+ *  and the questions on them, which no source list may narrow); on Event the event sources are picked (Main: all three). */
 export const computeFixed = m => tabOf(m) === 'compute' && formOf(isRecord(m) ? m : {}) !== 'event';
 // a share's currency by its venue, when no read names it
 const VENUE_CURRENCY = { hk: 'HKD', kr: 'KRW', tw: 'TWD' };
@@ -194,7 +195,8 @@ export function exploreQueryOf(markets) {
   // movers alone (the market refuses Closing soonest, kept from an Event view: then by volume)
   if (onOptions(m)) return `asset=${tab}&form=option&sort=${sortOf(m) === 'movers' ? 'movers' : 'volume'}&limit=${MARKET_ROWS}${tab === 'stocks' ? '&region=us' : ''}`;
   // Compute on Spot or with no form: the market's own read of Ornn's indices, no source, by Most traded or Biggest moves alone (it refuses
-  // Closing soonest wherever spot rows are in the answer, kept from Event: then by volume); on Event the generic path below
+  // Closing soonest wherever spot rows are in the answer, kept from Event: then by volume); on Event the generic query below, which the
+  // market routes to its own search for Ornn's events over the sources selected
   if (computeFixed(m)) return `asset=compute&sort=${sortOf(m) === 'movers' ? 'movers' : 'volume'}&limit=${MARKET_ROWS}${formOf(m) ? '&form=spot' : ''}`;
   const form = formOf(m) ? `&form=${formOf(m)}` : '';
   const region = REGIONED.has(tab) ? `&region=${regionOf(m)}` : '';

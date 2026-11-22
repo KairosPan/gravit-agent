@@ -1529,6 +1529,37 @@ describe("compute in the market's reads", () => {
     expect(r.ev.asked).toEqual(["Ornn"]);
   });
 
+  it("one search per source list, whatever the sort or form: sort toggles and the formless view share it, each ask sorted its own way", async () => {
+    const B200Q = "Will the Ornn B200 Index hit $5 by June 30, 2026?";
+    const soon = new Date(Date.now() + 2 * 86_400_000).toISOString();
+    const rows = [
+      // the H100 question: busier, closing later; the B200 one: quieter, closing sooner
+      { ...event(1, H100Q, "Crypto"), volumeUsd24h: 5e6 },
+      { ...event(4, B200Q, "Crypto"), volumeUsd24h: 1e5, closeTime: soon },
+    ];
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const r = computeMarket({ events: events({ listings: async (q) => (q === "Ornn" ? rows.map((x) => ({ ...x })) : []) }) });
+      // each ask past the source's own 20-second keep of a listing and the explore's 30 seconds: only the search's keep can share it
+      const later = (): void => { vi.setSystemTime(Date.now() + 31_000); };
+      expect(names(answered(await r.reads.explore({ asset: "compute", form: "event", sort: "volume" })))).toEqual([H100Q, B200Q]);
+      later();
+      expect(names(answered(await r.reads.explore({ asset: "compute", form: "event", sort: "closing" })))).toEqual([B200Q, H100Q]);
+      later();
+      expect(names(answered(await r.reads.explore({ asset: "compute", form: "event", sort: "movers" })))).toHaveLength(2);
+      later();
+      expect(names(answered(await r.reads.explore({ asset: "compute", form: "event" })))).toEqual([H100Q, B200Q]);
+      // the formless view searches the event sources; a source list naming exactly those is the same search
+      later();
+      answered(await r.reads.explore({ asset: "compute" }));
+      later();
+      answered(await r.reads.explore({ asset: "compute", form: "event", source: "polymarket" }));
+      expect(r.ev.asked).toEqual(["Ornn"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("asset=compute with no form is the spot rows, then the events", async () => {
     const r = computeMarket();
     const got = answered(await r.reads.explore({ asset: "compute" }));

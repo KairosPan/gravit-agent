@@ -924,6 +924,11 @@ function byClose(now: number): (a: ExploreItem, b: ExploreItem) => number {
   };
   return (a, b) => at(a) - at(b) || byVolume(a, b);
 }
+/** rows in the order a sort asks for, as exploreAcross sorts them: the busier first (no sort, or volume), the bigger move (by underlying:
+ * an event's in cents), or the closing soonest. A kept read sorted again for each ask (reads.ts's compute events) */
+export function sortRows(items: readonly ExploreItem[], sort: ExploreSort | undefined, now: number, byClass = false): ExploreItem[] {
+  return [...items].sort(sort === "movers" ? (byClass ? byClassMove : byMove) : sort === "closing" ? byClose(now) : byVolume);
+}
 
 /** one mover per asset: a coin's perpetual is the coin, so where both moved enough the coin's own market is the chip, and the perpetual
  * only where the coin is not among them. A stock and the token that stands for it are two things, and stay two */

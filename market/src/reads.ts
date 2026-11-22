@@ -39,7 +39,7 @@ import { ORNN_INDICES, ORNN_NAME, ORNN_VENUE, type OrnnHistory } from "./live/or
 import type { LocalHistory, LocalMarket, LocalVenue } from "./live/local.ts";
 import { NEWS_ID, NEWS_KEEP_MS, NEWS_NAME, type Headline } from "./live/news.ts";
 import { US_TICKER } from "./live/us-quotes.ts";
-import { exploreAcross, type Exploration, type ExploreItem, type ExploreMissing, type ExploreSort } from "./live/explore.ts";
+import { exploreAcross, sortRows, type Exploration, type ExploreItem, type ExploreMissing, type ExploreSort } from "./live/explore.ts";
 import { optionRow, VENUE_NAMES, type OptionChain, type OptionSummary, type OptionVenue } from "./live/options.ts";
 import { US_OPTION_UNDERLYINGS } from "./live/options-us.ts";
 import { INTERVAL_RANGE, PAGE_MOST, pageOf, RANGE_BAR, rangeSince, sessionsSince } from "./live/history.ts";
@@ -456,12 +456,14 @@ export function marketReads(core: MarketCore): MarketReads {
   }
 
   /** COMPUTE'S EVENTS: the market's own search for "Ornn" over the event sources (or the sources listed), the generic q path, kept
-   * COMPUTE_EVENT_KEEP_MS — only the rows classOf calls compute events (an Ornn index's question), whatever category the venue files them
-   * under. Waited for COMPUTE_EVENT_WAIT_MS: a late search is still kept for the next ask; one no venue answered is a refusal, not kept */
-  function computeEvents(ids: string[], sort: string | undefined): Promise<Exploration | Refusal> {
-    const search = cache.get(`compute-events|${ids.join(",")}|${sort ?? ""}`, COMPUTE_EVENT_KEEP_MS, async () => {
-      const pub = core.sources().filter((s) => (ids.length ? ids.includes(s.id) : s.kind === "events"));
-      const found = await exploreAcross({ connected: [], public: pub }, { q: COMPUTE_EVENT_QUERY, limit: 200, clock: now, ...(sort ? { sort: sort as ExploreSort } : {}) });
+   * COMPUTE_EVENT_KEEP_MS by the sources searched alone (a list naming exactly the event sources is the formless view's search), and sorted
+   * again for each ask, so a sort toggle asks nothing — only the rows classOf calls compute events (an Ornn index's question), whatever
+   * category the venue files them under. Waited for COMPUTE_EVENT_WAIT_MS: a late search is still kept for the next ask; one no venue
+   * answered is a refusal, not kept */
+  async function computeEvents(ids: string[], sort: string | undefined): Promise<Exploration | Refusal> {
+    const pub = core.sources().filter((s) => (ids.length ? ids.includes(s.id) : s.kind === "events"));
+    const search = cache.get(`compute-events|${pub.map((s) => s.id).sort().join(",")}`, COMPUTE_EVENT_KEEP_MS, async () => {
+      const found = await exploreAcross({ connected: [], public: pub }, { q: COMPUTE_EVENT_QUERY, limit: 200, clock: now });
       // no venue answered: a refusal, never kept, so the next ask searches again
       const missed = new Set(found.missing.filter((m) => !m.symbol).map((m) => m.venue));
       if (pub.length && !found.items.length && pub.every((x) => missed.has(x.id))) {
@@ -469,7 +471,8 @@ export function marketReads(core: MarketCore): MarketReads {
       }
       return found;
     });
-    return within(COMPUTE_EVENT_WAIT_MS, search, COMPUTE_WORDS.eventsVenue, COMPUTE_WORDS.eventsName);
+    const got = await within(COMPUTE_EVENT_WAIT_MS, search, COMPUTE_WORDS.eventsVenue, COMPUTE_WORDS.eventsName);
+    return isRefusal(got) ? got : { ...got, items: sortRows(got.items, sort as ExploreSort | undefined, now(), true) };
   }
 
   /** COMPUTE (asset=compute): Ornn's indices on Spot (ornn.ts: kept by the source, never here), the events on them on Event (computeEvents),

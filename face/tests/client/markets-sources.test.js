@@ -34,7 +34,7 @@ test('the fixed lists: the tabs, the regions, the forms, the main sources and wh
   assert.deepEqual(REGIONS, { stocks: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in'], indices: ['us', 'cn', 'hk', 'jp', 'kr', 'tw', 'in', 'eu'], later: { stocks: ['eu'] } });
   assert.deepEqual(FORMS, { live: ['spot', 'perp', 'token', 'event', 'option'], later: [] });
   assert.deepEqual(Object.keys(TAB_SOURCES), ['crypto', 'stocks:us', 'stocks:cn', 'indices', 'commodities', 'compute', 'fx', 'preipo', 'macro']);
-  assert.deepEqual(TAB_SOURCES.compute, { main: ['kalshi', 'polymarket'], also: ['polymarket-us'] });
+  assert.deepEqual(TAB_SOURCES.compute, { main: ['kalshi', 'polymarket', 'polymarket-us'], also: [] }, 'the market\'s three event sources: the formless view\'s search');
   assert.deepEqual(TAB_SOURCES.preipo.main, ['hyperliquid-preipo', 'trade-xyz']);
   assert.deepEqual(TAB_SOURCES['stocks:cn'], { main: ['china'], also: [] });
   // every source a tab names says what it carries
@@ -507,7 +507,7 @@ test('Compute queries: Spot names no source and never Closing soonest; Event the
   const q = (...steps) => decoded(exploreQueryOf(on('compute', ...steps).markets));
   assert.equal(exploreQueryOf(on('compute').markets), 'asset=compute&sort=volume&limit=200');
   assert.equal(exploreQueryOf(on('compute', ['setMarketsForm', 'spot']).markets), 'asset=compute&sort=volume&limit=200&form=spot');
-  assert.deepEqual(q(['setMarketsForm', 'event']), { asset: 'compute', sort: 'volume', limit: '200', form: 'event', source: 'kalshi,polymarket' });
+  assert.deepEqual(q(['setMarketsForm', 'event']), { asset: 'compute', sort: 'volume', limit: '200', form: 'event', source: 'kalshi,polymarket,polymarket-us' });
   assert.deepEqual(q(['setMarketsForm', 'event'], ['setMarketsSource', 'all']).source, 'kalshi,polymarket,polymarket-us');
   // Closing soonest, kept from Event: asked by volume on Spot and with no form (the market refuses it beside spot rows); movers kept
   const closing = ['setMarketsSort', 'closing'];
