@@ -291,6 +291,8 @@ export interface ExploreItem {
   at: ExploreAt[];
   /** every line of the row is a paper account's: its price is that test environment's, and it carries no volume */
   paper?: true | undefined;
+  /** an option row's own figures (options.ts optionRow): volume in contracts or coin, never joining the dollar-volume cut */
+  option?: { nearestExpiry: string | null; volume: number | null; volumeUsd?: number | undefined; openInterest: number | null; atmIv?: number | undefined; nearestOnly?: true | undefined } | undefined;
 }
 
 export type Mover = ExploreItem & { changePct24h: number; volumeUsd24h: number };
