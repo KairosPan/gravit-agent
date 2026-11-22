@@ -13,7 +13,6 @@ const reply = (b: string, status = 200): CnReply => ({ status, bytes: new TextEn
 const answered = <T,>(v: T | Refusal): T => { if (isRefusal(v)) throw new Error(`refused: ${v.message}`); return v; };
 const refusedWith = (v: unknown): string => { if (!isRefusal(v)) throw new Error("answered"); return v.message; };
 
-const FAMILIES = JSON.stringify({ code: "0", data: [["BTC-USD", "ETH-USD"]], msg: "" });
 type Route = [string, CnReply | ((url: string) => CnReply)];
 function net(routes: Route[]) {
   const sent: string[] = [];
@@ -29,7 +28,7 @@ const ROUTES: Route[] = [
   ["currency=BTC&kind=option", reply(text("deribit-btc"))],
   ["currency=ETH&kind=option", reply(text("deribit-eth"))],
   ["currency=USDC&kind=option", reply(text("deribit-usdc"))],
-  ["public/underlying?instType=OPTION", reply(FAMILIES)],
+  ["public/underlying?instType=OPTION", reply(text("okx-underlying"))],
   ["market/tickers?instType=OPTION&instFamily=BTC-USD", reply(text("okx-btc"))],
   ["opt-summary?instFamily=BTC-USD", reply(text("okx-opt-summary"))],
   ["open-interest?instType=OPTION&instFamily=BTC-USD", reply(text("okx-open-interest"))],
@@ -76,14 +75,43 @@ describe("summaries", () => {
     expect(r.items[0]!.underlying).toBe("BTC"); // the busiest first
   });
 
-  it("lists Deribit's linear underlyings (SOL, XRP) from the USDC book, Deribit alone; never the whole chain of OKX", async () => {
+  it("lists Deribit's linear underlyings (SOL, XRP) from the USDC book with Deribit's figures; never OKX's tickers for an underlying Deribit lists", async () => {
     const { src, sent } = source();
     const r = answered(await src.summaries());
     const sol = r.items.find((i) => i.underlying === "SOL")!;
-    expect(sol.venues).toEqual(["deribit"]);
+    expect(sol.venues).toEqual(["deribit", "okx"]);
+    expect(sol.quoteFrom).toBe("Deribit");
     expect(sol.price).toBe(69.3658);
+    expect(r.items.find((i) => i.underlying === "XRP")!.venues).toEqual(["deribit"]);
+    for (const c of ["BTC", "ETH", "SOL"]) expect(sent.some((u) => u.includes(`market/tickers?instType=OPTION&instFamily=${c}-USD`))).toBe(false);
+    // HYPE is not in the trimmed USDC fixture, so it is OKX-only here: its tickers are asked (404 in this net: left out)
+    expect(sent.some((u) => u.includes("instFamily=HYPE-USD"))).toBe(true);
     expect(r.items.map((i) => i.underlying).sort()).toEqual(["BTC", "ETH", "SOL", "XRP"]);
-    expect(sent.some((u) => u.includes("www.okx.com/api/v5/market/tickers"))).toBe(false);
+  });
+
+  it("OKX's gold family (XAU-USD) is not crypto: never listed, never asked; its chain is refused", async () => {
+    const { src, sent } = source();
+    const r = answered(await src.summaries());
+    expect(r.items.map((i) => i.underlying)).not.toContain("XAU");
+    expect(refusedWith(await src.chain("XAU", "okx"))).toMatch(/OKX's XAU options are not crypto/);
+    expect(sent.some((u) => u.includes("XAU-USD"))).toBe(false);
+  });
+
+  it("one Deribit book failing lists what answered, flagged partial and naming the book", async () => {
+    const routes: Route[] = [["currency=USDC&kind=option", reply("", 500)], ...ROUTES];
+    const { src } = source(routes);
+    const r = answered(await src.summaries());
+    expect(r.partial).toBe(true);
+    expect(r.note).toMatch(/USDC/);
+    expect(r.stale).toBeUndefined();
+    expect(r.items.map((i) => i.underlying).sort()).toEqual(["BTC", "ETH"]);
+  });
+
+  it("a 451 is refused without claiming a pause", async () => {
+    const { src } = source([["www.deribit.com", reply("", 451)], ...ROUTES]);
+    const m = refusedWith(await src.chain("BTC", "deribit"));
+    expect(m).toMatch(/Deribit refuses this place/);
+    expect(m).not.toMatch(/minutes/);
   });
 
   it("an underlying only OKX lists shows OKX's volume in USD, no OI or IV; the list caps at the busiest six", async () => {
@@ -115,7 +143,7 @@ describe("summaries", () => {
 
   it("is kept 30 s; a failed read answers the last good one stale within 10 min, then refuses", async () => {
     let down = false;
-    const routes: Route[] = ROUTES.map(([k, v]) => [k, (u: string) => (down && k.includes("currency=ETH") ? reply("", 500) : typeof v === "function" ? v(u) : v)]);
+    const routes: Route[] = ROUTES.map(([k, v]) => [k, (u: string) => (down && k.includes("kind=option") ? reply("", 500) : typeof v === "function" ? v(u) : v)]);
     const s = source(routes);
     const first = answered(await s.src.summaries());
     const asked = s.sent.length;
@@ -137,8 +165,13 @@ describe("summaries", () => {
   it("an unparseable 200 is a failure, never kept", async () => {
     const routes: Route[] = [["currency=BTC&kind=option", reply("<html>not json</html>")], ...ROUTES];
     const s = source(routes);
-    expect(refusedWith(await s.src.summaries())).toMatch(/Deribit/);
-    const shapeless: Route[] = [["currency=BTC&kind=option", reply(JSON.stringify({ result: { nope: 1 } }))], ...ROUTES];
+    expect(refusedWith(await s.src.chain("BTC", "deribit"))).toMatch(/Deribit is not answering/);
+    await s.src.chain("BTC", "deribit");
+    expect(s.sent.filter((u) => u.includes("currency=BTC")).length).toBe(2);
+    const list = answered(await s.src.summaries());
+    expect(list.partial).toBe(true);
+    expect(list.items.map((i) => i.underlying)).not.toContain("BTC");
+    const shapeless: Route[] = [["kind=option", reply(JSON.stringify({ result: { nope: 1 } }))], ...ROUTES];
     expect(isRefusal(await source(shapeless).src.summaries())).toBe(true);
   });
 });

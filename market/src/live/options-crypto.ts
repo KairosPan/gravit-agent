@@ -5,8 +5,8 @@
  * OKX's a fraction, so counts never add across venues); an OKX-only row shows OKX's volume and no OI or IV. A chain (`chain`) is one venue's:
  * Deribit's legs in the coin (or USDC) with `usd` at the row's own `underlying_price`; OKX's in the coin with `usd` at OKX's index, IV from
  * `opt-summary` (`markVol` x 100) and open interest from `open-interest` (`oiCcy`, in the coin as Deribit's is). Every ask is kept 30 s (OKX's
- * family list a day), one flight per URL; a failure is never kept. A failed list read answers the last good one up to 10 min, flagged
- * stale. Each host is asked through `politeHosts`, inside whatever shared guard the core hands in as `http`: a 3xx, 403 or 429 pauses it. */
+ * family list a day), one flight per URL; a failure is never kept. A list read some Deribit book failed lists what answered, flagged
+ * partial; one every book failed answers the last good list up to 10 min, flagged stale. OKX's non-crypto families (XAU…) are dropped. Each host is asked through `politeHosts`, inside whatever shared guard the core hands in as `http`: a 3xx, 403 or 429 pauses it. */
 import { isRefusal, type Refusal } from "../core/errors.ts";
 import { no } from "../refuse.ts";
 import { cnKeeper, STALE_KEEP_MS } from "./china.ts";
@@ -30,6 +30,8 @@ const HEADERS = { accept: "application/json" };
 /** Deribit's inverse books; every other underlying is in its USDC book */
 const INVERSE = ["BTC", "ETH"] as const;
 const BOOKS = [...INVERSE, "USDC"] as const;
+/** OKX's option families that are not crypto (gold, silver, the other metals, fiat): never listed, never asked here */
+export const OKX_NOT_CRYPTO: ReadonlySet<string> = new Set(["XAU", "XAG", "XPT", "XPD", "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNH", "CNY", "HKD", "SGD", "NZD", "KRW", "TWD"]);
 
 export const deribitBookUrl = (currency: string): string =>
   `https://${DERIBIT_HOST}/api/v2/public/get_book_summary_by_currency?currency=${currency}&kind=option`;
@@ -65,7 +67,7 @@ function okxRows(body: unknown): unknown[] | null {
 }
 
 export function cryptoOptions(deps: { http?: CnHttp; clock?: () => number } = {}): {
-  summaries(): Promise<{ items: OptionSummary[]; asOf: string; stale?: true } | Refusal>;
+  summaries(): Promise<{ items: OptionSummary[]; asOf: string; stale?: true; partial?: true; note?: string } | Refusal>;
   chain(underlying: string, venue: CryptoVenue, expiry?: string): Promise<OptionChain | Refusal>;
   status(): LocalStatus;
 } {
@@ -79,6 +81,8 @@ export function cryptoOptions(deps: { http?: CnHttp; clock?: () => number } = {}
   const unreachable = (v: CryptoVenue): Refusal => no("E_VENUE_UNREACHABLE", { venue: v, message: `${name(v)} is not answering: its options cannot be read now` });
   const refused = (v: CryptoVenue, why: string): Refusal =>
     no("E_VENUE_UNREACHABLE", { venue: v, message: `${name(v)} refused this place (${why}): its options are not asked for ${PAUSE_MS / 60_000} minutes` });
+  /** a 451 pauses nothing (politeHosts pauses on a 3xx, 403 or 429): the venue refuses this place, and that is all that is said */
+  const refuses = (v: CryptoVenue): Refusal => no("E_VENUE_UNREACHABLE", { venue: v, message: `${name(v)} refuses this place (HTTP 451): its options cannot be read from here` });
   const badAction = (v: CryptoVenue, message: string): Refusal => no("E_ACCOUNT_BAD_ACTION", { venue: v, message });
   const isRows = (r: Rows | Refusal): r is Rows => !isRefusal(r);
 
@@ -88,7 +92,8 @@ export function cryptoOptions(deps: { http?: CnHttp; clock?: () => number } = {}
     return keep.ask(url, async () => {
       try {
         const r = await retryOnce(() => hosts[v](url, { timeoutMs: TIMEOUT_MS, maxBytes: v === "deribit" ? DERIBIT_LIMIT : OKX_LIMIT, headers: HEADERS }));
-        if (r.status === 403 || r.status === 429 || r.status === 451 || (r.status >= 300 && r.status < 400)) return refused(v, `HTTP ${r.status}`);
+        if (r.status === 451) return refuses(v);
+        if (r.status === 403 || r.status === 429 || (r.status >= 300 && r.status < 400)) return refused(v, `HTTP ${r.status}`);
         if (r.status !== 200) return unreachable(v);
         let body: unknown;
         try { body = JSON.parse(new TextDecoder("utf-8").decode(r.bytes)); } catch { return unreachable(v); }
@@ -100,12 +105,13 @@ export function cryptoOptions(deps: { http?: CnHttp; clock?: () => number } = {}
     }, isRows);
   }
 
-  /** OKX's coin-margined option families as coins (`BTC-USD` → BTC), or null when the list cannot be read (then nothing is assumed) */
+  /** OKX's coin-margined crypto option families as coins (`BTC-USD` → BTC; `XAU-USD` and the other OKX_NOT_CRYPTO dropped), or null when the
+   * list cannot be read (then nothing is assumed) */
   async function okxCoins(): Promise<Set<string> | null> {
     const r = await ask("okx", OKX_FAMILIES_URL);
     if (isRefusal(r)) return null;
     const out = new Set<string>();
-    for (const f of r.rows.flat()) { const m = typeof f === "string" ? /^([A-Z0-9]+)-USD$/.exec(f) : null; if (m) out.add(m[1]!); }
+    for (const f of r.rows.flat()) { const m = typeof f === "string" ? /^([A-Z0-9]+)-USD$/.exec(f) : null; if (m && !OKX_NOT_CRYPTO.has(m[1]!)) out.add(m[1]!); }
     return out;
   }
 
@@ -198,6 +204,7 @@ export function cryptoOptions(deps: { http?: CnHttp; clock?: () => number } = {}
   };
 
   async function okxChain(u: string, expiry: string | undefined): Promise<OptionChain | Refusal> {
+    if (OKX_NOT_CRYPTO.has(u)) return badAction("okx", `OKX's ${u} options are not crypto: they are not read here`);
     const coins = await okxCoins();
     if (coins && !coins.has(u)) return badAction("okx", `OKX lists no options on ${u}`);
     const family = `${u}-USD`;
@@ -279,34 +286,43 @@ export function cryptoOptions(deps: { http?: CnHttp; clock?: () => number } = {}
   }
 
   // ---- the list --------------------------------------------------------------------------------------------------------------------
-  type ListAnswer = { items: OptionSummary[]; asOf: string };
+  /** `partial`: a Deribit book did not answer, and `note` names it; what answered is listed */
+  type ListAnswer = { items: OptionSummary[]; asOf: string; partial?: true; note?: string };
+  type ListReply = ListAnswer & { stale?: true };
   let kept: { at: number; answer: ListAnswer } | null = null;
   let lastGood: { at: number; answer: ListAnswer } | null = null;
-  let flight: Promise<{ items: OptionSummary[]; asOf: string; stale?: true } | Refusal> | null = null;
+  let flight: Promise<ListReply | Refusal> | null = null;
 
   async function readList(): Promise<ListAnswer | Refusal> {
     const [books, coins] = await Promise.all([Promise.all(BOOKS.map((c) => ask("deribit", deribitBookUrl(c)))), okxCoins()]);
-    const failed = books.find(isRefusal);
-    if (failed) return failed;
-    const [btc, eth, usdc] = books as Rows[];
-    const byU = new Map<string, DRow[]>([...deribitByUnderlying(btc!, "coin"), ...deribitByUnderlying(eth!, "coin")]);
-    for (const [u, rows] of deribitByUnderlying(usdc!, "USDC")) if (!byU.has(u)) byU.set(u, rows); // BTC and ETH: the inverse book's figures
+    const answeredBooks = books.filter(isRows);
+    if (!answeredBooks.length) return books.find(isRefusal)!;
+    const missing = BOOKS.filter((_, i) => isRefusal(books[i]!));
+    const [btc, eth, usdc] = books;
+    const byU = new Map<string, DRow[]>();
+    for (const b of [btc, eth]) if (b && isRows(b)) for (const [u, rows] of deribitByUnderlying(b, "coin")) byU.set(u, rows);
+    // BTC and ETH: the inverse book's figures; when an inverse book did not answer, its underlying is left out, never filled from USDC
+    if (usdc && isRows(usdc)) for (const [u, rows] of deribitByUnderlying(usdc, "USDC")) if (!byU.has(u) && !(missing as string[]).includes(u)) byU.set(u, rows);
     const items = [...byU].map(([u, rows]) => deribitSummary(u, rows, coins));
-    const okxOnly = [...(coins ?? [])].filter((c) => !byU.has(c));
+    /** an OKX-only underlying is one no Deribit book lists; while a book is missing, only the inverse coins' families are known to be Deribit's */
+    const okxOnly = missing.length ? [] : [...(coins ?? [])].filter((c) => !byU.has(c));
     for (const s of await Promise.all(okxOnly.map(okxSummary))) if (s) items.push(s);
     items.sort((a, b) => (b.volumeUsd ?? -1) - (a.volumeUsd ?? -1));
-    const at = Math.min(...books.map((b) => (b as Rows).at));
-    return { items: items.slice(0, SUMMARY_CAP), asOf: new Date(at).toISOString() };
+    const at = Math.min(...answeredBooks.map((b) => b.at));
+    const base = { items: items.slice(0, SUMMARY_CAP), asOf: new Date(at).toISOString() };
+    return missing.length ? { ...base, partial: true, note: `Deribit's ${missing.join(", ")} book${missing.length > 1 ? "s" : ""} did not answer: ${missing.length > 1 ? "their" : "its"} underlyings are not listed` } : base;
   }
 
-  async function summaries(): Promise<{ items: OptionSummary[]; asOf: string; stale?: true } | Refusal> {
+  async function summaries(): Promise<ListReply | Refusal> {
     if (kept && now() - kept.at < CRYPTO_CHAIN_MS) return kept.answer;
     if (flight) return flight;
     flight = readList().then((r) => {
       const t = now();
       if (!isRefusal(r)) {
-        kept = lastGood = { at: t, answer: r };
-        status = { state: "live", said: "Crypto options · answering", at: r.asOf };
+        // a partial list is answered and is the last good one, but not kept: the next read asks the missing book again
+        lastGood = { at: t, answer: r };
+        if (!r.partial) kept = lastGood;
+        status = r.partial ? { state: "live", said: `Crypto options · ${r.note}`, at: r.asOf } : { state: "live", said: "Crypto options · answering", at: r.asOf };
         return r;
       }
       if (lastGood && t - lastGood.at < STALE_KEEP_MS) {
