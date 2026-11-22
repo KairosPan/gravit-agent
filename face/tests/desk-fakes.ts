@@ -76,6 +76,11 @@ export class WallClock implements DeskClock {
     return this.timers.length;
   }
 
+  /** When each timer set and not yet fired or cleared falls due, in milliseconds, earliest first. */
+  due(): number[] {
+    return this.timers.map((timer) => timer.at).sort((a, b) => a - b);
+  }
+
   /** Let pending promise continuations run: twenty turns of the event loop. */
   async flush(): Promise<void> {
     for (let i = 0; i < 20; i++) await new Promise<void>((done) => { setImmediate(done); });
