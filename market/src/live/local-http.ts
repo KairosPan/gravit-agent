@@ -13,6 +13,8 @@ export const DERIBIT_HOST = "www.deribit.com";
 export const OKX_HOST = "www.okx.com";
 export const NASDAQ_HOST = "api.nasdaq.com";
 export const OPTION_HOSTS: readonly string[] = [DERIBIT_HOST, OKX_HOST, NASDAQ_HOST];
+/** Ornn's compute indices (ornn.ts): the daily settles and histories, and a GPU's current value */
+export const ORNN_HOSTS: readonly string[] = ["data.ornn.com", "api.ornnai.com"];
 
 export const PAUSE_MS = 900_000;
 
@@ -48,11 +50,11 @@ export function politeHosts(
   };
 }
 
-/** every local source's hosts but Eastmoney's (whose one client the core hands Hong Kong and the indices alike), and the option sources' */
-export const LOCAL_HOSTS: readonly string[] = [...HK_HOSTS, ...NAVER_HOSTS, ...TWSE_HOSTS, ...OPTION_HOSTS];
+/** every local source's hosts but Eastmoney's (whose one client the core hands Hong Kong and the indices alike), the option sources' and Ornn's */
+export const LOCAL_HOSTS: readonly string[] = [...HK_HOSTS, ...NAVER_HOSTS, ...TWSE_HOSTS, ...OPTION_HOSTS, ...ORNN_HOSTS];
 /** THE ONE GUARD the market's core builds over every local host and hands to Hong Kong, Korea, Taiwan and the indices as their `http`, so a
  * host that pauses for one source (Tencent for Hong Kong's shares and the indices, Naver for Korea and the indices, TWSE for Taiwan and TAIEX)
- * is paused for all; the option sources (Deribit, OKX, Nasdaq) take it too, so each of their hosts has one pause; each source's own `politeHosts` inside it still limits that source to its own hosts */
+ * is paused for all; the option sources (Deribit, OKX, Nasdaq) and Ornn take it too, so each of their hosts has one pause; each source's own `politeHosts` inside it still limits that source to its own hosts */
 export function localHosts(http: CnHttp, o: { clock?: () => number } = {}): CnHttp {
   return politeHosts(http, LOCAL_HOSTS, o);
 }
