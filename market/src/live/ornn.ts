@@ -3,7 +3,7 @@
  * last good read, flagged stale, for ten minutes past that read's keep, then its rows are left out with the read's note naming them (and when
  * no ask has anything, the read is refused). A failed ask is not asked again for a minute. A row's price is its latest settle; its change is
  * the latest settle less the previous one, from the row's history: the list never waits for a history, it starts the missing ones in the
- * background, one at a time, at most one per row per settle, and shows a row's change once its history has answered. A history is kept until
+ * background, one at a time, one that answers per row per settle (a failed one tried again after an hour), and shows a row's change once its history has answered. A history is kept until
  * 24 h after its last point (at least an hour); a GPU's current (intraday) value from api.ornnai.com is read only by `quote`, kept five
  * minutes, and its host failing leaves the rest of the quote answered with a note. Every row is view-only (venue `ornn`), never in `all` and
  * never a dollar volume; nothing Ornn does not give is computed but the change, said as such. Both hosts are in the shared guard
@@ -57,6 +57,8 @@ export const ORNN_CURRENT_TTL_MS = 300_000;
 /** a history is kept until 24 h after its last point, and at least an hour */
 export const ORNN_HISTORY_AFTER_MS = 86_400_000;
 export const ORNN_HISTORY_MIN_MS = 3_600_000;
+/** a background history read that failed is tried once more for the same settle after this long (a read that answered is once per settle) */
+export const ORNN_HISTORY_RETRY_MS = 3_600_000;
 /** the token histories are asked for this many days back from today (UTC dates): Ornn's free tier holds three months */
 export const ORNN_HISTORY_DAYS = 90;
 /** the pause between two background history reads */
@@ -135,12 +137,13 @@ export function parseHistory(body: string, kind: OrnnIndex["kind"]): Point[] {
   return out.sort((a, b) => a.t - b.t);
 }
 
-/** the change from the previous settle: the latest settle less the last history point dated before it; none without such a point */
+/** the change from the previous settle: the latest settle less the last history point dated before it; none without such a point, and none
+ * where that point is zero (no percentage of nothing) */
 function changeOf(settle: Settle, points: readonly Point[]): { change: number; changePct: number; prev: number } | null {
   const prev = [...points].reverse().find((p) => p.date < settle.date);
-  if (!prev) return null;
+  if (!prev || prev.value === 0) return null;
   const change = round(settle.value - prev.value, 10);
-  return { change, changePct: prev.value !== 0 ? round((settle.value / prev.value - 1) * 100, 2) : 0, prev: prev.value };
+  return { change, changePct: round((settle.value / prev.value - 1) * 100, 2), prev: prev.value };
 }
 
 export function ornnSource(deps: { http?: CnHttp; clock?: () => number; paceMs?: number } = {}): OrnnSource {
@@ -187,8 +190,9 @@ export function ornnSource(deps: { http?: CnHttp; clock?: () => number; paceMs?:
   const historyFlights = new Map<string, Promise<Point[] | null>>();
   /** each row's change for a settle (`<id>|<date>`), from its history; a row with a history and no previous point is kept as null */
   const changes = new Map<string, ReturnType<typeof changeOf>>();
-  /** the rows whose background history read was started for a settle (`<id>|<date>`): at most one per row per settle */
-  const started = new Set<string>();
+  /** the rows whose background history read is under way for a settle (`<id>|<date>`: "pending"), or failed (the time it failed): a read
+   * that answers is once per row per settle; one that failed is tried again after ORNN_HISTORY_RETRY_MS */
+  const started = new Map<string, "pending" | number>();
   const historyKeep = (points: readonly Point[], at: number): number =>
     Math.max(points.length ? points.at(-1)!.t + ORNN_HISTORY_AFTER_MS - at : 0, ORNN_HISTORY_MIN_MS);
 
@@ -218,13 +222,16 @@ export function ornnSource(deps: { http?: CnHttp; clock?: () => number; paceMs?:
   let line: Promise<void> = Promise.resolve();
   function startHistory(i: OrnnIndex, settle: Settle): void {
     const key = `${i.id}|${settle.date}`;
-    if (started.has(key) || changes.has(key)) return;
+    if (changes.has(key)) return;
+    const was = started.get(key);
+    if (was === "pending" || (typeof was === "number" && now() - was < ORNN_HISTORY_RETRY_MS)) return;
     // a new settle: the row's older settles are let go
-    for (const m of [started, changes]) for (const k of m.keys()) if (k.startsWith(`${i.id}|`)) m.delete(k);
-    started.add(key);
+    if (was === undefined) for (const m of [started, changes]) for (const k of m.keys()) if (k.startsWith(`${i.id}|`)) m.delete(k);
+    started.set(key, "pending");
     line = line.then(async () => {
-      const points = await pointsOf(i);
-      if (points) changes.set(key, changeOf(settle, points));
+      const points = await pointsOf(i).catch(() => null);
+      if (points) { changes.set(key, changeOf(settle, points)); started.delete(key); }
+      else started.set(key, now());
       if (paceMs > 0) await new Promise<void>((go) => setTimeout(go, paceMs));
     }).catch(() => {});
   }
@@ -299,7 +306,7 @@ export function ornnSource(deps: { http?: CnHttp; clock?: () => number; paceMs?:
     const points = await pointsOf(i);
     if (!points) return unreachable("Ornn is not answering: that index's history cannot be read now");
     const candles = points.map((p): CnBar => ({ t: p.t, o: p.value, h: p.value, l: p.value, c: p.value }));
-    const shown = range === "1M" ? candles.slice(-30) : range === "3M" ? candles.slice(-90) : candles;
+    const shown = range === "1M" ? candles.slice(-30) : candles;
     return { venue: "ornn", venueName: "Ornn", symbol: id, range: range as OrnnHistory["range"], candles: shown, source: ORNN_NAME,
       ...(range === "1M" ? {} : { note: ORNN_HISTORY_NOTE }) };
   }
@@ -336,8 +343,9 @@ export function ornnSource(deps: { http?: CnHttp; clock?: () => number; paceMs?:
     const [points, current] = await Promise.all([pointsOf(i), i.kind === "gpu" ? currentOf(i) : Promise.resolve(undefined)]);
     const ch = points ? changeOf(s, points) : null;
     if (points) changes.set(`${i.id}|${s.date}`, ch);
-    const month = points ? points.filter((p) => p.date <= s.date).slice(-30).map((p) => p.value) : [];
-    if (points && !points.some((p) => p.date === s.date)) month.push(s.value);
+    const upTo = points ? points.filter((p) => p.date <= s.date).map((p) => p.value) : [];
+    if (points && !points.some((p) => p.date === s.date)) upTo.push(s.value);
+    const month = upTo.slice(-30);
     const notes = [
       ...(points ? [] : ["Ornn's history did not answer: no previous settle or 30-day range"]),
       ...(current === null ? ["Ornn's current value did not answer: the latest settle is shown"] : []),

@@ -4,7 +4,7 @@ import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import type { CnHttp, CnReply } from "../../src/live/cn-http.ts";
 import { localHosts, LOCAL_HOSTS } from "../../src/live/local-http.ts";
 import {
-  ORNN_CURRENT_TTL_MS, ORNN_HOSTS, ORNN_INDICES, ORNN_LIST_TTL_MS, ORNN_STALE_MS, ornnSource, type OrnnMarket,
+  ORNN_CURRENT_TTL_MS, ORNN_FAIL_HOLD_MS, ORNN_HISTORY_AFTER_MS, ORNN_HISTORY_MIN_MS, ORNN_HISTORY_RETRY_MS, ORNN_HOSTS, ORNN_INDICES, ORNN_LIST_TTL_MS, ORNN_STALE_MS, ornnSource, type OrnnMarket,
 } from "../../src/live/ornn.ts";
 
 const fxText = (n: string): string => readFileSync(new URL(`../fixtures/ornn/${n}`, import.meta.url), "utf8");
@@ -144,7 +144,7 @@ describe("rows", () => {
 });
 
 describe("history", () => {
-  it("daily bars, o = h = l = c: 1M is 30 bars, 3M is 90 with the note", async () => {
+  it("daily bars, o = h = l = c: 1M is 30 bars; 3M and longer are all the points there are, with the note", async () => {
     const n = net(base());
     const s = ornnSource({ http: n.http, clock: () => T0, paceMs: 0 });
     const m1 = answered(await s.history("h100", "1M"));
@@ -152,12 +152,12 @@ describe("history", () => {
     expect(m1.candles).toHaveLength(30);
     expect(m1.note).toBeUndefined();
     expect(m1.candles.at(-1)).toEqual({ t: Date.parse("2026-11-21T05:00:00.000Z"), o: 2.89, h: 2.89, l: 2.89, c: 2.89 });
-    const m3 = answered(await s.history("h100", "3M"));
-    expect(m3.candles).toHaveLength(90);
-    expect(m3.note).toBe("Ornn's free history is three months");
-    const y1 = answered(await s.history("h100", "1Y"));
-    expect(y1.note).toBe("Ornn's free history is three months");
-    // one read answered all three ranges
+    for (const range of ["3M", "6M", "1Y", "MAX"] as const) {
+      const h = answered(await s.history("h100", range));
+      expect(h.candles).toHaveLength(91);
+      expect(h.note).toBe("Ornn's free history is three months");
+    }
+    // one read answered every range
     expect(n.count(H100_HIST)).toBe(1);
     const tok = answered(await s.history("tok-anthropic", "3M"));
     expect(tok.candles).toHaveLength(90);
@@ -274,8 +274,95 @@ describe("the shared guard", () => {
     const q = await s.history("h200", "1M");
     expect(isRefusal(q)).toBe(true);
     expect(n.count("data.ornn.com")).toBe(before);
+    // the pause is the guard's, not the source's: another consumer of the same guard sends nothing to that host either
+    const other = ornnSource({ http: shared, clock: () => t, paceMs: 0 });
+    expect(isRefusal(await other.history("b300", "1M"))).toBe(true);
+    await expect(shared("https://data.ornn.com/api/public-index/daily-index/all", { timeoutMs: 1, maxBytes: 1_000_000 })).rejects.toThrow("paused");
+    expect(n.count("data.ornn.com")).toBe(before);
     // api.ornnai.com is a host of its own: not paused
     await shared("https://api.ornnai.com/api/gpu/B200", { timeoutMs: 1, maxBytes: 1_000_000 });
     expect(n.count("api.ornnai.com/api/gpu/B200")).toBe(1);
+  });
+});
+
+describe("review round 1", () => {
+  it("a failed background history read is tried once more after the hold, and the change appears", async () => {
+    let fails = 1;
+    const n = net([[H100_HIST, () => (fails-- > 0 ? json({}, 500) : reply(fx("h100-history.json")))], ...base()]);
+    let t = T0;
+    const s = ornnSource({ http: n.http, clock: () => t, paceMs: 0 });
+    await s.rows("volume");
+    await vi.waitFor(() => expect(n.count(H100_HIST)).toBe(1));
+    await new Promise((go) => setTimeout(go, 10));
+    t += ORNN_HISTORY_RETRY_MS - 1;
+    // inside the list's keep and the hold: no second read
+    await s.rows("volume");
+    await new Promise((go) => setTimeout(go, 10));
+    expect(n.count(H100_HIST)).toBe(1);
+    expect(answered(await s.rows("volume")).items.find((i) => i.key === "cmp:h100")!.change24h).toBeUndefined();
+    t += 1;
+    await s.rows("volume");
+    await vi.waitFor(async () => {
+      expect(answered(await s.rows("volume")).items.find((i) => i.key === "cmp:h100")!.change24h).toBeCloseTo(-0.01, 8);
+    });
+    expect(n.count(H100_HIST)).toBe(2);
+    // an answered read is once per settle
+    t += ORNN_HISTORY_RETRY_MS * 3;
+    await s.rows("volume");
+    await new Promise((go) => setTimeout(go, 10));
+    expect(n.count(H100_HIST)).toBe(2);
+  });
+
+  it("a zero previous value gives no change at all", async () => {
+    const h = { success: true, gpu_type: "H100 SXM", access: "public-3mo", data: [
+      { timestamp: "2026-11-20T05:00:00.000Z", index_value: 0 }, { timestamp: "2026-11-21T05:00:00.000Z", index_value: 2.89 }] };
+    const n = net([[H100_HIST, json(h)], ...base()]);
+    const q = answered(await ornnSource({ http: n.http, clock: () => T0, paceMs: 0 }).quote("h100")) as OrnnMarket;
+    expect(q.change24h).toBeUndefined();
+    expect(q.changePct24h).toBeUndefined();
+    expect(q.local.prevClose).toBeNull();
+  });
+
+  it("the 30-day range holds at most 30 values, the settle among them", async () => {
+    // the history ends a day before the settle: the settle is pushed first, then the range cut to 30
+    const full = JSON.parse(fxText("h100-history.json")) as { data: Array<{ timestamp: string; index_value: number }> };
+    const data = full.data.slice(0, -1).map((p, k, all) => (k === all.length - 30 ? { ...p, index_value: 99 } : p));
+    const n = net([[H100_HIST, json({ ...full, data })], ...base()]);
+    const q = answered(await ornnSource({ http: n.http, clock: () => T0, paceMs: 0 }).quote("h100")) as OrnnMarket;
+    // the 99 is 30th from the end of the history; with the settle pushed it is 31st and falls outside the range
+    expect(q.local.high).toBeLessThan(99);
+    const want = [...data.slice(-29).map((p) => p.index_value), 2.89];
+    expect(q.local.high).toBe(Math.max(...want));
+    expect(q.local.low).toBe(Math.min(...want));
+  });
+
+  it("a history is kept until 24 h after its last point, and at least an hour", async () => {
+    const n = net(base());
+    const last = Date.parse("2026-11-21T05:00:00.000Z");
+    // read two hours after the last point: kept until 24 h after it
+    let t = last + 2 * 3_600_000;
+    const s = ornnSource({ http: n.http, clock: () => t, paceMs: 0 });
+    answered(await s.history("h100", "1M"));
+    t = last + ORNN_HISTORY_AFTER_MS - 1; answered(await s.history("h100", "1M"));
+    expect(n.count(H100_HIST)).toBe(1);
+    t = last + ORNN_HISTORY_AFTER_MS; answered(await s.history("h100", "1M"));
+    expect(n.count(H100_HIST)).toBe(2);
+    // read again past the 24 h: kept the hour's minimum
+    t += ORNN_HISTORY_MIN_MS - 1; answered(await s.history("h100", "1M"));
+    expect(n.count(H100_HIST)).toBe(2);
+    t += 1; answered(await s.history("h100", "1M"));
+    expect(n.count(H100_HIST)).toBe(3);
+  });
+
+  it("a failed latest-index ask is not sent again within a minute, and is after", async () => {
+    const n = net([[DAILY, json({}, 500)], ...base()]);
+    let t = T0;
+    const s = ornnSource({ http: n.http, clock: () => t, paceMs: 0 });
+    await s.rows("volume");
+    expect(n.count(DAILY)).toBe(1);
+    t += ORNN_FAIL_HOLD_MS - 1; await s.rows("volume");
+    expect(n.count(DAILY)).toBe(1);
+    t += 1; await s.rows("volume");
+    expect(n.count(DAILY)).toBe(2);
   });
 });
