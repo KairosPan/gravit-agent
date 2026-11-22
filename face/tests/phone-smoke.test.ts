@@ -315,7 +315,7 @@ test("phone smoke: a text through the account's inbox opens a desk turn and its 
     await writeFile(join(JOURNAL, "GRAVIT.md"), `${PLANTED}\n`);
     const startsBefore = turnStarts();
     const refusal = fenceRefusalLine("desk/journal/GRAVIT.md");
-    fromOperator("after the plant");
+    const lastText = fromOperator("after the plant");
     const refused = await sent("the fence's refusal", (text) => text === refusal);
     assert.equal(refused.kind, "chat");
     assert.equal(turnStarts(), startsBefore, "the refused text opened no turn");
@@ -323,7 +323,8 @@ test("phone smoke: a text through the account's inbox opens a desk turn and its 
 
     /* 7. ACROSS THE WHOLE FILE: every send named its kind and nothing that could be a recipient; every reply went as
      * chat to telegram; none carries the secret; the face asked the account for its inbox and its send, nothing else;
-     * the cursor and every desk file are free of the secret; and no guarded file was created or changed. */
+     * the cursor stands at the last text, and it and every desk file are free of the secret; and no guarded file was
+     * created or changed. */
     assert.ok(account.sends.length > 0);
     for (const body of account.sends) {
       assert.deepEqual(Object.keys(body).filter((k) => !["kind", "text", "replyTo", "network"].includes(k)), [], JSON.stringify(body));
@@ -331,11 +332,16 @@ test("phone smoke: a text through the account's inbox opens a desk turn and its 
     }
     assert.ok(account.sends.every((s) => s.kind === "chat" && s.network === "telegram"), "every line of this file is a reply to the operator's own text");
     assert.ok(account.reads.length > 5 && account.reads.every((r) => r.wait === 25));
+    /* The bridge is still taking the last text: the account records a send before it answers it, and the bridge stores
+     * the cursor past a message only once its reply is answered (src/phone-bridge.ts `take`), as a `.tmp` sibling renamed
+     * over `inbox.cursor`. Listed mid-write, the `.tmp` is gone by its read. Once the cursor holds the last text's inbox
+     * number the bridge writes nothing more - its next read is a long poll - so the desk files below are settled. */
+    const cursorFile = join(deskDir(HOME), "inbox.cursor");
+    await waitFor("the cursor at the last text", async () => (await readFile(cursorFile, "utf8")) === `${lastText.id}\n`);
     for (const entry of await readdir(deskDir(HOME), { withFileTypes: true })) {
       if (!entry.isFile()) continue;
       assert.equal((await readFile(join(deskDir(HOME), entry.name), "utf8")).includes(SECRET), false, `the secret is not in ${entry.name}`);
     }
-    assert.match(await readFile(join(deskDir(HOME), "inbox.cursor"), "utf8"), /^\d+\n$/);
     assert.deepEqual(await guardedFiles(BASE), guardedBefore, "no STANDING.md, levels.yml, rules.yml or holdings.yml was created or changed");
     passed = true;
   } finally {
