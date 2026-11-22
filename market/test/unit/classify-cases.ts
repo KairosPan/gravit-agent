@@ -43,4 +43,8 @@ export const CASES: Array<{ name: string; item: Parameters<typeof classOf>[0]; w
   { name: "Polymarket oil", item: { key: `pm:0x${"ae".repeat(32)}`, kind: "event", category: "Oil" }, want: { asset: "commodities", form: "event" } },
   { name: "Polymarket politics", item: { key: `pm:0x${"af".repeat(32)}`, kind: "event", category: "Politics" }, want: { asset: "macro", form: "event" } },
   { name: "event, no category", item: { key: "pmus:fed-cut", kind: "event" }, want: { asset: "macro", form: "event" } },
+  { name: "option chain, crypto", item: { key: "opt:BTC", kind: "optionChain", category: "crypto" }, want: { asset: "crypto", form: "option" } },
+  { name: "option chain, US underlying", item: { key: "opt:AAPL", kind: "optionChain", category: "stocks" }, want: { asset: "stocks", form: "option", region: "us" } },
+  { name: "option chain, US ETF", item: { key: "opt:SPY", kind: "optionChain", category: "stocks" }, want: { asset: "stocks", form: "option", region: "us" } },
+  { name: "option chain, no category", item: { key: "opt:XYZ", kind: "optionChain" }, want: { form: "option" } },
 ];

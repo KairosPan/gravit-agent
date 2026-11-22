@@ -69,8 +69,8 @@ export function perpCategoryTab(category?: string): TabId | undefined {
  * never a guess. In the order the screen shows them. */
 export type AssetId = "crypto" | "stocks" | "indices" | "commodities" | "fx" | "preipo" | "macro";
 export const ASSET_IDS: readonly AssetId[] = ["crypto", "stocks", "indices", "commodities", "fx", "preipo", "macro"];
-export type FormId = "spot" | "perp" | "token" | "event";
-export const FORM_IDS: readonly FormId[] = ["spot", "perp", "token", "event"];
+export type FormId = "spot" | "perp" | "token" | "event" | "option";
+export const FORM_IDS: readonly FormId[] = ["spot", "perp", "token", "event", "option"];
 export type RegionId = "us" | "cn" | "hk" | "jp" | "kr" | "tw" | "in" | "eu";
 export const REGION_IDS: readonly RegionId[] = ["us", "cn", "hk", "jp", "kr", "tw", "in", "eu"];
 
@@ -138,6 +138,13 @@ export function classOf(i: { key: string; kind: string; base?: string | undefine
       if (INDEX_SERIES.has(series) || INDEX_WORDS.has(word)) return { asset: "indices", form: "event", region: "us" };
       if (COMMODITY_WORDS.has(word)) return { asset: "commodities", form: "event" };
       return { asset: "macro", form: "event" };
+    }
+    case "optionChain": {
+      // an option chain row carries its underlying's class as its category word: crypto, or stocks (a US share or ETF)
+      const word = typeof i.category === "string" ? normalWords(i.category) : "";
+      if (word === "crypto") return { asset: "crypto", form: "option" };
+      if (word === "stocks") return { asset: "stocks", form: "option", region: "us" };
+      return { form: "option" };
     }
     default:
       return { form: "spot" };

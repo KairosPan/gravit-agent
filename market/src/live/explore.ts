@@ -113,9 +113,9 @@ export interface ExploreSources {
   public?: PublicSource[] | undefined;
 }
 
-export type ExploreKind = "coin" | "stock" | "perp" | "event" | "rwa" | "ashare" | "share" | "index";
+export type ExploreKind = "coin" | "stock" | "perp" | "event" | "rwa" | "ashare" | "share" | "index" | "optionChain";
 /** the kinds a dollar row is made of: an event is priced per contract, an A share (china.ts) in CNY and never in `exploreAcross` */
-type DollarKind = Exclude<ExploreKind, "event" | "ashare" | "share" | "index">;
+type DollarKind = Exclude<ExploreKind, "event" | "ashare" | "share" | "index" | "optionChain">;
 export type ExploreSort = "volume" | "movers" | "closing";
 
 export interface ExploreOptions {
