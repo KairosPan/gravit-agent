@@ -11,8 +11,9 @@
 import { normalizeAsset, number } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, isChiNext, cnHitsOf } from '../wire/china.js';
 import { localKeyOf, isLocalKey, localHitsOf, LOCAL_NAMES, SHARE_VENUES } from '../wire/local.js';
+import { optionKeyOf, OPTION_COINS } from '../wire/options.js';
 import { localAmount } from '../market-fmt.js';
-import { MIN, HOUR, DAY } from '../time.js';
+import { MIN, HOUR, DAY, fmtDate } from '../time.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
 import { t, isSaid, sayOf } from '../i18n/words.js';
 
@@ -185,8 +186,11 @@ export function exploreQueryOf(markets) {
   return `asset=${tab}&sort=${sortOf(m)}&limit=${MARKET_ROWS}${region}${form}${source}`;
 }
 /** The query the connected half takes: under All sources the tab's class with no source list, so every connected line of
- *  the class shows (spec §5.2; the join then rules the public lines alone, `allSources`); otherwise exploreQueryOf's. */
+ *  the class shows (spec §5.2; the join then rules the public lines alone, `allSources`); none (null) on an options view, which
+ *  no connected venue lists; otherwise exploreQueryOf's. */
 export function connectedQueryOf(markets) {
+  // no connected venue lists an option chain: the options read is the market's alone
+  if (onOptions(markets)) return null;
   const query = exploreQueryOf(markets);
   if (query === null || tabOf(markets) === 'watchlist' || markets?.source !== 'all') return query;
   const p = new URLSearchParams(query);
@@ -387,6 +391,8 @@ export function sourceWord(quote) {
 
 const UNITS = [[1e9, 'B'], [1e6, 'M'], [1e3, 'k']];
 
+/** A count in a compact word: 1.2k, 3.4M, 950. */
+export const compactNumber = value => compact(value);
 function compact(value) {
   const abs = Math.abs(value);
   // 0.99995 of a unit already rounds to 1.0 of it: 999,960 reads 1M, not 1000k.
@@ -867,6 +873,118 @@ function localHitRow(hit, quote) {
   };
 }
 
+// ── the option chains (spec 2026-11-22 §5.4): a row an underlying, its figures the market's (`item.option`); a chain's page ──
+
+// an expiry (`2026-11-28`) as a short date (Nov 28), its own calendar day whatever the zone; '' for none
+export function expiryWord(day) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str(day));
+  return m ? fmtDate(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12).getTime()) : '';
+}
+const OPTION_VENUE_NAMES = { deribit: 'Deribit', okx: 'OKX', nasdaq: 'Nasdaq' }; // en-kept: the venues' names
+const optionVenueName = v => (v === 'nasdaq' ? t('markets.option.venuesStocks') : OPTION_VENUE_NAMES[v] ?? v);
+// a compact count: 1.2k, 3.4M
+const counted = v => (v === null ? null : compact(v));
+/** An option row (an explore item of kind optionChain) as the table draws it: its underlying's price and day change, its volume —
+ *  dollars where the market gives them, else contracts — and its open interest (a coin's in the coin, a US ticker's in contracts), its
+ *  nearest expiry and the ATM IV, each a word ('' for none); a US row's figures are its nearest expiry's (`nearestOnly`). No star. */
+function optionRowOf(item) {
+  const o = isRecord(item.option) ? item.option : {};
+  const base = str(item.base) || str(item.key).slice(4);
+  const crypto = str(item.category || item.asset) === 'crypto';
+  const usd = number(o.volumeUsd);
+  const volume = number(o.volume);
+  const priced = {
+    price: number(item.price), unit: 'usd', changePct: number(item.changePct24h), change24h: null,
+    volume: usd ?? volume, volumeUnit: usd !== null ? 'usd' : 'contracts', implied: null,
+  };
+  const oi = counted(number(o.openInterest));
+  const iv = number(o.atmIv);
+  const venues = records(item.at).map(l => str(l.venue)).filter(Boolean);
+  return {
+    id: str(item.key), source: 'option', kind: 'optionChain', name: t('markets.option.name', { underlying: base }), tile: base,
+    // its venues, and on a US row that its figures are its nearest expiry's
+    sub: [...new Set(venues.map(optionVenueName)), o.nearestOnly === true ? t('markets.option.nearestOnly') : ''].filter(Boolean).join(' · '), // words-order: the venues' names under the visual separator
+    priced, price: priced.price, live: null, sourceWord: str(item.quoteFrom), closeTime: null, pastEnd: false, paper: false,
+    watched: false, atAccount: false, noStar: true, legs: [], tabs: [], asset: crypto ? 'crypto' : 'stocks', form: 'option', region: crypto ? null : 'us',
+    option: {
+      underlying: base, venues, nearestOnly: o.nearestOnly === true, expiry: expiryWord(o.nearestExpiry),
+      volume: volumeWordOf(priced),
+      openInterest: oi === null ? '' : crypto ? t('markets.option.inCoin', { n: oi, coin: base }) : t('markets.volume.contracts', { n: oi }),
+      atmIv: iv === null ? '' : `${iv.toFixed(1)}%`,
+    },
+  };
+}
+// a search's option rows, when they answer the query typed now
+const optionHitsOf = m => (isRecord(m.optionHits) && str(m.optionHits.q) === str(m.q).trim() && readable(m.optionHits.data)
+  ? itemsOf(m.optionHits.data).filter(i => i.kind === 'optionChain' && optionKeyOf(i.key)) : []);
+// every option row the slice's reads carry: the options views', a search's
+const optionItemsOf = m => [...exploreRowsOf(m), ...optionHitsOf(m)].filter(i => i.kind === 'optionChain');
+
+/** The venues a chain's page reads, `{ crypto, venues }`: a row's (a crypto row's Deribit and OKX, or OKX alone; a US row's Nasdaq),
+ *  else a coin's both and any other underlying Nasdaq. */
+export function optionVenuesOf(markets, underlying) {
+  const m = isRecord(markets) ? markets : {};
+  const row = optionItemsOf(m).find(i => i.key === `opt:${underlying}`);
+  const listed = records(row?.at).map(l => str(l.venue)).filter(v => Object.hasOwn(OPTION_VENUE_NAMES, v));
+  const crypto = row ? str(row.category || row.asset) === 'crypto' : OPTION_COINS.includes(underlying);
+  const venues = crypto ? ['deribit', 'okx'].filter(v => (listed.length ? listed.includes(v) : true)) : ['nasdaq'];
+  return { crypto, venues: venues.length ? venues : crypto ? ['deribit', 'okx'] : ['nasdaq'] };
+}
+/** The venue and expiry a chain's page reads: the ones picked on it, else its first venue (Deribit for a coin it lists, Nasdaq for a
+ *  US ticker) and the market's nearest expiry (null: none named). */
+export function chainPickOf(markets, underlying) {
+  const m = isRecord(markets) ? markets : {};
+  const { venues } = optionVenuesOf(m, underlying);
+  const pick = isRecord(m.chainPick) && m.chainPick.underlying === underlying ? m.chainPick : null;
+  const venue = venues.includes(pick?.venue) ? pick.venue : venues[0];
+  // an expiry is the venue's it was picked on (none named: the first venue's)
+  return { venue, expiry: pick && (pick.venue ?? venues[0]) === venue && str(pick.expiry) ? pick.expiry : null };
+}
+/** The options read a chain's page asks (`underlying=BTC&venue=deribit[&expiry=2026-11-28]`), else null for an id that is none. */
+export function chainQueryOf(markets, id) {
+  const key = optionKeyOf(id);
+  if (!key) return null;
+  const { venue, expiry } = chainPickOf(markets, key.underlying);
+  return `underlying=${encodeURIComponent(key.underlying)}&venue=${venue}${expiry ? `&expiry=${expiry}` : ''}`;
+}
+
+/** A chain's page (`#/markets/opt:<U>`): its name and its row's price and day change (the chain's price once it answers), the venue
+ *  switch (a coin both venues list), the expiry tabs (the chain's, the one read pressed), the strikes — calls | strike | puts, the
+ *  at-the-money strike marked, the cells in the money (a call below the price, a put above) marked — and what is said under the price:
+ *  the source, the last trade, a partial read's note. The chain kept is drawn only for the venue and expiry asked; else `status` says how
+ *  far that read has got, with the market's sentence (`message`) when it refused. Null for an id that is no chain's. */
+export function optionPageOf(markets, id) {
+  const m = isRecord(markets) ? markets : {};
+  const key = optionKeyOf(id);
+  if (!key) return null;
+  const { underlying } = key;
+  const { crypto, venues } = optionVenuesOf(m, underlying);
+  const pick = chainPickOf(m, underlying);
+  const row = optionItemsOf(m).find(i => i.key === id);
+  const kept = isRecord(m.chain) ? m.chain : {};
+  const data = isRecord(kept.data) ? kept.data : null;
+  const asked = chainQueryOf(m, id);
+  // the chain kept is this page's when it is for the underlying, the venue and the expiry asked (the nearest when none is)
+  const chain = data && data.underlying === underlying && data.venue === pick.venue && (pick.expiry === null || data.expiry === pick.expiry) ? data : null;
+  const askedNow = kept.query === asked;
+  const status = chain && !(askedNow && kept.status === 'error') ? 'ready' : askedNow ? str(kept.status) || 'idle' : 'idle';
+  const message = askedNow && kept.status === 'error' ? (isSaid(kept.message) ? sayOf(kept.message) : str(kept.message)) || null : null;
+  const price = chain?.price ?? number(row?.price);
+  const atm = chain?.atmStrike ?? null;
+  const rows = (chain?.strikes ?? []).map(s => ({
+    strike: s.strike, atm: atm !== null && s.strike === atm, call: s.call, put: s.put,
+    callItm: price !== null && s.strike < price, putItm: price !== null && s.strike > price,
+  }));
+  const unit = (chain?.strikes ?? []).map(s => s.call?.unit || s.put?.unit).find(Boolean) ?? '';
+  return {
+    id, underlying, name: t('markets.option.name', { underlying }), crypto, price, changePct: number(row?.changePct24h),
+    venues: venues.map(v => ({ id: v, label: optionVenueName(v) })), venue: pick.venue, switchable: crypto && venues.length > 1,
+    expiries: (chain?.expiries ?? []).map(e => ({ id: e, label: expiryWord(e) })), expiry: pick.expiry ?? chain?.expiry ?? null,
+    chain, rows, unit, coinPriced: chain !== null && unit !== '' && unit !== 'USD', status, message, failedOver: chain !== null && kept.status === 'error' && askedNow,
+    quoteFrom: str(chain?.quoteFrom) || str(row?.quoteFrom), lastTrade: str(chain?.lastTrade), note: str(chain?.note),
+  };
+}
+
 // an old us:/crypto: star the Account could not find: listed once, under its own muted line
 function notListedRow(asset) {
   const coin = asset.market === 'crypto';
@@ -965,12 +1083,18 @@ export function tableOf(markets, now = Date.now(), page = null) {
       message: (isSaid(slot?.message) ? sayOf(slot.message) : str(slot?.message)) || null };
   const empty = rows.length > 0 || searching ? null : watchlist ? 'watchlist' : noSpotSource(m) ? 'noSpot' : read.answered ? 'filters' : null;
   // an empty answer whose sources did not answer: each named with the market's own words, so an empty table is not taken for the filters'
-  const missing = empty === 'filters' && isRecord(slot?.data)
+  // an options view: its rows in the market's order (it sorts them itself, by dollars or contracts within an asset), its notes (what
+  // each source's figures are, a list read in part) and the sources that did not answer, each the market's words, under the rows
+  const options = !searching && onOptions(m);
+  const optionsRead = options && isRecord(slot?.data);
+  const missing = (empty === 'filters' || optionsRead) && isRecord(slot?.data)
     ? records(slot.data.missing).map(x => ({ name: str(x.venueName) || str(x.venue), why: str(x.why) })).filter(x => x.name)
     : [];
   return {
-    rows: local ? rows : sorted(rows, sort), sorts, sort, tabs: marketTabs(), filters: searching ? null : filtersOf(m), read,
-    china, local, session: local && rankFits(rankOf(m), m) ? rankOf(m)?.session ?? null : null, searching, empty, missing,
+    rows: local || options ? rows : sorted(rows, sort), sorts, sort, tabs: marketTabs(), filters: searching ? null : filtersOf(m), read,
+    china, local, session: local && rankFits(rankOf(m), m) ? rankOf(m)?.session ?? null : null, searching, empty, missing, options,
+    notes: optionsRead && Array.isArray(slot.data.notes) ? slot.data.notes.filter(n => typeof n === 'string' && n.trim()) : [],
+    stale: optionsRead && slot.data.stale === true,
   };
 }
 
@@ -991,7 +1115,11 @@ function unsortedRowsOf(m, { searching, watchlist, slot }, now, atPage) {
   const pageOnly = atPage.filter(key => !isCnKey(key) && !isStarred.has(key));
   const atAccount = new Set(pageOnly);
   const quotes = isRecord(m.accountQuotes) ? m.accountQuotes : {};
-  const row = item => { const key = str(item.key); return accountRow(item, quotes, isStarred.has(key) || atAccount.has(key), now, atAccount.has(key)); };
+  const row = item => {
+    if (item.kind === 'optionChain' && optionKeyOf(item.key)) return optionRowOf(item);
+    const key = str(item.key);
+    return accountRow(item, quotes, isStarred.has(key) || atAccount.has(key), now, atAccount.has(key));
+  };
   const dollars = body => itemsOf(body).filter(i => !isLocalKey(i.key));
   if (searching) {
     const cnListed = new Set(cnStars);
@@ -1001,7 +1129,9 @@ function unsortedRowsOf(m, { searching, watchlist, slot }, now, atPage) {
     const local = localHitsOf(m.results?.data);
     const others = local.hits.filter(h => h.venue !== 'china').map(h => localHitRow(h, own(m.hitQuotes, h.id) ?? own(local.quotes, h.id)));
     const found = readable(m.results?.data) ? dollars(m.results.data).map(row) : [];
-    return [...found, ...hits, ...others].map(r => ({ ...r, className: classWordOf(r) }));
+    // the market's option rows for the query (explore?q=…&form=option), each its chain's: named Options
+    const chains = optionHitsOf(m).filter(i => !found.some(r => r.id === i.key)).map(optionRowOf);
+    return [...found, ...hits, ...others, ...chains].map(r => ({ ...r, className: r.source === 'option' ? formWord('option') : classWordOf(r) }));
   }
   if (watchlist) {
     const lists = [...everyRow(bodyOf(reads, 'watchlist')), ...exploreRowsOf(m)];
@@ -1267,6 +1397,9 @@ export function localPageOf(markets, id) {
 /** What Hand to gravit names a market by, `{ symbol, name }`: an Account key by its page's item — its base, else its name, and its
  *  name — a face id by its asset's symbol and name; null for a key no read lists, or an id that is neither. */
 export function handWordsOf(markets, account, id, now = Date.now()) {
+  // an option chain: its underlying, and the chains' name
+  const option = optionKeyOf(id);
+  if (option) return { symbol: option.underlying, name: t('markets.option.name', { underlying: option.underlying }) };
   // a Hong Kong, Korean or Taiwanese share, a cash index: its page's asset, by its code and its name
   if (isLocalKey(id) && !isCnKey(id)) {
     const asset = localPageOf(markets, id)?.asset;

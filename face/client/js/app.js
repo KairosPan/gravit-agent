@@ -55,9 +55,10 @@ import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn, venuesOf } from './host/account-view.js';
 import { rulesOf } from './host/rules-view.js';
-import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
+import { isAccountKey, handWordsOf, watchedOf, chainPickOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { isLocalKey } from './wire/local.js';
+import { isOptionKey, optionKeyOf } from './wire/options.js';
 import { makeEditor } from './composer/dom.js';
 import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt } from './composer/draft.js';
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
@@ -1090,7 +1091,8 @@ export function boot(win, host = {}) {
     // leaving it lets the market go
     // an A share's page (a cn: id) too: its history at the Account's china venue, and nothing held or stated read for it; and a
     // Hong Kong, Korean or Taiwanese share's or a cash index's: its history and its price at the market, nothing else
-    const pageId = route => (route?.screen === 'markets' && (isLocalKey(route.id) || isAccountKey(route.id)) ? route.id : null);
+    // and an option chain's (opt:<U>): its chain at the venue and expiry picked, read again on its beat
+    const pageId = route => (route?.screen === 'markets' && (isLocalKey(route.id) || isAccountKey(route.id) || isOptionKey(route.id)) ? route.id : null);
     if (pageId(r) !== pageId(was)) {
       markets.page(pageId(r));
       if (!isLocalKey(pageId(r)) && isAccountKey(pageId(r))) { void account.loadHoldings(); void account.loadStatement(); }
@@ -2030,6 +2032,12 @@ export function boot(win, host = {}) {
     removeAsked: el => markets.unwatch(el.dataset.id),
     openMarket: el => go({ screen: 'markets', id: el.dataset.id }),
     setRange: el => markets.range(el.dataset.id, el.dataset.value),
+    // an option chain's page: a venue (a coin's Deribit or OKX) or an expiry picked; the host reads that chain
+    optVenue: el => {
+      const k = optionKeyOf(el.dataset.id);
+      if (k && chainPickOf(store.get().markets, k.underlying).venue !== el.dataset.value) store.dispatch('chainPicked', { underlying: k.underlying, venue: el.dataset.value });
+    },
+    optExpiry: el => { const k = optionKeyOf(el.dataset.id); if (k) store.dispatch('chainPicked', { underlying: k.underlying, expiry: el.dataset.value }); },
     // gravit's conversation with the market named in the composer: the operator says what to look for
     handToGravit: el => {
       const s = store.get();

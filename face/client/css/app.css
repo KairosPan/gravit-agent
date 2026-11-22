@@ -1539,3 +1539,15 @@ button.tk-at:hover { border-color: var(--dim); }
   .gbox-ball { transition: none; }
   .gbox-panel[data-grow], .gbox-dot.pulse { animation: none; }
 }
+
+/* ---- an option chain (spec 2026-11-22 §5.4): the options list's change beside its price; the chain's picks, calls | strike | puts, the
+   at-the-money row marked, the cells in the money shaded, a crypto leg's dollars under its coin price ---- */
+.mk-opt-chg { margin-left: 6px; font-size: calc(12px * var(--fs)); }
+.mk-chain-picks { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.mk-chain { font-size: calc(13px * var(--fs)); }
+.mk-chain th, .mk-chain td { padding: 6px 8px; }
+.mk-chain .mk-chain-side { text-align: center; color: var(--text); }
+.mk-chain .mk-strike { text-align: center; font-weight: 700; color: var(--text); background: var(--surface-2); }
+.mk-chain .mk-itm { background: var(--up-fill); }
+.mk-chain .mk-atm .mk-strike { color: var(--up); }
+.mk-chain .mk-usd { display: block; font-size: calc(11px * var(--fs)); color: var(--dim); }

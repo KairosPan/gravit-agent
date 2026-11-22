@@ -23,7 +23,8 @@ import {
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey } from '../wire/china.js';
 import { localKeyOf, isLocalKey, localPairOf, localRankOf, localQuoteOf, localHitsOf, venueOfMarket } from '../wire/local.js';
-import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, connectedQueryOf, chinaRankQueryOf, rankQueryOf, onLocal, onChinaA, localRangeOf, localRangesOf } from './market-view.js';
+import { optionKeyOf, optionChainOf } from '../wire/options.js';
+import { canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf, exploreQueryOf, connectedQueryOf, chinaRankQueryOf, rankQueryOf, onLocal, onChinaA, localRangeOf, localRangesOf, chainQueryOf } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
 import { venuesOf } from './account-view.js';
@@ -38,6 +39,10 @@ import { toHash } from '../router.js';
 const notAnswering = (venue = CHINA_VENUE) => ({ state: 'unavailable', said: venue === CHINA_VENUE ? said('markets.cn.notAnswering') : said('markets.local.notAnswering'), notAnswering: true });
 
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
+// an option chain's page reads its chain again on the face's keep of it (the proxy's 15 s), while the page is on screen
+export const CHAIN_MS = 15_000;
+// the option rows a search asks the market for (explore?q=…&form=option): one row an underlying
+export const OPTION_HITS = 20;
 // Longer than the explore proxies' 10 s bound, but shorter than the next poll. A browser request can otherwise stay
 // pending before reaching the proxy and hold the host's same-path deduplication lock forever.
 export const EXPLORE_TIMEOUT_MS = 15_000;
@@ -50,6 +55,7 @@ export const BOOK_DEPTH = 10, TRADES_LIMIT = 20, FUNDING_LIMIT = 100;
 const DEPTH_KINDS = ['asset', 'book', 'trades', 'funding'];
 
 const QUOTES = '/data/market/quotes';
+const OPTIONS = '/data/market/options';
 const CONNECTED_QUOTES = '/data/account/connected/quotes';
 const VENUES = '/data/account/venues';
 const SOURCES = '/data/market/sources';
@@ -99,6 +105,9 @@ export function startMarkets({
   let sourcesAskedAt = null; // an unsuccessful catalog retries no faster than the visible explore beat
   let depthId = null;        // the Account market page whose four reads are read, from entering it to leaving it
   let localPage = null;      // a local market's page (Hong Kong, Korea, Taiwan, an index) on screen: its quote asked first
+  let chainPage = null;      // an option chain's page on screen (`opt:<U>`): its chain read, and read again every CHAIN_MS
+  let chainAsked = null;     // the options read that page last asked (chainQueryOf's): a pick that changes it reads at once
+  let chainTimer = null;
   const kinds = new Map();   // a kind of read → { flight, path, seq, cancel }
   const signing = new Set(); // the Account keys whose setWatch is in the air
   const located = new Map(); // last exact-key lookup, independently of the selected scope; failures retry on a later poll
@@ -113,7 +122,7 @@ export function startMarkets({
     if (k.flight !== null && k.path === path) return;
     k.cancel?.();
     const mine = ++k.seq;
-    const bounded = path === SOURCES || path.startsWith(`${EXPLORE}?`) || path.startsWith(`${CONNECTED_EXPLORE}?`);
+    const bounded = path === SOURCES || path.startsWith(`${EXPLORE}?`) || path.startsWith(`${CONNECTED_EXPLORE}?`) || path.startsWith(`${OPTIONS}?`);
     const controller = bounded && typeof AbortController === 'function' ? new AbortController() : null;
     let deadline = null, settled = false;
     const clear = () => { if (deadline !== null) { cancelTimer(deadline); deadline = null; } };
@@ -150,7 +159,7 @@ export function startMarkets({
     // All sources: the connected half by class alone, every connected line of it kept (spec §5.2)
     const connectedQuery = connectedQueryOf(store.get().markets);
     halves.read(`explore:${tab}`, query, {
-      connectedQuery, join: connectedQuery !== query ? { allSources: true } : {},
+      connectedQuery, join: connectedQuery !== null && connectedQuery !== query ? { allSources: true } : {},
       land: data => { store.dispatch('exploreLoaded', { tab, data, at: now(), query }); if (tab === 'watchlist') locateMissing(); },
       failed: message => store.dispatch('exploreFailed', { tab, at: now(), message, query }),
       loading: ['exploreLoading', { tab }],
@@ -352,6 +361,38 @@ export function startMarkets({
   function stopPolls() {
     if (exploreTimer !== null) { cancelTimer(exploreTimer); exploreTimer = null; }
     if (quotesTimer !== null) { cancelTimer(quotesTimer); quotesTimer = null; }
+    stopChain();
+  }
+
+  // ---- an option chain's page (spec 2026-11-22 §5.4): its chain at the venue and expiry picked (chainQueryOf's), at once on entering
+  // and on every pick, and again every CHAIN_MS while the page is on screen. One flight: a read for a pick left behind lands nowhere,
+  // and the store drops an answer for a query not last asked (Review Focus 5); a refusal lands with the market's sentence
+  function readChain() {
+    if (chainPage === null) return;
+    const query = chainQueryOf(store.get().markets, chainPage);
+    if (query === null) return;
+    chainAsked = query;
+    fly('chain', `${OPTIONS}?${query}`, (body, refused) => {
+      const data = refused ? null : optionChainOf(body);
+      if (data) store.dispatch('chainLoaded', { query, data, at: now() });
+      else store.dispatch('chainFailed', { query, at: now(), message: messageOf(body) });
+    }, ['chainLoading', { query }]);
+  }
+  function armChain() {
+    if (chainTimer !== null || closed || !shown || chainPage === null) return;
+    chainTimer = schedule(() => { chainTimer = null; if (closed || !shown || chainPage === null) return; armChain(); readChain(); }, CHAIN_MS);
+  }
+  function stopChain() {
+    if (chainTimer !== null) { cancelTimer(chainTimer); chainTimer = null; }
+  }
+  // the chain's page left: its read in the air lands nowhere, and what it read goes, with the picks made on it
+  function leaveChain() {
+    if (chainPage === null) return;
+    chainPage = null;
+    chainAsked = null;
+    stopChain();
+    drop('chain');
+    store.dispatch('chainDropped');
   }
   // the tab or its filters changed while shown: its read at once, and its poll over from now
   function retab() {
@@ -647,9 +688,15 @@ export function startMarkets({
     if (shown && shownOf(store.get().markets) !== readShownOf) retab();
     // the search ended (Back to <tab>, another tab pressed): its read in the air lands nowhere
     const searching = !blank(store.get().markets.q);
-    if (wasSearching && !searching) halves.forget('results');
+    if (wasSearching && !searching) { halves.forget('results'); drop('optionHits'); }
     wasSearching = searching;
     if (waiting !== null) open(waiting);
+    // a venue or an expiry picked on a chain's page (or a row that names its venues landing): its chain read at once, its poll over
+    if (chainPage !== null && chainQueryOf(store.get().markets, chainPage) !== chainAsked) {
+      stopChain();
+      readChain();
+      armChain();
+    }
   }
   const onStorage = event => { if (!closed && (event?.key === STORAGE_KEY || event?.key === ACCOUNT_WATCH_KEY || event?.key === null)) load(); };
   const unsubscribe = store.subscribe(onStore);
@@ -675,6 +722,7 @@ export function startMarkets({
       if (!shown) { stopPolls(); return; }
       armExplore();
       armQuotes();
+      armChain();
       readOnce();
     },
     /** The query typed: the Account's search (explore?q=, the latest one lands) into results — its A shares the hits, with the
@@ -685,8 +733,14 @@ export function startMarkets({
       store.dispatch('setMarketsQuery', q);
       if (blank(q)) {
         halves.forget('results');
+        drop('optionHits');
         return;
       }
+      // the market's option rows for it, one row an underlying (no chain is read for a search): what the options views list
+      const hitsQ = q.trim();
+      fly('optionHits', `${EXPLORE}?q=${encodeURIComponent(hitsQ)}&form=option&limit=${OPTION_HITS}`, (body, refused) => {
+        store.dispatch('optionHitsLoaded', { q: hitsQ, data: !refused && answered(body, 'items') ? body : null });
+      });
       // a new query forgets what the last one kept (explore-halves.js)
       // every market, whatever the tab and its filters (G5)
       halves.read('results', `q=${encodeURIComponent(q.trim())}&limit=${ROWS}`, {
@@ -748,7 +802,17 @@ export function startMarkets({
       if (closed) return;
       waiting = null;
       if (id !== depthId) leaveDepth();
+      if (id !== chainPage) leaveChain();
       localPage = isLocalKey(id) && !isCnKey(id) ? id : null;
+      // an option chain's page: its chain read now and on its beat; nothing followed
+      if (optionKeyOf(id)) {
+        if (followed) unfollow();
+        if (chainPage === id) return;
+        chainPage = id;
+        readChain();
+        armChain();
+        return;
+      }
       if (isCnKey(id)) {
         if (followed) unfollow();
         readLocalCandles(id, rangeOf(id));

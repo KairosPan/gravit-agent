@@ -11,6 +11,8 @@ import { candlesSvg } from '../../client/js/render/chart.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { rowsOf, CANDLE_RANGES, exploreQueryOf } from '../../client/js/host/market-view.js';
+import * as MV from '../../client/js/host/market-view.js';
+import { optionChainOf } from '../../client/js/wire/options.js';
 import { fmtClock, fmtDate, sameDay } from '../../client/js/time.js';
 import { createStore } from '../../client/js/store.js';
 import { startMarkets } from '../../client/js/host/markets.js';
@@ -20,6 +22,7 @@ import { ZH } from '../../client/js/i18n/zh.js';
 import { nyDay } from '../../client/js/host/event-window.js';
 import { localQuoteOf } from '../../client/js/wire/local.js';
 import { EVENT_VIEW_ID, EVENT_VIEW_WITH_B, WYNN_B_CASE } from './helpers/event-view.js';
+import { cryptoOptionsList, usOptionsList, btcChain, aaplChain, NO_OPTIONS } from './helpers/options.js';
 
 // the renderer's clock: the stand-in's day — its statement is from that morning, its events close after it
 const NOW = Date.parse('2026-10-22T12:00:00.000Z');
@@ -1545,4 +1548,175 @@ test("a US index's 1M closes are drawn on their own session dates, whichever sou
   assert.doesNotMatch(section(naver, 'Price history'), /2026-11-21/);
   assert.match(section(naver, 'Price history'), /5,900\.10/);
   assert.doesNotMatch(section(naver, 'Price history'), /\$/);
+});
+
+
+// ---- the option chains (spec 2026-11-22 §5.4)
+
+// a tab on Options with its read answered (market-view.js exploreQueryOf's query, the market's alone)
+const optionsTab = (tab, body) => {
+  const s = R.setMarketsForm(R.setMarketsTab(R.nav(emptyState(), { screen: 'markets', id: null }), tab), 'option');
+  return R.exploreLoaded(s, { tab, data: body, at: NOW, query: exploreQueryOf(s.markets) });
+};
+const headsOf = html => [...html.matchAll(/<th scope="col"[^>]*>([\s\S]*?)<\/th>/g)].map(m => text(m[1]));
+
+test('an options view: a row an underlying with its price and change, nearest expiry, volume, open interest, ATM IV and source; no star', () => {
+  const html = renderMarketsScreen(optionsTab('crypto', cryptoOptionsList()), NOW);
+  assert.deepEqual(headsOf(html), ['Underlying', 'Price', 'Nearest expiry', 'Volume', 'Open interest', 'ATM IV', 'Source']);
+  assert.deepEqual(rowIds(html), ['opt:BTC', 'opt:ETH', 'opt:HYPE'], "the market's order");
+  const btc = cells(rowOf(html, 'opt:BTC'));
+  assert.equal(btc.length, 7, 'no star column');
+  assert.match(btc[0], /data-action="openMarket" data-id="opt:BTC"/);
+  assert.match(text(btc[0]), /BTC options/);
+  assert.match(text(btc[0]), /Deribit · OKX/);
+  assert.match(text(btc[1]), /\$60,487\.12/);
+  assert.match(text(btc[1]), /1\.84%/);
+  assert.deepEqual(btc.slice(2).map(text), ['Nov 23', '$129.5M', '412.3k BTC', '41.2%', 'Deribit']);
+  // OKX's row: no dollars given, so its volume is contracts; no IV given is —
+  assert.deepEqual(cells(rowOf(html, 'opt:HYPE')).slice(2, 6).map(text), ['Nov 28', '1.2k contracts', '9.8k HYPE', '—']);
+  assert.doesNotMatch(html, /mk-star/);
+  // the market's notes under the rows, in its words
+  assert.match(html, /<p class="mk-note">Crypto options: Deribit&#39;s figures where Deribit lists the coin/);
+});
+
+test('a US options view: contracts, the nearest expiry said on each row, the list read in part said under it', () => {
+  const html = renderMarketsScreen(optionsTab('stocks', usOptionsList()), NOW);
+  const nvda = cells(rowOf(html, 'opt:NVDA'));
+  assert.match(text(nvda[0]), /Nasdaq · nearest expiry/);
+  assert.deepEqual(nvda.slice(2).map(text), ['Nov 28', '1.3M contracts', '3.4M contracts', '—', 'Cboe · 15 min delayed']);
+  // a row the US line did not price: no price, no change
+  assert.equal(text(cells(rowOf(html, 'opt:SPY'))[1]).trim().startsWith('—'), true);
+  assert.match(html, /<p class="mk-note">US options: 3 of 10 read<\/p>/);
+  // a source that did not answer is said under the rows it left
+  const down = renderMarketsScreen(optionsTab('stocks', usOptionsList({ missing: [{ venue: 'nasdaq', venueName: 'Nasdaq', why: 'Nasdaq refused this address' }] })), NOW);
+  assert.match(down, /<p class="mk-note">Nasdaq refused this address<\/p>/);
+  // in Chinese, the heads and the row's words
+  const zh = withTable(ZH, () => renderMarketsScreen(optionsTab('stocks', usOptionsList()), NOW));
+  assert.deepEqual(headsOf(zh), ['标的', '价格', '最近到期', '成交量', '未平仓量', '平值隐含波动率', '来源']);
+  assert.match(zh, /NVDA 期权/);
+  assert.match(zh, /纳斯达克 · 最近到期日/);
+});
+
+// a chain's page with the chain read for `query` answered (`chain`), or failed with the market's sentence
+const chainPage = (id, { list = null, tab = 'crypto', chain = null, refusal = null, pick = null } = {}) => {
+  let s = list ? optionsTab(tab, list) : R.nav(emptyState(), { screen: 'markets', id: null });
+  s = R.nav(s, { screen: 'markets', id });
+  if (pick) s = R.chainPicked(s, pick);
+  const view = s.markets;
+  const u = id.slice(4);
+  const { chainQueryOf } = MV;
+  const query = chainQueryOf(view, id);
+  s = R.chainLoading(s, { query });
+  if (chain) s = R.chainLoaded(s, { query, data: optionChainOf({ ok: true, value: chain }), at: NOW });
+  if (refusal) s = R.chainFailed(s, { query, at: NOW, message: refusal });
+  return { s, query, u, html: renderMarketsScreen(s, NOW) };
+};
+
+test("a chain's page: the expiry tabs, the venue switch, calls | strike | puts, the ATM strike marked and the money shaded", () => {
+  const { html, query } = chainPage('opt:BTC', { list: cryptoOptionsList(), chain: btcChain() });
+  assert.equal(query, 'underlying=BTC&venue=deribit', 'Deribit first for a coin it lists, the nearest expiry');
+  assert.match(html, /<h1 class="head-title">BTC options<\/h1>/);
+  assert.match(html, /<span class="mk-big">\$60,487\.12<\/span>/);
+  assert.match(html, /<p class="mk-asof">Deribit<\/p>/);
+  // the venue switch, Deribit pressed; the expiry tabs, the nearest pressed
+  assert.match(html, /data-action="optVenue" data-value="deribit" data-id="opt:BTC">Deribit</);
+  assert.match(html, /aria-pressed="false" data-action="optVenue" data-value="okx" data-id="opt:BTC">OKX</);
+  const tabs = [...html.matchAll(/aria-pressed="(true|false)" data-action="optExpiry" data-value="([^"]+)"[^>]*>([^<]+)</g)].map(m => [m[2], m[3], m[1]]);
+  assert.deepEqual(tabs, [['2026-11-23', 'Nov 23', 'true'], ['2026-11-24', 'Nov 24', 'false'], ['2026-11-28', 'Nov 28', 'false'], ['2026-12-26', 'Dec 26', 'false'], ['2027-03-26', 'Mar 26', 'false']]);
+  // the table: two sides of seven and the strike between
+  const chain = html.match(/<table class="mk-t mk-chain">[\s\S]*?<\/table>/)[0];
+  assert.match(chain, />Calls<\/th>[\s\S]*>Strike<\/th>[\s\S]*>Puts<\/th>/);
+  const rows = [...chain.matchAll(/<tr( class="mk-atm")?>(<td[\s\S]*?)<\/tr>/g)];
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map(r => Boolean(r[1])), [false, true, false], 'the ATM strike, 60,000, marked');
+  assert.match(rows[1][2], /▸ <\/span>60,000<span aria-hidden="true"> ◂<\/span><span class="sr-only"> at the money/);
+  const tds = r => [...r.matchAll(/<td class="([^"]*)">([\s\S]*?)<\/td>/g)].map(m => [m[1], m[2]]);
+  const k58 = tds(rows[0][2]), k62 = tds(rows[2][2]);
+  assert.equal(k58.length, 14);
+  assert.ok(k58.slice(0, 7).every(([c]) => c.includes('mk-itm')), 'a call below the price is in the money');
+  assert.ok(k58.slice(7).every(([c]) => !c.includes('mk-itm')), 'a put below it is not');
+  assert.ok(k62.slice(7).every(([c]) => c.includes('mk-itm')), 'a put above it is');
+  // a crypto leg: its coin price, its dollars under it; its change a percent; its IV; a last the source gave none of is —
+  assert.equal(text(k58[0][1]), `0.0405$${(0.0405 * 60487.12).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`);
+  assert.match(k58[3][1], /class="up">\+3\.20%</);
+  assert.equal(text(k58[6][1]), '41.5%');
+  assert.equal(text(k58[9][1]), '—');
+  assert.match(html, /<p class="mk-note">Prices in BTC, US dollars under each<\/p>/);
+  assert.doesNotMatch(html, /As of the last read/);
+  // the proxy re-serving the chain it kept: said as last read, the strikes kept
+  const { s } = chainPage('opt:BTC', { list: cryptoOptionsList(), chain: btcChain() });
+  const kept = R.chainLoaded(s, { query: s.markets.chain.query, data: { ...s.markets.chain.data, stale: true }, at: NOW });
+  assert.match(renderMarketsScreen(kept, NOW), /<p class="mk-note">As of the last read<\/p>[\s\S]*mk-chain"/);
+});
+
+test("a US chain's page: Nasdaq, no venue switch, dollars and the change in dollars, no IV, its last trade under the price", () => {
+  const { html, query } = chainPage('opt:AAPL', { list: usOptionsList(), tab: 'stocks', chain: aaplChain() });
+  assert.equal(query, 'underlying=AAPL&venue=nasdaq');
+  assert.doesNotMatch(html, /optVenue/);
+  assert.match(html, /<p class="mk-asof">Nasdaq · LAST TRADE: \$342\.56 \(AS OF NOV 20, 2026\)<\/p>/);
+  const chain = html.match(/<table class="mk-t mk-chain">[\s\S]*?<\/table>/)[0];
+  assert.match(chain, /<td class="r mk-itm">\$5\.10<\/td>/, 'a dollar price, no dollars under it');
+  assert.match(chain, /class="up">\+\$0\.45</);
+  assert.doesNotMatch(html, /Prices in/);
+  // ATM 345 against 342.56: the 345 put is in the money, the 340 call is
+  assert.match(chain, /<tr class="mk-atm">/);
+});
+
+test("a ticker Nasdaq lists no options for: the market's sentence in place of the table, never a table that looks loading", () => {
+  const { html } = chainPage('opt:BRK.A', { refusal: NO_OPTIONS });
+  assert.match(html, /<h1 class="head-title">BRK\.A options<\/h1>/);
+  assert.match(html, new RegExp(`<p class="mk-empty">${NO_OPTIONS.replace('.', '\\.')}</p>`));
+  assert.doesNotMatch(html, /mk-chain"/);
+  assert.doesNotMatch(html, /Loading/);
+  // before it answers: Loading…
+  assert.match(chainPage('opt:BRK.A').html, /<p class="mk-empty">Loading…<\/p>/);
+});
+
+test("an expiry or a venue picked: the kept chain of another is not drawn as this one's", () => {
+  const { s } = chainPage('opt:BTC', { list: cryptoOptionsList(), chain: btcChain() });
+  const picked = R.chainPicked(s, { underlying: 'BTC', expiry: '2026-11-28' });
+  const query = MV.chainQueryOf(picked.markets, 'opt:BTC');
+  assert.equal(query, 'underlying=BTC&venue=deribit&expiry=2026-11-28');
+  const asking = R.chainLoading(picked, { query });
+  const html = renderMarketsScreen(asking, NOW);
+  assert.doesNotMatch(html, /mk-chain"/, "Nov 23's strikes are not drawn under Nov 28");
+  assert.match(html, /<p class="mk-empty">Loading…<\/p>/);
+  // a late answer for the expiry left behind lands nowhere
+  const late = R.chainLoaded(asking, { query: 'underlying=BTC&venue=deribit', data: optionChainOf({ ok: true, value: btcChain() }), at: NOW });
+  assert.equal(late, asking);
+  assert.equal(R.chainFailed(asking, { query: 'underlying=BTC&venue=deribit', at: NOW, message: 'x' }), asking);
+  // OKX picked: the expiry goes back to OKX's nearest
+  const okx = R.chainPicked(picked, { underlying: 'BTC', venue: 'okx' });
+  assert.equal(MV.chainQueryOf(okx.markets, 'opt:BTC'), 'underlying=BTC&venue=okx');
+  // a coin OKX alone lists: OKX, no switch
+  assert.equal(MV.chainQueryOf(chainPage('opt:HYPE', { list: cryptoOptionsList() }).s.markets, 'opt:HYPE'), 'underlying=HYPE&venue=okx');
+  assert.doesNotMatch(chainPage('opt:HYPE', { list: cryptoOptionsList(), chain: { ...btcChain(), underlying: 'HYPE', venue: 'okx' } }).html, /optVenue/);
+  // a deep link with no row: a coin at Deribit, anything else at Nasdaq
+  assert.equal(MV.chainQueryOf(emptyState().markets, 'opt:ETH'), 'underlying=ETH&venue=deribit');
+  assert.equal(MV.chainQueryOf(emptyState().markets, 'opt:TSLA'), 'underlying=TSLA&venue=nasdaq');
+  // leaving the page drops the chain and the picks
+  const left = R.chainDropped(okx);
+  assert.deepEqual([left.markets.chain.query, left.markets.chainPick], [null, null]);
+});
+
+test("a US share's page carries Options, to its chain's page; a coin's does not", () => {
+  const aapl = screen({ route: { screen: 'markets', id: 'stock:AAPL' }, account: true }).html;
+  assert.match(aapl, /<a class="btn" href="#\/markets\/opt:AAPL">Options<\/a>/);
+  assert.doesNotMatch(screen({ route: { screen: 'markets', id: 'coin:BTC' }, account: true }).html, /#\/markets\/opt:/);
+  assert.match(withTable(ZH, () => screen({ route: { screen: 'markets', id: 'stock:AAPL' }, account: true }).html), /href="#\/markets\/opt:AAPL">期权<\/a>/);
+  // the route keeps the chain's key
+  assert.equal(R.nav(emptyState(), { screen: 'markets', id: 'opt:AAPL' }).route.id, 'opt:AAPL');
+});
+
+test('a search lists the option rows the market found for it, each named Options, opening its chain', () => {
+  let s = R.setMarketsQuery(R.setMarketsTab(R.nav(emptyState(), { screen: 'markets', id: null }), 'stocks'), 'nvda');
+  s = R.resultsLoaded(s, { data: { ...fx('explore-all'), items: [itemOf(fx('explore-all'), 'stock:NVDA')] }, at: NOW });
+  s = R.optionHitsLoaded(s, { q: 'nvda', data: { ...usOptionsList(), items: usOptionsList().items.filter(i => i.base === 'NVDA') } });
+  const html = renderMarketsScreen(s, NOW);
+  assert.deepEqual(rowIds(html), ['stock:NVDA', 'opt:NVDA']);
+  assert.match(rowOf(html, 'opt:NVDA'), /data-action="openMarket" data-id="opt:NVDA"/);
+  assert.match(text(rowOf(html, 'opt:NVDA')), /NVDA options/);
+  assert.match(rowOf(html, 'opt:NVDA'), /<span class="mk-tag">Options<\/span>/);
+  // hits for another query are not this one's
+  assert.ok(!rowIds(renderMarketsScreen(R.setMarketsQuery(s, 'nvd'), NOW)).includes('opt:NVDA'));
 });

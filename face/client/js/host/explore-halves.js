@@ -7,7 +7,8 @@
 //   market's sentence, the last rows kept; the other answering lands it alone;
 // - a new query for a kind, or the kind dropped, forgets what was kept: what is in the air for it lands nowhere;
 // - the connected half takes the same query unless the ask names its own (`connectedQuery`: Markets' All sources asks the
-//   account by class with no source list, spec 2026-11-19 §5.2), and `join` adds to what the join is told (`allSources`).
+//   account by class with no source list, spec 2026-11-19 §5.2), and `join` adds to what the join is told (`allSources`); a
+//   `connectedQuery` of null asks the market alone (an options view: no connected venue lists a chain), the join over its half.
 // The host owns the flights (`fly`, `drop`, `kinds`: its one-flight-per-kind table); this owns the halves. No DOM.
 import { venuesOf } from './account-view.js';
 import { joinExplore } from './explore-join.js';
@@ -61,6 +62,8 @@ export function exploreHalves({ store, fly, drop, kinds, now = Date.now, onMarke
     if (halves.has(kind) && (halves.get(kind).query !== query || halves.get(kind).connectedQuery !== connectedQuery)) forget(kind);
     const kept = halves.get(kind) ?? { query, connectedQuery, join, market: undefined, connected: undefined, said: null, landed: { market: true, connected: true } };
     halves.set(kind, kept);
+    // the market alone: the connected half never asked, so nothing waits on it
+    if (connectedQuery === null) kept.landed.connected = true;
     const ask = (half, flight, path) => {
       const k = kinds.get(flight);
       if (!(k && k.flight !== null && k.path === path)) kept.landed[half] = false;
@@ -76,10 +79,11 @@ export function exploreHalves({ store, fly, drop, kinds, now = Date.now, onMarke
       if (!ok && !kept.landed[half === 'market' ? 'connected' : 'market']) return;
       const data = joinOf(kept);
       if (data) land(data, kept);
-      else if (kept.market === null && kept.connected === null) failed(kept.said);
+      else if (kept.market === null && (kept.connected === null || kept.connectedQuery === null)) failed(kept.said);
     };
     fly(`${kind}:market`, ask('market', `${kind}:market`, `${MARKET_EXPLORE}?${query}`), landHalf('market'), loading);
-    fly(`${kind}:account`, ask('connected', `${kind}:account`, `${CONNECTED_EXPLORE}?${connectedQuery}`), landHalf('connected'));
+    if (connectedQuery === null) drop(`${kind}:account`);
+    else fly(`${kind}:account`, ask('connected', `${kind}:account`, `${CONNECTED_EXPLORE}?${connectedQuery}`), landHalf('connected'));
   }
   return {
     read,

@@ -2340,9 +2340,9 @@ choices (`client/js/render/markets.js`; the view is `filtersOf` in `client/js/ho
   shares). One region at a time; a tab switch goes back to US; never a chip. Stocks › China A is the
   Tencent ranking (below); on a non-US region the Form is Spot or Perp (the region's own read, or
   trade.xyz's perps of that region), and the other regions' Spot reads are below.
-- **Form**: All, Spot & shares, Perp, Tokenized, Event contract, and Options greyed `piece 3`; a
-  form the tab's sources do not carry is greyed `none here` (read from `SOURCE_FORMS`, never from the
-  rows). Picking a form the main sources lack switches Source to All sources, so the pick never
+- **Form**: All, Spot & shares, Perp, Tokenized, Event contract, and Options (live on Crypto and
+  Stocks › US, below); a form the tab's sources do not carry is greyed `none here` (read from
+  `SOURCE_FORMS`, never from the rows). Picking a form the main sources lack switches Source to All sources, so the pick never
   empties the table.
 - **Source**: `Main · <names>`, `All sources`, then each source family of the tab (a venue and its
   `-preipo` source under one name; the main ones first, marked `main`), named from the registry's
@@ -2496,6 +2496,39 @@ Hong Kong, Korean and Taiwanese hits beside the A shares. All of it is view-only
 Sell, never in All, never in a dollar total. Each row's source words are the market's own: `real
 time` only where a source declares no delay, a declared delay in its own figure (`Naver · 15 min
 delayed`), a source that declares nothing by its name alone (`Tencent`).
+
+#### Options (spec 2026-11-22 §5.4)
+
+Form › Options on Crypto and Stocks › US is the market's own read of option chains, one row an
+underlying, never a registered source (`client/js/wire/options.js`; `optionPageOf`, `chainQueryOf`
+and the option rows in `client/js/host/market-view.js`). The list is
+`/data/market/explore?asset=crypto|stocks&form=option&sort=volume|movers&limit=200` (`&region=us` on
+Stocks), asked of the market alone: no connected venue lists a chain, so the connected explore is
+never asked on an options view (`connectedQueryOf` answers null). Its columns are **Underlying**
+(`BTC options`, its venues under it), **Price** (the underlying's, with its day change), **Nearest
+expiry**, **Volume** (dollars where the market gives them, else contracts), **Open interest** (a
+coin's in the coin, a US ticker's in contracts), **ATM IV** (— where the source gives none: Nasdaq
+never does) and **Source**; a US row says `nearest expiry` under its name, its figures being that
+expiry's alone. No star, the market's order. The answer's notes (what each source's figures are, `US
+options: 3 of 10 read`) and any source that did not answer are said under the rows, in the market's
+words. A search asks `/data/market/explore?q=<q>&form=option&limit=20` beside its explore (the
+market's keeps; nothing is asked of Nasdaq per keystroke beyond them) and lists `NVDA options`,
+tagged Options.
+
+A row opens its chain's page, `#/markets/opt:<U>` (any underlying: a deep link with no row is a coin's
+at Deribit for the market's coins, else a US ticker's at Nasdaq). It reads
+`/data/market/options?underlying=<U>&venue=deribit|okx|nasdaq[&expiry=YYYY-MM-DD]` at once, and again
+every 15 s (the proxy's keep) while the page is on screen; an answer for a venue or expiry picked
+before is dropped (one flight, and the store keeps only the query last asked). The page: the name and
+price with its change, the source and Nasdaq's last trade and a partial read's note under it; a venue
+switch for a coin both Deribit and OKX list (OKX alone: no switch); the expiry tabs, the chain's, the
+one read pressed; then calls | strike | puts, each side's bid, ask, last, change (a percent where the
+source gives one, else the change in the leg's unit), volume, open interest and IV, the
+at-the-money strike marked `▸ 60,000 ◂`, the cells in the money shaded (a call below the price, a
+put above). A crypto leg's prices are in the coin with its dollars under each (`Prices in BTC, US
+dollars under each`). A refusal is the page's sentence in place of the table (`Nasdaq lists no
+options for BRK.A`). A US share's page (`stock:<T>`) carries an **Options** key to `#/markets/opt:<T>`.
+All of it is view-only.
 
 ### A market's page
 

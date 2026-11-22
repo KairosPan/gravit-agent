@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startMarkets, EXPLORE_MS, EXPLORE_TIMEOUT_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS, BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT } from '../../client/js/host/markets.js';
+import { startMarkets, EXPLORE_MS, EXPLORE_TIMEOUT_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS, BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT, CHAIN_MS } from '../../client/js/host/markets.js';
 import { rowsOf, pageOf, tableOf, cnStateWord } from '../../client/js/host/market-view.js';
 import { renderMarketsScreen } from '../../client/js/render/markets.js';
 import { STORAGE_KEY, ACCOUNT_WATCH_KEY, readAccountWatch, saveAccountWatch } from '../../client/js/wire/market-model.js';
@@ -17,6 +17,7 @@ import { setTable } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
 import { spoken } from './helpers/spoken.js';
 import { windowAsk, windowPath } from '../../client/js/host/event-window.js';
+import { cryptoOptionsList, usOptionsList, btcChain, aaplChain, chainAnswer, noOptionsBody, NO_OPTIONS } from './helpers/options.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 8; i++) await tick(); };
@@ -80,7 +81,9 @@ const focused = (scope, coin = scope === 'xyz' ? 'xyz:NVDA' : 'BTC') => ({
       symbol: `${coin}-PERP`, connector: 'live:hyperliquid-trade', public: true, connected: false, price: 100 }] }],
   tabs: [{ id: 'all', label: 'All', count: 1 }, { id: 'perps', label: 'Perps', count: 1 }],
 });
-const isTwin = path => path.startsWith('/data/account/connected/explore?') || path === '/data/account/venues' || path === '/data/market/sources';
+// a search's option rows (explore?q=…&form=option) ride beside its explore read: a twin too (the options tests read allReads)
+const isOptionHits = path => path.startsWith('/data/market/explore?') && query(path).form === 'option' && query(path).q !== undefined;
+const isTwin = path => path.startsWith('/data/account/connected/explore?') || path === '/data/account/venues' || path === '/data/market/sources' || isOptionHits(path);
 
 // `reads` are the reads but each explore's connected twin and the venues read (`allReads` has them: the tests of the two
 // halves read those); the connected explore a test does not answer lists nothing
@@ -129,6 +132,7 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
     explore: {}, located: {}, results: IDLE, accountQuotes: {}, candles: {}, compare: {}, watch: [], watchError: null, asked: {},
     watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
     rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null }, depth: {}, event: {},
+    chain: { status: 'idle', query: null, data: null, at: null, message: null }, chainPick: null, optionHits: { q: '', data: null },
   }, 'the slice the host starts from');
   // two quiet stocks past the fixture's twelve rows: Most traded puts them last, so the first twelve rows leave them out
   const quiet = (symbol, usd) => ({
@@ -1874,7 +1878,8 @@ test('a search asks q with no tab and no filter', async () => {
   r.markets.show(true);
   await settle();
   r.markets.search('600519');
-  assert.deepEqual(r.allReads.filter(p => query(p).q === '600519'), ['/data/market/explore?q=600519&limit=200', '/data/account/connected/explore?q=600519&limit=200']);
+  assert.deepEqual(r.allReads.filter(p => query(p).q === '600519'), ['/data/market/explore?q=600519&form=option&limit=20', '/data/market/explore?q=600519&limit=200', '/data/account/connected/explore?q=600519&limit=200'],
+    "the search's option rows, then the search on both halves");
   assert.deepEqual([r.m().tab, r.m().form], ['indices', 'perp']);
   r.markets.close();
 });
@@ -2329,5 +2334,133 @@ test("a Hong Kong share's page reads its history at venue hk; an index's at venu
   r.markets.page('tw:2330');
   assert.equal(r.reads.find(p => p.includes('venue=tw')), '/data/market/candles?venue=tw&symbol=2330&range=3M');
   assert.deepEqual(r.follows, [], 'a local share follows nothing on the stream');
+  r.markets.close();
+});
+
+
+// ---- the option chains (spec 2026-11-22 §5.4)
+
+const CRYPTO_OPTIONS = '/data/market/explore?asset=crypto&form=option&sort=volume&limit=200';
+const optionsAt = path => (path.startsWith('/data/market/options?') ? query(path) : null);
+
+test('an options view asks the market alone: no connected venue lists a chain', async () => {
+  const r = rig({ tab: 'crypto', answer: path => (path === CRYPTO_OPTIONS ? cryptoOptionsList() : path.startsWith('/data/market/explore?') ? { ok: true, items: [] } : undefined) });
+  r.store.dispatch('setMarketsForm', 'option');
+  r.markets.show(true);
+  await settle();
+  const asked = r.allReads.filter(p => p.includes('form=option'));
+  assert.deepEqual(asked, [CRYPTO_OPTIONS], 'the market half alone');
+  assert.equal(r.allReads.some(p => p.startsWith('/data/account/connected/explore?') && p.includes('form=option')), false);
+  assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.id), ['opt:BTC', 'opt:ETH', 'opt:HYPE']);
+  assert.deepEqual(rowsOf(r.m(), NOW).map(x => x.legs.length), [0, 0, 0], 'no line to quote');
+  // the market down: the read failed, said in its sentence, no wait for a connected half
+  const down = rig({ tab: 'crypto', answer: path => (path === CRYPTO_OPTIONS ? refused(409, { ok: false, refusal: { message: 'Crypto options are not read by this market' } }) : undefined) });
+  down.store.dispatch('setMarketsForm', 'option');
+  down.markets.show(true);
+  await settle();
+  assert.deepEqual([down.m().explore.crypto.status, down.m().explore.crypto.message], ['error', 'Crypto options are not read by this market']);
+  r.markets.close();
+  down.markets.close();
+});
+
+test("a chain's page reads its chain at once and every 15 s while on screen; leaving it drops what it read", async () => {
+  const r = rig({ answer: path => (optionsAt(path) ? chainAnswer(btcChain()) : undefined) });
+  r.markets.show(true);
+  await settle();
+  r.store.dispatch('nav', { screen: 'markets', id: 'opt:BTC' });
+  r.markets.page('opt:BTC');
+  const chains = () => r.reads.filter(optionsAt);
+  assert.deepEqual(chains(), ['/data/market/options?underlying=BTC&venue=deribit'], 'Deribit, the nearest expiry');
+  assert.equal(r.m().chain.status, 'loading');
+  await settle();
+  assert.deepEqual([r.m().chain.status, r.m().chain.data.atmStrike, r.m().chain.query], ['ready', 60000, 'underlying=BTC&venue=deribit']);
+  assert.equal(CHAIN_MS, 15_000);
+  r.fire(CHAIN_MS);
+  assert.equal(chains().length, 2, 'read again on its keep');
+  await settle();
+  // hidden: no beat
+  r.markets.show(false);
+  r.fire(CHAIN_MS);
+  assert.equal(chains().length, 2);
+  r.markets.show(true);
+  r.fire(CHAIN_MS);
+  assert.equal(chains().length, 3);
+  await settle();
+  // left: the chain and the picks go, and no beat reads it
+  r.markets.page(null);
+  assert.deepEqual([r.m().chain.status, r.m().chain.query, r.m().chainPick], ['idle', null, null]);
+  r.fire(CHAIN_MS);
+  assert.equal(chains().length, 3);
+  r.markets.close();
+});
+
+test('an expiry picked asks that chain; the answer for the expiry left behind, landing late, is not drawn', async () => {
+  const held = new Map();
+  const r = rig({ answer: path => {
+    const q = optionsAt(path);
+    if (!q) return undefined;
+    const d = deferred();
+    held.set(`${q.venue}|${q.expiry ?? ''}`, d);
+    return d.promise;
+  } });
+  r.markets.show(true);
+  await settle();
+  r.store.dispatch('nav', { screen: 'markets', id: 'opt:BTC' });
+  r.markets.page('opt:BTC');
+  r.store.dispatch('chainPicked', { underlying: 'BTC', expiry: '2026-11-28' });
+  assert.equal(r.reads.filter(optionsAt).at(-1), '/data/market/options?underlying=BTC&venue=deribit&expiry=2026-11-28', 'asked at once');
+  held.get('deribit|2026-11-28').resolve(chainAnswer(btcChain('2026-11-28')));
+  await settle();
+  held.get('deribit|').resolve(chainAnswer(btcChain('2026-11-23')));
+  await settle();
+  assert.equal(r.m().chain.data.expiry, '2026-11-28', "Nov 23's late answer lands nowhere");
+  assert.equal(r.m().chain.query, 'underlying=BTC&venue=deribit&expiry=2026-11-28');
+  // OKX picked: its nearest expiry
+  r.store.dispatch('chainPicked', { underlying: 'BTC', venue: 'okx' });
+  assert.equal(r.reads.filter(optionsAt).at(-1), '/data/market/options?underlying=BTC&venue=okx');
+  held.get('okx|').resolve(chainAnswer(btcChain('2026-11-23', 'okx')));
+  await settle();
+  assert.deepEqual([r.m().chain.data.venue, r.m().chain.data.expiry], ['okx', '2026-11-23']);
+  r.markets.close();
+});
+
+test("a US ticker's chain is Nasdaq's; a ticker it lists no options for lands the market's sentence", async () => {
+  const r = rig({ answer: path => {
+    const q = optionsAt(path);
+    if (!q) return undefined;
+    return q.underlying === 'AAPL' ? chainAnswer(aaplChain()) : refused(409, noOptionsBody());
+  } });
+  r.markets.show(true);
+  await settle();
+  r.markets.page('opt:AAPL');
+  assert.equal(r.reads.filter(optionsAt).at(-1), '/data/market/options?underlying=AAPL&venue=nasdaq');
+  await settle();
+  assert.equal(r.m().chain.data.lastTrade, 'LAST TRADE: $342.56 (AS OF NOV 20, 2026)');
+  r.markets.page('opt:BRK.A');
+  assert.equal(r.reads.filter(optionsAt).at(-1), '/data/market/options?underlying=BRK.A&venue=nasdaq');
+  await settle();
+  assert.deepEqual([r.m().chain.status, r.m().chain.message, r.m().chain.data], ['error', NO_OPTIONS, null]);
+  r.store.dispatch('nav', { screen: 'markets', id: 'opt:BRK.A' });
+  assert.match(renderMarketsScreen(r.store.get(), NOW), new RegExp(`<p class="mk-empty">${NO_OPTIONS.replace('.', '\\.')}</p>`));
+  r.markets.close();
+});
+
+test('a search asks the market for its option rows too, and lists "NVDA options"', async () => {
+  const r = rig({ tab: 'stocks', answer: path => {
+    const q = query(path);
+    if (q.q === 'nvda' && q.form === 'option') return { ...usOptionsList(), items: usOptionsList().items.filter(i => i.base === 'NVDA') };
+    if (q.q === 'nvda') return { ...fx('explore-all'), items: [] };
+    return path.startsWith('/data/market/explore?') ? { ok: true, items: [] } : undefined;
+  } });
+  r.markets.show(true);
+  await settle();
+  r.markets.search('nvda');
+  assert.ok(r.allReads.includes('/data/market/explore?q=nvda&form=option&limit=20'), 'one read of the option rows, the market alone');
+  assert.equal(r.allReads.some(p => p.startsWith('/data/account/connected/explore?') && p.includes('form=option')), false);
+  await settle();
+  assert.deepEqual(rowsOf(r.m(), NOW).map(x => [x.id, x.name]), [['opt:NVDA', 'NVDA options']]);
+  // the search ended: its option rows go with it
+  r.markets.search('');
+  assert.deepEqual(r.m().optionHits, { q: '', data: null });
   r.markets.close();
 });

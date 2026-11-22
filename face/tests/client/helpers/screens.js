@@ -30,7 +30,9 @@ import { t, said } from '../../../client/js/i18n/words.js';
 import { listings, modulesListing } from './inventory.js';
 import { setMarkdown } from '../../../client/js/render/thread.js';
 import { reducers as R } from '../../../client/js/reducers/index.js';
-import { exploreQueryOf, rankQueryOf } from '../../../client/js/host/market-view.js';
+import { exploreQueryOf, rankQueryOf, chainQueryOf } from '../../../client/js/host/market-view.js';
+import { optionChainOf } from '../../../client/js/wire/options.js';
+import { cryptoOptionsList, usOptionsList, btcChain, NO_OPTIONS } from './options.js';
 import { localQuoteOf } from '../../../client/js/wire/local.js';
 import { emptyState } from '../../../client/js/data/empty.js';
 import { MIN } from '../../../client/js/time.js';
@@ -494,6 +496,35 @@ export function namedStates() {
     // re-served as last read; a Hong Kong share's page with its facts and 1M closes, an index's page with a refused 1D; a search
     // with Hong Kong and Korean hits beside an A share
     ...marketsRegionsStates(),
+    // Markets options (plan 2026-11-22 Task 8): Crypto's and US stocks' option rows with the market's notes; BTC's chain at Deribit
+    // (the venue switch, the expiry tabs, the ATM strike, the money shaded); a ticker Nasdaq lists no options for; a search's option row
+    ...marketsOptionsStates(),
+  ];
+}
+
+function marketsOptionsStates() {
+  const on = R.nav(emptyState(), { screen: 'markets', id: null });
+  const list = (tab, body) => {
+    const st = R.setMarketsForm(R.setMarketsTab(on, tab), 'option');
+    return R.exploreLoaded(st, { tab, data: body, at: NOW, query: exploreQueryOf(st.markets) });
+  };
+  const crypto = list('crypto', cryptoOptionsList());
+  const chainOf = (st, id, { chain = null, refusal = null } = {}) => {
+    let s = R.nav(st, { screen: 'markets', id });
+    const query = chainQueryOf(s.markets, id);
+    s = R.chainLoading(s, { query });
+    if (chain) s = R.chainLoaded(s, { query, data: optionChainOf({ ok: true, value: chain }), at: NOW });
+    if (refusal) s = R.chainFailed(s, { query, at: NOW, message: refusal });
+    return s;
+  };
+  const search = R.optionHitsLoaded(R.resultsLoaded(R.setMarketsQuery(R.setMarketsTab(on, 'stocks'), 'nvda'), { data: { ok: true, items: [], movers: [], closing: [], mostTraded: [], tabs: [], missing: [], notes: [] }, at: NOW }),
+    { q: 'nvda', data: { ...usOptionsList(), items: usOptionsList().items.filter(i => i.base === 'NVDA') } });
+  return [
+    ['markets-options-crypto', crypto],
+    ['markets-options-us', list('stocks', usOptionsList())],
+    ['markets-chain-btc', chainOf(crypto, 'opt:BTC', { chain: btcChain() })],
+    ['markets-chain-refused', chainOf(on, 'opt:BRK.A', { refusal: NO_OPTIONS })],
+    ['markets-search-options', search],
   ];
 }
 

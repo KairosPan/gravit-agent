@@ -53,6 +53,7 @@ const depth = (s, id, part, patch) => {
   const page = own(s.markets.depth, id);
   return mk(s, { depth: { ...s.markets.depth, [id]: { ...(isRecord(page) ? page : {}), [part]: { ...DEPTH_IDLE, ...own(page, part), ...patch } } } });
 };
+const CHAIN_IDLE = { status: 'idle', query: null, data: null, at: null, message: null };
 // a tab starts from Most traded, as Linqi's does
 const onTab = tab => ({ tab, sort: 'volume' });
 
@@ -60,6 +61,26 @@ export const reducers = {
   marketSourcesLoading: s => mk(s, { sources: { ...IDLE, ...s.markets.sources, status: 'loading', message: null } }),
   marketSourcesLoaded: (s, { data, at } = {}) => mk(s, { sources: { status: 'ready', data, at, message: null } }),
   marketSourcesFailed: (s, { at, message = null } = {}) => mk(s, { sources: { ...IDLE, ...s.markets.sources, status: 'error', at, message } }),
+  // an option chain's page (spec 2026-11-22 §5.4): its read by the query last asked — an answer or a failure for a query other than
+  // that one (an expiry or a venue left behind, landing late: Review Focus 5) lands nowhere; a failed read keeps the chain it had,
+  // with the market's sentence when it refused (`message`, else null); leaving the page drops it and the picks made on it
+  chainLoading: (s, { query } = {}) => (named(query) ? mk(s, { chain: { ...CHAIN_IDLE, ...s.markets.chain, status: 'loading', query } }) : s),
+  chainLoaded: (s, { query, data, at = null } = {}) => (named(query) && s.markets.chain?.query === query && isRecord(data)
+    ? mk(s, { chain: { status: 'ready', query, data, at, message: null } }) : s),
+  chainFailed: (s, { query, at = null, message = null } = {}) => (named(query) && s.markets.chain?.query === query
+    ? mk(s, { chain: { ...CHAIN_IDLE, ...s.markets.chain, status: 'error', at, message } }) : s),
+  chainDropped: s => (s.markets.chain?.query == null && s.markets.chainPick == null ? s : mk(s, { chain: { ...CHAIN_IDLE }, chainPick: null })),
+  // a venue or an expiry picked on a chain's page, for its underlying: a venue picked goes back to that venue's nearest expiry
+  chainPicked(s, { underlying, venue, expiry } = {}) {
+    if (!named(underlying)) return s;
+    const was = s.markets.chainPick?.underlying === underlying ? s.markets.chainPick : { underlying, venue: null, expiry: null };
+    if (named(venue) && venue !== was.venue) return mk(s, { chainPick: { underlying, venue, expiry: null } });
+    if (named(expiry) && expiry !== was.expiry) return mk(s, { chainPick: { ...was, expiry } });
+    return s;
+  },
+  // a search's option rows (explore?q=…&form=option, the market's), kept with the query they answer
+  optionHitsLoaded: (s, { q, data = null } = {}) => (typeof q === 'string' ? mk(s, { optionHits: { q, data } }) : s),
+
   // the A shares: the cn watchlist as stored; their quotes by cn id (the Account's, host/markets.js merges them) and the state of
   // that read; China's state as the Account says it (its ranking's status, or a refused quote's), the only setter of the
   // providers; the prices a search's A-share hits carry, by cn id
@@ -191,7 +212,7 @@ export const reducers = {
   setMarketsTab(s, tab) {
     // the tab already open, no search: as it is, its filters kept
     if (!MARKET_TABS.includes(tab) || (tab === s.markets.tab && blank(s.markets.q))) return s;
-    return mk(s, { ...onTab(tab), region: 'us', form: '', source: 'main', open: null, q: '', results: { ...IDLE } });
+    return mk(s, { ...onTab(tab), region: 'us', form: '', source: 'main', open: null, q: '', results: { ...IDLE }, optionHits: { q: '', data: null } });
   },
   setMarketsRegion(s, id) {
     const m = s.markets;
@@ -238,6 +259,6 @@ export const reducers = {
     const m = s.markets;
     if (v === m.q) return s;
     // a search closes a filter's popover (the filters are not drawn while it shows), so Back to <tab> finds it closed
-    return blank(v) && !blank(m.q) ? mk(s, { q: v, results: { ...IDLE } }) : mk(s, blank(v) ? { q: v } : { q: v, open: null });
+    return blank(v) && !blank(m.q) ? mk(s, { q: v, results: { ...IDLE }, optionHits: { q: '', data: null } }) : mk(s, blank(v) ? { q: v } : { q: v, open: null });
   },
 };

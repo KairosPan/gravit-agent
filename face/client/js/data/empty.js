@@ -76,6 +76,10 @@ export function emptyState() {
       // the market page on screen's four reads beside its price, by its key (plan 4a Task 4): `here` (the asset sheet), `book`,
       // `trades`, `funding` (a perpetual's) — each { status, data, at, message, freshAt }; dropped on leaving
       depth: {},
+      // an option chain's page (spec 2026-11-22 §5.4): its read, by the query last asked (`underlying=…&venue=…[&expiry=…]`), and the
+      // venue and expiry picked on it (null: the defaults); the option rows a search found (explore?q=…&form=option), by the query
+      chain: { status: 'idle', query: null, data: null, at: null, message: null }, chainPick: null,
+      optionHits: { q: '', data: null },
     },
     // the Account (host/account.js): its page with the sentence of its last refusal, its other reads, the history curve's
     // range, the Statement drawer, and the venue whose Details drawer is open (its id); and the connect sheet's reads — where

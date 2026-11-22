@@ -30,13 +30,14 @@ import {
   candleRanges, localCandleRanges, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
   chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf, marketOriginOf, noSpotSourceWord,
-  localPageOf, localWord, localDownWord, localRefreshWord, localStateWord, regionWord,
+  localPageOf, localWord, localDownWord, localRefreshWord, localStateWord, regionWord, optionPageOf, compactNumber,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
 import { tradeableOf } from '../host/trade-view.js';
 import { isCnKey } from '../wire/china.js';
 import { isLocalKey } from '../wire/local.js';
+import { isOptionKey } from '../wire/options.js';
 import { markOf } from '../host/desk-view.js';
 import { t, th, thn, sayOf } from '../i18n/words.js';
 
@@ -157,6 +158,29 @@ function table(rows, { local = null, markFor = () => null } = {}) {
   return `<section class="cardbox mk-tcard" aria-label="${th('nav.markets')}"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, markFor, starred, levels)).join('')}</tbody></table></div></section>`;
 }
 
+// an options view's table (spec 2026-11-22 §5.4): a row an underlying — its price with its day change, its nearest expiry, its volume,
+// its open interest, the ATM IV, where its figures are from; no star (a chain is not a market to watch)
+function optionRow(r) {
+  const o = r.option;
+  return `<tr data-id="${esc(r.id)}"><td class="mk-c-name">${nameCell(r)}</td>` +
+    `<td class="r">${esc(priceWord(r.price, 'usd'))} <span class="mk-opt-chg">${moveHtml(r.priced)}</span></td>` + // words-order: a price, then its move
+    `<td class="r">${esc(o.expiry || EM)}</td><td class="r mk-c-vol">${esc(o.volume)}</td><td class="r mk-c-vol">${esc(o.openInterest || EM)}</td>` +
+    `<td class="r mk-c-chg">${esc(o.atmIv || EM)}</td><td class="r mk-c-st"><span class="mk-st">${esc(r.sourceWord)}</span></td></tr>`;
+}
+function optionTable(rows) {
+  const head = `<tr><th scope="col" class="mk-c-name">${th('markets.head.underlying')}</th><th scope="col" class="r">${th('markets.head.price')}</th>` +
+    `<th scope="col" class="r">${th('markets.head.nearestExpiry')}</th><th scope="col" class="r mk-c-vol">${th('markets.head.volume')}</th>` +
+    `<th scope="col" class="r mk-c-vol">${th('markets.head.openInterest')}</th><th scope="col" class="r mk-c-chg">${th('markets.head.atmIv')}</th>` +
+    `<th scope="col" class="r mk-c-st">${th('markets.head.source')}</th></tr>`;
+  return `<section class="cardbox mk-tcard" aria-label="${th('nav.markets')}"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(optionRow).join('')}</tbody></table></div></section>`;
+}
+// under an options view's rows: the sources that did not answer, then the market's notes (each source's figures, a list read in part),
+// and As of the last read for a list it re-served
+function optionNotes(view) {
+  const down = view.missing.map(x => note(t('markets.empty.missing', { source: x.name })) + note(x.why)).join(''); // words-order: the sentence, then the market's words
+  return down + view.notes.map(note).join('') + (view.stale ? note(t('markets.asOfLast')) : '');
+}
+
 // where the rows would be when there are none (tableOf's `empty`, else the read they are from): the Watchlist with nothing
 // starred (G6); a tab whose read answered with nothing under its filters, with Back to the main sources where a Form or a Source
 // is set (§5.3); Stocks › Japan or India on Spot, which no free source lists; China A's ranking; a search's answer with nothing in it; a read still on its way, or one that failed before it
@@ -271,7 +295,9 @@ export function renderMarketsScreen(state, now) {
   // China's failure is said once, in the face's words: the route's own error text is not a sentence of the Account's
   const cnLine = cnSearch && !emptyBody.includes(`>${esc(cnSearch)}<`) ? cnSearch : '';
   const words = chinaWords + note(local ? '' : read.message) + note(cnLine) + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
-  const body = rows.length ? table(rows, { local, markFor: id => markOf(state.desk?.data, id) }) : emptyBody;
+  const body = rows.length
+    ? view.options ? optionTable(rows) + optionNotes(view) : table(rows, { local, markFor: id => markOf(state.desk?.data, id) })
+    : emptyBody;
   return screenHtml(m, tabsHtml(tabs, m.tab), `${bar}${words}${body}`);
 }
 
@@ -300,8 +326,11 @@ const pageHtml = (who, keys, top, left, right) => {
 const ticketKey = (id, side, word) => `<button type="button" class="btn" data-action="openTicket" data-id="${esc(id)}" data-side="${side}">${word}</button>`;
 // the page's keys: Buy, and Sell where it is held, when `trade` is given (an Account market on a page that signs); Hand to
 // gravit; Watch — and a perpetual's Leverage… (`leverage`, its seed) where it is given
+// a US share's page leads to its option chain (any ticker: the chain's page says when Nasdaq lists none)
+const US_TICKER = /^stock:([A-Z.]{1,6})$/;
+const optionsKey = id => { const m = US_TICKER.exec(id); return m ? `<a class="btn" href="#/markets/opt:${esc(m[1])}">${th('markets.form.option')}</a>` : ''; };
 const keysHtml = (id, watched, trade = null, leverage = null) => `<div class="mk-d-acts">${trade ? ticketKey(id, 'buy', th('trade.buy')) + (trade.held ? ticketKey(id, 'sell', th('trade.sell')) : '') : ''}` +
-  `${leverage ? marketKey('leverage', leverage, t('account.key.leverage'), 'btn') : ''}` +
+  `${leverage ? marketKey('leverage', leverage, t('account.key.leverage'), 'btn') : ''}${optionsKey(id)}` +
   `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button>` + // words-order: an icon, then its word
   `<button type="button" class="${cls('btn', watched && 'mk-on')}" data-action="toggleWatch" data-id="${esc(id)}" aria-pressed="${watched}">${icon('star', 16, 2)}${watched ? th('markets.tab.watching') : th('markets.head.watch')}</button></div>`; // words-order: an icon, then its word
 const aboutHtml = (conversations, asset, now) => mentionsOf(conversations, asset).map(c => `<a class="mk-line" href="#/messages/${esc(c.id)}"><span class="mk-mark">→</span>` +
@@ -319,6 +348,8 @@ function partBody(r, lines, none, unavailable) {
 /** A market's page, or '' for an id no read lists (the screen then draws the table): an A share's (a cn: id) its own, from its
  *  quote and history, reached cold or not; another Account key's from its reads. */
 export function marketPage(id, state, now) {
+  // an option chain's page: its strikes at the venue and expiry picked
+  if (isOptionKey(id)) return optionPage(id, state);
   if (!isCnKey(id) && isAccountKey(id)) {
     const view = pageOf(state.markets, state.account, id, now);
     return view ? accountPage(id, view, state, now) : '';
@@ -613,4 +644,61 @@ function localPage(id, state, now) {
   const keys = `<div class="mk-d-acts"><button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button></div>`; // words-order: an icon, then its word
   const about = aboutHtml(state.conversations, { symbol: asset.symbol, name: asset.name }, now);
   return pageHtml(who, keys, top, left, about.length ? [section(th('markets.about'), feed(about))] : []);
+}
+
+// ---- an option chain's page (spec 2026-11-22 §5.4): the underlying's price, the venue switch (a coin at Deribit or OKX), the expiry tabs,
+// then the strikes — calls | strike | puts, each side's bid, ask, last, change, volume, open interest and IV, the at-the-money strike
+// marked, the cells in the money shaded — with the source, the last trade and a partial read's note under the price. A crypto leg's
+// prices are in the coin, its dollars under each (spec: the source's own figures; the dollars the market's, coin × the underlying). A
+// refusal is the page's sentence in place of the table.
+
+// a leg's price: in dollars (a US leg's) with its mark, in the coin or USDC as a bare number (the head says the unit); none is —
+const legPrice = (v, unit) => (v === null ? EM : unit === 'USD' ? price(v, 'USD') : Number(v).toLocaleString('en-US', { maximumFractionDigits: unit === 'USDC' || unit === 'USDT' ? 2 : 4 }));
+const dollars = v => (v === null || v === undefined ? '' : price(v, 'USD'));
+// a leg's change: its percent where the source gives one, else its change in the leg's unit, signed; none is —
+function legChange(l) {
+  const v = l.changePct ?? l.change;
+  if (v === null || v === undefined) return `<span class="flat">${EM}</span>`;
+  const word = l.changePct !== null ? `${v > 0 ? '+' : ''}${v.toFixed(2)}%` : `${v > 0 ? '+' : ''}${legPrice(v, l.unit)}`;
+  return `<span class="${tone(v)}">${esc(word)}</span>`;
+}
+const compactCount = v => (v === null || v === undefined ? EM : compactNumber(v));
+// one side's seven cells: a crypto leg's bid, ask and last with their dollars under them; in the money shaded
+function legCells(l, itm, coin) {
+  const c = cls('r', itm && 'mk-itm');
+  if (!l) return Array.from({ length: 7 }, () => `<td class="${c}"></td>`).join('');
+  const px = (v, usd) => `<td class="${c}">${esc(legPrice(v, l.unit))}${coin && usd ? `<span class="mk-usd">${esc(usd)}</span>` : ''}</td>`;
+  return px(l.bid, dollars(l.usd?.bid)) + px(l.ask, dollars(l.usd?.ask)) + px(l.last, dollars(l.usd?.last)) +
+    `<td class="${c}">${legChange(l)}</td><td class="${c}">${esc(compactCount(l.volume))}</td><td class="${c}">${esc(compactCount(l.openInterest))}</td>` +
+    `<td class="${c}">${esc(l.iv === null ? '' : `${l.iv.toFixed(1)}%`)}</td>`;
+}
+function chainTable(view) {
+  const side = () => [th('markets.book.bid'), th('markets.book.ask'), th('markets.option.last'), th('markets.head.change'), th('markets.head.volume'), th('markets.option.oi'), th('markets.option.iv')]
+    .map(w => `<th scope="col" class="r">${w}</th>`).join('');
+  const head = `<tr><th scope="colgroup" colspan="7" class="mk-chain-side">${th('markets.option.calls')}</th><th scope="col" class="mk-strike">${th('markets.option.strike')}</th><th scope="colgroup" colspan="7" class="mk-chain-side">${th('markets.option.puts')}</th></tr>` +
+    `<tr>${side()}<th scope="col" class="mk-strike"><span class="sr-only">${th('markets.option.strike')}</span></th>${side()}</tr>`;
+  const k = v => esc(Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 }));
+  const strike = r => `<th scope="row" class="mk-strike">${r.atm ? `<span aria-hidden="true">▸ </span>${k(r.strike)}<span aria-hidden="true"> ◂</span><span class="sr-only"> ${th('markets.option.atm')}</span>` : k(r.strike)}</th>`; // words-order: the strike, then its mark
+  const body = view.rows.map(r => `<tr${r.atm ? ' class="mk-atm"' : ''}>${legCells(r.call, r.callItm, view.coinPriced)}${strike(r)}${legCells(r.put, r.putItm, view.coinPriced)}</tr>`).join('');
+  return `<div class="mk-wrap"><table class="mk-t mk-chain"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+
+function optionPage(id, state) {
+  const view = optionPageOf(state.markets, id);
+  const who = `<div class="mk-who">${mkAv(view.underlying, 'lg')}<div><h1 class="head-title">${esc(view.name)}</h1>` +
+    `<span class="mk-sub">${esc(view.venues.map(v => v.label).join(' · '))}</span></div></div>`; // words-order: the venues' names under the visual separator
+  const moved = view.changePct !== null;
+  const under = [view.quoteFrom, view.lastTrade].filter(Boolean).join(' · '); // words-order: the source, then its last trade, under the visual separator
+  const top = `<div class="mk-d-px"><span class="mk-big">${esc(priceWord(view.price, 'usd'))}</span>${moved ? `${moveHtml({ unit: 'usd', changePct: view.changePct })}<span class="mk-basis">24h</span>` : ''}</div>` +
+    `${under ? `<p class="mk-asof">${esc(under)}</p>` : ''}${note(view.note)}`;
+  const venue = view.switchable ? seg(view.venues.map(v => [v.label, v.id]), view.venue, 'optVenue', { 'data-id': id }) : '';
+  const tabs = view.expiries.length ? seg(view.expiries.map(e => [e.label, e.id]), view.expiry, 'optExpiry', { 'data-id': id }) : '';
+  // the strikes once the chain asked has answered; else how far its read has got, a refusal in the market's sentence
+  const body = view.chain
+    ? `${view.failedOver ? note(view.message) : ''}${view.chain.stale ? note(t('markets.asOfLast')) : ''}${view.coinPriced ? note(t('markets.option.pricesIn', { unit: view.unit })) : ''}${view.rows.length ? chainTable(view) : empty(t('markets.none'))}`
+    : view.status === 'error' ? empty(view.message || t('markets.option.unavailable')) : empty(t('common.loading'));
+  const keys = `<div class="mk-d-acts"><button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button></div>`; // words-order: an icon, then its word
+  return `<main class="main mkts mk-page"><a id="page-back" class="back-link page-back" href="#/markets">${th('markets.back')}</a><div class="mk-pg">` +
+    `<header class="mk-pg-head">${who}${keys}</header><div class="mk-pg-top">${top}</div>` +
+    section(th('markets.option.chain'), `<div class="mk-chain-picks">${venue}${tabs}</div>${body}`) + '</div></main>';
 }
