@@ -8,6 +8,11 @@ export const HK_HOSTS: readonly string[] = ["qt.gtimg.cn", "stock.gtimg.cn", "we
 export const EASTMONEY_HOSTS: readonly string[] = ["push2delay.eastmoney.com", "push2his.eastmoney.com"];
 export const NAVER_HOSTS: readonly string[] = ["polling.finance.naver.com", "m.stock.naver.com", "api.stock.naver.com", "ac.stock.naver.com"];
 export const TWSE_HOSTS: readonly string[] = ["openapi.twse.com.tw", "mis.twse.com.tw", "www.twse.com.tw"];
+/** the option sources' hosts: Deribit and OKX (crypto chains), Nasdaq (US chains) */
+export const DERIBIT_HOST = "www.deribit.com";
+export const OKX_HOST = "www.okx.com";
+export const NASDAQ_HOST = "api.nasdaq.com";
+export const OPTION_HOSTS: readonly string[] = [DERIBIT_HOST, OKX_HOST, NASDAQ_HOST];
 
 export const PAUSE_MS = 900_000;
 
@@ -43,11 +48,11 @@ export function politeHosts(
   };
 }
 
-/** every local source's hosts but Eastmoney's (whose one client the core hands Hong Kong and the indices alike) */
-export const LOCAL_HOSTS: readonly string[] = [...HK_HOSTS, ...NAVER_HOSTS, ...TWSE_HOSTS];
+/** every local source's hosts but Eastmoney's (whose one client the core hands Hong Kong and the indices alike), and the option sources' */
+export const LOCAL_HOSTS: readonly string[] = [...HK_HOSTS, ...NAVER_HOSTS, ...TWSE_HOSTS, ...OPTION_HOSTS];
 /** THE ONE GUARD the market's core builds over every local host and hands to Hong Kong, Korea, Taiwan and the indices as their `http`, so a
  * host that pauses for one source (Tencent for Hong Kong's shares and the indices, Naver for Korea and the indices, TWSE for Taiwan and TAIEX)
- * is paused for all; each source's own `politeHosts` inside it still limits that source to its own hosts */
+ * is paused for all; the option sources (Deribit, OKX, Nasdaq) take it too, so each of their hosts has one pause; each source's own `politeHosts` inside it still limits that source to its own hosts */
 export function localHosts(http: CnHttp, o: { clock?: () => number } = {}): CnHttp {
   return politeHosts(http, LOCAL_HOSTS, o);
 }
