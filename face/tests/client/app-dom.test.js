@@ -4179,7 +4179,8 @@ test('on a page that signs, Beast and the three Change keys open their signed sh
   const f = fakeWindow({ hash: '#/account/rules', storage: memoryStorage() });
   const door = ownerDoor();
   const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
-  const store = bootOwner(f, h, door);
+  // the page's clock before the fixture's session ends (its sessionExpiresAt, 2026-11-21T07:35:46.773Z), as rules-view.test.js reads it
+  const store = bootOwner(f, h, door, fakeMarkets(), { now: () => Date.parse('2026-11-01T12:00:00.000Z') });
   await h.ready();
   await until(signs(store), 'the page to sign');
   await settle();
