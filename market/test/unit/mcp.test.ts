@@ -149,6 +149,7 @@ describe("market:mcp", () => {
     for (const words of ["view-only", "Deribit", "OKX", "Nasdaq", "usd", "no IV", "outside"]) expect(d, words).toContain(words);
     const explore = tools.find((x) => x.name === "market_explore")!.description ?? "";
     expect(explore).toContain("`form=option`");
+    expect(explore).toContain("`form=option` without `asset` is refused");
     const seen: string[] = [];
     const stand = createServer((req, res) => {
       seen.push(req.url ?? "");

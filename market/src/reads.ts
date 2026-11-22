@@ -163,6 +163,7 @@ const LOCAL_WORDS: Record<LocalVenue, { label: string; notRead: string; notSourc
 /** THE OPTION CHAINS' WORDS: the explore refusals, the notes under the list, the venues and how each underlying is typed */
 const OPTION_WORDS = {
   sorted: "Options are sorted by volume or movers",
+  asset: "Options name an asset: crypto (Deribit, OKX) or stocks (Nasdaq's US underlyings)",
   notSource: "Options are not part of a selected public source",
   notRead: "Options are not read by this market",
   cryptoNotRead: "Crypto options are not read by this market",
@@ -181,9 +182,11 @@ const OPTION_COINS: ReadonlySet<string> = new Set(["BTC", "ETH", "SOL", "XRP", "
 const US_OPTION_TICKER = /^[A-Z.]{1,6}$/;
 const OPTION_COIN = /^[A-Z0-9]{1,15}$/;
 const OPTION_EXPIRY = /^\d{4}-\d{2}-\d{2}$/;
-/** how long the crypto option list (three Deribit books, then OKX's) and the coin rows its changes come from are waited for */
-const OPTION_LIST_WAIT_MS = 12_000;
-const COIN_CHANGE_WAIT_MS = 5_000;
+/** how long the option list's sources (three Deribit books, then OKX's; the US list never waits) and then the coin rows its changes come
+ * from are waited for: together inside the face's 10 s explore abort (face/src/market-proxy.ts MARKET_ABORT_MS.explore). A source read
+ * that comes late is still kept by its source for the next ask; coin changes that come late leave the rows without a change */
+export const OPTION_LIST_WAIT_MS = 6_000;
+export const COIN_CHANGE_WAIT_MS = 3_000;
 
 /** how long a chart's first view may take (Nasdaq's whole history of a share is about ten seconds), and one page scrolled left */
 export const HISTORY_WAIT_MS = 20_000;
@@ -365,13 +368,15 @@ export function marketReads(core: MarketCore): MarketReads {
   }
 
   /** THE OPTION CHAINS' LIST: one row an underlying — the crypto source's (asset crypto, no region) and the US source's (asset stocks, region
-   * us), both when neither is named, none for any other asset or region. `q` is a listed underlying's letters; sorted by summed volume (in
+   * us), one asset a list (explore refuses form=option without one), none for any other asset or region. `q` is a listed underlying's
+   * letters (a search naming none of the ten US underlyings does not ask the US source); sorted by summed volume (in
    * dollars where the source gives it) or by the size of the underlying's day change. A source's partial read, note and stale list are said
    * (`notes`, `stale`); a source that refuses is `missing`, the other answered. Never kept here: each source keeps its own reads */
-  async function exploreOptions(asset: AssetId | undefined, region: RegionId | undefined, q: string, key: string, sort: string | undefined, limit: number): Promise<Exploration | Refusal> {
+  async function exploreOptions(asset: AssetId, region: RegionId | undefined, q: string, key: string, sort: string | undefined, limit: number): Promise<Exploration | Refusal> {
     if (sort === "closing") return no("E_MARKET_BAD_REQUEST", { message: OPTION_WORDS.sorted });
-    const wantCrypto = (asset ?? "crypto") === "crypto" && region === undefined;
-    const wantUs = (asset ?? "stocks") === "stocks" && (region ?? "us") === "us";
+    const wantCrypto = asset === "crypto" && region === undefined;
+    const wantUs = asset === "stocks" && (region ?? "us") === "us";
+    const Q = q.toUpperCase();
     const missing: ExploreMissing[] = [];
     const notes: string[] = [];
     const empty = { movers: [], closing: [], mostTraded: [] };
@@ -381,9 +386,11 @@ export function marketReads(core: MarketCore): MarketReads {
     if (!crypto && !us) return no("E_MARKET_BAD_REQUEST", { message: OPTION_WORDS.notRead });
     if (wantCrypto && !crypto) missing.push({ venue: "deribit", venueName: VENUE_NAMES.deribit, connected: false, why: OPTION_WORDS.cryptoNotRead });
     if (wantUs && !us) missing.push({ venue: "nasdaq", venueName: VENUE_NAMES.nasdaq, connected: false, why: OPTION_WORDS.usNotRead });
+    // a search names one of the ten US underlyings or the US source is not asked (asking it starts its queue of ten Nasdaq reads)
+    const usAsked = us && (!Q || US_OPTION_UNDERLYINGS.some((x) => x.includes(Q))) ? us : undefined;
     const [c, u] = await Promise.all([
       crypto ? within(OPTION_LIST_WAIT_MS, crypto.summaries(), "deribit", "Crypto options") : undefined,
-      us ? within(OPTION_LIST_WAIT_MS, us.summaries(), "nasdaq", "US options") : undefined,
+      usAsked ? within(OPTION_LIST_WAIT_MS, usAsked.summaries(), "nasdaq", "US options") : undefined,
     ]);
     const summaries: OptionSummary[] = [];
     const asOfs: string[] = [];
@@ -405,7 +412,6 @@ export function marketReads(core: MarketCore): MarketReads {
     take(u, "nasdaq", "US options", OPTION_WORDS.usNote);
     // the crypto rows' day change is the coin's own row's (Deribit gives none): read only when a crypto row lacks one
     const changes = summaries.some((s) => s.asset === "crypto" && s.changePct === undefined) ? await coinChanges() : new Map<string, number>();
-    const Q = q.toUpperCase();
     const rows = summaries
       .map((s) => (s.asset === "crypto" && s.changePct === undefined && changes.has(s.underlying) ? { ...s, changePct: changes.get(s.underlying)! } : s))
       .map(optionRow)
@@ -479,7 +485,9 @@ export function marketReads(core: MarketCore): MarketReads {
       // THE OPTION CHAINS are their own sources' (each keeps its reads): asked only by form=option, never in All or another form
       if (form === "option") {
         if (ids.length) return no("E_MARKET_BAD_REQUEST", { message: OPTION_WORDS.notSource });
-        return exploreOptions(asset as AssetId | undefined, region as RegionId | undefined, q, key, sort, limit);
+        // one asset a list: crypto's volume is in dollars, the US list's in contracts, never sorted together
+        if (asset === undefined) return no("E_MARKET_BAD_REQUEST", { message: OPTION_WORDS.asset });
+        return exploreOptions(asset as AssetId, region as RegionId | undefined, q, key, sort, limit);
       }
       // THE LOCAL READS BY UNDERLYING: a region's shares on Stocks Spot (either left out) are its own source's — China A's (cn), Hong Kong's,
       // Korea's, Taiwan's — and a region's cash indices (Indices Spot) the world indices'; never beside a source list. Every other region and

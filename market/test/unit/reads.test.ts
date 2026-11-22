@@ -6,7 +6,7 @@ import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import type { ExchangeClient, OpenExchange } from "../../src/live/exchange.ts";
 import { exchangeTickers, kalshiPublic, polymarketPublic, PUBLIC_HOSTS } from "../../src/live/public-markets.ts";
 import type { Http } from "../../src/live/types.ts";
-import { CHINA_SEARCH_WAIT_MS, historyAsk, marketReads, mountReads, NEWS_PER_SYMBOL, type CandlesView } from "../../src/reads.ts";
+import { CHINA_SEARCH_WAIT_MS, COIN_CHANGE_WAIT_MS, historyAsk, marketReads, mountReads, NEWS_PER_SYMBOL, OPTION_LIST_WAIT_MS, type CandlesView } from "../../src/reads.ts";
 import type { Headline, NewsSource } from "../../src/live/news.ts";
 import { CHINA_NOTE, chinaSource, type ChinaHistory, type ChinaMarket, type ChinaRead, type ChinaSource, type ChinaStatus } from "../../src/live/china.ts";
 import type { CnHttp, CnReply } from "../../src/live/cn-http.ts";
@@ -20,7 +20,7 @@ import type { Listing, PublicSource } from "../../src/live/public-markets.ts";
 import { HK_NOTE } from "../../src/live/hongkong.ts";
 import { chainOf, fakeChina, fakeCryptoOptions, fakeHub, fakeIndices, fakeLocal, fakeSource, fakeUsOptions, listing, READ_AT } from "../fakes.ts";
 import { OPTION_QUOTE_KEEP_MS } from "../../src/core.ts";
-import type { UsQuote } from "../../src/live/options-us.ts";
+import { usOptions, type UsQuote } from "../../src/live/options-us.ts";
 
 const servers: MarketServerHandle[] = [];
 afterEach(async () => {
@@ -1295,10 +1295,13 @@ describe("option chains in the market's reads", () => {
     }
   });
 
-  it("form=option alone lists both; with any other asset or region, no rows and no source asked", async () => {
+  it("form=option without an asset is refused (a mixed sort would compare dollars with contracts); with any other asset or region, no rows and no source asked", async () => {
     const both = options();
-    expect(answered(await both.reads.explore({ form: "option" })).items.map((i) => i.key)).toEqual(["opt:BTC", "opt:ETH", "opt:SOL", "opt:SPY", "opt:AAPL"]);
-    for (const query of [{ asset: "indices", form: "option" }, { asset: "stocks", form: "option", region: "hk" }, { asset: "crypto", form: "option", region: "us" }, { form: "option", region: "cn" }]) {
+    for (const query of [{ form: "option" }, { form: "option", region: "us" }]) {
+      expect(refused(await both.reads.explore(query))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Options name an asset: crypto (Deribit, OKX) or stocks (Nasdaq's US underlyings)" });
+    }
+    expect([both.crypto.calls.summaries, both.us.calls.summaries]).toEqual([0, 0]);
+    for (const query of [{ asset: "indices", form: "option" }, { asset: "stocks", form: "option", region: "hk" }, { asset: "crypto", form: "option", region: "us" }, { asset: "stocks", form: "option", region: "cn" }]) {
       const r = options();
       expect(answered(await r.reads.explore(query)).items, JSON.stringify(query)).toEqual([]);
       expect([r.crypto.calls.summaries, r.us.calls.summaries]).toEqual([0, 0]);
@@ -1310,14 +1313,36 @@ describe("option chains in the market's reads", () => {
     expect(answered(await r.reads.explore({ asset: "crypto", form: "option", q: "et" })).items.map((i) => i.key)).toEqual(["opt:ETH"]);
     expect(answered(await r.reads.explore({ asset: "stocks", form: "option", q: "AAP" })).items.map((i) => i.key)).toEqual(["opt:AAPL"]);
     expect(answered(await r.reads.explore({ asset: "stocks", form: "option", q: "TSLA" })).items).toEqual([]);
-    expect(answered(await r.reads.explore({ form: "option", key: "opt:SPY" })).items.map((i) => i.key)).toEqual(["opt:SPY"]);
+    expect(answered(await r.reads.explore({ asset: "stocks", form: "option", key: "opt:SPY" })).items.map((i) => i.key)).toEqual(["opt:SPY"]);
+  });
+
+  it("a search that matches none of the ten US underlyings never asks the US source (its queue starts only for one of the ten)", async () => {
+    const r = options();
+    expect(answered(await r.reads.explore({ asset: "stocks", form: "option", q: "600519" })).items).toEqual([]);
+    expect(answered(await r.reads.explore({ asset: "stocks", form: "option", q: "PLTR" })).items).toEqual([]);
+    expect(r.us.calls.summaries).toBe(0);
+    answered(await r.reads.explore({ asset: "stocks", form: "option", q: "goog" }));
+    expect(r.us.calls.summaries).toBe(1);
+  });
+
+  it("a search that names one of the ten finds its row on a cold start: no figures yet, the list read in part said", async () => {
+    // the real US source over a Nasdaq that has not answered yet
+    const core = createMarketCore({ sources: [coins()], usOptions: (quote) => usOptions({ http: () => new Promise(() => {}), quote, pace: async () => {} }) });
+    const got = answered(await marketReads(core).explore({ asset: "stocks", form: "option", q: "nvda" }));
+    expect(got.items.map((i) => i.key)).toEqual(["opt:NVDA"]);
+    expect(got.items[0]!.option).toMatchObject({ nearestExpiry: null, volume: null, openInterest: null, nearestOnly: true });
+    expect(got.notes).toContain("US options: 0 of 10 read");
+  });
+
+  it("the list's waits fit inside the face's 10 s explore abort: the sources' and then the coin changes'", () => {
+    expect(OPTION_LIST_WAIT_MS + COIN_CHANGE_WAIT_MS).toBeLessThan(10_000);
   });
 
   it("movers sorts by the size of the underlying's day change, a row with none last; limit cuts after", async () => {
     const r = options();
     expect(answered(await r.reads.explore({ asset: "stocks", form: "option", sort: "movers" })).items.map((i) => i.key)).toEqual(["opt:AAPL", "opt:SPY"]);
-    expect(answered(await r.reads.explore({ form: "option", sort: "movers" })).items.map((i) => i.key)).toEqual(["opt:BTC", "opt:AAPL", "opt:SPY", "opt:ETH", "opt:SOL"]);
-    expect(answered(await r.reads.explore({ form: "option", limit: 2 })).items).toHaveLength(2);
+    expect(answered(await r.reads.explore({ asset: "crypto", form: "option", sort: "movers" })).items.map((i) => i.key)).toEqual(["opt:BTC", "opt:ETH", "opt:SOL"]);
+    expect(answered(await r.reads.explore({ asset: "crypto", form: "option", limit: 2 })).items).toHaveLength(2);
   });
 
   it("option rows never appear in all, another form or a tab", async () => {
@@ -1333,20 +1358,21 @@ describe("option chains in the market's reads", () => {
     const us = fakeUsOptions({ summaries: async () => ({ items: [], asOf: new Date(READ_AT).toISOString(), partial: true, stale: true, note: "3 of 10 read" }) });
     const crypto = fakeCryptoOptions({ summaries: async () => no("E_VENUE_UNREACHABLE", { venue: "deribit", message: "Deribit is not answering: its options cannot be read now" }) });
     const r = options({ us, crypto });
-    const got = answered(await r.reads.explore({ form: "option" }));
+    const got = answered(await r.reads.explore({ asset: "stocks", form: "option" }));
     expect(got.items).toEqual([]);
     expect(got.stale).toBe(true);
     expect(got.notes).toContain("US options: 3 of 10 read");
-    expect(got.missing).toEqual([{ venue: "deribit", venueName: "Deribit", connected: false, why: "Deribit is not answering: its options cannot be read now", code: "E_VENUE_UNREACHABLE" }]);
+    const off = answered(await r.reads.explore({ asset: "crypto", form: "option" }));
+    expect(off.missing).toEqual([{ venue: "deribit", venueName: "Deribit", connected: false, why: "Deribit is not answering: its options cannot be read now", code: "E_VENUE_UNREACHABLE" }]);
     const fine = options();
-    expect(answered(await fine.reads.explore({ form: "option" })).stale).toBeUndefined();
+    expect(answered(await fine.reads.explore({ asset: "stocks", form: "option" })).stale).toBeUndefined();
   });
 
   it("refuses the closing sort, a source list, and options the market does not read", async () => {
     const r = options();
-    expect(refused(await r.reads.explore({ form: "option", sort: "closing" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Options are sorted by volume or movers" });
+    expect(refused(await r.reads.explore({ asset: "crypto", form: "option", sort: "closing" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Options are sorted by volume or movers" });
     expect(refused(await r.reads.explore({ form: "option", source: "okx" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Options are not part of a selected public source" });
-    expect(refused(await options({ none: true }).reads.explore({ form: "option" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Options are not read by this market" });
+    expect(refused(await options({ none: true }).reads.explore({ asset: "crypto", form: "option" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Options are not read by this market" });
   });
 
   it("options(): one chain at each venue, the expiry passed on", async () => {
