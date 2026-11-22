@@ -1021,7 +1021,9 @@ test("an index key: its wire, its quote, Hand to gravit's words; its page before
   const { reducers: R } = await import('../../client/js/reducers/index.js');
   const { emptyState } = await import('../../client/js/data/empty.js');
   const { h100Quote, deepseekQuote } = await import('./helpers/compute.js');
-  assert.deepEqual([computeKeyOf('cmp:h100'), computeKeyOf('cmp:tok-open'), computeKeyOf('cmp:x'), computeKeyOf('h100')], [{ id: 'h100', gpu: true }, { id: 'tok-open', gpu: false }, null, null]);
+  // any cmp:<id> is an index key: the market's list (ornn.ts ORNN_INDICES) is the market's alone, an id it adds is drawn as one
+  assert.deepEqual([computeKeyOf('cmp:h100'), computeKeyOf('cmp:tok-open'), computeKeyOf('cmp:x'), computeKeyOf('h100'), computeKeyOf('cmp:'), computeKeyOf('cmp:Bad id')],
+    [{ id: 'h100', gpu: true }, { id: 'tok-open', gpu: false }, { id: 'x', gpu: true }, null, null, null]);
   assert.equal(computePairOf('cmp:rtxpro6000'), 'ornn|rtxpro6000');
   assert.deepEqual([computeRangeOf('1M'), computeRangeOf('1Y'), computeRangeOf(undefined)], ['1M', '3M', '3M']);
   const q = computeQuoteOf(h100Quote());
@@ -1036,5 +1038,5 @@ test("an index key: its wire, its quote, Hand to gravit's words; its page before
   assert.equal(computePageOf(emptyState().markets, 'stock:AAPL'), null);
   const s = R.computeQuoteLoaded(emptyState(), { id: 'cmp:h100', data: q, at: NOW });
   assert.deepEqual(handWordsOf(s.markets, null, 'cmp:h100'), { symbol: 'H100 SXM', name: 'H100 SXM' });
-  assert.equal(R.computeQuoteLoaded(emptyState(), { id: 'cmp:nope', data: q, at: NOW }).markets.computeQuotes['cmp:nope'], undefined);
+  assert.equal(R.computeQuoteLoaded(emptyState(), { id: 'stock:AAPL', data: q, at: NOW }).markets.computeQuotes['stock:AAPL'], undefined);
 });

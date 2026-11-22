@@ -748,7 +748,7 @@ function computePage(id, state, now) {
   const sub = [view.kind, ORNN].join(' · '); // words-order: an index's kind and its source under the visual separator
   const who = `<div class="mk-who">${mkAv(view.name.split(' ')[0], 'lg')}<div><h1 class="head-title">${esc(view.name)}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
   const moved = view.changePct !== null && view.changePct !== undefined;
-  // the quote not read: the market's sentence when it refused before any answer, else nothing until it answers
+  // the quote read failed (any error status, an earlier answer kept or not): the market's sentence, else the face's word; nothing while loading
   const down = view.quote.status === 'error' ? note(view.quote.message || t('markets.compute.unavailable')) : '';
   const top = `<div class="mk-d-px"><span class="mk-big">${esc(computePrice(view.price))}</span><span class="mk-unit">${esc(view.perUnit)}</span>` +
     `${moved ? `${chgHtml(view.changePct)}<span class="mk-basis">${th('markets.compute.change')}</span>` : ''}</div>` +

@@ -535,6 +535,21 @@ test('Compute Source: Spot one fixed entry, Ornn; Event the event sources; a fam
   assert.deepEqual([R.setMarketsForm(kalshi, 'spot').markets.source, R.setMarketsForm(kalshi, '').markets.source], ['main', 'main'], 'the fixed Source resets a family');
 });
 
+test('Compute rows: an index id the face has never seen (cmp:l40s) is still an index: no star, its own page, its quote pair', async () => {
+  const { computeSpot } = await import('./helpers/compute.js');
+  const { computeKeyOf, computePairOf } = await import('../../client/js/wire/compute.js');
+  const { computePageOf } = await import('../../client/js/host/market-view.js');
+  const data = computeSpot();
+  data.items.push({ ...data.items[0], key: 'cmp:l40s', name: 'L40S', base: 'l40s', price: 0.9, at: [{ ...data.items[0].at[0], symbol: 'l40s' }] });
+  const s = landed(on('compute', ['setMarketsForm', 'spot']), data);
+  const row = tableOf(s.markets, NOW).rows.find(r => r.id === 'cmp:l40s');
+  assert.deepEqual([row.kind, row.source, row.name, row.noStar, row.perUnit], ['computeIndex', 'compute', 'L40S', true, '/GPU·hr']);
+  assert.deepEqual(computeKeyOf('cmp:l40s'), { id: 'l40s', gpu: true });
+  assert.equal(computePairOf('cmp:l40s'), 'ornn|l40s');
+  const page = computePageOf(s.markets, 'cmp:l40s');
+  assert.deepEqual([page.name, page.price], ['L40S', 0.9]);
+});
+
 test('Compute rows: Spot the indices in the market\'s order, two sorts, no star; no form the spot rows then the events', async () => {
   const { computeSpot, computeAll, computeEvents } = await import('./helpers/compute.js');
   const spot = landed(on('compute', ['setMarketsForm', 'spot']), computeSpot());

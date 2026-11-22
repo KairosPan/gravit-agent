@@ -3,9 +3,6 @@
 // (market/src/live/ornn.ts quote: the latest settle, the previous one, the 30-day range, a GPU's current value). Pure: no DOM, no fetch.
 import { number } from './market-model.js';
 
-/** The indices the market reads (market/src/live/ornn.ts ORNN_INDICES, the same ids): seven GPUs, four labs' tokens, two classes'. */
-export const COMPUTE_IDS = ['a100', 'b200', 'b300', 'h100', 'h200', 'rtx5090', 'rtxpro6000',
-  'tok-anthropic', 'tok-openai', 'tok-google', 'tok-deepseek', 'tok-closed', 'tok-open'];
 /** The venue an index is read at, and its source by name. */
 export const COMPUTE_VENUE = 'ornn';
 export const ORNN = 'Ornn'; // en-kept: the provider's name
@@ -16,12 +13,15 @@ export const COMPUTE_FIRST_RANGE = '3M';
 const isRecord = v => !!v && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+// an index's id as the market names it (market/src/live/ornn.ts ORNN_INDICES, the market's list alone: the face keeps no copy of it)
+const CODE = /^[a-z0-9][a-z0-9-]{0,59}$/;
 
-/** An index's key (`cmp:h100`, `cmp:tok-deepseek`) as its id and whether it is a GPU's, else null (`cmp:x`, `h100`). @param {unknown} id */
+/** An index's key (`cmp:h100`, `cmp:tok-deepseek`, any `cmp:<id>` the market names) as its id and whether it is a GPU's (a token index's
+ *  id starts `tok-`), else null (`cmp:`, `h100`). @param {unknown} id */
 export function computeKeyOf(id) {
   if (typeof id !== 'string' || !id.startsWith('cmp:')) return null;
   const code = id.slice(4);
-  return COMPUTE_IDS.includes(code) ? { id: code, gpu: !code.startsWith('tok-') } : null;
+  return CODE.test(code) ? { id: code, gpu: !code.startsWith('tok-') } : null;
 }
 /** @param {unknown} id */
 export const isComputeKey = id => computeKeyOf(id) !== null;
