@@ -39,14 +39,26 @@ const NOW = Date.parse("2026-11-22T03:00:00Z");
 function source(routes: Route[] = ROUTES, start = NOW) {
   let t = start;
   const n = net(routes);
-  const src = cryptoOptions({ http: n.http, clock: () => t });
-  return { src, sent: n.sent, at: (ms: number) => { t = ms; }, later: (ms: number) => { t += ms; } };
+  const turns: string[] = [];
+  const src = cryptoOptions({ http: n.http, clock: () => t, pace: async (host) => { turns.push(host); } });
+  return { src, sent: n.sent, turns, at: (ms: number) => { t = ms; }, later: (ms: number) => { t += ms; } };
 }
 const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
 
 describe("the hosts", () => {
   it("the shared local guard covers Deribit, OKX and Nasdaq", () => {
     for (const h of ["www.deribit.com", "www.okx.com", "api.nasdaq.com"]) expect(LOCAL_HOSTS).toContain(h);
+  });
+});
+
+describe("OKX's line", () => {
+  it("every OKX ask takes its turn in the process's one OKX line; Deribit, which has none, is not paced", async () => {
+    const { src, sent, turns } = source();
+    answered(await src.summaries());
+    answered(await src.chain("BTC", "okx"));
+    const okx = sent.filter((u) => u.includes("www.okx.com")).length;
+    expect(okx).toBeGreaterThan(0);
+    expect(turns).toEqual(Array.from({ length: okx }, () => "okx"));
   });
 });
 
@@ -193,6 +205,8 @@ describe("chains", () => {
     const strikes = [...new Set(rows.map((x) => parseDeribitName(x.instrument_name)!.strike))].sort((a, b) => a - b);
     expect(c.strikes.map((s) => s.strike)).toEqual(strikes);
     expect(c.atmStrike).toBe(atmStrike(strikes, rows[0].underlying_price));
+    // the price the at-the-money strike is read at rides on the chain, so the page shades in-the-money cells by the same one
+    expect(c.expiryPrice).toBe(rows[0].underlying_price);
     const withBid = rows.find((x) => typeof x.bid_price === "number" && x.bid_price > 0 && x.instrument_name.endsWith("-C"))!;
     const leg = c.strikes.find((s) => s.strike === parseDeribitName(withBid.instrument_name)!.strike)!.call!;
     expect(leg.symbol).toBe(withBid.instrument_name);
@@ -244,6 +258,7 @@ describe("chains", () => {
     expect(leg.volume).toBe(Number(t.volCcy24h));
     const fwd = Number((fx("okx-opt-summary").data as any[]).find((x) => x.instId.includes("-261123-")).fwdPx);
     expect(c.atmStrike).toBe(atmStrike(c.strikes.map((x) => x.strike), fwd));
+    expect(c.expiryPrice).toBe(fwd);
     const empty = (fx("okx-btc").data as any[]).find((x) => x.bidPx === "")!;
     const er = c.strikes.find((x) => x.strike === Number(empty.instId.split("-")[3]));
     if (er && empty.instId.includes("-261123-")) expect((empty.instId.endsWith("-C") ? er.call : er.put)!.bid).toBeNull();

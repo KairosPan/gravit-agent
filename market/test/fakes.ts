@@ -235,7 +235,6 @@ export function fakeUsOptions(o: { summaries?: () => Promise<OptionList | Refusa
   const source: UsOptions = {
     summaries: async () => { calls.summaries++; return o.summaries ? o.summaries() : list(); },
     chain: async (t, e) => { calls.chain.push([t, e]); return o.chain ? o.chain(t, e) : chainOf(t, "nasdaq", e); },
-    has: (t) => ["AAPL", "SPY"].includes(t),
     status: () => ({ state: "live", said: "US options · answering" }),
   };
   return { source, calls };

@@ -4,16 +4,20 @@
  * Nasdaq filters it). Its price and day change are the market's US quote line's (`quote`, injected; when it refuses the row lists without
  * them), never Nasdaq's. The ten are read one at a time, at least SUMMARY_GAP_MS apart, by one queue: a `summaries()` call answers what is
  * kept (flagged partial, "n of 10 read", while the queue is still reading) and starts the queue if it is not running; it never waits for
- * the queue (on a cold start it answers no items, "0 of 10 read"). Each summary is kept 10 min in a US session, until the next US open outside it; one past
- * its keep is still shown, flagged stale, for STALE_KEEP_MS. A chain (`chain`) asks the month range Nasdaq's `filterlist` names for the
- * expiry (`money=all&type=all`, 60 rows a page, paged with `offset`, at most CHAIN_PAGES pages, said in the chain's note when cut) and keeps
- * that expiry's rows; its price is Nasdaq's "LAST TRADE" line, the line's date kept as words. Every page is kept 60 s in a US session, until
- * the next US open outside it, one flight per URL; a failure is never kept. The host is asked through `politeHosts`, inside whatever shared
- * guard the core hands in as `http`: a 3xx, 403 or 429 pauses it. */
+ * the queue: the ten are always its rows, one not read yet without figures (on a cold start all ten, "0 of 10 read"). Each summary is kept 10
+ * min in a US session, until the next US open outside it; one past its keep is still shown, flagged stale, for STALE_KEEP_MS. A chain
+ * (`chain`) asks its expiry alone (`fromdate` = `todate` = the expiry, `money=all&type=all`, 60 rows a page, paged with `offset`, at most
+ * CHAIN_PAGES pages, said in the chain's note when cut; a cut or a refusal that leaves no row is said as such, never as "no such expiry"); its
+ * price is Nasdaq's "LAST TRADE" line, the line's date kept as words. Its expiries are every group the month ranges Nasdaq's `filterlist`
+ * names hold: a range of more than one date is scanned near the money (`money=at`, at most SCAN_PAGES pages), each scan kept as a summary
+ * is. Every other page is kept 60 s in a US session, until the next US open outside it, one flight per URL; a failure is never kept. Every
+ * ask waits its turn in the process's one Nasdaq line (history.ts hostLane, HOST_LIMITS.nasdaq, shared with the US quotes and charts), and
+ * goes through `politeHosts`, inside whatever shared guard the core hands in as `http`: a 3xx, 403 or 429 pauses it. */
 import { isRefusal, type Refusal } from "../core/errors.ts";
 import { no } from "../refuse.ts";
 import { cnKeeper, STALE_KEEP_MS } from "./china.ts";
 import { realCnHttp, type CnHttp } from "./cn-http.ts";
+import { hostLane, type Pace } from "./history.ts";
 import { NASDAQ_HOST, PAUSE_MS, politeHosts, retryOnce } from "./local-http.ts";
 import { SESSIONS } from "./local-session.ts";
 import { rankTtlMs, type LocalStatus } from "./local.ts";
@@ -27,6 +31,8 @@ export const SUMMARY_KEEP_MS = 600_000;
 export const US_CHAIN_MS = 60_000;
 export const PAGE_ROWS = 60;
 export const CHAIN_PAGES = 10;
+/** the pages of a month's near-the-money scan read for its expiry groups */
+export const SCAN_PAGES = 2;
 const TIMEOUT_MS = 10_000;
 const LIMIT = 2_000_000;
 const HEADERS = {
@@ -40,8 +46,12 @@ const NAME = VENUE_NAMES.nasdaq;
 type AssetClass = "stocks" | "etf";
 const BASE = `https://${NASDAQ_HOST}/api/quote`;
 export const nasdaqNearestUrl = (t: string, cls: AssetClass): string => `${BASE}/${encodeURIComponent(t)}/option-chain?assetclass=${cls}&limit=${PAGE_ROWS}`;
-export const nasdaqRangeUrl = (t: string, cls: AssetClass, from: string, to: string, offset: number): string =>
-  `${BASE}/${encodeURIComponent(t)}/option-chain?assetclass=${cls}&limit=${PAGE_ROWS}&offset=${offset}&fromdate=${from}&todate=${to}&money=all&type=all`;
+/** one expiry's every strike (Nasdaq takes fromdate = todate: one date's rows alone) */
+export const nasdaqDateUrl = (t: string, cls: AssetClass, date: string, offset: number): string =>
+  `${BASE}/${encodeURIComponent(t)}/option-chain?assetclass=${cls}&limit=${PAGE_ROWS}&offset=${offset}&fromdate=${date}&todate=${date}&money=all&type=all`;
+/** a month range near the money: a few strikes of each of its expiries, read for the expiry groups */
+export const nasdaqScanUrl = (t: string, cls: AssetClass, from: string, to: string, offset: number): string =>
+  `${BASE}/${encodeURIComponent(t)}/option-chain?assetclass=${cls}&limit=${PAGE_ROWS}&offset=${offset}&fromdate=${from}&todate=${to}&money=at&type=all`;
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -138,19 +148,17 @@ function total(xs: Array<number | null>): number | null {
 export type UsQuote = (ticker: string) => Promise<{ price: number | null; changePct?: number; quoteFrom: string } | null>;
 type SummaryCore = Omit<OptionSummary, "price" | "changePct" | "quoteFrom">;
 
-export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: UsQuote } = {}): {
+export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: UsQuote; pace?: Pace } = {}): {
   summaries(): Promise<{ items: OptionSummary[]; asOf: string; stale?: true; partial?: true; note?: string } | Refusal>;
   chain(ticker: string, expiry?: string): Promise<OptionChain | Refusal>;
-  has(ticker: string): boolean;
   status(): LocalStatus;
 } {
   const now = deps.clock ?? Date.now;
+  const pace = deps.pace ?? hostLane;
   const http = politeHosts(deps.http ?? realCnHttp, [NASDAQ_HOST], deps.clock ? { clock: deps.clock } : {});
   let status: LocalStatus = { state: "unavailable", said: "US options · not read yet" };
   /** tickers a read found options for, and the asset class Nasdaq answered them under */
   const classOf = new Map<string, AssetClass>();
-  /** tickers Nasdaq lists no options for */
-  const none = new Set<string>();
   /** every expiry group seen per ticker, so the chain's list grows as months are read */
   const seen = new Map<string, Set<string>>();
   /** when Nasdaq was last asked for a nearest page: the summaries' queue and the stocks-then-etf fallback keep SUMMARY_GAP_MS from it */
@@ -165,11 +173,16 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
   const noOptions = (t: string): Refusal => badAction(`${NAME} lists no options for ${t}`);
   const isRead = (r: Read | Refusal): r is Read => !isRefusal(r);
 
-  /** one page, kept per URL 60 s in a US session, until the next US open outside it; one flight per URL; a refusal is never kept */
-  const keep = cnKeeper<Read>(now, (_key, at) => rankTtlMs(SESSIONS.us, at, US_CHAIN_MS));
+  /** as long as a summary is kept: 10 min in a US session, until the next US open outside it (never less than 10 min) */
+  const summaryTtl = (at: number): number => Math.max(rankTtlMs(SESSIONS.us, at, SUMMARY_KEEP_MS), SUMMARY_KEEP_MS);
+  /** one page, kept per URL 60 s in a US session, until the next US open outside it (a month's scan as a summary); one flight per URL; a
+   * refusal is never kept */
+  const keep = cnKeeper<Read>(now, (key, at) => (key.includes("&money=at&") ? summaryTtl(at) : rankTtlMs(SESSIONS.us, at, US_CHAIN_MS)));
   function ask(url: string): Promise<Read | Refusal> {
     return keep.ask(url, async () => {
       try {
+        // the process's one Nasdaq line (history.ts hostLane): every GET of the host waits its turn, the quotes' and charts' too
+        await pace("nasdaq");
         const r = await retryOnce(() => http(url, { timeoutMs: TIMEOUT_MS, maxBytes: LIMIT, headers: HEADERS }));
         if (r.status === 451) return refuses();
         if (r.status === 403 || r.status === 429 || (r.status >= 300 && r.status < 400)) return refused(`HTTP ${r.status}`);
@@ -203,9 +216,8 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
       const r = await ask(nasdaqNearestUrl(t, cls));
       note(t, r);
       if (isRefusal(r)) return r;
-      if (r.kind === "page") { classOf.set(t, cls); none.delete(t); return { page: r, cls }; }
+      if (r.kind === "page") { classOf.set(t, cls); return { page: r, cls }; }
     }
-    none.add(t);
     classOf.delete(t);
     return "none";
   }
@@ -219,6 +231,8 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
     if (n === "none") return noOptions(t);
     if (isRefusal(n)) return n;
     const { page, cls } = n;
+    // every month range of more than one date scanned near the money for its expiry groups (note() adds them to `seen`), in Nasdaq's line
+    await Promise.all(page.ranges.filter(([a, b]) => a < b).map((range) => scan(t, cls, range)));
     /** the ranges' bounds and the groups seen, each inside one of the nearest page's current ranges and not yet settled (16:00 New York) */
     const listed = (): string[] => {
       const out = new Set<string>(seen.get(t) ?? []);
@@ -228,29 +242,28 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
     };
     const chosen = expiry ?? defaultExpiry(listed(), now(), "nasdaq") ?? listed()[0];
     if (chosen === undefined) return noOptions(t);
-    const range = page.ranges.find(([a, b]) => a <= chosen && chosen <= b);
-    if (!range) return badAction(`${NAME} lists no ${t} expiry on ${chosen}`);
+    if (!page.ranges.some(([a, b]) => a <= chosen && chosen <= b)) return badAction(`${NAME} lists no ${t} expiry on ${chosen}`);
 
     const rows = new Map<number, Dated>();
-    /** the group the previous page ended in */
-    let carried: string | null = null;
+    /** the group the previous page ended in; a single date's first page opening without a group is that date's */
+    let carried: string | null = chosen;
     let lastTrade = parseLastTrade(page.lastTrade);
     let at = page.at, pages = 0, lastTotal = 0, cut: string | undefined;
     for (let offset = 0; ; offset += PAGE_ROWS) {
       if (pages === CHAIN_PAGES) {
-        cut = `${NAME} lists ${lastTotal} rows for ${range[0]} to ${range[1]}: the first ${CHAIN_PAGES * PAGE_ROWS} of ${lastTotal} are read`;
+        cut = `${NAME} lists ${lastTotal} rows for ${chosen}: the first ${CHAIN_PAGES * PAGE_ROWS} of ${lastTotal} are read`;
         break;
       }
-      const r = await ask(nasdaqRangeUrl(t, cls, range[0], range[1], offset));
+      const r = await ask(nasdaqDateUrl(t, cls, chosen, offset));
       note(t, r);
       if (isRefusal(r)) {
         if (pages === 0) return r;
-        cut = `${NAME} answered ${pages} page${pages > 1 ? "s" : ""} of this month and then stopped: the strikes after them are not shown`;
+        cut = `${NAME} answered ${pages} page${pages > 1 ? "s" : ""} of this expiry and then stopped: the strikes after them are not shown`;
         break;
       }
       pages++;
-      // the ticker has options (its nearest page listed them): a month that answers none has no such expiry
-      if (r.kind === "none") { if (pages === 1) return badAction(`${NAME} lists no ${t} expiry on ${chosen}`); break; }
+      // the ticker has options (its nearest page listed them): a date that answers none is no expiry of it
+      if (r.kind === "none") break;
       at = Math.min(at, r.at);
       lastTrade = parseLastTrade(r.lastTrade) ?? lastTrade;
       lastTotal = r.total;
@@ -263,7 +276,8 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
       if (r.groups.some((g) => g > chosen)) break;
       if (r.count < PAGE_ROWS || offset + PAGE_ROWS >= r.total) break;
     }
-    if (!rows.size) return badAction(`${NAME} lists no ${t} expiry on ${chosen}`);
+    // no row: a cut or a stop is said as itself (the date may well be listed); only a whole answer without it is "no such expiry"
+    if (!rows.size) return cut ? no("E_VENUE_UNREACHABLE", { venue: "nasdaq", message: cut }) : badAction(`${NAME} lists no ${t} expiry on ${chosen}`);
     const strikes = [...rows.values()].sort((a, b) => a.strike - b.strike).map((x) => ({ strike: x.strike, call: leg(t, x, "c"), put: leg(t, x, "p") }));
     const price = lastTrade?.price ?? null;
     return {
@@ -274,10 +288,18 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
     };
   }
 
+  /** a month range's expiry groups, from at most SCAN_PAGES pages near the money; a refusal leaves the range's bounds alone listed */
+  async function scan(t: string, cls: AssetClass, [a, b]: [string, string]): Promise<void> {
+    for (let p = 0; p < SCAN_PAGES; p++) {
+      const r = await ask(nasdaqScanUrl(t, cls, a, b, p * PAGE_ROWS));
+      note(t, r);
+      if (isRefusal(r) || r.kind !== "page" || r.count < PAGE_ROWS || (p + 1) * PAGE_ROWS >= r.total) return;
+    }
+  }
+
   // ---- the list --------------------------------------------------------------------------------------------------------------------
   type Kept = { at: number; core: SummaryCore | "none" };
   const summariesKept = new Map<string, Kept>();
-  const summaryTtl = (at: number): number => Math.max(rankTtlMs(SESSIONS.us, at, SUMMARY_KEEP_MS), SUMMARY_KEEP_MS);
   const fresh = (k: Kept | undefined, t: number): boolean => !!k && t - k.at < summaryTtl(k.at);
   let lastFailure: Refusal | null = null;
   let running: Promise<void> | null = null;
@@ -320,18 +342,21 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
     // never waits for the queue: what is kept is answered, and the queue reads the rest in the background
     start();
     const t = now();
-    const shown: Array<{ core: SummaryCore; at: number; stale: boolean }> = [];
+    // the ten are always the rows: one not read yet (or past its stale keep) has no figures until the queue reads it
+    const shown: Array<{ core: SummaryCore; at: number | null; stale: boolean }> = [];
     let read = 0;
     for (const u of US_OPTION_UNDERLYINGS) {
       const k = summariesKept.get(u);
-      if (!k) continue;
-      const isFresh = fresh(k, t);
+      const isFresh = !!k && fresh(k, t);
       if (isFresh) read++;
-      if (k.core === "none") continue;
-      if (isFresh) shown.push({ core: k.core, at: k.at, stale: false });
-      else if (t - (k.at + summaryTtl(k.at)) < STALE_KEEP_MS) shown.push({ core: k.core, at: k.at, stale: true });
+      if (k?.core === "none") continue;
+      if (k && isFresh) shown.push({ core: k.core as SummaryCore, at: k.at, stale: false });
+      else if (k && t - (k.at + summaryTtl(k.at)) < STALE_KEEP_MS) shown.push({ core: k.core as SummaryCore, at: k.at, stale: true });
+      else shown.push({ core: { underlying: u, asset: "stocks", nearestExpiry: null, volume: null, openInterest: null, venues: ["nasdaq"], nearestOnly: true }, at: null, stale: false });
     }
-    if (!shown.length && lastFailure) return lastFailure;
+    const readAts = shown.flatMap((s) => (s.at === null ? [] : [s.at]));
+    // nothing read to show and the last pass failed: its refusal
+    if (!readAts.length && lastFailure) return lastFailure;
     const items = await Promise.all(shown.map(async ({ core }) => {
       let q: Awaited<ReturnType<UsQuote>> = null;
       try { q = deps.quote ? await deps.quote(core.underlying) : null; } catch { q = null; }
@@ -339,7 +364,7 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
       if (q && typeof q.changePct === "number" && Number.isFinite(q.changePct)) s.changePct = q.changePct;
       return s;
     }));
-    const asOf = new Date(shown.length ? Math.min(...shown.map((s) => s.at)) : t).toISOString();
+    const asOf = new Date(readAts.length ? Math.min(...readAts) : t).toISOString();
     const stale = shown.some((s) => s.stale);
     const all = US_OPTION_UNDERLYINGS.length;
     return {
@@ -348,10 +373,5 @@ export function usOptions(deps: { http?: CnHttp; clock?: () => number; quote?: U
     };
   }
 
-  const has = (ticker: string): boolean => {
-    const t = String(ticker ?? "").trim().toUpperCase();
-    return !none.has(t) && ((US_OPTION_UNDERLYINGS as readonly string[]).includes(t) || classOf.has(t));
-  };
-
-  return { summaries, chain, has, status: () => status };
+  return { summaries, chain, status: () => status };
 }

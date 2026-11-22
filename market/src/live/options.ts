@@ -34,6 +34,9 @@ export interface OptionChain {
   expiries: string[];
   expiry: string;
   atmStrike: number | null;
+  /** the underlying's price at this expiry the at-the-money strike is read at (Deribit's `underlying_price`, OKX's forward), where it
+   * differs from `price` (crypto); absent: `price` is it */
+  expiryPrice?: number | undefined;
   strikes: Array<{ strike: number; call?: OptionLeg | undefined; put?: OptionLeg | undefined }>;
   /** a partial read said in words (Nasdaq's paging stopped short) */
   note?: string | undefined;

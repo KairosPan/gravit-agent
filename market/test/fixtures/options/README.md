@@ -21,6 +21,9 @@ One reply per URL, sequential, browser user agent; Nasdaq with `Accept: applicat
   ("2026-12-02|2026-12-31"); asking `fromdate=2026-12-02&todate=2026-12-31&money=all&type=all&limit=60&offset=0` gave totalRecord 400,
   60 rows a page (page with `offset`), expiry groups "December 2, 2026", "December 4, 2026". Rows: an `expirygroup` header row, then
   strike rows with c_*/p_* cells; "--" for none. No IV. `lastTrade`: "LAST TRADE: $342.56 (AS OF NOV 20, 2026)".
+- Nasdaq takes a single date (`fromdate` = `todate`, read 2026-11-22 by the controller): `nasdaq-aapl-single-date.json` is AAPL's
+  `fromdate=2026-12-18&todate=2026-12-18&money=all&type=all&limit=60&offset=0`, HTTP 200, totalRecord 103, every row in the group
+  "December 18, 2026" (its first page, 60 rows). A chain asks its expiry this way; the month ranges are scanned with `money=at` only for their groups.
 - Nasdaq no-options reply (BRK.A): HTTP 200, `data.totalRecord` 0, rows null, `message` "Options are not available for this symbol".
 
 ## Log (UTC time, status, file, URL)
@@ -32,4 +35,5 @@ One reply per URL, sequential, browser user agent; Nasdaq with `Accept: applicat
 2026-11-22T02:57:29Z 200 okx-index.json https://www.okx.com/api/v5/market/index-tickers?instId=BTC-USD
 2026-11-22T02:57:46Z 200 nasdaq-aapl-expiry.json https://api.nasdaq.com/api/quote/AAPL/option-chain?assetclass=stocks&limit=60&offset=0&fromdate=2026-12-02&todate=2026-12-31&money=all&type=all
 2026-11-22T02:57:52Z 200 nasdaq-none.json https://api.nasdaq.com/api/quote/BRK.A/option-chain?assetclass=stocks&limit=20
+2026-11-22 (controller) 200 nasdaq-aapl-single-date.json https://api.nasdaq.com/api/quote/AAPL/option-chain?assetclass=stocks&limit=60&offset=0&fromdate=2026-12-18&todate=2026-12-18&money=all&type=all
 2026-11-22T02:57:54Z 200 deribit-usdc.json https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=USDC&kind=option

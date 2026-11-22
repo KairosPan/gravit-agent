@@ -6,11 +6,13 @@
  * Deribit's legs in the coin (or USDC) with `usd` at the row's own `underlying_price`; OKX's in the coin with `usd` at OKX's index, IV from
  * `opt-summary` (`markVol` x 100) and open interest from `open-interest` (`oiCcy`, in the coin as Deribit's is). Every ask is kept 30 s (OKX's
  * family list a day), one flight per URL; a failure is never kept. A list read some Deribit book failed lists what answered, flagged
- * partial; one every book failed answers the last good list up to 10 min, flagged stale. OKX's non-crypto families (XAU…) are dropped. Each host is asked through `politeHosts`, inside whatever shared guard the core hands in as `http`: a 3xx, 403 or 429 pauses it. */
+ * partial; one every book failed answers the last good list up to 10 min, flagged stale. OKX's non-crypto families (XAU…) are dropped. Each host is asked through `politeHosts`, inside whatever shared guard the core hands in as `http`: a 3xx, 403 or 429 pauses it;
+ * every OKX ask first waits its turn in the process's one OKX line (history.ts hostLane, HOST_LIMITS.okx). */
 import { isRefusal, type Refusal } from "../core/errors.ts";
 import { no } from "../refuse.ts";
 import { cnKeeper, STALE_KEEP_MS } from "./china.ts";
 import { realCnHttp, type CnHttp } from "./cn-http.ts";
+import { hostLane, type Pace } from "./history.ts";
 import { DERIBIT_HOST, OKX_HOST, PAUSE_MS, politeHosts, retryOnce } from "./local-http.ts";
 import type { LocalStatus } from "./local.ts";
 import {
@@ -66,13 +68,14 @@ function okxRows(body: unknown): unknown[] | null {
   return body.data;
 }
 
-export function cryptoOptions(deps: { http?: CnHttp; clock?: () => number } = {}): {
+export function cryptoOptions(deps: { http?: CnHttp; clock?: () => number; pace?: Pace } = {}): {
   summaries(): Promise<{ items: OptionSummary[]; asOf: string; stale?: true; partial?: true; note?: string } | Refusal>;
   chain(underlying: string, venue: CryptoVenue, expiry?: string): Promise<OptionChain | Refusal>;
   status(): LocalStatus;
 } {
   const now = deps.clock ?? Date.now;
   const raw = deps.http ?? realCnHttp;
+  const pace = deps.pace ?? hostLane;
   const clock = deps.clock ? { clock: deps.clock } : {};
   const hosts: Record<CryptoVenue, CnHttp> = { deribit: politeHosts(raw, [DERIBIT_HOST], clock), okx: politeHosts(raw, [OKX_HOST], clock) };
   let status: LocalStatus = { state: "unavailable", said: "Crypto options · not read yet" };
@@ -91,6 +94,8 @@ export function cryptoOptions(deps: { http?: CnHttp; clock?: () => number } = {}
   function ask(v: CryptoVenue, url: string): Promise<Rows | Refusal> {
     return keep.ask(url, async () => {
       try {
+        // OKX's one line in the process (history.ts hostLane, HOST_LIMITS.okx), shared with its charts; Deribit has no line of its own
+        if (v === "okx") await pace("okx");
         const r = await retryOnce(() => hosts[v](url, { timeoutMs: TIMEOUT_MS, maxBytes: v === "deribit" ? DERIBIT_LIMIT : OKX_LIMIT, headers: HEADERS }));
         if (r.status === 451) return refuses(v);
         if (r.status === 403 || r.status === 429 || (r.status >= 300 && r.status < 400)) return refused(v, `HTTP ${r.status}`);
@@ -271,7 +276,7 @@ export function cryptoOptions(deps: { http?: CnHttp; clock?: () => number } = {}
     status = { state: "live", said: `${name(venue)} · answering`, at: asOf };
     return {
       underlying: u, venue, venueName: name(venue), price, asOf, quoteFrom: name(venue), expiries, expiry,
-      atmStrike: under === null ? null : atmStrike(strikes.map((s) => s.strike), under), strikes,
+      atmStrike: under === null ? null : atmStrike(strikes.map((s) => s.strike), under), ...(under !== null ? { expiryPrice: under } : {}), strikes,
     };
   }
 

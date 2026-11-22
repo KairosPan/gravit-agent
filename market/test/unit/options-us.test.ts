@@ -13,6 +13,10 @@ const reply = (b: string, status = 200): CnReply => ({ status, bytes: new TextEn
 const answered = <T,>(v: T | Refusal): T => { if (isRefusal(v)) throw new Error(`refused: ${v.message}`); return v; };
 const refusedWith = (v: unknown): string => { if (!isRefusal(v)) throw new Error("answered"); return v.message; };
 
+/** a source whose turns in Nasdaq's line are counted, never waited (the process's own line is real time) */
+let turns = 0;
+const mk = (o: Parameters<typeof usOptions>[0] = {}) => usOptions({ pace: async (host) => { expect(host).toBe("nasdaq"); turns++; }, ...o });
+
 /** the default (nearest) page: no `fromdate` in the URL */
 const isDefault = (url: string): boolean => !url.includes("fromdate=");
 type Ask = { url: string; at: number };
@@ -27,12 +31,24 @@ function net(answer: (url: string) => CnReply) {
   return { http, sent };
 }
 /** every ticker's default page is the AAPL fixture; the December range is the expiry fixture */
+/** every ticker's default page is the AAPL fixture; the months' near-the-money scans list the fixtures' groups (November 23; December 2
+ * and 4); a single date is the December 18 fixture, or December 2's rows inside the December fixture, or November 23's in the default page */
 const fixtures = (url: string): CnReply => {
   if (url.includes("/BRK.A/")) return reply(text("nasdaq-none"));
   if (isDefault(url)) return reply(text("nasdaq-aapl"));
-  if (url.includes("fromdate=2026-12-02&todate=2026-12-31")) return reply(text("nasdaq-aapl-expiry"));
+  if (url.includes("money=at")) {
+    // a scan's one page: its records are its rows
+    const one = (f: string) => { const j = fx(f); return reply(JSON.stringify({ ...j, data: { ...j.data, totalRecord: j.data.table.rows.length } })); };
+    if (url.includes("fromdate=2026-12-02&todate=2026-12-31")) return one("nasdaq-aapl-expiry");
+    if (url.includes("fromdate=2026-11-23&todate=2026-11-30")) return one("nasdaq-aapl");
+  }
+  if (url.includes("fromdate=2026-12-18&todate=2026-12-18")) return reply(text("nasdaq-aapl-single-date"));
+  if (url.includes("fromdate=2026-12-02&todate=2026-12-02") || url.includes("fromdate=2026-12-04&todate=2026-12-04")) return reply(text("nasdaq-aapl-expiry"));
+  if (url.includes("fromdate=2026-11-23&todate=2026-11-23")) return reply(text("nasdaq-aapl"));
   return { status: 404, bytes: new Uint8Array() };
 };
+/** the URLs a chain asks of Nasdaq that are its single date's pages */
+const datePages = (sent: Ask[], date: string): string[] => sent.map((s) => s.url).filter((u) => u.includes(`fromdate=${date}&todate=${date}&`));
 
 /** Sunday 2026-11-22 06:00 UTC: the fixtures' morning, the US closed */
 const SUNDAY = Date.parse("2026-11-22T06:00:00Z");
@@ -71,7 +87,7 @@ describe("a chain", () => {
   it("AAPL's December 2 chain: the expiries, a strike row with call and put, '--' cells null, the last trade", async () => {
     vi.setSystemTime(SUNDAY);
     const n = net(fixtures);
-    const src = usOptions({ http: n.http });
+    const src = mk({ http: n.http });
     const c = answered(await src.chain("aapl", "2026-12-02"));
     expect(c.underlying).toBe("AAPL");
     expect(c.venue).toBe("nasdaq");
@@ -96,17 +112,76 @@ describe("a chain", () => {
     expect(k270.call!.symbol).toBe("AAPL261202C00270000");
     expect(k270.put!.symbol).toBe("AAPL261202P00270000");
     expect(c.atmStrike).toBe(atm(c.strikes.map((s) => s.strike), 342.56));
-    // the nearest page, then the December range's first page (December 4 seen: no more pages)
+    // the nearest page, each month range of more than one date scanned near the money, then December 2 alone (December 4 seen: no more pages)
     expect(n.sent.map((s) => s.url)).toEqual([
       "https://api.nasdaq.com/api/quote/AAPL/option-chain?assetclass=stocks&limit=60",
-      "https://api.nasdaq.com/api/quote/AAPL/option-chain?assetclass=stocks&limit=60&offset=0&fromdate=2026-12-02&todate=2026-12-31&money=all&type=all",
+      "https://api.nasdaq.com/api/quote/AAPL/option-chain?assetclass=stocks&limit=60&offset=0&fromdate=2026-11-23&todate=2026-11-30&money=at&type=all",
+      "https://api.nasdaq.com/api/quote/AAPL/option-chain?assetclass=stocks&limit=60&offset=0&fromdate=2026-12-02&todate=2026-12-31&money=at&type=all",
+      "https://api.nasdaq.com/api/quote/AAPL/option-chain?assetclass=stocks&limit=60&offset=0&fromdate=2026-12-02&todate=2026-12-02&money=all&type=all",
     ]);
+    // every ask took its turn in the process's one Nasdaq line
+    expect(turns).toBe(n.sent.length);
+  });
+
+  it("an expiry is asked alone (fromdate = todate): December 18, inside no range's bounds, read whole from the single-date fixture", async () => {
+    vi.setSystemTime(SUNDAY);
+    const n = net(fixtures);
+    const c = answered(await mk({ http: n.http }).chain("AAPL", "2026-12-18"));
+    const rows = (fx("nasdaq-aapl-single-date").data.table.rows as any[]).filter((r) => !r.expirygroup);
+    expect(c.expiry).toBe("2026-12-18");
+    expect(c.strikes.length).toBe(rows.length);
+    expect(c.strikes[0]!.call!.symbol).toBe("AAPL261218C00005000");
+    expect(c.note).toBeUndefined();
+    // 103 records: two pages of that date
+    expect(datePages(n.sent, "2026-12-18").map((u) => /offset=(\d+)/.exec(u)![1])).toEqual(["0", "60"]);
+  });
+
+  it("the expiry tabs list every weekly a month's near-the-money scan names, at most two pages a month, kept 10 min in session", async () => {
+    vi.setSystemTime(MONDAY_SESSION);
+    const base = fx("nasdaq-aapl-expiry");
+    const weeklies = ["December 2, 2026", "December 4, 2026", "December 9, 2026", "December 11, 2026", "December 18, 2026", "December 24, 2026", "December 31, 2026"];
+    const scan = (offset: number) => {
+      const groups = offset === 0 ? weeklies.slice(0, 4) : weeklies.slice(4);
+      const rows = groups.flatMap((g) => [{ expirygroup: g }, ...Array.from({ length: 14 }, (_, i) => ({ ...base.data.table.rows[1], strike: `${300 + i}.00`, expirygroup: "" }))]);
+      return reply(JSON.stringify({ ...base, data: { ...base.data, totalRecord: 300, table: { ...base.data.table, rows: rows.slice(0, 60) } } }));
+    };
+    const n = net((url) => (url.includes("money=at") && url.includes("fromdate=2026-12-02&todate=2026-12-31") ? scan(Number(/offset=(\d+)/.exec(url)![1])) : fixtures(url)));
+    const src = mk({ http: n.http });
+    const c = answered(await src.chain("AAPL", "2026-12-18"));
+    for (const e of ["2026-11-23", "2026-12-02", "2026-12-04", "2026-12-09", "2026-12-11", "2026-12-18", "2026-12-24", "2026-12-31", "2027-01-15"]) expect(c.expiries).toContain(e);
+    const scans = () => n.sent.filter((s) => s.url.includes("money=at") && s.url.includes("fromdate=2026-12-02"));
+    expect(scans().map((s) => /offset=(\d+)/.exec(s.url)![1])).toEqual(["0", "60"]);
+    // the scans are kept 10 min (the chain's pages 60 s)
+    vi.setSystemTime(MONDAY_SESSION + 5 * 60_000);
+    answered(await src.chain("AAPL", "2026-12-18"));
+    expect(scans().length).toBe(2);
+    vi.setSystemTime(MONDAY_SESSION + 11 * 60_000);
+    answered(await src.chain("AAPL", "2026-12-18"));
+    expect(scans().length).toBe(4);
+  });
+
+  it("a date cut at 10 pages with none of its rows, or refused after a page, says so: never 'no such expiry'", async () => {
+    vi.setSystemTime(SUNDAY);
+    const base = fx("nasdaq-aapl-expiry");
+    // every page an earlier expiry's rows only (a reply that never reaches the date asked)
+    const other = (offset: number) => reply(JSON.stringify({ ...base, data: { ...base.data, totalRecord: 5000,
+      table: { ...base.data.table, rows: [{ expirygroup: "December 17, 2026" }, ...Array.from({ length: 59 }, (_, i) => ({ ...base.data.table.rows[1], strike: `${offset + i + 1}.00`, expirygroup: "" }))] } } }));
+    const n = net((url) => (url.includes("fromdate=2026-12-18&todate=2026-12-18") ? other(Number(/offset=(\d+)/.exec(url)![1])) : fixtures(url)));
+    const r = await mk({ http: n.http }).chain("AAPL", "2026-12-18");
+    expect(refusedWith(r)).toMatch(/first 600 of 5000/);
+    expect(refusedWith(r)).not.toMatch(/no AAPL expiry/);
+    // the first page answers none of the date's rows, the second is refused
+    let k = 0;
+    const m = net((url) => (url.includes("fromdate=2026-12-18&todate=2026-12-18") ? (k++ === 0 ? other(0) : { status: 500, bytes: new Uint8Array() }) : fixtures(url)));
+    const s = await mk({ http: m.http }).chain("AAPL", "2026-12-18");
+    expect(refusedWith(s)).toMatch(/answered 1 page of this expiry and then stopped/);
   });
 
   it("no expiry: the nearest with a day left, asked in its month's range", async () => {
     vi.setSystemTime(SUNDAY);
-    const n = net((url) => (url.includes("fromdate=2026-11-23&todate=2026-11-30") ? reply(text("nasdaq-aapl")) : fixtures(url)));
-    const c = answered(await usOptions({ http: n.http }).chain("AAPL"));
+    const n = net(fixtures);
+    const c = answered(await mk({ http: n.http }).chain("AAPL"));
+    expect(datePages(n.sent, "2026-11-23").length).toBe(1);
     expect(c.expiry).toBe("2026-11-23");
     expect(c.strikes.length).toBe(19);
   });
@@ -118,7 +193,7 @@ describe("a chain", () => {
     const strikeRow = (k: number) => ({ ...base.data.table.rows[1], strike: `${k}.00`, expirygroup: "" });
     const page = (offset: number, rows: unknown[]) => JSON.stringify({ ...base, data: { ...base.data, totalRecord: 130, table: { ...base.data.table, rows } } });
     const n = net((url) => {
-      if (url.includes("fromdate=2026-12-02")) {
+      if (url.includes("fromdate=2026-12-02&todate=2026-12-02")) {
         const off = Number(/offset=(\d+)/.exec(url)![1]);
         if (off === 0) return reply(page(0, [header, ...Array.from({ length: 59 }, (_, i) => strikeRow(100 + i))]));
         if (off === 60) return reply(page(60, Array.from({ length: 60 }, (_, i) => strikeRow(200 + i))));
@@ -126,10 +201,10 @@ describe("a chain", () => {
       }
       return fixtures(url);
     });
-    const c = answered(await usOptions({ http: n.http }).chain("AAPL", "2026-12-02"));
+    const c = answered(await mk({ http: n.http }).chain("AAPL", "2026-12-02"));
     expect(c.strikes.length).toBe(129);
     expect(c.note).toBeUndefined();
-    expect(n.sent.filter((s) => s.url.includes("fromdate=2026-12-02")).map((s) => /offset=(\d+)/.exec(s.url)![1])).toEqual(["0", "60", "120"]);
+    expect(datePages(n.sent, "2026-12-02").map((u) => /offset=(\d+)/.exec(u)![1])).toEqual(["0", "60", "120"]);
   });
 
   it("stops at 10 pages and says so in the chain's note", async () => {
@@ -137,28 +212,28 @@ describe("a chain", () => {
     const base = fx("nasdaq-aapl-expiry");
     const header = base.data.table.rows[0];
     const n = net((url) => {
-      if (url.includes("fromdate=2026-12-02")) {
+      if (url.includes("fromdate=2026-12-02&todate=2026-12-02")) {
         const off = Number(/offset=(\d+)/.exec(url)![1]);
         const rows = Array.from({ length: 60 }, (_, i) => ({ ...base.data.table.rows[1], strike: `${off + i + 1}.00`, expirygroup: "" }));
         return reply(JSON.stringify({ ...base, data: { ...base.data, totalRecord: 5000, table: { ...base.data.table, rows: off === 0 ? [header, ...rows.slice(1)] : rows } } }));
       }
       return fixtures(url);
     });
-    const c = answered(await usOptions({ http: n.http }).chain("AAPL", "2026-12-02"));
-    expect(n.sent.filter((s) => s.url.includes("fromdate=2026-12-02")).length).toBe(10);
+    const c = answered(await mk({ http: n.http }).chain("AAPL", "2026-12-02"));
+    expect(datePages(n.sent, "2026-12-02").length).toBe(10);
     expect(c.note).toMatch(/first 600 of 5000/);
   });
 
   it("a ticker Nasdaq has no options for is refused in the market's words", async () => {
     vi.setSystemTime(SUNDAY);
     const n = net(fixtures);
-    const r = await settle(usOptions({ http: n.http }).chain("BRK.A"));
+    const r = await settle(mk({ http: n.http }).chain("BRK.A"));
     expect(refusedWith(r)).toBe("Nasdaq lists no options for BRK.A");
   });
 
   it("an expiry Nasdaq does not list is refused; a bad expiry or ticker too", async () => {
     vi.setSystemTime(SUNDAY);
-    const src = usOptions({ http: net(fixtures).http });
+    const src = mk({ http: net(fixtures).http });
     expect(refusedWith(await src.chain("AAPL", "2026-10-02"))).toBe("Nasdaq lists no AAPL expiry on 2026-10-02");
     expect(refusedWith(await src.chain("AAPL", "Dec 2"))).toMatch(/YYYY-MM-DD/);
     expect(refusedWith(await src.chain("a b"))).toMatch(/no such ticker/);
@@ -167,20 +242,22 @@ describe("a chain", () => {
   it("is kept 60 s in session; a 403 pauses Nasdaq; an unparseable 200 is a failure", async () => {
     vi.setSystemTime(MONDAY_SESSION);
     const n = net(fixtures);
-    const src = usOptions({ http: n.http });
+    const src = mk({ http: n.http });
     answered(await src.chain("AAPL", "2026-12-02"));
     answered(await src.chain("AAPL", "2026-12-02"));
-    expect(n.sent.length).toBe(2);
+    // the nearest page, two month scans, the date's page
+    expect(n.sent.length).toBe(4);
     vi.setSystemTime(MONDAY_SESSION + 61_000);
     answered(await src.chain("AAPL", "2026-12-02"));
-    expect(n.sent.length).toBe(4);
+    // the nearest page and the date's page again; the scans are kept 10 min
+    expect(n.sent.length).toBe(6);
 
-    const bad = usOptions({ http: net(() => reply("<html>")).http });
+    const bad = mk({ http: net(() => reply("<html>")).http });
     expect(refusedWith(await bad.chain("AAPL"))).toMatch(/Nasdaq is not answering/);
     expect(bad.status().state).toBe("unavailable");
 
     const m = net(() => reply("", 403));
-    const shut = usOptions({ http: m.http });
+    const shut = mk({ http: m.http });
     expect(refusedWith(await shut.chain("AAPL"))).toMatch(/refused this place \(HTTP 403\)/);
     expect(refusedWith(await shut.chain("MSFT"))).toMatch(/refused this place/);
     expect(m.sent.length).toBe(1);
@@ -189,30 +266,30 @@ describe("a chain", () => {
   it("outside a session is kept until the next US open", async () => {
     vi.setSystemTime(SUNDAY);
     const n = net(fixtures);
-    const src = usOptions({ http: n.http });
+    const src = mk({ http: n.http });
     answered(await src.chain("AAPL", "2026-12-02"));
     vi.setSystemTime(Date.parse("2026-11-23T14:00:00Z")); // Monday 09:00 New York
     answered(await src.chain("AAPL", "2026-12-02"));
-    expect(n.sent.length).toBe(2);
+    expect(n.sent.length).toBe(4);
     vi.setSystemTime(Date.parse("2026-11-23T14:31:00Z")); // past the open
     answered(await src.chain("AAPL", "2026-12-02"));
-    expect(n.sent.length).toBe(4);
+    expect(n.sent.length).toBe(8);
   });
 
   it("a 451 is said plainly and pauses nothing; a 'paused' throw from the shared guard is a refusal", async () => {
     vi.setSystemTime(SUNDAY);
     const m = net(() => reply("", 451));
-    const src = usOptions({ http: m.http });
+    const src = mk({ http: m.http });
     expect(refusedWith(await src.chain("AAPL"))).toBe("Nasdaq refuses this place (HTTP 451): its options cannot be read from here");
     await src.chain("MSFT");
     expect(m.sent.length).toBe(2);
     const paused: CnHttp = async () => { throw new Error("paused"); };
-    expect(refusedWith(await usOptions({ http: paused }).chain("AAPL"))).toMatch(/Nasdaq refused this place \(lately\)/);
+    expect(refusedWith(await mk({ http: paused }).chain("AAPL"))).toMatch(/Nasdaq refused this place \(lately\)/);
   });
 
   it("expiries already settled, or outside the current ranges, are not listed", async () => {
     vi.setSystemTime(SUNDAY);
-    const src = usOptions({ http: net(fixtures).http });
+    const src = mk({ http: net(fixtures).http });
     const c = answered(await src.chain("AAPL", "2026-12-02"));
     expect(c.expiries).toContain("2026-11-23");
     vi.setSystemTime(Date.parse("2026-12-03T00:00:00Z")); // December 2 settled at 16:00 New York
@@ -226,13 +303,13 @@ describe("a chain", () => {
   it("a month that answers no options for a ticker that has them: no such expiry", async () => {
     vi.setSystemTime(SUNDAY);
     const n = net((url) => (url.includes("fromdate=2027-01-15") ? reply(text("nasdaq-none")) : fixtures(url)));
-    expect(refusedWith(await usOptions({ http: n.http }).chain("AAPL", "2027-01-15"))).toBe("Nasdaq lists no AAPL expiry on 2027-01-15");
+    expect(refusedWith(await mk({ http: n.http }).chain("AAPL", "2027-01-15"))).toBe("Nasdaq lists no AAPL expiry on 2027-01-15");
   });
 
   it("a ticker outside the list is asked as a share, then as an ETF 3 s later", async () => {
     vi.setSystemTime(SUNDAY);
     const n = net((url) => (url.includes("/GLD/") && url.includes("assetclass=stocks") ? reply(text("nasdaq-none")) : fixtures(url)));
-    const src = usOptions({ http: n.http });
+    const src = mk({ http: n.http });
     const p = src.chain("GLD", "2026-12-02");
     await vi.advanceTimersByTimeAsync(4_000);
     const c = answered(await p);
@@ -240,18 +317,7 @@ describe("a chain", () => {
     expect(n.sent[0]!.url).toContain("assetclass=stocks");
     expect(n.sent[1]!.url).toContain("assetclass=etf");
     expect(n.sent[1]!.at - n.sent[0]!.at).toBeGreaterThanOrEqual(SUMMARY_GAP_MS);
-    expect(n.sent[2]!.url).toContain("assetclass=etf&limit=60&offset=0&fromdate=2026-12-02");
-  });
-
-  it("has: the listed tickers, and a ticker a chain found options for", async () => {
-    vi.setSystemTime(SUNDAY);
-    const src = usOptions({ http: net(fixtures).http });
-    expect(src.has("spy")).toBe(true);
-    expect(src.has("AMD")).toBe(false);
-    answered(await src.chain("AMD", "2026-12-02"));
-    expect(src.has("AMD")).toBe(true);
-    await settle(src.chain("BRK.A"));
-    expect(src.has("BRK.A")).toBe(false);
+    expect(n.sent.at(-1)!.url).toContain("assetclass=etf&limit=60&offset=0&fromdate=2026-12-02&todate=2026-12-02");
   });
 });
 
@@ -270,15 +336,18 @@ describe("summaries", () => {
       flying--;
       return fixtures(url);
     };
-    const src = usOptions({ http, quote });
-    // a cold start answers at once: nothing kept, the queue reading in the background
+    const src = mk({ http, quote });
+    // a cold start answers at once: the ten rows, their figures not read yet, the queue reading in the background
     const r = answered(await src.summaries());
-    expect(r.items).toEqual([]);
+    expect(r.items.map((i) => i.underlying)).toEqual([...US_OPTION_UNDERLYINGS]);
+    expect(r.items.every((i) => i.volume === null && i.openInterest === null && i.nearestExpiry === null && i.nearestOnly === true)).toBe(true);
+    expect(r.items.find((i) => i.underlying === "AAPL")).toMatchObject({ price: 100, changePct: 1.5 });
     expect((r as any).partial).toBe(true);
     expect((r as any).note).toBe("0 of 10 read");
     await vi.advanceTimersByTimeAsync(600);
     const some = answered(await src.summaries());
-    expect(some.items.length).toBe(1);
+    expect(some.items.length).toBe(10);
+    expect(some.items.filter((i) => i.volume !== null).map((i) => i.underlying)).toEqual(["SPY"]);
     expect((some as any).note).toBe("1 of 10 read");
     await vi.advanceTimersByTimeAsync(60_000);
     expect(sent.length).toBe(10);
@@ -295,7 +364,7 @@ describe("summaries", () => {
   it("a summary is the nearest expiry's alone: summed volume and open interest; price and change are the quote's", async () => {
     vi.setSystemTime(MONDAY_SESSION);
     const n = net(fixtures);
-    const src = usOptions({ http: n.http, quote });
+    const src = mk({ http: n.http, quote });
     void src.summaries();
     await vi.advanceTimersByTimeAsync(60_000);
     const r = answered(await src.summaries());
@@ -320,7 +389,7 @@ describe("summaries", () => {
   it("each summary is kept 10 min in session, then asked again", async () => {
     vi.setSystemTime(MONDAY_SESSION);
     const n = net(fixtures);
-    const src = usOptions({ http: n.http, quote });
+    const src = mk({ http: n.http, quote });
     void src.summaries();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(n.sent.length).toBe(10);
@@ -342,7 +411,7 @@ describe("summaries", () => {
       if (slow) await new Promise((r) => setTimeout(r, 5_000));
       return n.http(url, init);
     };
-    const src = usOptions({ http, quote });
+    const src = mk({ http, quote });
     void src.summaries();
     await vi.advanceTimersByTimeAsync(60_000);
     slow = true;
@@ -358,7 +427,7 @@ describe("summaries", () => {
   it("outside a session each summary is kept until the next US open", async () => {
     vi.setSystemTime(SUNDAY);
     const n = net(fixtures);
-    const src = usOptions({ http: n.http, quote });
+    const src = mk({ http: n.http, quote });
     void src.summaries();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(n.sent.length).toBe(10);
@@ -378,7 +447,7 @@ describe("summaries", () => {
     vi.setSystemTime(MONDAY_SESSION);
     let down = false;
     const n = net((url) => (down ? { status: 500, bytes: new Uint8Array() } : fixtures(url)));
-    const src = usOptions({ http: n.http, quote });
+    const src = mk({ http: n.http, quote });
     void src.summaries();
     await vi.advanceTimersByTimeAsync(60_000);
     down = true;

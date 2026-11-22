@@ -267,11 +267,13 @@ export function lane(max: number, perMs: number, o: { now?: () => number; sleep?
 /** each host's limit (see the top of this file): requests (Hyperliquid: weight) in a window of ms */
 export const HOST_LIMITS: Readonly<Record<HistoryHost, { max: number; perMs: number }>> = {
   coinbase: { max: 10, perMs: 1_000 },
+  // OKX's line is its option asks' too (options-crypto.ts)
   okx: { max: 20, perMs: 2_000 },
   hyperliquid: { max: 900, perMs: 60_000 },
   // neither publishes a limit for these keyless reads (history-sources.md: no rate-limit headers): a few a second, so a burst of charts
   // never looks like a crawl. Nasdaq's line is every GET of it the process sends — the US shares' real-time quotes too (us-quotes.ts
-  // nasdaqSource) — four a second on the whole, a burst of eight at once (one batch of quotes: NASDAQ_AT_ONCE) still sent at once
+  // nasdaqSource) and the US option chains (options-us.ts) — four a second on the whole, a burst of eight at once (one batch of quotes:
+  // NASDAQ_AT_ONCE) still sent at once
   robinhood: { max: 5, perMs: 1_000 },
   nasdaq: { max: 8, perMs: 2_000 },
   // Nasdaq's website host, its per-symbol news feeds (news.ts): its own line, apart from the API's, two a second
