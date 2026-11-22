@@ -3,7 +3,9 @@
 import type { ExploreItem } from "../src/live/explore.ts";
 import type { ChinaHistory, ChinaMarket, ChinaSource } from "../src/live/china.ts";
 import { indexRow, shareRow, type LocalHistory, type LocalMarket, type LocalRead, type LocalSort, type LocalSource } from "../src/live/local.ts";
-import type { WorldIndices } from "../src/core.ts";
+import type { CryptoOptions, UsOptions, WorldIndices } from "../src/core.ts";
+import type { OptionChain, OptionSummary, OptionVenue } from "../src/live/options.ts";
+import type { Refusal } from "../src/core/errors.ts";
 import type { RegionId } from "../src/live/categories.ts";
 import { readLike, type Listing, type PublicSource } from "../src/live/public-markets.ts";
 import type { HubBook, HubQuote, HubTick, MarketHub } from "../src/live/stream-hub.ts";
@@ -177,4 +179,64 @@ export function fakeHub() {
       tell(s, y, "trades");
     },
   };
+}
+
+type OptionList = { items: OptionSummary[]; asOf: string; stale?: true; partial?: true; note?: string };
+
+/** one option chain as a source answers it: two strikes around the price, the expiry asked (else the nearest) */
+export function chainOf(underlying: string, venue: OptionVenue, expiry?: string): OptionChain {
+  const coin = venue !== "nasdaq";
+  const unit = coin ? underlying : "USD";
+  const price = coin ? 60_000 : 230;
+  const leg = (symbol: string) => ({ symbol, bid: 1, ask: 1.2, last: 1.1, volume: 10, unit, ...(coin ? { iv: 50, usd: { bid: 60_000, ask: 72_000, last: 66_000 } } : {}) });
+  const e = expiry ?? "2026-11-27";
+  return {
+    underlying, venue, venueName: venue === "deribit" ? "Deribit" : venue === "okx" ? "OKX" : "Nasdaq", price, asOf: new Date(READ_AT).toISOString(), quoteFrom: venue === "deribit" ? "Deribit" : venue === "okx" ? "OKX" : "Nasdaq",
+    expiries: ["2026-11-27", "2026-12-25"], expiry: e, atmStrike: price,
+    strikes: [{ strike: price * 0.9, call: leg(`${underlying}-C-1`), put: leg(`${underlying}-P-1`) }, { strike: price, call: leg(`${underlying}-C-2`), put: leg(`${underlying}-P-2`) }],
+  };
+}
+
+const optionSummary = (underlying: string, asset: "crypto" | "stocks", o: Partial<OptionSummary> = {}): OptionSummary => ({
+  underlying, asset, price: asset === "crypto" ? 60_000 : 230, nearestExpiry: "2026-11-27", volume: 1_000, openInterest: 5_000,
+  venues: asset === "crypto" ? ["deribit", "okx"] : ["nasdaq"], quoteFrom: asset === "crypto" ? "Deribit" : "Nasdaq", ...o,
+});
+
+/** crypto options (options-crypto.ts) with BTC, ETH and SOL rows (no change: the market fills it from its coin rows), every ask recorded;
+ * either read replaced by `o` */
+export function fakeCryptoOptions(o: { summaries?: () => Promise<OptionList | Refusal>; chain?: (u: string, v: "deribit" | "okx", e?: string) => Promise<OptionChain | Refusal> } = {}) {
+  const calls = { summaries: 0, chain: [] as Array<[string, string, string | undefined]> };
+  const list = (): OptionList => ({
+    items: [
+      optionSummary("SOL", "crypto", { volume: 900, volumeUsd: 1e7, venues: ["deribit"] }),
+      optionSummary("BTC", "crypto", { volume: 9_000, volumeUsd: 5e8, atmIv: 45 }),
+      optionSummary("ETH", "crypto", { volume: 30_000, volumeUsd: 2e8, atmIv: 60 }),
+    ],
+    asOf: new Date(READ_AT).toISOString(),
+  });
+  const source: CryptoOptions = {
+    summaries: async () => { calls.summaries++; return o.summaries ? o.summaries() : list(); },
+    chain: async (u, v, e) => { calls.chain.push([u, v, e]); return o.chain ? o.chain(u, v, e) : chainOf(u, v, e); },
+    status: () => ({ state: "live", said: "Crypto options · answering" }),
+  };
+  return { source, calls };
+}
+
+/** US options (options-us.ts) with SPY and AAPL rows, priced and changed as the US line would, every ask recorded; either read replaced by `o` */
+export function fakeUsOptions(o: { summaries?: () => Promise<OptionList | Refusal>; chain?: (t: string, e?: string) => Promise<OptionChain | Refusal> } = {}) {
+  const calls = { summaries: 0, chain: [] as Array<[string, string | undefined]> };
+  const list = (): OptionList => ({
+    items: [
+      optionSummary("AAPL", "stocks", { volume: 300_000, changePct: 1.2, nearestOnly: true, quoteFrom: "Nasdaq · real time" }),
+      optionSummary("SPY", "stocks", { volume: 900_000, changePct: -0.4, nearestOnly: true, quoteFrom: "Nasdaq · real time" }),
+    ],
+    asOf: new Date(READ_AT).toISOString(),
+  });
+  const source: UsOptions = {
+    summaries: async () => { calls.summaries++; return o.summaries ? o.summaries() : list(); },
+    chain: async (t, e) => { calls.chain.push([t, e]); return o.chain ? o.chain(t, e) : chainOf(t, "nasdaq", e); },
+    has: (t) => ["AAPL", "SPY"].includes(t),
+    status: () => ({ state: "live", said: "US options · answering" }),
+  };
+  return { source, calls };
 }

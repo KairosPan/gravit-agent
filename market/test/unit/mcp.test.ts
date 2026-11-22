@@ -78,9 +78,9 @@ afterAll(async () => {
 });
 
 describe("market:mcp", () => {
-  it("lists six read tools", async () => {
+  it("lists seven read tools", async () => {
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(["market_akshare", "market_book", "market_candles", "market_explore", "market_quotes", "market_wencai"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["market_akshare", "market_book", "market_candles", "market_explore", "market_option_chain", "market_quotes", "market_wencai"]);
     for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(true);
     // the market's words: no connected venue, no "Account" for the market
     for (const t of tools) expect(t.description ?? "").not.toMatch(/the Account|connected venue|venue the owner connected/);
@@ -135,6 +135,43 @@ describe("market:mcp", () => {
       await c.close();
       await new Promise((r) => stand.close(r));
     }
+  });
+
+  it("market_option_chain: its schema, its words, and one read of /api/options with the names given", async () => {
+    const { tools } = await client.listTools();
+    const t = tools.find((x) => x.name === "market_option_chain")!;
+    const props = t.inputSchema.properties as Record<string, { enum?: string[]; maxLength?: number; pattern?: string }>;
+    expect(t.inputSchema.required).toEqual(["underlying", "venue"]);
+    expect(props.venue!.enum).toEqual(["deribit", "okx", "nasdaq"]);
+    expect(props.underlying!.maxLength).toBe(15);
+    expect(props.expiry!.pattern).toBe("^\\d{4}-\\d{2}-\\d{2}$");
+    const d = t.description ?? "";
+    for (const words of ["view-only", "Deribit", "OKX", "Nasdaq", "usd", "no IV", "outside"]) expect(d, words).toContain(words);
+    const explore = tools.find((x) => x.name === "market_explore")!.description ?? "";
+    expect(explore).toContain("`form=option`");
+    const seen: string[] = [];
+    const stand = createServer((req, res) => {
+      seen.push(req.url ?? "");
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, value: { underlying: "BTC", venue: "deribit", strikes: [] } }));
+    });
+    await new Promise<void>((r) => stand.listen(0, "127.0.0.1", r));
+    const c = await seat(`http://127.0.0.1:${(stand.address() as AddressInfo).port}`);
+    try {
+      const r = await c.callTool({ name: "market_option_chain", arguments: { underlying: "BTC", venue: "deribit", expiry: "2026-12-25" } });
+      expect(r.isError).toBeFalsy();
+      expect(body(r)).toEqual({ ok: true, value: { underlying: "BTC", venue: "deribit", strikes: [] } });
+      await c.callTool({ name: "market_option_chain", arguments: { underlying: "AAPL", venue: "nasdaq" } });
+      expect(seen).toEqual(["/api/options?underlying=BTC&venue=deribit&expiry=2026-12-25", "/api/options?underlying=AAPL&venue=nasdaq"]);
+    } finally {
+      await c.close();
+      await new Promise((r) => stand.close(r));
+    }
+  });
+
+  it("market_option_chain passes the market's refusal on", async () => {
+    const r = await client.callTool({ name: "market_option_chain", arguments: { underlying: "BTC", venue: "nasdaq" } });
+    expect(r.isError).toBe(true);
+    expect(body(r)).toMatchObject({ ok: false, code: "E_MARKET_BAD_REQUEST", message: "BTC is a coin: its options are read at deribit or okx" });
   });
 
   it("market_explore passes a mixing refusal through as the market's words", async () => {

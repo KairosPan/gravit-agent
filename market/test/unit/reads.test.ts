@@ -18,7 +18,9 @@ import { no } from "../../src/refuse.ts";
 import { startMarketServer, type MarketServerHandle } from "../../src/server.ts";
 import type { Listing, PublicSource } from "../../src/live/public-markets.ts";
 import { HK_NOTE } from "../../src/live/hongkong.ts";
-import { fakeChina, fakeHub, fakeIndices, fakeLocal, fakeSource, listing } from "../fakes.ts";
+import { chainOf, fakeChina, fakeCryptoOptions, fakeHub, fakeIndices, fakeLocal, fakeSource, fakeUsOptions, listing, READ_AT } from "../fakes.ts";
+import { OPTION_QUOTE_KEEP_MS } from "../../src/core.ts";
+import type { UsQuote } from "../../src/live/options-us.ts";
 
 const servers: MarketServerHandle[] = [];
 afterEach(async () => {
@@ -1253,3 +1255,159 @@ describe("the local regions and the world's indices in the market's reads", () =
 function shareOf(venue: "hk" | "kr" | "tw", code: string): ExploreItem {
   return { key: `${venue}:${code}`, kind: "share", name: code, base: code, asset: "stocks", form: "spot", region: venue, quoteFrom: "x", tabs: [], at: [] } as unknown as ExploreItem;
 }
+
+/** OPTION CHAINS IN THE MARKET'S READS: explore's form=option rows (crypto and US), GET /api/options, and the US line's quote the US option
+ * list is priced by — each over its fake (fakes.ts) */
+describe("option chains in the market's reads", () => {
+  const answered = <T,>(v: T | Refusal): T => { if (isRefusal(v)) throw new Error(`refused: ${v.code} ${v.message}`); return v; };
+  const refused = (v: unknown): Refusal => { if (!isRefusal(v)) throw new Error(`answered: ${JSON.stringify(v).slice(0, 160)}`); return v; };
+  /** a coin source whose BTC row moved 2.5 % in a day; ETH's row gives no change, SOL is not listed */
+  const coins = (): PublicSource => ({ ...fakeSource({ id: "okx" }), listings: async () => [listing("BTC/USDT", 62_000, { changePct24h: 2.5 }), listing("ETH/USDT", 3_000)] });
+  function options(o: { crypto?: ReturnType<typeof fakeCryptoOptions>; us?: ReturnType<typeof fakeUsOptions>; none?: boolean } = {}) {
+    const crypto = o.crypto ?? fakeCryptoOptions();
+    const us = o.us ?? fakeUsOptions();
+    const core = createMarketCore({ sources: [coins()], ...(o.none ? {} : { cryptoOptions: crypto.source, usOptions: us.source }) });
+    return { reads: marketReads(core), crypto, us, core };
+  }
+
+  it("form=option with asset=crypto lists the crypto rows by summed volume (USD), each change the coin's own row's", async () => {
+    const r = options();
+    const got = answered(await r.reads.explore({ asset: "crypto", form: "option" }));
+    expect(got.items.map((i) => i.key)).toEqual(["opt:BTC", "opt:ETH", "opt:SOL"]);
+    expect(got.items.every((i) => i.kind === "optionChain" && i.form === "option" && i.asset === "crypto")).toBe(true);
+    const [btc, eth, sol] = got.items;
+    expect(btc!.changePct24h).toBe(2.5);
+    expect(eth!.changePct24h).toBeUndefined();
+    expect(sol!.changePct24h).toBeUndefined();
+    expect(btc!.option).toMatchObject({ volumeUsd: 5e8, atmIv: 45 });
+    expect(btc!.at.every((a) => a.canTrade === false && a.connected === false && a.public === true)).toBe(true);
+    expect([r.crypto.calls.summaries, r.us.calls.summaries]).toEqual([1, 0]);
+    expect(got.notes.some((n) => n.startsWith("Crypto options:"))).toBe(true);
+  });
+
+  it("form=option with asset=stocks and region us, or no region, lists the US rows", async () => {
+    for (const query of [{ asset: "stocks", form: "option", region: "us" }, { asset: "stocks", form: "option" }]) {
+      const r = options();
+      const got = answered(await r.reads.explore(query));
+      expect(got.items.map((i) => i.key)).toEqual(["opt:SPY", "opt:AAPL"]);
+      expect(got.items.every((i) => i.asset === "stocks" && i.region === "us" && i.option?.nearestOnly === true)).toBe(true);
+      expect([r.crypto.calls.summaries, r.us.calls.summaries]).toEqual([0, 1]);
+    }
+  });
+
+  it("form=option alone lists both; with any other asset or region, no rows and no source asked", async () => {
+    const both = options();
+    expect(answered(await both.reads.explore({ form: "option" })).items.map((i) => i.key)).toEqual(["opt:BTC", "opt:ETH", "opt:SOL", "opt:SPY", "opt:AAPL"]);
+    for (const query of [{ asset: "indices", form: "option" }, { asset: "stocks", form: "option", region: "hk" }, { asset: "crypto", form: "option", region: "us" }, { form: "option", region: "cn" }]) {
+      const r = options();
+      expect(answered(await r.reads.explore(query)).items, JSON.stringify(query)).toEqual([]);
+      expect([r.crypto.calls.summaries, r.us.calls.summaries]).toEqual([0, 0]);
+    }
+  });
+
+  it("q matches the listed underlyings only; key keeps one row", async () => {
+    const r = options();
+    expect(answered(await r.reads.explore({ asset: "crypto", form: "option", q: "et" })).items.map((i) => i.key)).toEqual(["opt:ETH"]);
+    expect(answered(await r.reads.explore({ asset: "stocks", form: "option", q: "AAP" })).items.map((i) => i.key)).toEqual(["opt:AAPL"]);
+    expect(answered(await r.reads.explore({ asset: "stocks", form: "option", q: "TSLA" })).items).toEqual([]);
+    expect(answered(await r.reads.explore({ form: "option", key: "opt:SPY" })).items.map((i) => i.key)).toEqual(["opt:SPY"]);
+  });
+
+  it("movers sorts by the size of the underlying's day change, a row with none last; limit cuts after", async () => {
+    const r = options();
+    expect(answered(await r.reads.explore({ asset: "stocks", form: "option", sort: "movers" })).items.map((i) => i.key)).toEqual(["opt:AAPL", "opt:SPY"]);
+    expect(answered(await r.reads.explore({ form: "option", sort: "movers" })).items.map((i) => i.key)).toEqual(["opt:BTC", "opt:AAPL", "opt:SPY", "opt:ETH", "opt:SOL"]);
+    expect(answered(await r.reads.explore({ form: "option", limit: 2 })).items).toHaveLength(2);
+  });
+
+  it("option rows never appear in all, another form or a tab", async () => {
+    const r = options();
+    for (const query of [{}, { asset: "crypto" }, { asset: "crypto", form: "spot" }, { tab: "crypto" }, { q: "BTC" }, { asset: "stocks", region: "us" }]) {
+      const got = answered(await r.reads.explore(query));
+      expect(got.items.some((i) => i.kind === "optionChain"), JSON.stringify(query)).toBe(false);
+    }
+    expect([r.crypto.calls.summaries, r.us.calls.summaries]).toEqual([0, 0]);
+  });
+
+  it("a source's partial, note and stale pass through; a refusal is a missing venue, the other side answered", async () => {
+    const us = fakeUsOptions({ summaries: async () => ({ items: [], asOf: new Date(READ_AT).toISOString(), partial: true, stale: true, note: "3 of 10 read" }) });
+    const crypto = fakeCryptoOptions({ summaries: async () => no("E_VENUE_UNREACHABLE", { venue: "deribit", message: "Deribit is not answering: its options cannot be read now" }) });
+    const r = options({ us, crypto });
+    const got = answered(await r.reads.explore({ form: "option" }));
+    expect(got.items).toEqual([]);
+    expect(got.stale).toBe(true);
+    expect(got.notes).toContain("US options: 3 of 10 read");
+    expect(got.missing).toEqual([{ venue: "deribit", venueName: "Deribit", connected: false, why: "Deribit is not answering: its options cannot be read now", code: "E_VENUE_UNREACHABLE" }]);
+    const fine = options();
+    expect(answered(await fine.reads.explore({ form: "option" })).stale).toBeUndefined();
+  });
+
+  it("refuses the closing sort, a source list, and options the market does not read", async () => {
+    const r = options();
+    expect(refused(await r.reads.explore({ form: "option", sort: "closing" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Options are sorted by volume or movers" });
+    expect(refused(await r.reads.explore({ form: "option", source: "okx" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Options are not part of a selected public source" });
+    expect(refused(await options({ none: true }).reads.explore({ form: "option" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "Options are not read by this market" });
+  });
+
+  it("options(): one chain at each venue, the expiry passed on", async () => {
+    const r = options();
+    expect(answered(await r.reads.options({ underlying: "btc", venue: "deribit" }))).toMatchObject({ underlying: "BTC", venue: "deribit", expiry: "2026-11-27" });
+    expect(answered(await r.reads.options({ underlying: "ETH", venue: "okx", expiry: "2026-12-25" }))).toMatchObject({ underlying: "ETH", venue: "okx", expiry: "2026-12-25" });
+    expect(answered(await r.reads.options({ underlying: "BRK.B", venue: "nasdaq" }))).toMatchObject({ underlying: "BRK.B", venue: "nasdaq" });
+    expect(r.crypto.calls.chain).toEqual([["BTC", "deribit", undefined], ["ETH", "okx", "2026-12-25"]]);
+    expect(r.us.calls.chain).toEqual([["BRK.B", undefined]]);
+  });
+
+  it("options(): each refusal in the market's words, no source asked", async () => {
+    const r = options();
+    const cases: Array<[{ underlying: string; venue: string; expiry?: string }, string]> = [
+      [{ underlying: "BTC", venue: "bybit" }, "an option venue is deribit, okx or nasdaq"],
+      [{ underlying: "BTC", venue: "nasdaq" }, "BTC is a coin: its options are read at deribit or okx"],
+      [{ underlying: "AAPL", venue: "deribit" }, "AAPL is a US share: its options are read at nasdaq"],
+      [{ underlying: "BTC", venue: "deribit", expiry: "27NOV26" }, "an expiry is a date, YYYY-MM-DD"],
+      [{ underlying: "AAPL1", venue: "nasdaq" }, "a US ticker is 1 to 6 letters or dots (BRK.B)"],
+      [{ underlying: "TOOLONG", venue: "nasdaq" }, "a US ticker is 1 to 6 letters or dots (BRK.B)"],
+      [{ underlying: "", venue: "deribit" }, "an option chain names its underlying: a coin (BTC) or a US ticker (AAPL)"],
+    ];
+    for (const [ask, message] of cases) expect(refused(await r.reads.options(ask)), JSON.stringify(ask)).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message });
+    expect([r.crypto.calls.chain, r.us.calls.chain]).toEqual([[], []]);
+    expect(refused(await options({ none: true }).reads.options({ underlying: "BTC", venue: "deribit" }))).toMatchObject({ message: "Crypto options are not read by this market" });
+    expect(refused(await options({ none: true }).reads.options({ underlying: "AAPL", venue: "nasdaq" }))).toMatchObject({ message: "US options are not read by this market" });
+  });
+
+  it("GET /api/options answers {ok, value} per venue, a refusal 409, a doubled name 400", async () => {
+    const crypto = fakeCryptoOptions({ chain: async (u, v, e) => (u === "XRP" ? no("E_ACCOUNT_BAD_ACTION", { venue: v, message: "Deribit lists no XRP options" }) : chainOf(u, v, e)) });
+    const core = createMarketCore({ sources: [], cryptoOptions: crypto.source, usOptions: fakeUsOptions().source });
+    const srv = await startMarketServer({ port: 0, mount: (app) => mountReads(app, core, marketReads(core)) });
+    servers.push(srv);
+    const get = async (path: string) => { const x = await fetch(`${srv.url}${path}`); return { status: x.status, body: (await x.json()) as Record<string, any> }; };
+    for (const [venue, underlying] of [["deribit", "BTC"], ["okx", "ETH"], ["nasdaq", "AAPL"]]) {
+      const a = await get(`/api/options?underlying=${underlying}&venue=${venue}&expiry=2026-12-25`);
+      expect(a.status).toBe(200);
+      expect(a.body).toMatchObject({ ok: true, value: { underlying, venue, expiry: "2026-12-25" } });
+    }
+    const unknown = await get("/api/options?underlying=BTC&venue=binance");
+    expect(unknown).toMatchObject({ status: 409, body: { ok: false, refusal: { code: "E_MARKET_BAD_REQUEST", message: "an option venue is deribit, okx or nasdaq" } } });
+    const theirs = await get("/api/options?underlying=XRP&venue=deribit");
+    expect(theirs).toMatchObject({ status: 409, body: { ok: false, refusal: { code: "E_ACCOUNT_BAD_ACTION", message: "Deribit lists no XRP options" } } });
+    expect((await get("/api/options?underlying=BTC&venue=deribit&venue=okx")).status).toBe(400);
+    expect((await get(`/api/options?underlying=${"B".repeat(40)}&venue=deribit`)).status).toBe(409);
+  });
+
+  it("the US option list's quote is the US stocks line, kept 20 s at least; a refusal or no line is no quote", async () => {
+    let asked = 0;
+    let answer: unknown = { ...listing("AAPL", 230, { quote: "USD", changePct24h: 1.5, quoteFrom: "Nasdaq · real time" }) };
+    const stocks: PublicSource = { ...fakeSource({ id: "stocks" }), name: "US stocks", kind: "stocks", line: async () => { asked++; return answer as Listing; } };
+    let quote: UsQuote | undefined;
+    createMarketCore({ sources: [stocks], usOptions: (q) => { quote = q; return fakeUsOptions().source; } });
+    expect(OPTION_QUOTE_KEEP_MS).toBeGreaterThanOrEqual(20_000);
+    expect(await quote!("AAPL")).toEqual({ price: 230, changePct: 1.5, quoteFrom: "Nasdaq · real time" });
+    expect(await quote!("AAPL")).toEqual({ price: 230, changePct: 1.5, quoteFrom: "Nasdaq · real time" });
+    expect(asked).toBe(1);
+    answer = no("E_VENUE_UNREACHABLE", { venue: "stocks", message: "Cboe refused this place" });
+    expect(await quote!("MSFT")).toBeNull();
+    let none: UsQuote | undefined;
+    createMarketCore({ sources: [fakeSource()], usOptions: (q) => { none = q; return fakeUsOptions().source; } });
+    expect(await none!("AAPL")).toBeNull();
+  });
+});

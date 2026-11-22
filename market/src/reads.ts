@@ -7,13 +7,15 @@
  *
  *   GET  /api/explore   ?scope= &source= &tab= &q= &key= &sort= &limit=  Exploration; or by underlying, ?asset= &form= &region= with
  *                       &source=<id>,<id>… (never beside scope or tab), region=cn being the China read, region=hk|kr|tw on Stocks Spot that
- *                       region's ranking, asset=indices&form=spot a region's cash indices
+ *                       region's ranking, asset=indices&form=spot a region's cash indices, form=option the option chains (one row an
+ *                       underlying: asset=crypto Deribit's and OKX's, asset=stocks&region=us Nasdaq's ten; never in any other answer)
  *   GET  /api/quotes    ?pairs=<venue>|<symbol>,… (or ?pair= each)  {quotes: [{venue, symbol, market? | refusal?}]}: A shares (china), Hong
  *                       Kong, Korean and Taiwanese shares (hk, kr, tw) and the cash indices (ix)
  *   GET  /api/candles   ?venue= &symbol= &interval= &range= &since= &before= &limit=   CandlesView, or an A share's ChinaHistory, or a local
  *                       region's LocalHistory (hk, kr, tw, ix: by range)
  *   GET  /api/book      ?venue= &symbol= &depth=                  BookView
  *   GET  /api/trades    ?venue= &symbol= &limit=                  TradesView
+ *   GET  /api/options   ?underlying= &venue=deribit|okx|nasdaq &expiry=YYYY-MM-DD       {value: OptionChain}: one chain, view-only
  *   GET  /api/news      ?symbols=<A,B> &since=<ISO time>          {news: {<SYM>: Headline[]}, unavailable?: {<SYM>: reason}}: US shares
  *
  * Each answers 200 with `{ok: true, …}`, a refusal 409 `{ok: false, refusal}`, a malformed question 400 `{ok: false, error}`. Nothing is
@@ -34,7 +36,9 @@ import { WORLD_INDICES } from "./live/world-indices.ts";
 import type { LocalHistory, LocalMarket, LocalVenue } from "./live/local.ts";
 import { NEWS_ID, NEWS_KEEP_MS, NEWS_NAME, type Headline } from "./live/news.ts";
 import { US_TICKER } from "./live/us-quotes.ts";
-import { exploreAcross, type Exploration, type ExploreItem, type ExploreSort } from "./live/explore.ts";
+import { exploreAcross, type Exploration, type ExploreItem, type ExploreMissing, type ExploreSort } from "./live/explore.ts";
+import { optionRow, VENUE_NAMES, type OptionChain, type OptionSummary, type OptionVenue } from "./live/options.ts";
+import { US_OPTION_UNDERLYINGS } from "./live/options-us.ts";
 import { INTERVAL_RANGE, PAGE_MOST, pageOf, RANGE_BAR, rangeSince, sessionsSince } from "./live/history.ts";
 import { KEEP_MS as LISTING_KEEP_MS, type PublicSource } from "./live/public-markets.ts";
 import { CANDLE_INTERVALS, CANDLE_RANGES, HISTORY_MOST, type Candle, type CandleInterval, type CandlePage, type CandleRange, type CandleWindow, type Market, type OrderBook, type PublicTrade } from "./live/trade.ts";
@@ -51,6 +55,8 @@ export interface MarketReads {
   /** each US share's latest headlines (at most NEWS_PER_SYMBOL, newest first, none older than `since`), a feed that refuses under
    * `unavailable` with its reason */
   news(symbols: readonly string[], since?: string): Promise<NewsView | Refusal>;
+  /** ONE OPTION CHAIN at one venue (Deribit, OKX: a coin; Nasdaq: a US ticker), at `expiry` (absent: the nearest with a day left) */
+  options(o: { underlying: string; venue: string; expiry?: string | undefined }): Promise<OptionChain | Refusal>;
 }
 
 /** the headlines GET /api/news answers: by symbol, and the symbols whose feed refused, each with the refusal's words */
@@ -154,6 +160,31 @@ const LOCAL_WORDS: Record<LocalVenue, { label: string; notRead: string; notSourc
     code: ixCode, bad: "an index is <region>:<id> from the market's list (jp:n225)", quote: "index", history: "an index's history is read by range",
     note: "Indices: the cash indices, levels in points, view-only; no venue here trades them." },
 };
+/** THE OPTION CHAINS' WORDS: the explore refusals, the notes under the list, the venues and how each underlying is typed */
+const OPTION_WORDS = {
+  sorted: "Options are sorted by volume or movers",
+  notSource: "Options are not part of a selected public source",
+  notRead: "Options are not read by this market",
+  cryptoNotRead: "Crypto options are not read by this market",
+  usNotRead: "US options are not read by this market",
+  venue: "an option venue is deribit, okx or nasdaq",
+  named: "an option chain names its underlying: a coin (BTC) or a US ticker (AAPL)",
+  expiry: "an expiry is a date, YYYY-MM-DD",
+  ticker: "a US ticker is 1 to 6 letters or dots (BRK.B)",
+  coin: "a coin is 1 to 15 letters or digits (BTC)",
+  cryptoNote: "Crypto options: Deribit's figures where Deribit lists the coin (volume in USD, open interest in the coin), else OKX's; view-only.",
+  usNote: "US options: Nasdaq's nearest expiry alone (volume and open interest summed), no IV; price from the US stocks line; view-only.",
+} as const;
+const OPTION_VENUES: readonly OptionVenue[] = ["deribit", "okx", "nasdaq"];
+/** the coins Deribit and OKX list options on (fixtures/options/README.md): never asked of Nasdaq */
+const OPTION_COINS: ReadonlySet<string> = new Set(["BTC", "ETH", "SOL", "XRP", "AVAX", "TRX", "HYPE"]);
+const US_OPTION_TICKER = /^[A-Z.]{1,6}$/;
+const OPTION_COIN = /^[A-Z0-9]{1,15}$/;
+const OPTION_EXPIRY = /^\d{4}-\d{2}-\d{2}$/;
+/** how long the crypto option list (three Deribit books, then OKX's) and the coin rows its changes come from are waited for */
+const OPTION_LIST_WAIT_MS = 12_000;
+const COIN_CHANGE_WAIT_MS = 5_000;
+
 /** how long a chart's first view may take (Nasdaq's whole history of a share is about ten seconds), and one page scrolled left */
 export const HISTORY_WAIT_MS = 20_000;
 export const PAGE_WAIT_MS = 12_000;
@@ -321,6 +352,75 @@ export function marketReads(core: MarketCore): MarketReads {
       notes: [w.note, got.read.note], local: got.read };
   }
 
+  /** EACH COIN'S 24-HOUR CHANGE as the market's coin rows give it (Crypto Spot over the public sources, kept as explore keeps it): the
+   * crypto option rows' change (Deribit gives none for an underlying). A coin no row lists, or a read that does not come, has no change */
+  async function coinChanges(): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    const got = await within(COIN_CHANGE_WAIT_MS, reads.explore({ asset: "crypto", form: "spot", limit: 200 }), "coins", "The coin rows");
+    if (isRefusal(got)) return out;
+    for (const i of got.items) {
+      if (i.kind === "coin" && i.key.startsWith("coin:") && typeof i.changePct24h === "number" && Number.isFinite(i.changePct24h)) out.set(i.key.slice(5).toUpperCase(), i.changePct24h);
+    }
+    return out;
+  }
+
+  /** THE OPTION CHAINS' LIST: one row an underlying — the crypto source's (asset crypto, no region) and the US source's (asset stocks, region
+   * us), both when neither is named, none for any other asset or region. `q` is a listed underlying's letters; sorted by summed volume (in
+   * dollars where the source gives it) or by the size of the underlying's day change. A source's partial read, note and stale list are said
+   * (`notes`, `stale`); a source that refuses is `missing`, the other answered. Never kept here: each source keeps its own reads */
+  async function exploreOptions(asset: AssetId | undefined, region: RegionId | undefined, q: string, key: string, sort: string | undefined, limit: number): Promise<Exploration | Refusal> {
+    if (sort === "closing") return no("E_MARKET_BAD_REQUEST", { message: OPTION_WORDS.sorted });
+    const wantCrypto = (asset ?? "crypto") === "crypto" && region === undefined;
+    const wantUs = (asset ?? "stocks") === "stocks" && (region ?? "us") === "us";
+    const missing: ExploreMissing[] = [];
+    const notes: string[] = [];
+    const empty = { movers: [], closing: [], mostTraded: [] };
+    if (!wantCrypto && !wantUs) return { asOf: new Date(now()).toISOString(), tabs: [], items: [], ...empty, missing, notes };
+    const crypto = wantCrypto ? core.cryptoOptions : undefined;
+    const us = wantUs ? core.usOptions : undefined;
+    if (!crypto && !us) return no("E_MARKET_BAD_REQUEST", { message: OPTION_WORDS.notRead });
+    if (wantCrypto && !crypto) missing.push({ venue: "deribit", venueName: VENUE_NAMES.deribit, connected: false, why: OPTION_WORDS.cryptoNotRead });
+    if (wantUs && !us) missing.push({ venue: "nasdaq", venueName: VENUE_NAMES.nasdaq, connected: false, why: OPTION_WORDS.usNotRead });
+    const [c, u] = await Promise.all([
+      crypto ? within(OPTION_LIST_WAIT_MS, crypto.summaries(), "deribit", "Crypto options") : undefined,
+      us ? within(OPTION_LIST_WAIT_MS, us.summaries(), "nasdaq", "US options") : undefined,
+    ]);
+    const summaries: OptionSummary[] = [];
+    const asOfs: string[] = [];
+    let stale = false;
+    const take = (got: typeof c, fallback: OptionVenue, label: string, note: string): void => {
+      if (got === undefined) return;
+      if (isRefusal(got)) {
+        const venue = (OPTION_VENUES as readonly string[]).includes(got.venue ?? "") ? (got.venue as OptionVenue) : fallback;
+        missing.push({ venue, venueName: VENUE_NAMES[venue], connected: false, why: got.message, code: got.code });
+        return;
+      }
+      notes.push(note);
+      if (got.note) notes.push(`${label}: ${got.note}`.slice(0, 159));
+      if (got.stale) stale = true;
+      asOfs.push(got.asOf);
+      summaries.push(...got.items);
+    };
+    take(c, "deribit", "Crypto options", OPTION_WORDS.cryptoNote);
+    take(u, "nasdaq", "US options", OPTION_WORDS.usNote);
+    // the crypto rows' day change is the coin's own row's (Deribit gives none): read only when a crypto row lacks one
+    const changes = summaries.some((s) => s.asset === "crypto" && s.changePct === undefined) ? await coinChanges() : new Map<string, number>();
+    const Q = q.toUpperCase();
+    const rows = summaries
+      .map((s) => (s.asset === "crypto" && s.changePct === undefined && changes.has(s.underlying) ? { ...s, changePct: changes.get(s.underlying)! } : s))
+      .map(optionRow)
+      .filter((i) => (!Q || (i.base ?? "").toUpperCase().includes(Q)) && (!key || i.key === key));
+    const volumeOf = (i: ExploreItem): number => i.option?.volumeUsd ?? i.option?.volume ?? -1;
+    const moveOf = (i: ExploreItem): number => (typeof i.changePct24h === "number" ? Math.abs(i.changePct24h) : -1);
+    rows.sort(sort === "movers" ? (a, b) => moveOf(b) - moveOf(a) || volumeOf(b) - volumeOf(a) : (a, b) => volumeOf(b) - volumeOf(a));
+    const tabs: Exploration["tabs"] = [
+      ...(crypto ? [{ id: "crypto" as const, label: "Crypto", count: rows.filter((i) => i.asset === "crypto").length }] : []),
+      ...(us ? [{ id: "stocks" as const, label: "Stocks", count: rows.filter((i) => i.asset === "stocks").length }] : []),
+    ];
+    const asOf = asOfs.length ? asOfs.reduce((a, b) => (Date.parse(a) <= Date.parse(b) ? a : b)) : new Date(now()).toISOString();
+    return { asOf, tabs, items: rows.slice(0, limit), ...empty, missing, notes, ...(stale ? { stale: true as const } : {}) };
+  }
+
   /** a venue and a market as the book and the trades take them (as `candles` does): a venue's id, and the market as plain text */
   function oneMarket(venue: string, symbol: string): { id: string; sym: string } | Refusal {
     const id = venue.trim();
@@ -338,7 +438,7 @@ export function marketReads(core: MarketCore): MarketReads {
     return within(BOOK_WAIT_MS, cache.get(`public-${what}|${src.id}|${sym}|${n}`, what === "book" ? BOOK_KEEP_MS : TRADES_KEEP_MS, load, at), src.id, src.name);
   }
 
-  return {
+  const reads: MarketReads = {
     /** MARKETS: what the public sources publish without a key (marked "Connect to trade"), as one list with its tabs, its movers, what closes
      * soon and what trades most (live/explore.ts), China's hits beside them on a search. The same question is answered from what was found
      * for thirty seconds. `key`, a row's own exactly as `items` names it, keeps only that row */
@@ -375,6 +475,11 @@ export function marketReads(core: MarketCore): MarketReads {
         if (ids.length) return no("E_MARKET_BAD_REQUEST", { message: "China is not part of a selected public source" });
         if (scope && scope !== "more") return no("E_MARKET_BAD_REQUEST", { message: "China is in more markets" });
         return exploreChina(q, sort, limit);
+      }
+      // THE OPTION CHAINS are their own sources' (each keeps its reads): asked only by form=option, never in All or another form
+      if (form === "option") {
+        if (ids.length) return no("E_MARKET_BAD_REQUEST", { message: OPTION_WORDS.notSource });
+        return exploreOptions(asset as AssetId | undefined, region as RegionId | undefined, q, key, sort, limit);
       }
       // THE LOCAL READS BY UNDERLYING: a region's shares on Stocks Spot (either left out) are its own source's — China A's (cn), Hong Kong's,
       // Korea's, Taiwan's — and a region's cash indices (Indices Spot) the world indices'; never beside a source list. Every other region and
@@ -606,7 +711,33 @@ export function marketReads(core: MarketCore): MarketReads {
       });
       return { news, ...(Object.keys(unavailable).length ? { unavailable } : {}) };
     },
+
+    /** ONE OPTION CHAIN (live/options-crypto.ts, live/options-us.ts): a coin's at Deribit or OKX, in the coin with its dollars; a US ticker's
+     * at Nasdaq, in dollars, no IV. A coin is never asked of Nasdaq nor a US share of a crypto venue. Each source keeps its own reads; the
+     * answer is waited for HISTORY_WAIT_MS (a Nasdaq month is paged) */
+    async options(o) {
+      const venue = (o.venue ?? "").trim().toLowerCase();
+      if (!(OPTION_VENUES as readonly string[]).includes(venue)) return no("E_MARKET_BAD_REQUEST", { message: OPTION_WORDS.venue });
+      const u = (o.underlying ?? "").trim().toUpperCase();
+      if (!u) return no("E_MARKET_BAD_REQUEST", { venue, message: OPTION_WORDS.named });
+      const expiry = (o.expiry ?? "").trim() || undefined;
+      if (expiry !== undefined && !OPTION_EXPIRY.test(expiry)) return no("E_MARKET_BAD_REQUEST", { venue, message: OPTION_WORDS.expiry });
+      if (venue === "nasdaq") {
+        if (OPTION_COINS.has(u)) return no("E_MARKET_BAD_REQUEST", { venue, message: `${u} is a coin: its options are read at deribit or okx` });
+        if (!US_OPTION_TICKER.test(u)) return no("E_MARKET_BAD_REQUEST", { venue, message: OPTION_WORDS.ticker });
+        const us = core.usOptions;
+        if (!us) return no("E_MARKET_BAD_REQUEST", { venue, message: OPTION_WORDS.usNotRead });
+        return within(HISTORY_WAIT_MS, us.chain(u, expiry), venue, VENUE_NAMES.nasdaq);
+      }
+      const v = venue as "deribit" | "okx";
+      if ((US_OPTION_UNDERLYINGS as readonly string[]).includes(u) || u.includes(".")) return no("E_MARKET_BAD_REQUEST", { venue, message: `${u} is a US share: its options are read at nasdaq` });
+      if (!OPTION_COIN.test(u)) return no("E_MARKET_BAD_REQUEST", { venue, message: OPTION_WORDS.coin });
+      const crypto = core.cryptoOptions;
+      if (!crypto) return no("E_MARKET_BAD_REQUEST", { venue, message: OPTION_WORDS.cryptoNotRead });
+      return within(HISTORY_WAIT_MS, crypto.chain(u, v, expiry), v, VENUE_NAMES[v]);
+    },
   };
+  return reads;
 }
 
 /** THE ROUTES: each read's query parsed and answered with its status code (200, 409 a refusal, 400 a malformed question) */
@@ -666,6 +797,14 @@ export function mountReads(app: express.Express, _core: MarketCore, reads: Marke
     if (!q) return;
     if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of trades, 1 to 100, in digits");
     answerOf(res, await reads.trades(q.venue, q.symbol, q.limit ? Number(q.limit) : 30));
+  }));
+
+  // one option chain: ?underlying=BTC&venue=deribit (or okx; a US ticker at nasdaq) and an optional &expiry=YYYY-MM-DD. Each name is read one
+  // character past its longest (a coin's 15, a venue's 7, a date's 10), so a longer one is refused by the read, never cut into another
+  app.get("/api/options", wrap(async (req, res) => {
+    const q = strings(req, res, { underlying: 16, venue: 8, expiry: 11 });
+    if (!q) return;
+    answerOf(res, await reads.options({ underlying: q.underlying, venue: q.venue, ...(q.expiry ? { expiry: q.expiry } : {}) }), "value");
   }));
 
   // each US share's latest headlines: ?symbols=INTC,CRWV (1 to 10 tickers, the Market's rule: us-quotes.ts US_TICKER) and an optional

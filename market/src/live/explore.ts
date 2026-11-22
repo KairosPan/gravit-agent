@@ -329,6 +329,8 @@ export interface Exploration {
   /** plain sentences for under the list, each under 160 characters: what the lists are made of (the sources' own words, and this file's
    * about Predictions) */
   notes: string[];
+  /** a list answered from its last good read because the source did not answer now (the option lists: reads.ts) */
+  stale?: true | undefined;
 }
 
 /** the most event rows Predictions shows when nothing is searched for */

@@ -99,7 +99,7 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
       if (marketNames.length >= 6) break;
       await sleep(500);
     }
-    assert.deepEqual(marketNames, ["akshare", "book", "candles", "explore", "quotes", "wencai"].map((raw) => `${MARKET_TOOL_PREFIX}market_${raw}`), "the market row's six tools");
+    assert.deepEqual(marketNames, ["akshare", "book", "candles", "explore", "option_chain", "quotes", "wencai"].map((raw) => `${MARKET_TOOL_PREFIX}market_${raw}`), "the market row's seven tools");
     assert.deepEqual(auditOrderTools(tools.schemas()).gated.filter((name) => name.startsWith(MARKET_TOOL_PREFIX)), [], "no market read is carded");
 
     /* 3. A real session with an open turn, and the outermost answerer, as the
