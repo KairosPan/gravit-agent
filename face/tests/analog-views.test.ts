@@ -77,6 +77,28 @@ test("the trimming is the same every time: four windows kept, the last two dropp
   }
 });
 
+test("a version 2 view over the bound drops windows, then cases, as version 1 did", async (t) => {
+  const window = Array.from({ length: 91 }, (_, k) => [k - 30, 101.11, 102.22, 99.33, 100.44, 123456789]);
+  const rel = Array.from({ length: 281 }, (_, k) => [k - 30, 101.11]);
+  const measure = { base: 50, gap: -0.1, changes: [0, 1, 5, 20, 60, 250].map((k) => ({ k, r: -0.12, x: -0.11 })), low: -0.16, lowAt: 1, sessionsAfter: 300 };
+  const cases = Array.from({ length: 12 }, (_, k) => ({ id: `S${k}:2020-01-01`, measure, relOf: "benchmark", listed: false, skipped: 0, tapeRan: true, window, rel }));
+  const view = { kind: "events", version: 2, windowsDropped: 0, cases };
+  const store = createViewStore(await dir(t), { maxBytes: 60_000 });
+  const some = await store.write(view);
+  const kept = await store.read(some.id) as { version: number; cases: Array<{ window: unknown; rel: unknown }> };
+  assert.ok(some.bytes <= 60_000); assert.equal(kept.version, 2);
+  assert.ok(some.windowsDropped > 0 && some.windowsDropped < 12); assert.equal(some.casesDropped, 0);
+  assert.deepEqual(kept.cases.map((c) => c.window === null), cases.map((_, k) => k >= 12 - some.windowsDropped));
+  assert.ok(kept.cases.every((c) => Array.isArray(c.rel)), "rel is kept; only windows are dropped");
+
+  const tight = createViewStore(await dir(t), { maxBytes: 30_000 });
+  const more = await tight.write(view);
+  const left = await tight.read(more.id) as { cases: Array<{ id: string; window: unknown }>; windowsDropped: number; casesDropped: number };
+  assert.ok(more.bytes <= 30_000); assert.ok(more.casesDropped > 0);
+  assert.equal(more.windowsDropped, 12 - more.casesDropped); // every window went before the first case did
+  assert.deepEqual(left.cases.map((c) => [c.id, c.window]), cases.slice(0, 12 - more.casesDropped).map((c) => [c.id, null]));
+});
+
 test("write leaves the view it was given as it was", async (t) => {
   const window = Array.from({ length: 91 }, (_, k) => [k - 30, 101.11, 102.22, 99.33, 100.44, 123456789]);
   const view = { kind: "events", windowsDropped: 0, cases: Array.from({ length: 12 }, (_, k) => ({ id: `S${k}:2020-01-01`, window })) };

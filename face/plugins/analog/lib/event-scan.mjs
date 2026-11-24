@@ -1,30 +1,34 @@
 // face/plugins/analog/lib/event-scan.mjs
 /**
  * The event scan: a researched list of past events checked field by field, every company's daily history read through
- * the keep, each event measured from its day 0 against the market, and the view that holds what was measured, what
- * could not be, and why.
+ * the keep, each event measured from the call's base at its horizons against its benchmark, and the view (version 2)
+ * that holds what was measured, what could not be, and why.
  *
  * The input is refused at its first bad field, named by its path. Each text (the title, a label, a group, a note) is
  * put on one line before it is measured, every run of whitespace and control characters one space, so a text from a
  * page cannot start a line of the digest; a source URL that carries a username or a password is refused. Every history
- * is read in one call to the keep under the scan's deadline; the market's (`SPY`) is always read fresh, and so is the
- * present case's company (`query`) when there is one, so a new session drops what the keep held; the past events'
- * companies may come from the keep. A market that does not answer with nothing read is a refusal; a company the market
- * refuses, one not read before the deadline, an event whose day 0 has not traded, and one with fewer than 20 sessions
- * before day 0 are kept as unmeasured cases with the words that say why, never left out. Without the market's own bars
- * the raw changes stay and every change against the market is null. The view says where the present case's and the
- * market's bars came from, where they start and whether they were read short, and how many of the companies' histories
- * end on a bar built from the session's minutes.
+ * is read in one call to the keep under the scan's deadline; the market's (`SPY`) is always read fresh, and so are the
+ * benchmark and the present case's company (`query`) when there is one, so a new session drops what the keep held; the
+ * past events' companies may come from the keep. A market that does not answer with nothing read is a refusal; a
+ * company the market refuses, one not read before the deadline, an event whose day 0 has not traded, one whose day 0
+ * SPY's sessions do not confirm, a price that cannot be tied to the bars and a base that cannot be had are kept as
+ * unmeasured cases with the words that say why, never left out. Without the benchmark's own bars (refused, or `none`)
+ * the view is raw: every change against it is null, the summaries read the raw changes, and each path is the stock's
+ * own. The view says where the present case's, the market's and the benchmark's bars came from, where they start and
+ * whether they were read short, and how many of the companies' histories end on a bar built from the session's minutes.
  *
  * `verified` is the reader's claim checked by the face: an event marked verified whose source no reader opened is
- * stored unverified and flagged `unopened`. The present case's anchors are measured like the events, are in no
- * group, and may carry a source, `verified` and a note, checked the same way; an anchor's source may be left out.
+ * stored unverified and flagged `unopened`; a split record whose page no reader opened is stored unverified and
+ * flagged `splitsUnopened`, and still measured, the bars having confirmed its factor. The present case's anchors are
+ * measured like the events, are in no group, and may carry a source, `verified` and a note, checked the same way; an
+ * anchor's source may be left out.
  */
 import {
   BASES, DEFAULT_HORIZONS, DEFAULT_HORIZONS_DAY0_CLOSE, ELSEWHERE, ELSEWHERE_OVER, HORIZONS_MAX, HORIZON_MAX,
-  MIN_VOLUMES, NEIGHBOURS, QUIET, TIMINGS, VOLUME_BASE, dayZero, tapeCheck,
+  MIN_VOLUMES, NEIGHBOURS, QUIET, TIMINGS, VOLUME_BASE, baseOf, casePaths, dayZero, measureCase, tapeCheck,
 } from "./events.mjs";
-import { SPLITS_MAX } from "./price-tie.mjs";
+import { SPLITS_MAX, TIE_TOLERANCE, tiePrice } from "./price-tie.mjs";
+import { CALENDAR_DAYS, checkDayZero } from "./sessions.mjs";
 import { groupPaths, orderCases, summarizeEvents } from "./event-summary.mjs";
 import { normalizeSymbol } from "./symbols.mjs";
 import { MIN_GROUP } from "./stats.mjs";
@@ -50,27 +54,41 @@ import { refuse } from "./errors.mjs";
  *   verified: boolean, note: string | null } & PriceIn} EventIn
  * @typedef {{ label: string, date: string, timing: When["timing"], source: string | null, verified: boolean,
  *   note: string | null } & PriceIn} AnchorIn
+ * @typedef {import("./event-summary.mjs").Against} Against
+ * @typedef {{ list: Split[], factor: number, source: string, opened: boolean, verified: boolean }} SplitRecord the
+ *   splits a case's price was divided by, their factor and the page that lists them, `verified` when a reader opened it
  * @typedef {{ state: "measured" | "unmeasured", words: string | null, day0: string | null, measure: Measure | null,
- *   tape: Tape | null, flags: string[], window: Path | null, rel: Array<[number, number]> | null }} Measured
+ *   tape: Tape | null, tapeRan: boolean, flags: string[], window: Path | null, rel: Array<[number, number]> | null,
+ *   relOf: "benchmark" | "self" | null, factor: number | null, splits: SplitRecord | null, listed: boolean,
+ *   skipped: number }} Measured `tapeRan` false when the tape check had too few volumes before day 0; `relOf` what
+ *   `rel` is against (`self`: the stock's own path); `factor` the split factor a price was divided by, under `price`
+ * @typedef {{ price: number | null, statedOpen: number | null }} PriceOut a case's stated price and first-day open,
+ *   as given (null under any base but `price`)
  * @typedef {{ id: string, symbol: string, label: string, group: string, date: string, timing: string, source: string,
- *   note: string | null, claimed: boolean, opened: boolean, verified: boolean } & Measured} EventCase
+ *   note: string | null, claimed: boolean, opened: boolean, verified: boolean } & PriceOut & Measured} EventCase
  * @typedef {{ claimed: boolean, opened: boolean, verified: boolean }} Checked
  * @typedef {{ id: string, label: string, date: string, timing: string, source: string | null, note: string | null }
- *   & Checked & Measured} Anchor
- * @typedef {{ kind: "events", version: 1, at: string, title: string,
+ *   & Checked & PriceOut & Measured} Anchor
+ * @typedef {{ symbol: string | null, source: string | null, words: string | null, firstBar: string | null,
+ *   short: boolean }} BenchmarkRead
+ * @typedef {{ kind: "events", version: 2, at: string, title: string,
  *   query: null | { symbol: string, readDate: string, latest: string | null, today: string | null,
  *     sessionOpen: boolean, words: string | null, source: string | null, short: boolean, firstBar: string | null,
  *     anchors: Anchor[] },
- *   parameters: { minBefore: number, volumeBase: number, minVolumes: number, quiet: number, elsewhere: number,
- *     elsewhereOver: number, neighbours: number, minGroup: number, pre: number, post: number },
+ *   parameters: { base: Base, horizons: number[], benchmark: string | null, against: Against, volumeBase: number,
+ *     minVolumes: number, quiet: number, elsewhere: number, elsewhereOver: number, neighbours: number,
+ *     minGroup: number, pre: number, post: number, tieTolerance: number, calendarDays: number },
  *   coverage: { asked: number, measured: number, unmeasured: Array<{ id: string, symbol: string, words: string }>,
  *     verified: number, unverified: number, unopened: number, quiet: number, elsewhere: number, noContext: number,
  *     companies: { asked: number, read: number }, sources: Record<string, number>,
  *     short: Array<{ symbol: string, source: string, firstBar: string }>, adjustment: string[],
  *     market: { source: string | null, words: string | null, firstBar: string | null, short: boolean },
+ *     benchmark: BenchmarkRead, skipped: number, listed: number,
  *     sessionBars: number, readFrom: string | null, deadline: boolean },
  *   groups: { all: EventSummary, named: Array<{ name: string, summary: EventSummary, paths: Paths | null }> },
- *   cases: EventCase[], windowsDropped: 0 }} EventsView
+ *   cases: EventCase[], windowsDropped: 0 }} EventsView `against` is `benchmark` when a benchmark was asked and its
+ *   history read, else `raw`; `market` is SPY's read, `benchmark` the benchmark's; `noContext` counts the measured
+ *   cases whose first change has no figure against the benchmark; `skipped` and `listed` count cases
  */
 
 /** The most events one scan takes. */
@@ -356,13 +374,14 @@ function horizonsIn(raw, base) {
 }
 
 /**
- * The call's benchmark: a ticker as `normalizeSymbol` writes it, null for `none`, `SPY` when left out.
+ * The call's benchmark: a ticker as `normalizeSymbol` writes it, null for `none` (in any case, trimmed), `SPY` when
+ * left out.
  * @param {unknown} raw
  * @returns {string | null}
  */
 function benchmarkIn(raw) {
   if (!given(raw)) return MARKET_SYMBOL;
-  if (typeof raw === "string" && raw.trim() === "none") return null;
+  if (typeof raw === "string" && raw.trim().toLowerCase() === "none") return null;
   try {
     return normalizeSymbol(raw);
   } catch {
@@ -401,48 +420,107 @@ export function normalizeEvents({ title: rawTitle, events: rawEvents, query: raw
 }
 
 /**
- * An unmeasured case and the words that say why, with a `flags` array of its own.
- * @param {string} words
+ * An unmeasured case and the words that say why, with a `flags` array of its own; `listed` and `skipped` as day 0's
+ * check found them, when it ran.
+ * @param {string} words @param {{ listed: boolean, skipped: number }} [at]
  * @returns {Measured}
  */
-const unmeasured = (words) => ({ state: "unmeasured", words, day0: null, measure: null, tape: null, flags: [], window: null, rel: null });
+const unmeasured = (words, { listed, skipped } = { listed: false, skipped: 0 }) => ({
+  state: "unmeasured", words, day0: null, measure: null, tape: null, tapeRan: false, flags: [], window: null, rel: null,
+  relOf: null, factor: null, splits: null, listed, skipped,
+});
 
 /**
- * An event measured on its company's history, or the words that say why it cannot be.
- * @param {History} history @param {When} when @param {Bar[] | null} marketBars
+ * Whether the tape check had the volumes it needs: `MIN_VOLUMES` of the `VOLUME_BASE` sessions before day `i0`.
+ * @param {Bar[]} bars @param {number} i0
+ */
+function tapeRuns(bars, i0) {
+  let count = 0;
+  for (let i = Math.max(0, i0 - VOLUME_BASE); i < i0; i++) {
+    const v = bars[i].v;
+    if (typeof v === "number" && v > 0) count++;
+  }
+  return count >= MIN_VOLUMES;
+}
+
+/**
+ * @typedef {{ base: Base, horizons: number[], bench: Bar[] | null, calendar: Bar[] | null,
+ *   opened: (url: string) => boolean }} Measuring the call's base and horizons, the benchmark's bars (null when none
+ *   was read), SPY's bars as day 0's calendar (null when not read), and the page record
+ */
+
+/**
+ * An event measured on its company's history, or the words that say why it cannot be: day 0 by its timing, checked on
+ * SPY's sessions; under `price` the price tied to the bars; the base; the changes at the horizons; the tape; the paths.
+ * @param {History} history @param {When} when @param {PriceIn} price @param {Measuring} measuring
  * @returns {Measured}
  */
-function measureOn(history, when, marketBars) {
+function measureOn(history, when, price, { base, horizons, bench, calendar, opened }) {
   const { bars } = history;
   const i0 = dayZero(bars, when);
   if (i0 === null) {
     const after = when.timing === "post" || when.timing === "closed" ? "after" : "on or after";
     return unmeasured(`no session ${after} ${when.date} in its bars, which end ${dateOf(bars[bars.length - 1].t)}`);
   }
-  if (i0 < MIN_BEFORE) {
-    return unmeasured(`only ${i0} sessions before day 0; its bars start ${history.firstBar} (${history.source})`);
+  const day0 = dateOf(bars[i0].t);
+  const check = checkDayZero(bars, i0, when, { calendar, short: history.short });
+  if ("words" in check) return unmeasured(check.words);
+  let value = null;
+  /** @type {number | null} */
+  let factor = null;
+  /** @type {SplitRecord | null} */
+  let splits = null;
+  if (base === "price") {
+    const tie = tiePrice({ day0Open: bars[i0].o, day0Date: day0, statedOpen: price.statedOpen, splits: price.splits });
+    if ("words" in tie) return unmeasured(tie.words, check);
+    factor = tie.factor;
+    value = /** @type {number} */ (price.price) / factor;
+    if (tie.splitFactor !== null && price.splits !== null && price.splitsSource !== null) {
+      const isOpened = opened(price.splitsSource);
+      splits = { list: price.splits, factor: tie.splitFactor, source: price.splitsSource, opened: isOpened, verified: isOpened };
+    }
   }
+  const based = baseOf(bars, i0, base, value, bench);
+  if ("words" in based) return unmeasured(based.words, check);
   const tape = tapeCheck(bars, i0);
-  const { window, rel } = eventWindow(bars, i0, marketBars);
+  const { window, rel, relOf } = casePaths(bars, i0, based, bench, Math.max(POST, horizons.at(-1) ?? 0));
+  /** @type {string[]} */
+  const flags = [...tape.flags];
+  if (check.skipped > 0) flags.push("skipped");
+  if (splits !== null && !splits.opened) flags.push("splitsUnopened");
   return {
-    state: "measured", words: null, day0: dateOf(bars[i0].t), measure: measureEvent(bars, i0, marketBars), tape,
-    flags: [...tape.flags], window, rel,
+    state: "measured", words: null, day0, measure: measureCase(bars, i0, base, based, horizons, bench), tape,
+    tapeRan: tapeRuns(bars, i0), flags, window, rel, relOf, factor, splits, listed: check.listed, skipped: check.skipped,
   };
 }
 
 /**
- * The scan of a list of events and, when asked, the present case.
- * @param {{ title: unknown, events: unknown, query?: unknown, keep: BarsKeep, opened?: (url: string) => boolean,
- *   now?: () => Date, deadlineMs?: number }} args
+ * A group's paths cut to `sessions` entries, so they run from day 0 to the last horizon and no further.
+ * @param {Paths | null} paths @param {number} sessions
+ * @returns {Paths | null}
+ */
+const pathsTo = (paths, sessions) => paths === null ? null : {
+  median: paths.median.slice(0, sessions), q1: paths.q1.slice(0, sessions), q3: paths.q3.slice(0, sessions),
+};
+
+/**
+ * The scan of a list of events and, when asked, the present case, measured from the call's base at its horizons
+ * against its benchmark.
+ * @param {{ title: unknown, events: unknown, query?: unknown, base?: unknown, horizons?: unknown, benchmark?: unknown,
+ *   keep: BarsKeep, opened?: (url: string) => boolean, now?: () => Date, deadlineMs?: number }} args
  * @returns {Promise<EventsView>}
  */
-export async function scanEvents({ title: rawTitle, events: rawEvents, query: rawQuery, keep, opened = () => false, now = () => new Date(), deadlineMs = SCAN_DEADLINE_MS }) {
-  const { title, events, query } = normalizeEvents({ title: rawTitle, events: rawEvents, query: rawQuery });
+export async function scanEvents({
+  title: rawTitle, events: rawEvents, query: rawQuery, base: rawBase, horizons: rawHorizons, benchmark: rawBenchmark,
+  keep, opened = () => false, now = () => new Date(), deadlineMs = SCAN_DEADLINE_MS,
+}) {
+  const { title, events, query, base, horizons, benchmark } = normalizeEvents({
+    title: rawTitle, events: rawEvents, query: rawQuery, base: rawBase, horizons: rawHorizons, benchmark: rawBenchmark,
+  });
   const companies = [...new Set(events.map((e) => e.symbol))];
-  const got = await keep.histories(
-    [...companies, ...(query === null ? [] : [query.symbol]), MARKET_SYMBOL],
-    { fresh: query === null ? [MARKET_SYMBOL] : [query.symbol, MARKET_SYMBOL], deadlineMs },
-  );
+  /** @type {string[]} SPY always, the present case's company and the benchmark, each read fresh */
+  const fresh = [...new Set([...(query === null ? [] : [query.symbol]), MARKET_SYMBOL, ...(benchmark === null ? [] : [benchmark])])];
+  const got = await keep.histories([...new Set([...companies, ...fresh])], { fresh, deadlineMs });
   if (got.down && got.read.size === 0) {
     throw refuse.marketUnreachable([...got.refused.values()][0] ?? "the market did not answer");
   }
@@ -450,22 +528,28 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
   /** @param {string} symbol @returns {string} */
   const wordsOf = (symbol) => got.refused.get(symbol) ?? DEADLINE_WORDS;
   const spy = got.read.get(MARKET_SYMBOL);
-  const marketBars = spy === undefined ? null : spy.bars;
-  /** @param {string} symbol @param {When} when @returns {Measured} */
-  const measure = (symbol, when) => {
+  const benchHistory = benchmark === null ? undefined : got.read.get(benchmark);
+  const bench = benchHistory === undefined ? null : benchHistory.bars;
+  /** @type {Against} */
+  const against = bench === null ? "raw" : "benchmark";
+  /** @type {Measuring} */
+  const measuring = { base, horizons, bench, calendar: spy === undefined ? null : spy.bars, opened };
+  /** @param {string} symbol @param {When} when @param {PriceIn} price @returns {Measured} */
+  const measure = (symbol, when, price) => {
     const history = got.read.get(symbol);
-    return history === undefined ? unmeasured(wordsOf(symbol)) : measureOn(history, when, marketBars);
+    return history === undefined ? unmeasured(wordsOf(symbol)) : measureOn(history, when, price, measuring);
   };
 
   /** @type {EventCase[]} */
-  const given = events.map((e) => {
-    const m = measure(e.symbol, e);
+  const asked = events.map((e) => {
+    const m = measure(e.symbol, e, e);
     return {
       id: `ev-${e.symbol}-${e.date}`, symbol: e.symbol, label: e.label, group: e.group, date: e.date, timing: e.timing,
-      source: e.source, note: e.note, ...m, ...checkClaim(e.verified, e.source, opened, m),
+      source: e.source, note: e.note, price: e.price, statedOpen: e.statedOpen, ...m,
+      ...checkClaim(e.verified, e.source, opened, m),
     };
   });
-  const cases = orderCases(given);
+  const cases = orderCases(asked, against);
   const measured = cases.filter((c) => c.state === "measured");
 
   /** @type {History[]} every history the view was measured on */
@@ -500,29 +584,32 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
       source: h === undefined ? null : h.source, short: h === undefined ? false : h.short,
       firstBar: h === undefined ? null : h.firstBar,
       anchors: query.anchors.map((a, i) => {
-        const m = measure(query.symbol, a);
+        const m = measure(query.symbol, a, a);
         return {
           id: `q-${i + 1}`, label: a.label, date: a.date, timing: a.timing, source: a.source, note: a.note,
-          ...m, ...checkClaim(a.verified, a.source, opened, m),
+          price: a.price, statedOpen: a.statedOpen, ...m, ...checkClaim(a.verified, a.source, opened, m),
         };
       }),
     };
   }
   if (spy !== undefined) used.push(spy);
+  if (benchHistory !== undefined && benchmark !== MARKET_SYMBOL) used.push(benchHistory);
   const adjustment = [...new Set(used.map((h) => h.adjustment).filter((a) => a !== null))];
   const readFrom = used.length === 0 ? null : new Date(Math.min(...used.map((h) => h.readAt))).toISOString();
   const groupNames = [...new Set(events.map((e) => e.group))];
   const verified = cases.filter((c) => c.verified).length;
+  const sessions = (horizons.at(-1) ?? 0) + 1;
 
   return {
     kind: "events",
-    version: 1,
+    version: 2,
     at: now().toISOString(),
     title,
     query: present,
     parameters: {
-      minBefore: MIN_BEFORE, volumeBase: VOLUME_BASE, minVolumes: MIN_VOLUMES, quiet: QUIET, elsewhere: ELSEWHERE,
-      elsewhereOver: ELSEWHERE_OVER, neighbours: NEIGHBOURS, minGroup: MIN_GROUP, pre: PRE, post: POST,
+      base, horizons, benchmark, against, volumeBase: VOLUME_BASE, minVolumes: MIN_VOLUMES, quiet: QUIET,
+      elsewhere: ELSEWHERE, elsewhereOver: ELSEWHERE_OVER, neighbours: NEIGHBOURS, minGroup: MIN_GROUP, pre: PRE,
+      post: POST, tieTolerance: TIE_TOLERANCE, calendarDays: CALENDAR_DAYS,
     },
     coverage: {
       asked: cases.length,
@@ -533,7 +620,7 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
       unopened: cases.filter((c) => c.flags.includes("unopened")).length,
       quiet: measured.filter((c) => c.flags.includes("quiet")).length,
       elsewhere: measured.filter((c) => c.flags.includes("elsewhere")).length,
-      noContext: measured.filter((c) => c.measure?.x0 === null).length,
+      noContext: measured.filter((c) => (c.measure?.changes[0]?.x ?? null) === null).length,
       companies: { asked: companies.length, read },
       sources,
       short,
@@ -542,15 +629,24 @@ export async function scanEvents({ title: rawTitle, events: rawEvents, query: ra
         source: spy === undefined ? null : spy.source, words: spy === undefined ? wordsOf(MARKET_SYMBOL) : null,
         firstBar: spy === undefined ? null : spy.firstBar, short: spy === undefined ? false : spy.short,
       },
+      benchmark: {
+        symbol: benchmark,
+        source: benchHistory === undefined ? null : benchHistory.source,
+        words: benchmark !== null && benchHistory === undefined ? wordsOf(benchmark) : null,
+        firstBar: benchHistory === undefined ? null : benchHistory.firstBar,
+        short: benchHistory === undefined ? false : benchHistory.short,
+      },
+      skipped: cases.filter((c) => c.skipped > 0).length,
+      listed: cases.filter((c) => c.listed).length,
       sessionBars,
       readFrom,
       deadline: timedOut.size > 0,
     },
     groups: {
-      all: summarizeEvents(cases),
+      all: summarizeEvents(cases, horizons, against),
       named: groupNames.map((name) => {
         const inGroup = cases.filter((c) => c.group === name);
-        return { name, summary: summarizeEvents(inGroup), paths: groupPaths(inGroup) };
+        return { name, summary: summarizeEvents(inGroup, horizons, against), paths: pathsTo(groupPaths(inGroup), sessions) };
       }),
     },
     cases,
