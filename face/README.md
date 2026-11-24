@@ -7137,10 +7137,14 @@ catalog lists `analog-guide` (the profile's `mechanics` root; Discover's skills)
    case has no case line, so read its `verified` and `flags` in the view. PASS: gravit's report
    names them as unverified, and no date the reader did not verify is told as checked.
 5. **A company gone is unmeasured.** PASS: a precedent whose stock no longer trades is in the
-   list, under its last ticker, on the digest's `unmeasured:` line (its ticker and date, with the
-   market's words when the digest has room: they go before any case line does, and the company itself
-   only once every case line has left) and in the view's `coverage.unmeasured` with the market's words,
-   and gravit's report says the list leans favourable for it.
+   list, under its last ticker, in the digest: with room, on the `unmeasured:` line with its date
+   and the market's words; cut, on a reason's line, `unmeasured, <reason>: TICKER, …` (the market's
+   words with each ticker taken out, so every company refused alike shares one line, as do the
+   face's own reasons such as `needs a split record`). Case lines leave before a reason's
+   companies are cut to `+N more`; only past that are the unmeasured named alone
+   (`unmeasured: TICKER, …`) and, last, counted (`unmeasured: N cases`), and the case lines then
+   come back while they fit. It is also in the view's `coverage.unmeasured` with the market's
+   words, and gravit's report says the list leans favourable for it.
 6. **The answer.** PASS: the report gives the counts by group, how the present case differs, the
    digest's caveats and its flags, and recommends no trade. Its `ready` report names the view
    (`an-…`), and the relay in the conversation ends, after its closing fence, with the face's line
