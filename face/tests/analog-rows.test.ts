@@ -8,6 +8,7 @@ import * as viewsRow from "../plugins/analog/views-row.mjs";
 import * as eventsRow from "../plugins/analog/events-row.mjs";
 import { AnalogError } from "../plugins/analog/lib/errors.mjs";
 import { VIEW_ID_RE } from "../plugins/analog/lib/views.mjs";
+import { BASES } from "../plugins/analog/lib/events.mjs";
 import { ANALOG_ROW_IDS, ANALOG_TOOL_NAMES, analogPatches } from "../src/analog.ts";
 import { EVENT, EVENT_MARKET, fakeMarket } from "./analog-fixtures.ts";
 
@@ -69,7 +70,7 @@ test("analog_events answers a digest and the id of a stored view", async (t) => 
   assert.deepEqual([...ANALOG_TOOL_NAMES], ["analog_events"]);
   const events = tools.find((tool) => tool.name === "analog_events")!;
   const schema = events.parameters as { properties: object; required: string[] };
-  assert.deepEqual(Object.keys(schema.properties), ["title", "events", "query"]); assert.deepEqual(schema.required, ["title", "events"]);
+  assert.deepEqual(Object.keys(schema.properties), ["title", "events", "query", "base", "horizons", "benchmark"]); assert.deepEqual(schema.required, ["title", "events"]);
   service.notePage("https://example.com/a");
   const answer = JSON.parse(await events.execute({ title: "CEO scandals", events: [EVENT_IN] }, ROOT));
   assert.equal(answer.ok, true); assert.match(answer.view, VIEW_ID_RE);
@@ -77,6 +78,9 @@ test("analog_events answers a digest and the id of a stored view", async (t) => 
   assert.ok(answer.digest.includes("1 verified, 0 unverified"), answer.digest);
   assert.deepEqual(await readdir(viewsDir), [`${answer.view}.json`]);
   assert.equal((await service.readView(answer.view)).kind, "events");
+  assert.ok(!answer.digest.includes("from day 0's close"), answer.digest);
+  const closed = JSON.parse(await events.execute({ title: "CEO scandals", events: [EVENT_IN], base: "day0_close" }, ROOT));
+  assert.ok(closed.digest.includes("from day 0's close"), closed.digest);
   await assert.rejects(events.execute({ title: "CEO scandals", events: [EVENT_IN] }, CHILD), code("NOT_GRAVIT"));
   await assert.rejects(events.execute({ title: "CEO scandals", events: [] }, ROOT), code("INVALID_EVENTS"));
   assert.equal(service.pageOpened("http://www.example.com/a/"), true);
@@ -92,6 +96,24 @@ test("the events schema says what each timing means and requires a query's ancho
   }
 });
 
+test("the events schema names the base, the horizons, the benchmark and each case's price fields", async (t) => {
+  const { tools } = await mountedEvents(t);
+  const schema = tools.find((tool) => tool.name === "analog_events")!.parameters as any;
+  assert.equal(schema.properties.base.type, "string"); assert.deepEqual(schema.properties.base.enum, BASES);
+  assert.equal(schema.properties.horizons.type, "array"); assert.equal(schema.properties.horizons.items.type, "integer");
+  assert.equal(schema.properties.benchmark.type, "string");
+  for (const item of [schema.properties.events.items, schema.properties.query.properties.anchors.items]) {
+    const props = item.properties;
+    for (const key of ["price", "stated_open", "splits", "splits_source"]) assert.ok(key in props, key);
+    assert.equal(props.price.type, "number"); assert.equal(props.stated_open.type, "number"); assert.equal(props.splits_source.type, "string");
+    assert.equal(props.splits.type, "array"); assert.equal(props.splits.items.additionalProperties, false);
+    assert.deepEqual(Object.keys(props.splits.items.properties), ["date", "new", "old"]);
+    assert.deepEqual([props.splits.items.properties.new.type, props.splits.items.properties.old.type], ["integer", "integer"]);
+    assert.ok(!(item.required ?? []).includes("price"), "price stays optional");
+  }
+});
+
 test("the events description says what the tool is and is not", () => {
-  for (const word of ["Past events like this one, measured.", "role_source_reader", "analog-guide", "never verified", "against SPY", "quote numbers from the digest only", "never evidence for a trade"]) assert.ok(eventsRow.EVENTS_DESCRIPTION.includes(word), word);
+  for (const word of ["Past events like this one, measured.", "role_source_reader", "analog-guide", "never verified", "a listing has no close before it", "default SPY", "quote its numbers from the digest", "labelled as your own", "never evidence for a trade"]) assert.ok(eventsRow.EVENTS_DESCRIPTION.includes(word), word);
+  assert.ok(!eventsRow.EVENTS_DESCRIPTION.includes("quote numbers from the digest only"));
 });
