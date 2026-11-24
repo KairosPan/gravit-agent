@@ -1,0 +1,824 @@
+{
+ "assets": [
+  {
+   "tokenSymbol": "CRM",
+   "tokenName": "Salesforce • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "P",
+   "tokenName": "Everpure • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CIEN",
+   "tokenName": "Ciena • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ON",
+   "tokenName": "ON Semiconductor • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "APLD",
+   "tokenName": "Applied Digital • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AEHR",
+   "tokenName": "Aehr • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "TEAM",
+   "tokenName": "Atlassian Corporation • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "QBTS",
+   "tokenName": "D-Wave Quantum Inc. Common Stock • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SATS",
+   "tokenName": "EchoStar • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "FIX",
+   "tokenName": "Comfort Systems • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MTSI",
+   "tokenName": "MACOM • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SMCI",
+   "tokenName": "Super Micro Computer • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "V",
+   "tokenName": "Visa • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "DELL",
+   "tokenName": "Dell • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MXL",
+   "tokenName": "MaxLinear • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "RUN",
+   "tokenName": "Sunrun • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "WDAY",
+   "tokenName": "Workday • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SPCX",
+   "tokenName": "Space Exploration Technologies Corp. Class A Common Stock • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "GLXY",
+   "tokenName": "Galaxy Digital Inc. • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CRWD",
+   "tokenName": "CrowdStrike Holdings • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AVGO",
+   "tokenName": "Broadcom • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SPY",
+   "tokenName": "SPDR S&P 500 ETF Trust • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CCL",
+   "tokenName": "Carnival Corporation • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "GLD",
+   "tokenName": "SPDR Gold Trust • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SNOW",
+   "tokenName": "Snowflake • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "FICO",
+   "tokenName": "Fair Isaac • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "PR",
+   "tokenName": "Permian Resources • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "QQQ",
+   "tokenName": "Invesco QQQ • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "WYFI",
+   "tokenName": "WhiteFiber, Inc. • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "JPM",
+   "tokenName": "JPMorgan Chase • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "NNE",
+   "tokenName": "Nano Nuclear Energy • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "GE",
+   "tokenName": "General Electric • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SNAP",
+   "tokenName": "Snap • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SKHY",
+   "tokenName": "SK hynix Inc. American Depositary Shares • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CBRS",
+   "tokenName": "Cerebras Systems • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "FUTU",
+   "tokenName": "Futu Holdings • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "TSM",
+   "tokenName": "Taiwan Semiconductor Manufacturing • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "NU",
+   "tokenName": "Nu • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "INTC",
+   "tokenName": "Intel • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MSFT",
+   "tokenName": "Microsoft • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "RCAT",
+   "tokenName": "Red Cat • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "RGTI",
+   "tokenName": "Rigetti Computing • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "TTWO",
+   "tokenName": "Take-Two Interactive Software • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "META",
+   "tokenName": "Meta Platforms • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "VICR",
+   "tokenName": "Vicor • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "TSEM",
+   "tokenName": "Tower Semiconductor • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "RDDT",
+   "tokenName": "Reddit • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "GLW",
+   "tokenName": "Corning • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "UPS",
+   "tokenName": "UPS • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "PANW",
+   "tokenName": "Palo Alto Networks • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "LHX",
+   "tokenName": "L3Harris • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MCD",
+   "tokenName": "McDonald's • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "FLY",
+   "tokenName": "Firefly Aerospace Inc. • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SNDK",
+   "tokenName": "Sandisk Corporation • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "BA",
+   "tokenName": "Boeing • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "INTU",
+   "tokenName": "Intuit • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ELF",
+   "tokenName": "e.l.f. Beauty • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "GDX",
+   "tokenName": "VanEck Gold Miners ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AMZN",
+   "tokenName": "Amazon • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "NFLX",
+   "tokenName": "Netflix • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CRCL",
+   "tokenName": "Circle Internet Group • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "PYPL",
+   "tokenName": "PayPal • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "USAR",
+   "tokenName": "USA Rare Earth • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "VST",
+   "tokenName": "Vistra • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CSCO",
+   "tokenName": "Cisco Systems • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "FISV",
+   "tokenName": "Fiserv • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "GOOGL",
+   "tokenName": "Alphabet Class A • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "BB",
+   "tokenName": "Blackberry • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CVNA",
+   "tokenName": "Carvana • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AXTI",
+   "tokenName": "AXT • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MOD",
+   "tokenName": "Modexus Solutions, Inc. • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "LULU",
+   "tokenName": "Lululemon • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "LMT",
+   "tokenName": "Lockheed • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "INFQ",
+   "tokenName": "Infleqtion • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SGOV",
+   "tokenName": "iShares 0-3 Month Treasury Bond • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "OUST",
+   "tokenName": "Ouster • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "IREN",
+   "tokenName": "IREN Limited • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MRNA",
+   "tokenName": "Moderna • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "LRCX",
+   "tokenName": "Lam Research Corp • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "BND",
+   "tokenName": "Vanguard Total Bond Market ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CEG",
+   "tokenName": "Constellation Energy • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ALAB",
+   "tokenName": "Astera Labs, Inc. • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "TEM",
+   "tokenName": "Tempus AI • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "BULL",
+   "tokenName": "Webull • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "UNH",
+   "tokenName": "UnitedHealth • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CLOV",
+   "tokenName": "Clover Health Investments • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "BABA",
+   "tokenName": "Alibaba • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SIMO",
+   "tokenName": "Silicon Motion • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "WDC",
+   "tokenName": "Western Digital • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CLSK",
+   "tokenName": "CleanSpark • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "PLTR",
+   "tokenName": "Palantir Technologies • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MU",
+   "tokenName": "Micron Technology • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ASTS",
+   "tokenName": "AST SpaceMobile • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "POWL",
+   "tokenName": "Powell Industries • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "VTI",
+   "tokenName": "Vanguard Morningstar Total Stock Market ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "RKLB",
+   "tokenName": "Rocket Lab Corporation • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "TER",
+   "tokenName": "Teradyne • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CRWV",
+   "tokenName": "CoreWeave • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CLS",
+   "tokenName": "Celestica • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "FIG",
+   "tokenName": "Figma • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AMD",
+   "tokenName": "AMD • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "EWY",
+   "tokenName": "iShares MSCI South Korea fund • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SLS",
+   "tokenName": "SELLAS Life Sciences • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CRDO",
+   "tokenName": "Credo Technology Group • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SMH",
+   "tokenName": "VanEck Semiconductor ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "VRT",
+   "tokenName": "Vertiv • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "NOW",
+   "tokenName": "ServiceNow • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "XLK",
+   "tokenName": "State Street Technology Select Sector SPDR ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AMBA",
+   "tokenName": "Ambarella • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "NVDA",
+   "tokenName": "NVIDIA • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "JOBY",
+   "tokenName": "Joby Aviation • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "QUBT",
+   "tokenName": "Quantum Computing • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "USO",
+   "tokenName": "United States Oil Fund • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "PWR",
+   "tokenName": "Quanta • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "F",
+   "tokenName": "Ford Motor • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ZS",
+   "tokenName": "Zscaler • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "COIN",
+   "tokenName": "Coinbase • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "XOM",
+   "tokenName": "ExxonMobil Holdings Corporation • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "NBIS",
+   "tokenName": "Nebius Group • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SHY",
+   "tokenName": "iShares 1-3 Year Treasury Bond ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SMR",
+   "tokenName": "NuScale Power • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SOUN",
+   "tokenName": "SoundHound AI • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "POET",
+   "tokenName": "POET Technologies • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "APP",
+   "tokenName": "AppLovin • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AAOI",
+   "tokenName": "Applied Optoelectronics • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "LITE",
+   "tokenName": "Lumentum • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AEIS",
+   "tokenName": "Advanced Energy • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "KTOS",
+   "tokenName": "Kratos Defense & Security Solutions • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AMAT",
+   "tokenName": "Applied Materials • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MRVL",
+   "tokenName": "Marvell Technology • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "JBL",
+   "tokenName": "Jabil Inc. • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "LLY",
+   "tokenName": "Eli Lilly • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "QCOM",
+   "tokenName": "Qualcomm • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "BMNR",
+   "tokenName": "BitMine Immersion Technologies • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "JNJ",
+   "tokenName": "Johnson & Johnson • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "KSS",
+   "tokenName": "Kohls Corporation • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ANET",
+   "tokenName": "Arista • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "TTEQ",
+   "tokenName": "T. Rowe Price Exchange-Traded Funds, Inc. T. Rowe Price Technology ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CTSH",
+   "tokenName": "Cognizant • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "PL",
+   "tokenName": "Planet Labs • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "IONQ",
+   "tokenName": "IonQ • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "TE",
+   "tokenName": "T1 Energy • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SHOP",
+   "tokenName": "Shopify • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "NVTS",
+   "tokenName": "Navitas Semiconductor • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "PATH",
+   "tokenName": "UiPath • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "UMC",
+   "tokenName": "United Microelectronics • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "DIS",
+   "tokenName": "Disney • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ORCL",
+   "tokenName": "Oracle • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "COHR",
+   "tokenName": "Coherent • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "GEV",
+   "tokenName": "GE Vernova • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AUR",
+   "tokenName": "Aurora Innovation • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "IBM",
+   "tokenName": "IBM • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "NAVN",
+   "tokenName": "Navan • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "INOD",
+   "tokenName": "Innodata • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AAPL",
+   "tokenName": "Apple • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AMC",
+   "tokenName": "AMC Entertainment • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "RIVN",
+   "tokenName": "Rivian Automotive • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "GME",
+   "tokenName": "GameStop • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MPWR",
+   "tokenName": "Monolithic Power Systems • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "PENG",
+   "tokenName": "Penguin Solutions • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ANT",
+   "tokenName": "Anthropic, PBC Class A Common Stock • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "NET",
+   "tokenName": "Cloudflare, Inc. Class A common stock • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SCHD",
+   "tokenName": "Schwab US Dividend Equity ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "LUNR",
+   "tokenName": "Intuitive Machines • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MSTR",
+   "tokenName": "Strategy Inc. • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ABCL",
+   "tokenName": "Abcellera Biologics • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AXON",
+   "tokenName": "Axon • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "TSLA",
+   "tokenName": "Tesla • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "EWT",
+   "tokenName": "iShares MSCI Taiwan Capped ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "FTNT",
+   "tokenName": "Fortinet • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "HPE",
+   "tokenName": "HP Enterprise • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "VSAT",
+   "tokenName": "ViaSat • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ADBE",
+   "tokenName": "Adobe • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "XNDU",
+   "tokenName": "Xanadu Quantum • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "DDOG",
+   "tokenName": "Datadog • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "RDW",
+   "tokenName": "Redwire • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "BE",
+   "tokenName": "Bloom Energy • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "DJT",
+   "tokenName": "Trump Media & Technology Group • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "UBER",
+   "tokenName": "Uber • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "OKLO",
+   "tokenName": "Oklo • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ZM",
+   "tokenName": "Zoom • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "FLNC",
+   "tokenName": "Fluence Energy • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SLV",
+   "tokenName": "iShares Silver Trust • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SOFI",
+   "tokenName": "SoFi Technologies • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "DOCN",
+   "tokenName": "DigitalOcean • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "WULF",
+   "tokenName": "TeraWulf • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "COST",
+   "tokenName": "Costco • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "TTD",
+   "tokenName": "Trade Desk • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "HWM",
+   "tokenName": "Howmet Aerospace • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "HIMS",
+   "tokenName": "Hims & Hers Health • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "CELH",
+   "tokenName": "Celsius • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "RBLX",
+   "tokenName": "Roblox • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SPMO",
+   "tokenName": "Invesco S&P 500 Momentum ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AMKR",
+   "tokenName": "Amkor Technology • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ONTO",
+   "tokenName": "Onto Innovation • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "SOXX",
+   "tokenName": "iShares Semiconductor ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ASML",
+   "tokenName": "ASML Holding NV • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "HII",
+   "tokenName": "Huntington Ingalls • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "AVAV",
+   "tokenName": "AeroVironment • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "INDA",
+   "tokenName": "iShares MSCI India ETF • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "MDB",
+   "tokenName": "MongoDB • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "PFE",
+   "tokenName": "Pfizer • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "KLAC",
+   "tokenName": "KLA • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "ZETA",
+   "tokenName": "Zeta Global • Robinhood Token"
+  },
+  {
+   "tokenSymbol": "IBRX",
+   "tokenName": "ImmunityBio, • Robinhood Token"
+  }
+ ]
+}
