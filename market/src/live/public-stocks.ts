@@ -32,20 +32,23 @@
  *                       (an XML AccessDenied, not a refusal of this network): read as "not listed". But the store also keeps files of
  *                       tickers that no longer trade: SATS.json (2026-10-14) is dated "2026-09-26 14:14:54", last_trade_time
  *                       "2026-06-23T15:59:59", current_price 103.3, prev_day_close 0.0 and bid and ask 0.0 — EchoStar's share trades as
- *                       ECHO — so a ticker the loaded symbol book does not list is not asked of Cboe (Nasdaq, which knows the tickers that
- *                       trade, is), and a change is taken only beside a previous close. A dotted class share is written with its dot (BRK.B).
- *                       cdn.cboe.com redirects here (HTTP 307) and is not asked: the account follows no redirect
- *   GET …/symbol_book/symbol-book.json                                        every symbol Cboe quotes, {name, company_name} (35,769 on
- *                       2026-10-14, 2.3 MB), kept ten minutes (LIST_MS) and read for a search, the companies' names, which tickers the
- *                       market lists (a Robinhood quote is taken only for a ticker in it: us-quotes.ts UsAsk.listed) and which are likely
- *                       ETFs (a company name with ETF, ETN, Fund or Trust, not Inc or Corp: Nasdaq is asked for those as an ETF first). A
- *                       plain ticker (one to five letters, a class letter after a dot) is a stock or an ETF; an index (^SPX) or a futures
- *                       root is not offered
+ *                       ECHO — so a ticker the loaded symbol directory does not list is not asked of Cboe (Nasdaq, which knows the tickers
+ *                       that trade, is), and a change is taken only beside a previous close. A dotted class share is written with its dot
+ *                       (BRK.B). cdn.cboe.com redirects here (HTTP 307) and is not asked: the account follows no redirect
  *   GET …/charts/intraday/{symbol}.json                                       the last market day's regular-session minutes, each with its
  *                       real open, high, low, close and volume, {datetime (New York), price: {open, high, low, close}, volume:
  *                       {stock_volume}}, fifteen minutes behind; …/charts/historical/{symbol}.json every day since 2004 (600 KB, kept ten
  *                       minutes), its rows on days the market was closed (2025-05-26 copies 05-23) and its repeated dates (SPY 2024-12-31)
  *                       left out
+ * THE BOOK — which tickers the market lists, and what each company is called — is Nasdaq Trader's symbol directory (us-directory.ts: its two
+ * files, read whole on their own lane, kept twelve hours), read for a search (the ticker whole, then its start, then the company's name), the
+ * lines' names, which tickers the market lists and which are ETFs (Nasdaq is asked for those as an ETF first). A plain ticker (one to five
+ * letters, a class letter after a dot) is a stock or an ETF; an index (^SPX), a futures root or a preferred share ("ABR$D") is not offered.
+ * A ROBINHOOD QUOTE is taken for a ticker only where the directory lists it and, where Robinhood has a token of that symbol, the token's
+ * name (/rhj/assets, us-tokens.ts) and the directory's agree (us-tokens.ts listedGate): SATS is EchoStar's token, while the directory's
+ * SATS is Strive's preferred stock. Until both have answered, only for the well-known few this file names itself (US_SHARES). The
+ * directory refusing at cold start leaves the well-known list priced and a ticker typed whole answered; a search by a company's name then
+ * answers the directory's refusal, and the notes say that company names are unavailable.
  * PRICE HISTORY (feat/paper-live phase H, live/history-stocks.ts): Robinhood's real bars in bars of 1m to 1h for the windows it keeps — the
  * latest session in minutes, five sessions in five minutes, a month of hours with pre-market and after-hours, three of the regular session —
  * folded into 15m and 4h; Robinhood's daily bars for a year or five, Nasdaq's by dates for all of it and for every page scrolled left, today's
@@ -82,7 +85,9 @@ import { badHistory, fin, fixedHosts, has, keeper, LIST_MS, list, nonNeg, pos, P
 import type { Candle, MarketSession } from "./trade.ts";
 import { realHttp, unreachable, type HttpReply } from "./types.ts";
 import { closedSessionBefore } from "./us-closes.ts";
+import { usDirectory, type DirEntry } from "./us-directory.ts";
 import { FRESH_MS, NASDAQ_AT_ONCE, NASDAQ_FROM, nasdaqSource, ROBINHOOD_FROM, ROBINHOOD_OVERNIGHT, usQuote, UsQuoteFeed, type NasdaqClosing, type UsQuote } from "./us-quotes.ts";
+import { listedGate, robinhoodTokenNames } from "./us-tokens.ts";
 
 /** whether Robinhood's quotes are taken in the overnight session (us-quotes.ts, where it is set): a share Robinhood priced is then offered
  * for an extended-hours limit order overnight */
@@ -110,13 +115,14 @@ export const DAY_CHANGE_FROM_CBOE = true;
 /** a plain ticker: one to five letters, a class letter after a dot (BRK.B) — the same as us-quotes.ts US_TICKER, written out here: this file
  * and that one import each other (through public-markets.ts), so neither reads the other's values while it is being loaded */
 const TICKER = /^[A-Z]{1,5}(\.[A-Z])?$/;
-/** a company in Cboe's book whose name says it is likely a fund (an ETF or the like), not a company that is a REIT trust (…Trust Inc) */
-const FUND = /\b(ETF|ETN|Fund|Trust)\b/i;
-const COMPANY = /\b(Inc|Corp|Corporation)\b/i;
 /** Cboe writes a new quote file about once a minute: a quote is kept that long */
 const PRICE_MS = 60_000;
-/** how long a search for a plain ticker waits for the symbol book before answering from the quote alone */
-const BOOK_WAIT_MS = 1_500;
+/** how long a search for a plain ticker — and a share's line, and a listing with nothing searched for — waits for the symbol directory (and
+ * the token names) on their first read before answering without them: the directory's two files are well over a megabyte, and the Markets
+ * read allows a source four seconds in all */
+export const DIR_WAIT_MS = 1_500;
+/** what the notes say while the directory has never answered */
+const NO_NAMES = "Company names are unavailable: Nasdaq Trader's symbol directory did not answer; search by ticker.";
 /** how long a listing waits for Cboe's quotes, from when it asked them (with the real-time chain), once the chain has priced something: a
  * Cboe that is slow or hangs does not hold back the lines the chain priced past the callers' four seconds. Where the chain priced nothing,
  * Cboe is waited for in full: its answer, or its refusal, is then the listing's */
@@ -145,10 +151,8 @@ interface Quote {
   /** when Cboe wrote the file (its `timestamp`, UTC), in ms: the file says the trades up to fifteen minutes before it */
   writtenMs?: number | undefined;
 }
-interface BookEntry {
-  symbol: string;
-  company: string;
-}
+/** a line asked for: a directory entry, or a ticker typed whole that the directory does not carry (its name is then its ticker) */
+type Wanted = Pick<DirEntry, "symbol" | "name">;
 
 /** "2026-10-13T09:45:44" (New York, as Cboe writes it) in ms; nothing for anything else */
 export function cboeTimeMs(v: unknown): number | undefined {
@@ -362,7 +366,14 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
   const nasdaq = nasdaqSource(deps);
   const live = usQuote(deps, nasdaq);
   const quotes = keeper<Quote | null>(clock, PRICE_MS);
-  const book = keeper<BookEntry[]>(clock, LIST_MS);
+  // THE BOOK (see the top of this file): Nasdaq Trader's directory, read whole on its own lane, and Robinhood's token names, through the same
+  // guard (it passes the directory's own maxText through)
+  const directory = usDirectory({ http, pace: deps.pace ?? hostLane, clock });
+  const tokens = robinhoodTokenNames({ http, pace: deps.pace ?? hostLane, clock });
+  /** whether Robinhood's quote may be taken for a ticker, as the directory and the token names last said (us-tokens.ts listedGate) */
+  const gate = () => listedGate(directory.now(), tokens.now());
+  /** both reads started, or the ones kept answered: each is kept (twelve hours, a day; a refusal ten minutes) and shared while on its way */
+  const readBook = () => Promise.all([directory.entries(), tokens.read()]).catch(() => undefined);
   const minutes = keeper<Candle[]>(clock, HISTORY_MS);
   const days = keeper<Candle[]>(clock, LIST_MS);
   const months = keeper<Candle[]>(clock, HISTORY_MS);
@@ -463,42 +474,22 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       }
       return [...out.values()].sort((a, b) => a.t - b.t);
     });
-  // the symbol book as last read, its tickers by their companies — kept beside the keeper, so a share's line and the background reader know
-  // the tickers the market lists at once while the book is read again
-  let bookNames: Map<string, string> | undefined;
-  /** every plain ticker Cboe quotes, with its company, kept ten minutes */
-  const symbols = (): Promise<BookEntry[] | Refusal> =>
-    book("book", async () => {
-      const r = await ask(`${CBOE}/symbol_book/symbol-book.json`);
-      if (isRefusal(r)) return r;
-      if (r.status !== 200 || r.body === undefined) return publicNo(id, CBOE_NAME, r);
-      const out: BookEntry[] = [];
-      for (const x of list(rec(r.body).data)) {
-        const sym = str(rec(x).name)?.toUpperCase();
-        if (!sym || !TICKER.test(sym)) continue;
-        out.push({ symbol: sym, company: str(rec(x).company_name) ?? sym });
-      }
-      bookNames = new Map(out.map((e) => [e.symbol, e.company]));
-      return out;
-    });
-  /** the tickers the market lists as the book last said them: a book read before answers at once (read again in the background once it is
-   * ten minutes old); none read yet, the book waited for BOOK_WAIT_MS at most (it finishes loading for the next ask) */
-  const namesNow = async (): Promise<Map<string, string> | undefined> => {
-    if (bookNames) {
-      void symbols().catch(() => undefined);
-      return bookNames;
-    }
-    await within(symbols(), BOOK_WAIT_MS);
-    return bookNames;
+  /** the directory as last read, by symbol: one read before answers at once (read again in the background once it is twelve hours old);
+   * none read yet, the directory and the token names waited for DIR_WAIT_MS at most (they finish loading for the next ask) */
+  const dirNow = async (): Promise<ReadonlyMap<string, DirEntry> | undefined> => {
+    const on = readBook();
+    if (!directory.now() || !tokens.now()) await within(on, DIR_WAIT_MS);
+    return directory.now();
   };
   /** THE BACKGROUND READER (live/us-quotes.ts UsQuoteFeed) of the shares someone is looking at, on this line's own chain: Robinhood's quote
-   * taken for a ticker the book lists — before the book has answered, for the well-known few this file names itself (as a listing takes it) */
+   * taken by the gate a listing takes it by — before the directory and the token names have answered, for the well-known few this file
+   * names itself */
   const feed = new UsQuoteFeed({
     source: id,
     quotes: live,
     listed: (s) => {
-      if (!bookNames) void symbols().catch(() => undefined);
-      return bookNames ? bookNames.has(s) : US_SHARES.includes(s);
+      if (!directory.now() || !tokens.now()) void readBook();
+      return gate()(s);
     },
     clock,
   });
@@ -603,7 +594,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
      * Cboe's quote for it AT THE SAME TIME — one GET of Cboe at most (P16: a search of a short ticker reads forty) — and a line the chain
      * priced does not wait for Cboe: the previous close beside a Robinhood price is Cboe's answer where it has come, and the day's change is
      * left out where it has not — but for a Robinhood line in pre-market or after-hours whose close nothing at hand says, which waits for one
-     * read of Nasdaq for it (closesFor), to CBOE_WAIT_MS from the start at most, once per share and close. Cboe's delayed quote is the line only where the chain priced nothing. A ticker the loaded book does not list
+     * read of Nasdaq for it (closesFor), to CBOE_WAIT_MS from the start at most, once per share and close. Cboe's delayed quote is the line only where the chain priced nothing. A ticker the loaded directory does not list
      * is asked of Nasdaq alone (Cboe's store keeps files of tickers that no longer trade). Null: not a plain ticker, or no source prices it;
      * Cboe's refusal where nothing priced it and Cboe refused */
     async line(symbol) {
@@ -611,12 +602,13 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       live.warm();
       const sym = symbol.trim().toUpperCase();
       if (!TICKER.test(sym)) return null;
-      const names = await namesNow();
-      const company = names?.get(sym);
-      const unlisted = !!names && !names.has(sym);
-      if (FUND.test(company ?? "") && !COMPANY.test(company ?? "")) nasdaq.hint(sym, "etf");
+      const dir = await dirNow();
+      const entry = dir?.get(sym);
+      const company = entry?.name;
+      const unlisted = !!dir && !entry;
+      if (entry?.etf) nasdaq.hint(sym, "etf");
       const cbP = unlisted ? undefined : quote(sym);
-      const rt = (await live.many([sym], { listed: names ? (s) => names.has(s) : (s) => US_SHARES.includes(s) })).get(sym);
+      const rt = (await live.many([sym], { listed: gate() })).get(sym);
       const now = clock();
       if (rt) {
         // Cboe's quote where it has already answered, and nothing waited for where it has not
@@ -633,55 +625,60 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       live.clear();
       quotes.clear();
       closes.clear();
-      book.clear();
+      directory.clear();
+      tokens.clear();
       minutes.clear();
       days.clear();
       months.clear();
     },
     async listings(o) {
-      // Robinhood's one answer for every share it quotes is on its way while the symbol book is read (it is kept, and asked once)
+      // Robinhood's one answer for every share it quotes is on its way while the directory is read (it is kept, and asked once)
       live.warm();
       const Q = (o.q ?? "").trim().toUpperCase();
       const limit = Math.max(1, o.limit);
-      let pool: BookEntry[];
-      let all: BookEntry[] | undefined;
-      // a ticker typed whole that the loaded book does not list: asked of Nasdaq alone (Cboe keeps files of tickers that no longer trade)
+      let pool: Wanted[];
+      // the directory's refusal, where a search found it refusing: the answer to a search that priced nothing (no name could be looked up)
+      let dirRefused: Refusal | undefined;
+      // a ticker typed whole that the loaded directory does not list: asked of Nasdaq alone (Cboe keeps files of tickers that no longer trade)
       let unlisted: string | undefined;
       if (Q) {
-        // a search: the symbol book, by the ticker first (whole, then its start), then the company's name. A plain ticker typed whole is
-        // asked for directly as well, and does not wait for the book past BOOK_WAIT_MS: the book is 2.3 MB and its first read takes
-        // longer than the Markets read allows a source, so the first search of "AAPL" answers from the quote alone while the book
-        // finishes loading for the next one (the keeper keeps it on its way)
+        // a search: the directory, by the ticker first (whole, then its start), then the company's name. A plain ticker typed whole is
+        // asked for directly as well, and does not wait for the directory past DIR_WAIT_MS: its two files are over a megabyte, and the first
+        // search of "AAPL" answers from the quote alone while the directory finishes loading for the next one (it is kept on its way)
         const ticker = TICKER.test(Q);
-        const got = ticker ? await Promise.race([symbols(), new Promise<undefined>((go) => setTimeout(() => go(undefined), BOOK_WAIT_MS))]) : await symbols();
-        if (isRefusal(got) && !ticker) return got;
-        if (got && !isRefusal(got)) all = got;
-        const score = (e: BookEntry): number => (e.symbol === Q ? 3 : e.symbol.startsWith(Q) ? 2 : has(Q, e.company) ? 1 : 0);
-        pool = (all ?? [])
+        const asked = Date.now();
+        // the token names are read beside the directory, and waited for within the same DIR_WAIT_MS on their first read (the gate needs both)
+        const tokensOn = tokens.read().catch(() => undefined);
+        const got = ticker ? await Promise.race([directory.entries(), new Promise<undefined>((go) => setTimeout(() => go(undefined), DIR_WAIT_MS))]) : await directory.entries();
+        if (!tokens.now()) await within(tokensOn, asked + DIR_WAIT_MS - Date.now());
+        if (isRefusal(got)) {
+          if (!ticker) return got;
+          dirRefused = got;
+        }
+        const all = got && !isRefusal(got) ? got : [];
+        const score = (e: DirEntry): number => (e.symbol === Q ? 3 : e.symbol.startsWith(Q) ? 2 : has(Q, e.name) ? 1 : 0);
+        pool = all
           .map((e) => ({ e, s: score(e) }))
           .filter((x) => x.s > 0)
           .sort((a, b) => b.s - a.s || a.e.symbol.length - b.e.symbol.length || a.e.symbol.localeCompare(b.e.symbol))
           .slice(0, limit)
           .map((x) => x.e);
-        // a ticker typed whole that the book does not carry (or that the book has not yet answered for) is still asked for: of Nasdaq alone
-        // where the book has answered without it, of Nasdaq and Cboe where it has not answered yet
+        // a ticker typed whole that the directory does not carry (or that it has not yet answered for) is still asked for: of Nasdaq alone
+        // where the directory has answered without it, of Nasdaq and Cboe where it has not answered yet
         if (ticker && !pool.some((e) => e.symbol === Q)) {
-          pool = [{ symbol: Q, company: Q }, ...pool].slice(0, limit);
-          if (all) unlisted = Q;
+          pool = [{ symbol: Q, name: Q }, ...pool].slice(0, limit);
+          if (got && !isRefusal(got)) unlisted = Q;
         }
       } else {
-        pool = US_SHARES.slice(0, limit).map((s) => ({ symbol: s, company: s }));
-        // the well-known few carry their company's name from the book too (kept ten minutes); the book refusing leaves them their tickers
-        const got = await symbols();
-        if (!isRefusal(got)) all = got;
+        // the well-known few carry their company's name from the directory, waited for DIR_WAIT_MS at most on its first read; the directory
+        // refusing (or late) leaves them their tickers
+        pool = US_SHARES.slice(0, limit).map((s) => ({ symbol: s, name: s }));
+        await dirNow();
       }
-      const names = new Map((all ?? []).map((e) => [e.symbol, e.company]));
-      // a likely fund is asked of Nasdaq as an ETF first
-      for (const e of pool) {
-        const company = names.get(e.symbol) ?? "";
-        if (FUND.test(company) && !COMPANY.test(company)) nasdaq.hint(e.symbol, "etf");
-      }
-      // Cboe for every line (but a ticker the loaded book does not list), AT THE SAME TIME as the real-time chain: the fallback for what the
+      const names = directory.now();
+      // a fund, as the directory says, is asked of Nasdaq as an ETF first
+      for (const e of pool) if (names?.get(e.symbol)?.etf) nasdaq.hint(e.symbol, "etf");
+      // Cboe for every line (but a ticker the loaded directory does not list), AT THE SAME TIME as the real-time chain: the fallback for what the
       // chain does not price in time, and the previous close beside a Robinhood price; eight at a time, as before
       const started = Date.now();
       const got = new Map<string, Quote>();
@@ -697,14 +694,13 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
             }),
           );
       })();
-      // real time within its one deadline: Robinhood's one answer for the tickers the book lists, then Nasdaq for the first lines it did not
-      // price (us-quotes.ts). With no book to check against, Robinhood's quote is taken only for the well-known few, tickers this file
-      // names itself (US_SHARES; each one Robinhood quotes matched the book by company on 2026-10-14) — never for a ticker typed before the
-      // book has answered, since a token's symbol may not be the share's ticker (SATS)
-      const listed = all ? (s: string) => names.has(s) : Q ? undefined : (s: string) => US_SHARES.includes(s);
+      // real time within its one deadline: Robinhood's one answer for the tickers the gate lets through, then Nasdaq for the first lines it
+      // did not price (us-quotes.ts). The gate (us-tokens.ts listedGate): the directory lists the ticker and the token's name agrees with the
+      // directory's, since a token's symbol may not be the share's ticker (SATS); before both have answered, only the well-known few, tickers
+      // this file names itself (US_SHARES; each one Robinhood quotes matched Cboe's book by company on 2026-10-14) — never another ticker typed
       const rt = await live.many(
         pool.map((e) => e.symbol),
-        { listed },
+        { listed: gate() },
       );
       // A LINE THE CHAIN PRICED NEVER WAITS FOR CBOE: Cboe is waited for only where a line has no real-time price — in full where the chain
       // priced nothing, else to CBOE_WAIT_MS from the start at most. What Cboe has answered by then is the previous close beside a Robinhood
@@ -715,18 +711,23 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       }
       const cb = new Map(got);
       // nothing priced and Cboe refused (a place rule, an edge, a ban, no answer): that is the answer, not a list with no prices
+      // a search with no directory to look names up in, that priced nothing: the directory's refusal says why nothing was found
+      if (dirRefused && !rt.size && !cb.size) return dirRefused;
       if (!rt.size && !cb.size && refused) return refused;
       const now = clock();
       // a Robinhood line right after the close (or in pre-market) whose close nothing at hand says: one Nasdaq read for it, in Cboe's time
       await closesFor(pool.map((e) => ({ sym: e.symbol, rt: rt.get(e.symbol), cb: cb.get(e.symbol) })), now, started + CBOE_WAIT_MS);
-      const out = pool.filter((e) => rt.has(e.symbol) || cb.has(e.symbol)).map((e) => listing(e.symbol, rt.get(e.symbol), cb.get(e.symbol), names.get(e.symbol) ?? (e.company !== e.symbol ? e.company : undefined), now));
+      const out = pool.filter((e) => rt.has(e.symbol) || cb.has(e.symbol)).map((e) => listing(e.symbol, rt.get(e.symbol), cb.get(e.symbol), names?.get(e.symbol)?.name ?? (e.name !== e.symbol ? e.name : undefined), now));
       if (!Q) shown = { of: out.length, total: US_SHARES.length };
       return out;
     },
-    notes: (o) =>
+    notes: (o) => [
       o.q?.trim()
-        ? [`${name}: real-time quotes from Robinhood or Nasdaq, else Cboe's delayed ones (15 minutes), for any US stock or ETF in Cboe's symbol book.`]
-        : [`${name}: real-time quotes (Robinhood, else Nasdaq) for ${shown?.of ?? US_SHARES.length} well-known names, else Cboe's 15 min delayed ones · search any stock or ETF.`],
+        ? `${name}: real-time quotes from Robinhood or Nasdaq, else Cboe's delayed ones (15 minutes), for any US stock or ETF in Nasdaq Trader's symbol directory.`
+        : `${name}: real-time quotes (Robinhood, else Nasdaq) for ${shown?.of ?? US_SHARES.length} well-known names, else Cboe's 15 min delayed ones · search any stock or ETF.`,
+      // while the directory has never answered (a read on its way, or refused)
+      ...(directory.now() ? [] : [NO_NAMES]),
+    ],
     /** price history, keyless (see the top of this file and live/history-stocks.ts): a plain ticker (AAPL, BRK.B), in bars of 1m to 1w,
      * for a chart's first view or one page before the first bar it has */
     async candles(symbol, interval, w) {
@@ -735,9 +736,8 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       if (bad) return bad;
       const sym = symbol.trim().toUpperCase();
       if (!TICKER.test(sym)) return no("E_ACCOUNT_BAD_ACTION", { venue: id, message: `a US stock here is its ticker (AAPL, BRK.B), not "${symbol.slice(0, 40)}"` });
-      // a likely fund is asked of Nasdaq as an ETF first (its company's name in the book, where the book has been read)
-      const company = bookNames?.get(sym) ?? "";
-      if (FUND.test(company) && !COMPANY.test(company)) nasdaq.hint(sym, "etf");
+      // a fund is asked of Nasdaq as an ETF first (as the directory says, where it has been read)
+      if (directory.now()?.get(sym)?.etf) nasdaq.hint(sym, "etf");
       return history(sym, interval, w);
     },
   };

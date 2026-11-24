@@ -130,8 +130,8 @@
  *                       and ask in dollars per token (tokenBid, tokenAsk). The listing itself is only read: the tokens trade from a
  *                       connected wallet on Robinhood Chain, against USDG through LI.FI (dex.ts), where the wallet's own rows offer them
  *   US stocks           Cboe's own delayed quotes (public-stocks.ts): GET cdn-api.cboe.com/api/global/delayed_quotes/quotes/{symbol}.json,
- *                       fifteen minutes behind the market, its symbol book for a search, its intraday minutes and daily closes for a
- *                       history. Read-only: a US stock trades at a connected broker (Alpaca, Robinhood) or in a paper account
+ *                       fifteen minutes behind the market, its intraday minutes and daily closes for a history; Nasdaq Trader's symbol
+ *                       directory (us-directory.ts, www.nasdaqtrader.com) for a search. Read-only: a US stock trades at a connected broker (Alpaca, Robinhood) or in a paper account
  *   xStocks, Ondo       tokenised shares priced where they trade without a key (public-rwa.ts): an xStock at Gate's spot ticker
  *                       (api.gateio.ws /api/v4/spot/tickers), with xStocks' own trading state (api.xstocks.fi); an Ondo Stock as LI.FI
  *                       prices it (li.quest /v1/token). Each carries its issuer's own words, as the wallet's rows do (dex.ts)

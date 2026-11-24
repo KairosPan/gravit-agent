@@ -1,11 +1,14 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import { fromEt, usClock } from "../../src/calendar.ts";
 import { PUBLIC_HOSTS, publicSources, type Listing } from "../../src/live/public-markets.ts";
-import { CBOE_DELAY_MS, CBOE_FROM, cboeQuoteInSession, cboeTimeMs, DAY_CHANGE_FROM_CBOE, ROBINHOOD_OVERNIGHT, US_SHARES, US_STOCKS_LINE, US_STOCKS_NAME, US_STOCKS_READ_ONLY, usLineAt, usStocksPublic } from "../../src/live/public-stocks.ts";
+import { CBOE_DELAY_MS, CBOE_FROM, cboeQuoteInSession, cboeTimeMs, DAY_CHANGE_FROM_CBOE, DIR_WAIT_MS, ROBINHOOD_OVERNIGHT, US_SHARES, US_STOCKS_LINE, US_STOCKS_NAME, US_STOCKS_READ_ONLY, usLineAt, usStocksPublic } from "../../src/live/public-stocks.ts";
 import type { Candle, CandlePage } from "../../src/live/trade.ts";
 import type { Http, HttpReply } from "../../src/live/types.ts";
 import { NASDAQ_FROM, ROBINHOOD_FROM, ROBINHOOD_OVERNIGHT as OVERNIGHT_IN_QUOTES, ROBINHOOD_PRICES, RT_WAIT_MS } from "../../src/live/us-quotes.ts";
+import { NASDAQ_TRADER } from "../../src/live/us-directory.ts";
+import { RH_ASSETS } from "../../src/live/us-tokens.ts";
 import { json, network } from "./live-public-markets-fixtures.ts";
 
 /** US STOCKS WITHOUT A KEY (live/public-stocks.ts): real-time quotes from Robinhood or Nasdaq where they answer, Cboe's own delayed quotes
@@ -20,8 +23,18 @@ const STAMP = "2026-10-13 14:30:46";
 const quoteOf = (symbol: string, price: number, extra: Rec = {}) =>
   json({ timestamp: STAMP, data: { symbol, security_type: "stock", exchange_id: 2, current_price: price, price_change: 0.84, price_change_percent: 0.2464, bid: price - 0.05, ask: price + 0.06, bid_size: 1280, ask_size: 80, open: price + 2.9, high: price + 6.3, low: price - 0.7, close: price, prev_day_close: price - 0.84, volume: 6877536, iv30: 26.691, last_trade_time: "2026-10-13T10:15:44", tick: "up", ...extra }, symbol });
 const NOT_LISTED = { status: 403, body: undefined, text: '<?xml version="1.0" encoding="UTF-8"?>\n<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>' };
-const BOOK = json({ timestamp: "2026-10-13 13:00:03", data: [{ name: "A", company_name: "Agilent Technologies Inc" }, { name: "A2RZ1", company_name: "Adjusted Interest Rate Russell 2000 Total Return Futures" }, { name: "AAPL", company_name: "Apple Inc" }, { name: "APP", company_name: "AppLovin Corp" }, { name: "NVDA", company_name: "NVIDIA Corp" }, { name: "BRK.B", company_name: "Berkshire Hathaway Inc" }, { name: "JPM", company_name: "JPMorgan Chase & Co" }, { name: "^SPX", company_name: "S&P 500 INDEX" }, { name: "SPY", company_name: "SPDR S&P 500 ETF Trust" }] });
-const routes = (): Array<[string, ReturnType<typeof json> | ((url: string) => ReturnType<typeof json>)]> => [
+/** Nasdaq Trader's symbol directory (live/us-directory.ts) and Robinhood's token names (live/us-tokens.ts), as cut from the files they
+ * served on 2026-11-23: the market's book of tickers, their companies' names, and the names a Robinhood quote is checked against */
+const fixture = (name: string) => readFileSync(new URL(`../fixtures/us-stocks/${name}`, import.meta.url), "utf8");
+const NASDAQ_LISTED = fixture("nasdaqlisted.txt");
+const OTHER_LISTED = fixture("otherlisted.txt");
+const TOKEN_NAMES = json(JSON.parse(fixture("rh-token-names.json")));
+/** a text answer, as the directory's files are read (whole, not as JSON) */
+const textReply = (text: string): HttpReply => ({ status: 200, body: undefined, text });
+/** the directory's two files and the token names, as routes; another nasdaqlisted text (its header kept) where a test needs other rows */
+const dirRoutes = (nasdaqListed = NASDAQ_LISTED, otherListed = OTHER_LISTED): Array<[string, HttpReply]> => [["/SymDir/nasdaqlisted.txt", textReply(nasdaqListed)], ["/SymDir/otherlisted.txt", textReply(otherListed)], ["/rhj/assets", TOKEN_NAMES]];
+const dirSent = (net: { sent: Array<{ url: string }> }) => net.sent.filter((s) => s.url.startsWith(NASDAQ_TRADER)).map((s) => s.url);
+const routes = (): Array<[string, HttpReply | ((url: string) => HttpReply)]> => [
   ["/quotes/AAPL.json", quoteOf("AAPL", 341.81)],
   ["/quotes/NVDA.json", quoteOf("NVDA", 180.5)],
   ["/quotes/APP.json", quoteOf("APP", 400)],
@@ -29,7 +42,7 @@ const routes = (): Array<[string, ReturnType<typeof json> | ((url: string) => Re
   ["/quotes/_SPX.json", quoteOf("^SPX", 7810.31, { security_type: "index" })],
   ["/quotes/ZZZZ.json", NOT_LISTED],
   ["/charts/intraday/ZZZZ.json", NOT_LISTED],
-  ["/symbol_book/symbol-book.json", BOOK],
+  ...dirRoutes(),
   ["/charts/intraday/AAPL.json", json({ timestamp: STAMP, data: [{ datetime: "2026-10-13T09:31:00", price: { open: 344.665, high: 347.61, low: 344.665, close: 346.9699 }, volume: { stock_volume: 1637693 } }, { datetime: "2026-10-13T09:32:00", price: { open: 346.935, high: 347.2, low: 346.5, close: 346.8 }, volume: { stock_volume: 500000 } }, { datetime: "2026-10-13T09:36:00", price: { open: 346.8, high: 348.1, low: 346.1, close: 347.5 }, volume: { stock_volume: 400000 } }] })],
   ["/charts/historical/AAPL.json", json({ timestamp: "11:00:08", data: [{ date: "2004-01-02", volume: 2024993600, open: 0.39, high: 0.39, low: 0.38, close: 0.38 }, { date: "2026-10-09", volume: 50000000, open: 340, high: 342, low: 338, close: 341 }, { date: "2026-10-12", volume: 48000000, open: 341, high: 343, low: 339, close: 340.97 }] })],
 ];
@@ -46,7 +59,7 @@ const seenMoving = (r: HttpReply) => {
   return () => (asked++ === 0 ? earlier : r);
 };
 /** a source whose clock reads `at`, that listed a search matching nothing fifteen seconds before and again at `at` — which reads
- * Robinhood's answer (as it stood then, `seenMoving`, then as it is) and the symbol book, nothing else — so each book Robinhood quotes at
+ * Robinhood's answer (as it stood then, `seenMoving`, then as it is), the symbol directory and the token names, nothing else — so each book Robinhood quotes at
  * `at` has been seen to move, and its latest answer prices it: Nasdaq is asked, at the same time as Robinhood, only for what that answer
  * does not price. What those listings asked is not counted in `sent`, and the answer read at `at` is kept until Robinhood's next write */
 async function watched(net: { http: Http; sent?: unknown[] }, at: number) {
@@ -81,15 +94,16 @@ describe("US stocks, keyless: Cboe's delayed quotes where no real-time source an
     // by design since the real-time chain: the line carries its stamp (Cboe's last_trade_time), the delay, the source in words (which is
     // the line's name), and the session in full
     const closes = new Date(fromEt(2026, 10, 13, 16)).toISOString();
-    expect(got[1]).toEqual({ symbol: "AAPL", name: "Apple Inc", kind: "stock", base: "AAPL", quote: "USD", price: 341.81, bid: 341.76, ask: 341.87, quoteAt: new Date(fromEt(2026, 10, 13, 10, 15) + 44_000).toISOString(), delayMs: CBOE_DELAY_MS, quoteFrom: CBOE_FROM, open: true, types: [], session: { open: true, closesAt: closes, phase: "regular", phaseEndsAt: closes, extendedHours: false }, change24h: 0.84, changePct24h: 0.2464, venueName: US_STOCKS_NAME });
+    expect(got[1]).toEqual({ symbol: "AAPL", name: "Apple Inc.", kind: "stock", base: "AAPL", quote: "USD", price: 341.81, bid: 341.76, ask: 341.87, quoteAt: new Date(fromEt(2026, 10, 13, 10, 15) + 44_000).toISOString(), delayMs: CBOE_DELAY_MS, quoteFrom: CBOE_FROM, open: true, types: [], session: { open: true, closesAt: closes, phase: "regular", phaseEndsAt: closes, extendedHours: false }, change24h: 0.84, changePct24h: 0.2464, venueName: US_STOCKS_NAME });
     expect(CBOE_FROM).toBe("Cboe · 15 min delayed");
     // nothing worked out from Cboe's figures: its volume is in shares, so no dollar volume
     expect(got[1]!.volumeUsd24h).toBeUndefined();
-    // Robinhood's one answer, Nasdaq for each share (as a stock, then as an ETF), then Cboe: the symbol book for the names (kept ten
-    // minutes) and the two quotes, nothing else
-    expect(net.sent.map((s) => s.url).filter((u) => u.includes("robinhood"))).toEqual([ROBINHOOD_PRICES]);
+    // Robinhood's token names and its one answer, Nasdaq for each share (as a stock, then as an ETF), Nasdaq Trader's directory for the
+    // names (its two files, kept twelve hours), then Cboe: the two quotes, nothing else
+    expect(net.sent.map((s) => s.url).filter((u) => u.includes("robinhood")).sort()).toEqual([RH_ASSETS, ROBINHOOD_PRICES]);
     expect(net.sent.filter((s) => s.url.includes("api.nasdaq.com"))).toHaveLength(4);
-    expect(cboeSent(net)).toEqual(["https://cdn-api.cboe.com/api/global/delayed_quotes/symbol_book/symbol-book.json", "https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/NVDA.json", "https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/AAPL.json"]);
+    expect(dirSent(net)).toEqual([`${NASDAQ_TRADER}/nasdaqlisted.txt`, `${NASDAQ_TRADER}/otherlisted.txt`]);
+    expect(cboeSent(net)).toEqual(["https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/NVDA.json", "https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/AAPL.json"]);
     expect(src).toMatchObject({ id: "cboe", name: "US stocks", kind: "stocks", connectTo: "alpaca", connector: "live:alpaca" });
     expect([US_STOCKS_NAME, US_STOCKS_LINE]).toEqual(["US stocks", "US stocks · real time, else Cboe 15 min delayed"]);
     expect(src.readOnly).toBe(US_STOCKS_READ_ONLY);
@@ -98,66 +112,104 @@ describe("US stocks, keyless: Cboe's delayed quotes where no real-time source an
     expect(src.notes!({}).every((n) => n.length < 160)).toBe(true);
     expect(PUBLIC_HOSTS).toEqual(expect.arrayContaining(["cdn-api.cboe.com", "api.robinhood.com", "api.nasdaq.com"]));
     expect(publicSources().map((s) => s.id)).toContain("cboe");
-    // a quote is kept a minute, the book ten, Robinhood's answer ten seconds, a symbol Nasdaq does not know ten minutes: the same listing
+    expect(PUBLIC_HOSTS).toContain("www.nasdaqtrader.com");
+    // a quote is kept a minute, the directory twelve hours, the token names a day, Robinhood's answer ten seconds, a symbol Nasdaq does not know ten minutes: the same listing
     // again asks nothing
     const asked = net.sent.length;
     await src.listings({ limit: 2 });
     expect(net.sent).toHaveLength(asked);
-    // the book refusing leaves the well-known their tickers for names, and the quotes still answer
-    const noBook = network([["/symbol_book/", { status: 500, body: undefined, text: "" }], ["/quotes/NVDA.json", quoteOf("NVDA", 180.5)], ["/quotes/AAPL.json", quoteOf("AAPL", 341.81)], ...noRealTime()]);
+    // the directory refusing leaves the well-known their tickers for names, and the quotes still answer
+    const noBook = network([["/SymDir/", { status: 500, body: undefined, text: "" }], ["/quotes/NVDA.json", quoteOf("NVDA", 180.5)], ["/quotes/AAPL.json", quoteOf("AAPL", 341.81)], ...noRealTime()]);
     expect(((await usStocksPublic({ pace: async () => undefined, http: noBook.http, clock: () => NOW }).listings({ limit: 2 })) as Listing[]).map((m) => m.name)).toEqual(["NVDA", "AAPL"]);
   });
 
-  it("a search reads Cboe's symbol book: the ticker whole first, then its start, then the company's name; an index and a futures root are not stocks; a dotted class share is; a ticker the loaded book lacks is asked of Nasdaq alone, and not listed where Nasdaq does not know it", async () => {
+  it("a search reads Nasdaq Trader's directory: the ticker whole first, then its start, then the company; an index and a futures root are not stocks; a dotted class share is; a ticker the loaded directory lacks is asked of Nasdaq alone, and not listed where Nasdaq does not know it", async () => {
     const net = network([...routes(), ...noRealTime()]);
     const src = usStocksPublic({ pace: async () => undefined, http: net.http, clock: () => NOW });
     const app = (await src.listings({ q: "app", limit: 5 })) as Listing[];
-    // APP whole, then Apple by its company name; the company's name comes with the quote
-    expect(app.map((m) => [m.symbol, m.name])).toEqual([["APP", "AppLovin Corp"], ["AAPL", "Apple Inc"]]);
-    expect(net.sent.filter((s) => s.url.includes("symbol_book"))).toHaveLength(1);
-    // the same book serves the well-known list's names
-    expect(((await src.listings({ limit: 2 })) as Listing[]).map((m) => m.name)).toEqual(["NVIDIA Corp", "Apple Inc"]);
+    // APP whole, then Apple by its company's name; the company's name is the directory's, its share-class words trimmed
+    expect(app.map((m) => [m.symbol, m.name])).toEqual([["APP", "Applovin Corporation Class A"], ["AAPL", "Apple Inc."]]);
+    // "Apple" is five letters, so a ticker typed whole as well: Nasdaq is asked for APPLE (it knows none), and Apple Inc. is found by name
+    expect(((await src.listings({ q: "Apple", limit: 5 })) as Listing[]).map((m) => [m.symbol, m.name])).toEqual([["AAPL", "Apple Inc."]]);
+    expect(dirSent(net)).toEqual([`${NASDAQ_TRADER}/nasdaqlisted.txt`, `${NASDAQ_TRADER}/otherlisted.txt`]);
+    // the same directory serves the well-known list's names
+    expect(((await src.listings({ limit: 2 })) as Listing[]).map((m) => m.name)).toEqual(["NVIDIA Corporation", "Apple Inc."]);
     expect(((await src.listings({ q: "berk", limit: 5 })) as Listing[]).map((m) => m.symbol)).toEqual(["BRK.B"]);
-    // the book is kept ten minutes: one read for both searches
-    expect(net.sent.filter((s) => s.url.includes("symbol_book"))).toHaveLength(1);
+    // the directory is kept twelve hours: one read of each file for every search
+    expect(dirSent(net)).toHaveLength(2);
     // an index (^SPX) and a futures root (A2RZ1) are no stock: not asked for, not listed
     expect(await src.listings({ q: "A2RZ", limit: 5 })).toEqual([]);
     expect(await src.listings({ q: "^SPX", limit: 5 })).toEqual([]);
     expect(net.sent.some((s) => s.url.includes("_SPX") || s.url.includes("A2RZ1") || s.url.includes("SPX/"))).toBe(false);
-    // a ticker typed whole that the loaded book does not carry is asked of Nasdaq, which knows the tickers that trade — not of Cboe, whose
-    // store keeps files of tickers that no longer trade — and Nasdaq not knowing it, it is not listed
+    // a ticker typed whole that the loaded directory does not carry is asked of Nasdaq, which knows the tickers that trade — not of Cboe,
+    // whose store keeps files of tickers that no longer trade — and Nasdaq not knowing it, it is not listed
     expect(await src.listings({ q: "ZZZZ", limit: 5 })).toEqual([]);
     expect(net.sent.some((s) => s.url.endsWith("/quotes/ZZZZ.json"))).toBe(false);
     expect(net.sent.filter((s) => s.url.includes("/quote/ZZZZ/info")).map((s) => s.url.split("?")[1])).toEqual(["assetclass=stocks", "assetclass=etf"]);
     // a quote that is an index is not listed either
-    const spx = network([["/quotes/SPY.json", quoteOf("SPY", 778.67, { security_type: "index" })], ["/symbol_book/", BOOK], ...noRealTime()]);
+    const spx = network([["/quotes/SPY.json", quoteOf("SPY", 778.67, { security_type: "index" })], ...dirRoutes(), ...noRealTime()]);
     expect(await usStocksPublic({ pace: async () => undefined, http: spx.http, clock: () => NOW }).listings({ q: "SPY", limit: 5 })).toEqual([]);
-    expect(src.notes!({ q: "app" })).toEqual(["US stocks: real-time quotes from Robinhood or Nasdaq, else Cboe's delayed ones (15 minutes), for any US stock or ETF in Cboe's symbol book."]);
+    expect(src.notes!({ q: "app" })).toEqual(["US stocks: real-time quotes from Robinhood or Nasdaq, else Cboe's delayed ones (15 minutes), for any US stock or ETF in Nasdaq Trader's symbol directory."]);
     expect(src.notes!({ q: "app" })[0]!.length).toBeLessThan(160);
   });
 
-  it("a plain ticker typed whole answers from its quote without waiting for a slow symbol book (the book finishes loading for the next search), so the first search of AAPL is the share and not a slower source's token", async () => {
-    let bookAsked = 0;
-    const slow = {
-      http: async (url: string, init?: { timeoutMs?: number }) => {
-        if (url.includes("symbol_book")) {
-          bookAsked++;
-          await new Promise((go) => setTimeout(go, 2_000));
-          return BOOK;
+  it("a search for \"BRK\" lists BRK.B with its name: a class share is found by the start of its ticker", async () => {
+    const got = await listings({ q: "BRK", limit: 5 });
+    expect(got.map((m) => [m.symbol, m.name])).toEqual([["BRK.B", "Berkshire Hathaway Inc. New"]]);
+  });
+
+  it("SPY is asked of Nasdaq as an ETF first: the directory says it is one", async () => {
+    const net = network([...routes(), ...noRealTime()]);
+    await usStocksPublic({ pace: async () => undefined, http: net.http, clock: () => NOW }).listings({ q: "SPY", limit: 5 });
+    const spy = net.sent.filter((s) => s.url.includes("/quote/SPY/")).map((s) => s.url.split("?")[1]);
+    expect(spy[0]).toBe("assetclass=etf");
+    // and a share the directory says is not a fund is asked as a stock first
+    await usStocksPublic({ pace: async () => undefined, http: net.http, clock: () => NOW }).listings({ q: "JPM", limit: 5 });
+    expect(net.sent.filter((s) => s.url.includes("/quote/JPM/")).map((s) => s.url.split("?")[1])[0]).toBe("assetclass=stocks");
+  });
+
+  it("a ticker typed whole answers without waiting past DIR_WAIT_MS for a slow directory (it finishes loading for the next search), so the first search of AAPL is the share and not a slower source's token", async () => {
+    expect(DIR_WAIT_MS).toBe(1_500);
+    let dirAsked = 0;
+    const fast = network([...routes(), ...noRealTime()]);
+    const slow: { http: Http } = {
+      http: async (url, init) => {
+        if (url.includes("/SymDir/")) {
+          dirAsked++;
+          await new Promise((go) => setTimeout(go, 1_000));
         }
-        return url.includes("/quotes/AAPL.json") ? quoteOf("AAPL", 341.81) : url.includes("/quotes/APP.json") ? quoteOf("APP", 400) : NOT_LISTED;
+        return fast.http(url, init);
       },
     };
     const src = usStocksPublic({ pace: async () => undefined, http: slow.http, clock: () => NOW });
     const t0 = Date.now();
     const got = (await src.listings({ q: "aapl", limit: 5 })) as Listing[];
-    expect(Date.now() - t0).toBeLessThan(1_900);
+    // the two files, one after the other, take two seconds: the search answers at DIR_WAIT_MS, from the quote alone
+    expect(Date.now() - t0).toBeLessThan(DIR_WAIT_MS + 400);
     expect(got.map((m) => [m.symbol, m.name])).toEqual([["AAPL", "AAPL"]]);
-    // a search by a company's name has to wait for the book
+    // a search by a company's name has to wait for the directory
     expect(((await src.listings({ q: "applovin", limit: 5 })) as Listing[]).map((m) => m.symbol)).toEqual(["APP"]);
-    // the book was loaded once, on its way during the first search, and kept
-    expect(bookAsked).toBe(1);
-    expect(((await src.listings({ q: "aapl", limit: 5 })) as Listing[]).map((m) => [m.symbol, m.name])).toEqual([["AAPL", "Apple Inc"]]);
+    // the directory was read once, on its way during the first search, and kept
+    expect(dirAsked).toBe(2);
+    expect(((await src.listings({ q: "aapl", limit: 5 })) as Listing[]).map((m) => [m.symbol, m.name])).toEqual([["AAPL", "Apple Inc."]]);
+  });
+
+  it("the directory refused at cold start: the well-known list still priced, a ticker typed whole still answered, a search by name the directory's refusal, and the notes say company names are unavailable", async () => {
+    const down = network([["/SymDir/", { status: 503, body: undefined, text: "Service Unavailable" }], ...routes(), ...noRealTime()]);
+    const src = usStocksPublic({ pace: async () => undefined, http: down.http, clock: () => NOW });
+    // no search: US_SHARES, priced from the chain (here Cboe's, the fallback), their tickers for names
+    const all = (await src.listings({ limit: 2 })) as Listing[];
+    expect(all.map((m) => [m.symbol, m.name])).toEqual([["NVDA", "NVDA"], ["AAPL", "AAPL"]]);
+    // a ticker typed whole: the share
+    expect(((await src.listings({ q: "AAPL", limit: 5 })) as Listing[]).map((m) => m.symbol)).toEqual(["AAPL"]);
+    // a company's name: no directory to find it in, so its refusal is the answer
+    const apple = (await src.listings({ q: "Apple", limit: 5 })) as Refusal;
+    expect(isRefusal(apple)).toBe(true);
+    expect([apple.venue, apple.code]).toEqual(["nasdaqtrader", "E_VENUE_UNREACHABLE"]);
+    expect(src.notes!({})).toContain("Company names are unavailable: Nasdaq Trader's symbol directory did not answer; search by ticker.");
+    expect(src.notes!({ q: "apple" })).toContain("Company names are unavailable: Nasdaq Trader's symbol directory did not answer; search by ticker.");
+    // the refusal is kept ten minutes: the directory was asked once (its first file refused, the second not asked)
+    expect(dirSent(down)).toEqual([`${NASDAQ_TRADER}/nasdaqlisted.txt`]);
   });
 
   it("out of the session the line says the market is closed and when it opens, and keeps Cboe's quote (the close); the delayed window (the old rule) is the session shifted by fifteen minutes", async () => {
@@ -181,7 +233,7 @@ describe("US stocks, keyless: Cboe's delayed quotes where no real-time source an
 
   it("a Cboe-priced line carries Cboe's change (from prev_day_close) only while its last trade is in the regular session or the close's own minute: one stamped after-hours carries none, never a change from yesterday said beside today's after-hours price", async () => {
     const evening = fromEt(2026, 10, 13, 18, 0);
-    const at = (t: string) => network([["/quotes/NVDA.json", quoteOf("NVDA", 180.5, { last_trade_time: t })], ["/symbol_book/symbol-book.json", BOOK], ...noRealTime()]);
+    const at = (t: string) => network([["/quotes/NVDA.json", quoteOf("NVDA", 180.5, { last_trade_time: t })], ...dirRoutes(), ...noRealTime()]);
     const after = (await listings({ limit: 1 }, at("2026-10-13T17:30:12"), () => evening))[0]!;
     expect(after.price).toBe(180.5);
     expect(after.quoteAt).toBe(new Date(fromEt(2026, 10, 13, 17, 30) + 12_000).toISOString());
@@ -223,10 +275,10 @@ describe("US stocks, keyless: Cboe's delayed quotes where no real-time source an
     const r = (await src.listings({ limit: 2 })) as Refusal;
     expect(r.code).toBe("E_VENUE_GEOBLOCKED");
     expect(r.message).toBe("Cboe does not serve this location: that is its own rule, and the market does not look for a way around it");
-    // held ten minutes (the book's refusal and each quote's): the next listing asks Cboe nothing
+    // held ten minutes (each quote's refusal, and the directory's and the token names' here): the next listing asks Cboe nothing
     const asked = blocked.sent.length;
     await src.listings({ limit: 2 });
-    expect(cboeSent(blocked)).toHaveLength(3);
+    expect(cboeSent(blocked)).toHaveLength(2);
     expect(blocked.sent).toHaveLength(asked);
     const some = network([["/quotes/NVDA.json", { status: 500, body: undefined, text: "" }], ["/quotes/AAPL.json", quoteOf("AAPL", 341.81)], ...noRealTime()]);
     expect(((await usStocksPublic({ pace: async () => undefined, http: some.http, clock: () => NOW }).listings({ limit: 2 })) as Listing[]).map((m) => m.symbol)).toEqual(["AAPL"]);
@@ -256,7 +308,7 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Cboe's 
     const src = await watched(net, NOW);
     const first = (await src.listings({ q: "AAPL", limit: 1 })) as Listing[];
     const closes = new Date(fromEt(2026, 10, 13, 16)).toISOString();
-    const line = { symbol: "AAPL", name: "Apple Inc", kind: "stock", base: "AAPL", quote: "USD", price: 341.82, bid: 341.8, ask: 341.84, quoteAt: new Date(NOW - 5_000).toISOString(), delayMs: 0, quoteFrom: ROBINHOOD_FROM, open: true, types: [], session: { open: true, closesAt: closes, phase: "regular", phaseEndsAt: closes, extendedHours: false }, venueName: US_STOCKS_NAME };
+    const line = { symbol: "AAPL", name: "Apple Inc.", kind: "stock", base: "AAPL", quote: "USD", price: 341.82, bid: 341.8, ask: 341.84, quoteAt: new Date(NOW - 5_000).toISOString(), delayMs: 0, quoteFrom: ROBINHOOD_FROM, open: true, types: [], session: { open: true, closesAt: closes, phase: "regular", phaseEndsAt: closes, extendedHours: false }, venueName: US_STOCKS_NAME };
     // A ROBINHOOD LINE NEVER WAITS FOR CBOE (feat/paper-live phase 3): Cboe, asked at the same time, had not answered when Robinhood's price
     // was at hand — the line goes without the day's change rather than wait for it
     expect(first).toEqual([line]);
@@ -292,8 +344,7 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Cboe's 
     const old = (await (await watched(stale, NOW)).listings({ limit: 2 })) as Listing[];
     expect(old.map((m) => [m.symbol, m.quoteFrom])).toEqual([["NVDA", CBOE_FROM], ["AAPL", CBOE_FROM]]);
     expect(stale.sent.filter((s) => s.url.includes("api.nasdaq.com"))).toHaveLength(4);
-    // Cboe refusing everything beside Robinhood's prices (its book too: the well-known few are tickers the file names itself, so Robinhood's
-    // quote is still taken for them): the lines Robinhood priced, with no day's change, not a refusal
+    // Cboe refusing everything beside Robinhood's prices: the lines Robinhood priced, with no day's change, not a refusal
     const cboeDown = network([["cdn-api.cboe.com", { status: 503, body: undefined, text: "" }], ...live(NOW)]);
     const without = (await (await watched(cboeDown, NOW)).listings({ limit: 2 })) as Listing[];
     expect(without.map((m) => [m.symbol, m.price, m.changePct24h])).toEqual([["NVDA", 180.5, undefined], ["AAPL", 341.82, undefined]]);
@@ -339,7 +390,7 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Cboe's 
     const sat = network(live(saturday));
     const s = ((await usStocksPublic({ pace: async () => undefined, http: sat.http, clock: () => saturday }).listings({ q: "AAPL", limit: 1 })) as Listing[])[0]!;
     expect([s.quoteFrom, s.session!.phase, s.session!.extendedHours]).toEqual([CBOE_FROM, "closed", false]);
-    expect(sat.sent.some((x) => x.url.includes("robinhood") || x.url.includes("nasdaq"))).toBe(false);
+    expect(sat.sent.some((x) => x.url.includes("/rhj/prices") || x.url.includes("api.nasdaq.com"))).toBe(false);
     // the day after Thanksgiving, 14:00 EST: the early close's after-hours, to 17:00
     const early = fromEt(2026, 11, 27, 14, 0);
     const e = await read(early, "AAPL");
@@ -386,21 +437,27 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Cboe's 
     expect(((await usStocksPublic({ http: neither.http, clock: () => NOW, pace: async () => undefined }).candles!("AAPL", "1h", { since: NOW - 3_600_000 })) as Refusal).message).toBe("Robinhood keeps no history of AAPL");
   });
 
-  it("a ticker the market does not list under that name — SATS, EchoStar's Robinhood token; the share trades as ECHO — takes no Robinhood quote and no dead Cboe file once the book has answered: not listed, and ECHO is the share", async () => {
-    // SATS.json as Cboe's store served it on 2026-10-14: written in September, a last trade in June, no previous close, no book
+  it("SATS takes no Robinhood quote, AAPL does: the gate is the directory's name beside the token's — SATS is EchoStar's token, while the directory's SATS is Strive's preferred stock; EchoStar's share is ECHO", async () => {
+    // SATS.json as Cboe's store served it on 2026-10-14: written in September, a last trade in June, no previous close
     const satsFile = json({ timestamp: "2026-09-26 14:14:54", data: { symbol: "SATS", security_type: "stock", exchange_id: 2, current_price: 103.3, price_change: 0.0, price_change_percent: null, bid: 0.0, ask: 0.0, bid_size: 0, ask_size: 0, open: 0.0, high: 0.0, low: 0.0, close: 103.915, prev_day_close: 0.0, volume: 0, last_trade_time: "2026-06-23T15:59:59", tick: "up" }, symbol: "SATS" });
-    const book = json({ timestamp: "2026-10-14 13:00:03", data: [{ name: "AAPL", company_name: "Apple Inc" }, { name: "ECHO", company_name: "EchoStar Corp" }] });
-    // Robinhood's SATS book seen moving and fresh: only the ticker keeps it out
-    const routesOf = (bookReply: HttpReply): Array<[string, HttpReply | (() => HttpReply)]> => [["/rhj/prices", seenMoving(rhAnswer(NOW - 5_000, [["SATS", "87.87", "87.93"], ["AAPL", "341.80", "341.84"]]))], [nq("ECHO"), nqInfo("ECHO", "87.90", "87.88", "87.92", "Oct 13, 2026 10:29 AM ET")], ["api.nasdaq.com", NQ_NONE], ["/quotes/SATS.json", satsFile], ["/quotes/ECHO.json", quoteOf("ECHO", 87.94)], ["/symbol_book/", bookReply]];
-    const net = network(routesOf(book));
+    // Robinhood's SATS book seen moving and fresh: only the names keep it out
+    const routesOf = (dir: Array<[string, HttpReply]>): Array<[string, HttpReply | (() => HttpReply)]> => [["/rhj/prices", seenMoving(rhAnswer(NOW - 5_000, [["SATS", "87.87", "87.93"], ["AAPL", "341.80", "341.84"]]))], [nq("ECHO"), nqInfo("ECHO", "87.90", "87.88", "87.92", "Oct 13, 2026 10:29 AM ET")], ["api.nasdaq.com", NQ_NONE], ["/quotes/SATS.json", satsFile], ["/quotes/ECHO.json", quoteOf("ECHO", 87.94)], ["/quotes/AAPL.json", quoteOf("AAPL", 341.81)], ...dir];
+    const net = network(routesOf(dirRoutes()));
     const src = await watched(net, NOW);
-    expect(await src.listings({ q: "SATS", limit: 5 })).toEqual([]);
-    expect(net.sent.some((s) => s.url.endsWith("/quotes/SATS.json"))).toBe(false);
-    expect(((await src.listings({ q: "ECHO", limit: 5 })) as Listing[]).map((m) => [m.symbol, m.name, m.quoteFrom, m.price])).toEqual([["ECHO", "EchoStar Corp", NASDAQ_FROM, 87.9]]);
-    // the book not answering (a first search, or the book refused): still no Robinhood quote for a ticker typed. Cboe's dead file is then
-    // all there is: shown as Cboe's, stamped June, with no change (the file gives no previous close) — and no paper fill takes a stamp so old
-    const noBook = network(routesOf({ status: 500, body: undefined, text: "" }));
-    const dead = ((await (await watched(noBook, NOW)).listings({ q: "SATS", limit: 5 })) as Listing[])[0]!;
+    // SATS: the directory lists it, but "EchoStar" and "Strive, Inc. … SATS Preferred Stock" name two companies — not Robinhood's price
+    const sats = (await src.listings({ q: "SATS", limit: 5 })) as Listing[];
+    expect(sats.map((m) => m.quoteFrom)).not.toContain(ROBINHOOD_FROM);
+    expect(sats.some((m) => m.price === 87.9)).toBe(false);
+    expect(((await src.listings({ q: "AAPL", limit: 1 })) as Listing[]).map((m) => [m.symbol, m.name, m.quoteFrom, m.price])).toEqual([["AAPL", "Apple Inc.", ROBINHOOD_FROM, 341.82]]);
+    expect(((await src.listings({ q: "ECHO", limit: 5 })) as Listing[]).map((m) => [m.symbol, m.name, m.quoteFrom, m.price])).toEqual([["ECHO", "EchoStar Corporation", NASDAQ_FROM, 87.9]]);
+    // one share's line says the same
+    expect(((await src.line!("SATS")) as Listing).quoteFrom).not.toBe(ROBINHOOD_FROM);
+    expect(((await src.line!("AAPL")) as Listing).quoteFrom).toBe(ROBINHOOD_FROM);
+    // the directory not answering: Robinhood's quote only for the well-known few (US_SHARES), so still none for SATS. Cboe's dead file is
+    // then all there is: shown as Cboe's, stamped June, with no change (the file gives no previous close) — and no paper fill takes a stamp
+    // so old
+    const noDir = network(routesOf([["/SymDir/", { status: 500, body: undefined, text: "" }], ["/rhj/assets", TOKEN_NAMES]]));
+    const dead = ((await (await watched(noDir, NOW)).listings({ q: "SATS", limit: 5 })) as Listing[])[0]!;
     expect([dead.quoteFrom, dead.price, dead.quoteAt, dead.change24h, dead.bid]).toEqual([CBOE_FROM, 103.3, new Date(fromEt(2026, 6, 23, 15, 59) + 59_000).toISOString(), undefined, undefined]);
   });
 
@@ -408,7 +465,7 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Cboe's 
     const hang = () => new Promise<HttpReply>(() => undefined);
     const base = network(live(NOW));
     const t0 = Date.now();
-    const quiet = (await usStocksPublic({ pace: async () => undefined, http: (url, init) => (url.includes("robinhood") || url.includes("nasdaq") ? hang() : base.http(url, init)), clock: () => NOW }).listings({ q: "AAPL", limit: 5 })) as Listing[];
+    const quiet = (await usStocksPublic({ pace: async () => undefined, http: (url, init) => (url.includes("/rhj/prices") || url.includes("api.nasdaq.com") ? hang() : base.http(url, init)), clock: () => NOW }).listings({ q: "AAPL", limit: 5 })) as Listing[];
     expect(Date.now() - t0).toBeLessThan(RT_WAIT_MS + 500);
     expect(quiet.map((m) => [m.symbol, m.quoteFrom])).toEqual([["AAPL", CBOE_FROM]]);
     const slowSrc = await watched({ http: (url, init) => (url.includes("/quotes/") ? hang() : base.http(url, init)) }, NOW);
@@ -574,26 +631,27 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Cboe's 
 });
 
 describe("one share's line, asked alone (line) — what a paper account prices a share it knows by — and a line said again at a newer quote (usLineAt)", () => {
-  /** Cboe's symbol book with V and forty-five more tickers that start with it (VA… VZ, VAA…): a search of "V" lists forty */
+  /** a directory with V and forty-five more tickers that start with it (VA… VZ, VAA…) in nasdaqlisted's shape: a search of "V" lists forty */
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const many = json({ timestamp: "2026-10-13 13:00:03", data: [{ name: "V", company_name: "Visa Inc" }, ...Array.from({ length: 45 }, (_, i) => ({ name: `V${letters[i % 26]}${i >= 26 ? letters[i - 26] : ""}`, company_name: `V company ${i}` }))] });
+  const rows = [["V", "Visa Inc. - Common Stock"], ...Array.from({ length: 45 }, (_, i) => [`V${letters[i % 26]}${i >= 26 ? letters[i - 26] : ""}`, `V company ${i} - Common Stock`])];
+  const many = dirRoutes([NASDAQ_LISTED.split("\n")[0]!, ...rows.map(([sym, name]) => `${sym}|${name}|Q|N|N|100|N|N`), "File Creation Time: 1123202608:30|||||||"].join("\r\n"), OTHER_LISTED.split("\n")[0]!);
   const anyQuote = (url: string) => quoteOf(decodeURIComponent(url.split("/quotes/")[1]!.replace(/\.json$/, "")), 330);
 
   it("P16: a short ticker's line asks Cboe for that one share — one GET, where a search of the same ticker reads forty — with the real-time chain at the same time; a line the chain priced never waits for Cboe", async () => {
-    const searched = network([["/symbol_book/", many], ["/quotes/", anyQuote], ...noRealTime()]);
+    const searched = network([...many, ["/quotes/", anyQuote], ...noRealTime()]);
     const search = (await usStocksPublic({ pace: async () => undefined, http: searched.http, clock: () => NOW }).listings({ q: "V", limit: 40 })) as Listing[];
     expect(search).toHaveLength(40);
     expect(cboeSent(searched).filter((u) => u.includes("/quotes/"))).toHaveLength(40);
     // the line: one quote of Cboe's, the share's own; Nasdaq (at the same time as Robinhood) for it alone
-    const alone = network([["/symbol_book/", many], ["/quotes/", anyQuote], ...noRealTime()]);
+    const alone = network([...many, ["/quotes/", anyQuote], ...noRealTime()]);
     const src = usStocksPublic({ pace: async () => undefined, http: alone.http, clock: () => NOW });
     const line = (await src.line!("v")) as Listing;
-    expect(line).toMatchObject({ symbol: "V", name: "Visa Inc", kind: "stock", price: 330, quoteFrom: CBOE_FROM, delayMs: CBOE_DELAY_MS, venueName: US_STOCKS_NAME });
+    expect(line).toMatchObject({ symbol: "V", name: "Visa Inc.", kind: "stock", price: 330, quoteFrom: CBOE_FROM, delayMs: CBOE_DELAY_MS, venueName: US_STOCKS_NAME });
     expect(cboeSent(alone).filter((u) => u.includes("/quotes/"))).toEqual(["https://cdn-api.cboe.com/api/global/delayed_quotes/quotes/V.json"]);
     expect(alone.sent.filter((x) => x.url.includes("api.nasdaq.com")).map((x) => x.url.split("/quote/")[1])).toEqual(["V/info?assetclass=stocks", "V/info?assetclass=etf"]);
     // Cboe hanging: a line Robinhood prices answers at once, without the day's change — never waiting for Cboe
     const hang = () => new Promise<HttpReply>(() => undefined);
-    const base = network([["/rhj/prices", seenMoving(rhAnswer(NOW - 5_000, [["AAPL", "341.80", "341.84"]]))], ["/symbol_book/", BOOK], ["api.nasdaq.com", NQ_NONE]]);
+    const base = network([["/rhj/prices", seenMoving(rhAnswer(NOW - 5_000, [["AAPL", "341.80", "341.84"]]))], ...dirRoutes(), ["api.nasdaq.com", NQ_NONE]]);
     const rh = await watched({ http: (url, init) => (url.includes("/quotes/") ? hang() : base.http(url, init)) }, NOW);
     const t0 = Date.now();
     const fast = (await rh.line!("AAPL")) as Listing;
@@ -601,7 +659,7 @@ describe("one share's line, asked alone (line) — what a paper account prices a
     expect([fast.quoteFrom, fast.price, fast.change24h]).toEqual([ROBINHOOD_FROM, 341.82, undefined]);
   });
 
-  it("a ticker the loaded book does not list is asked of Nasdaq alone (no dead Cboe file); not a ticker, nothing is asked; nothing priced and Cboe refusing is Cboe's refusal", async () => {
+  it("a ticker the loaded directory does not list is asked of Nasdaq alone (no dead Cboe file); not a ticker, nothing is asked; nothing priced and Cboe refusing is Cboe's refusal", async () => {
     const net = network([...routes(), ...noRealTime()]);
     const src = usStocksPublic({ pace: async () => undefined, http: net.http, clock: () => NOW });
     expect(await src.line!("ZZZZ")).toBeNull();

@@ -36,8 +36,8 @@
  *                       bidPrice "$344.85", askPrice "$344.89", bidSize, askSize, volume}, secondaryData}}: prices are strings with a "$"
  *                       and commas, the time is New York's to the minute. Eight asked at once answered in 0.3 s at 17:50 UTC. An ETF
  *                       answers only as assetclass=etf (SPY as "stocks" answered 200 with data null and status.rCode 400 "Symbol not
- *                       exists."), so a symbol is asked as a stock first — as an ETF first where the caller says it is likely one (its
- *                       company's name in Cboe's book: Nasdaq.hint) — then as the other, and the class that answered is remembered (an hour,
+ *                       exists."), so a symbol is asked as a stock first — as an ETF first where the caller says it is one (the symbol
+ *                       directory's ETF flag: Nasdaq.hint) — then as the other, and the class that answered is remembered (an hour,
  *                       for at most a thousand symbols, shared by the quote and the chart); a symbol neither knows is not listed (kept ten
  *                       minutes). A dotted class share is written with its dot (BRK.B). Nasdaq's book (bidPrice, askPrice) is NASDAQ's own,
  *                       not the national best: where it is crossed (bid above ask) neither side is taken, only the last trade. OUTSIDE THE
@@ -128,7 +128,7 @@ export const ROBINHOOD_OVERNIGHT = true;
 /** a quote older than this (by its own stamp) is not taken as real time */
 export const FRESH_MS = 120_000;
 /** the ONE deadline of the chain: a listing waits this long at most for the real-time sources, then says what answered. The callers allow a
- * source four seconds in all (paper.ts SOURCE_MS, explore.ts), the first search of a ticker waits up to 1.5 s for Cboe's symbol book before
+ * source four seconds in all (paper.ts SOURCE_MS, explore.ts), the first search of a ticker waits up to 1.5 s for the symbol directory before
  * it (public-stocks.ts), and Cboe's quotes are asked at the same time as this chain */
 export const RT_WAIT_MS = 1_500;
 /** Robinhood's one answer for every symbol is kept this long at most — less where its next write is out for certain sooner (nextWrite): it
@@ -467,7 +467,7 @@ export interface Nasdaq {
    * each stamped at its session's open, 09:30 New York; the days whose opening price Nasdaq gives as 0 (AAPL's in 1990 and 1991) left out
    * and counted (`noOpen`, and the latest of them). Null where Nasdaq does not know the symbol */
   daily(symbol: string, from: string, to: string): Promise<{ bars: Candle[]; noOpen: number; lastNoOpen?: number | undefined } | null | Refusal>;
-  /** what the caller knows of a symbol's class before Nasdaq is asked (an ETF by its company's name in Cboe's book): asked as that class
+  /** what the caller knows of a symbol's class before Nasdaq is asked (an ETF by the symbol directory's ETF flag): asked as that class
    * first. What Nasdaq answered is never overwritten by a hint */
   hint(symbol: string, cls: AssetClass): void;
   /** let go of the refusals held (the whole source's and each symbol's), and of the answers kept: each symbol is asked anew */
@@ -713,14 +713,14 @@ export interface UsAsk {
 
 /** the chain over both (usQuote) */
 export interface UsQuotes {
-  /** one share's real-time quote, or nothing (the caller says Cboe's delayed one) */
+  /** one share's real-time quote, or nothing (the caller's fallback) */
   (symbol: string, ask?: UsAsk): Promise<UsQuote | undefined>;
   /** many at once, within RT_WAIT_MS: Robinhood's one answer for the ones `listed` allows, and AT THE SAME TIME Nasdaq for NASDAQ_AT_ONCE
    * of the ones Robinhood's latest answer does not price fresh — those Nasdaq has no recent answer for first, so a longer list is asked in turns; a symbol neither priced in time — nor by a recent answer of
    * Nasdaq's that came after an earlier ask had stopped waiting (Nasdaq.latest) — is not in the map */
   many(symbols: readonly string[], ask?: UsAsk): Promise<Map<string, UsQuote>>;
-  /** start reading Robinhood's answer where the session is one it is taken in, so a caller with something else to wait for first (Cboe's
-   * symbol book) does not wait for it after: the answer is kept, and the next ask takes it */
+  /** start reading Robinhood's answer where the session is one it is taken in, so a caller with something else to wait for first (the
+   * symbol directory, us-directory.ts) does not wait for it after: the answer is kept, and the next ask takes it */
   warm(): void;
   /** let go of the refusals each source holds */
   clear(): void;
