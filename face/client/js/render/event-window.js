@@ -1,13 +1,14 @@
 // face/client/js/render/event-window.js — a stock's page at an event (spec 2026-11-12 §4.3, analog event table Task 9): above
-// the price, a banner from the view — where the page came from, the case's group, date and timing, label, note and its three
-// chips, a link back to Messages — and, in place of the price history, the range Around the event pressed before 1D…MAX and a card: the
+// the price, a banner from the view — where the page came from, the case's group, date and timing, label, note and its chips
+// (version 1's three, one per horizon in version 2), a link back to Messages — and, in place of the price history, the range Around the event pressed before 1D…MAX and a card: the
 // window's first and last dates, its daily candles marked (day 0, the symbol's other events in the view, +5 and +60 where those
 // bars are), the case's line against the market (or a sentence when the view kept none), and a caption naming the bars' source,
 // their adjustment and, for a window older than five years read from Nasdaq, that Nasdaq filled it. A view that is gone, or a
 // case not in it, still draws the window and day 0 from `at`. Every text from the view is masked, then escaped.
 // A version 2 view (event analog redesign §4.5): the window runs to the route's `after` (the view's last horizon past 60), a
 // flag at every horizon after day 0 the bars reach, under the `price` base a dashed line at the price the case was measured
-// from (as the bars see it: over its split factor), and the line labelled with the benchmark, or as the stock's own path.
+// from (as the bars see it: over its split factor), and the line labelled with the benchmark, or as the stock's own path,
+// its screen reader's label and the sentence for a line not kept saying the same.
 import { esc } from '../html.js';
 import { t, th, sayOf } from '../i18n/words.js';
 import { maskExcerpt } from '../mask.js';
@@ -113,10 +114,15 @@ export function eventHistoryHtml(ev, now) {
   const candles = eventCandlesSvg(bars, { day0, marks, flags, unit: 'usd', ...(level !== null ? { level } : {}) });
   let rel = '';
   if (ev.raw) {
-    const line = eventRelSvg(ev.raw.rel, { day0, count: bars.length });
-    const head = !basis ? th('markets.event.relHead')
-      : ev.raw.relOf === 'benchmark' && basis.benchmark !== null ? th('markets.event.relHeadBench', { symbol: basis.benchmark }) : th('markets.event.relHeadSelf');
-    rel = line ? `<div class="ew-rel-head">${head}</div>${line}` : `<p class="mk-note">${th('markets.event.noRel')}</p>`;
+    // a version 2 line is against the benchmark (the base = 100) or the stock's own path; its label and its sentence say which
+    const of = !basis ? undefined : ev.raw.relOf === 'benchmark' && basis.benchmark !== null ? basis.benchmark : 'self';
+    const line = eventRelSvg(ev.raw.rel, { day0, count: bars.length, ...(of !== undefined ? { of } : {}) });
+    const head = of === undefined ? th('markets.event.relHead')
+      : of === 'self' ? th('markets.event.relHeadSelf') : th('markets.event.relHeadBench', { symbol: of });
+    // with no line kept, a version 2 view says what it would have been against: its benchmark when one was read
+    const none = !basis ? th('markets.event.noRel')
+      : basis.against === 'benchmark' && basis.benchmark !== null ? th('markets.event.noRelBench', { symbol: basis.benchmark }) : th('markets.event.noRelSelf');
+    rel = line ? `<div class="ew-rel-head">${head}</div>${line}` : `<p class="mk-note">${none}</p>`;
   }
   const source = str(b.data?.source);
   const filled = source?.startsWith(NASDAQ) && olderThanFive(bars[0].t, now) ? t('markets.event.filled', { source: NASDAQ }) : null;

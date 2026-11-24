@@ -5,7 +5,8 @@
 // market's words as they came. Every text from the view is escaped and masked as a worker's words. A view still being read
 // is one line, a failed read its words, a view the face no longer keeps one line saying so and nothing else. A version 2
 // view (event analog redesign §4.5) says its base and benchmark in the head and has a chip per horizon; its row adds its
-// price, its split with the split record's link and that record's own badge, a listing day and the sessions day 0 skipped.
+// price, its split with the split record's link and that record's own badge, a listing day, the sessions day 0 skipped, no
+// volume check (never on a listing day) and, for a case older than the benchmark's bars, its raw chips said to be raw.
 import { esc, cls } from '../html.js';
 import { t, th, thn, sayOf } from '../i18n/words.js';
 import { maskExcerpt } from '../mask.js';
@@ -49,10 +50,12 @@ function rowHtml(row) {
     (row.date ? `<span class="et-date">${esc(row.date)}</span>` : '') + timing +
     (row.shifted ? `<span class="et-shift">${th('analog.row.shifted', { date: row.day0.slice(5) })}</span>` : '') +
     (row.skipped > 0 ? `<span class="et-flag">${thn('analog.row.skipped', row.skipped)}</span>` : '') +
-    (row.listed ? `<span class="et-flag">${th('analog.row.listed')}</span>` : '') + `${badge(row)}</div>`;
+    (row.listed ? `<span class="et-flag">${th('analog.row.listed')}</span>` : '') +
+    (row.noVolume ? `<span class="et-flag">${th('analog.row.noVolume')}</span>` : '') + `${badge(row)}</div>`;
   const note = pricedHtml(row) + (row.note ? `<div class="et-note">${text(row.note)}</div>` : '');
   const flags = row.flags.filter(f => Object.hasOwn(FLAG, f)).map(f => `<span class="et-flag">${FLAG[f]()}</span>`).join('');
-  const body = row.measured ? `<div class="et-chips">${row.chips.map(chip).join('')}${flags}</div>` : `<div class="et-words">${text(row.words)}</div>`;
+  const raw = row.raw !== null ? `<span class="et-flag">${th('analog.row.raw', { symbol: row.raw })}</span>` : '';
+  const body = row.measured ? `<div class="et-chips">${raw}${row.chips.map(chip).join('')}${flags}</div>` : `<div class="et-words">${text(row.words)}</div>`;
   const links = (row.source !== null ? `<a class="et-src" href="${esc(row.source)}" target="_blank" rel="noopener noreferrer">${th('analog.row.source')}</a>` : '') +
     (row.href !== null ? `<a class="et-market" href="${esc(row.href)}">${th('analog.row.market')}</a>` : '');
   return `<div class="${cls('et-row', !row.measured && 'unmeasured')}">${top}${note}${body}${links ? `<div class="et-links">${links}</div>` : ''}</div>`;

@@ -416,7 +416,8 @@ export const ZH = Object.freeze({
   'analog.table.basis2': '{basis}，{against}；当天是第一个能对消息作出反应的交易日',
   'analog.basis.priorClose': '从消息前收盘起算',
   'analog.basis.price': '从来源给出的价格起算（如发行价）',
-  'analog.basis.day0Open': '从当天开盘起算',
+  'analog.basis.day0Open': '从当天开盘起算（大盘按 09:30 开盘价）',
+  'analog.basis.day0OpenAlone': '从当天开盘起算',
   'analog.basis.day0Close': '从当天收盘起算',
   'analog.against.benchmark': '对比 {symbol}',
   'analog.against.none': '未对比大盘',
@@ -444,6 +445,8 @@ export const ZH = Object.freeze({
   'analog.row.split': '按拆股折算 ×{factor}',
   'analog.row.splitSource': '拆股来源 ↗',
   'analog.row.listed': '上市首日',
+  'analog.row.noVolume': '未做量能核对',
+  'analog.row.raw': '原始涨跌：{symbol} 没有这么早的行情',
   'analog.row.skipped': '跳过 {n} 个交易日',
 
   // the operator's own browser wallet (wire/wallet.js, render/wallet-row.js, host/wallet-send.js): its refusals and its row
@@ -1777,6 +1780,10 @@ export const ZH = Object.freeze({
   'markets.event.relHeadSelf': '自身走势 · 起算价 = 100',
   'markets.event.relSaid': '相对大盘，消息前一天 = 100：最低 {low}，最高 {high}',
   'markets.event.noRel': '视图没有保留这个事件相对大盘的走势',
+  'markets.event.relSaidBench': '相对 {symbol}，起算价 = 100：最低 {low}，最高 {high}',
+  'markets.event.relSaidSelf': '自身走势，起算价 = 100：最低 {low}，最高 {high}',
+  'markets.event.noRelBench': '视图没有保留这个事件相对 {symbol} 的走势',
+  'markets.event.noRelSelf': '视图没有保留这个事件的自身走势',
   'markets.event.filled': '{source} 补齐',
 
   // the desk's status as the screens read it (host/desk-view.js): a time in New York's, as the server writes it, and the

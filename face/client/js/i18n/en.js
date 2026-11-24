@@ -415,7 +415,8 @@ export const EN = Object.freeze({
   'analog.table.basis2': '{basis}, {against}; Day 0 is the first session that could react',
   'analog.basis.priorClose': 'From the close before the news',
   'analog.basis.price': 'From the price its source gives (an offer price)',
-  'analog.basis.day0Open': "From Day 0's open",
+  'analog.basis.day0Open': "From Day 0's open (the benchmark from its 09:30 open)",
+  'analog.basis.day0OpenAlone': "From Day 0's open",
   'analog.basis.day0Close': "From Day 0's close",
   'analog.against.benchmark': 'against {symbol}',
   'analog.against.none': 'not against the market',
@@ -443,6 +444,8 @@ export const EN = Object.freeze({
   'analog.row.split': 'Split-adjusted ×{factor}',
   'analog.row.splitSource': 'Split record ↗',
   'analog.row.listed': 'Listing day',
+  'analog.row.noVolume': 'No volume check',
+  'analog.row.raw': 'Raw changes: {symbol} has no bars this early',
   'analog.row.skipped': { one: 'Skipped {n} session', other: 'Skipped {n} sessions' },
 
   // the operator's own browser wallet (wire/wallet.js, render/wallet-row.js, host/wallet-send.js): its refusals and its row
@@ -1784,6 +1787,10 @@ export const EN = Object.freeze({
   'markets.event.relHeadSelf': 'Its own path · the base = 100',
   'markets.event.relSaid': 'Against the market, the day before the news = 100: low {low}, high {high}',
   'markets.event.noRel': 'The view did not keep this event’s line against the market',
+  'markets.event.relSaidBench': 'Against {symbol}, the base = 100: low {low}, high {high}',
+  'markets.event.relSaidSelf': 'Its own path, the base = 100: low {low}, high {high}',
+  'markets.event.noRelBench': 'The view did not keep this event’s line against {symbol}',
+  'markets.event.noRelSelf': 'The view did not keep this event’s own path',
   'markets.event.filled': 'filled by {source}',
 
   // the desk's status as the screens read it (host/desk-view.js): a time in New York's, as the server writes it, and the

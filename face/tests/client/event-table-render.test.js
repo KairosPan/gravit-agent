@@ -180,3 +180,31 @@ test('a version 2 group with medians shows its first and last horizon', () => {
   assert.match(drawV2(view), /<div class="et-median"><span class="et-median-label">中位数<\/span><span class="et-chip down"><span class="et-chip-label">当天<\/span>−5\.0%<\/span><span class="et-chip up"><span class="et-chip-label">250 天<\/span>\+3\.1%<\/span><\/div>/);
   assert.match(drawV2(), /不足 8 例/);
 });
+
+test('a case older than the benchmark\'s bars shows its raw chips, said to be raw, never a row of 尚无', () => {
+  const old = c => (c.id === 'ev-SKPD-2021-03-10' ? { ...c, measure: { ...c.measure, changes: c.measure.changes.map(ch => ({ ...ch, x: null })) } } : c);
+  const h = drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(old) });
+  const skpd = rowOf(h, 'SKPD 恢复交易');
+  assert.deepEqual(chipsOf(skpd), ['当天 +3.0%', '5 天 +1.8%', '20 天 −1.4%', '60 天 −3.2%', '120 天 −3.9%', '250 天 −4.8%']);
+  assert.match(skpd, /<div class="et-chips"><span class="et-flag">原始涨跌：SPY 没有这么早的行情<\/span>/);
+  // a case with a figure against it at some horizon keeps its own chips; a raw view says it once, in its head
+  assert.doesNotMatch(rowOf(h, 'ANT 上市'), /原始涨跌/);
+  assert.doesNotMatch(drawV2(EVENT_VIEW_V2_RAW), /原始涨跌：/);
+  assert.match(drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(old) }, EN), /<span class="et-flag">Raw changes: SPY has no bars this early<\/span>/);
+});
+
+test('a measured row whose volume was not checked says so, unless it is a listing day', () => {
+  const unchecked = c => (c.id === 'ev-SKPD-2021-03-10' || c.id === 'ev-LSTA-2023-09-14' ? { ...c, tapeRan: false } : c);
+  const h = drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(unchecked) });
+  assert.match(rowOf(h, 'SKPD 恢复交易'), /<span class="et-flag">未做量能核对<\/span>/);
+  assert.doesNotMatch(rowOf(h, 'LSTA 上市'), /未做量能核对/);
+  assert.doesNotMatch(rowOf(h, 'TIEC 上市'), /未做量能核对/);
+  assert.doesNotMatch(drawV2(), /未做量能核对/);
+  assert.match(drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(unchecked) }, EN), /<span class="et-flag">No volume check<\/span>/);
+});
+
+test("day 0's open says how the benchmark is measured", () => {
+  const view = { ...EVENT_VIEW_V2, parameters: { ...EVENT_VIEW_V2.parameters, base: 'day0_open' } };
+  assert.match(drawV2(view), /<div class="et-basis">从当天开盘起算（大盘按 09:30 开盘价），对比 SPY；/);
+  assert.match(drawV2(view, EN), /<div class="et-basis">From Day 0&#39;s open \(the benchmark from its 09:30 open\), against SPY;/);
+});

@@ -175,6 +175,7 @@ test('the basis says the base and the benchmark', () => {
   }).basis.line);
   assert.match(with_('prior_close', 'QQQ', 'benchmark'), /^从消息前收盘起算，对比 QQQ；/);
   assert.match(with_('day0_open', null, 'raw'), /^从当天开盘起算，未对比大盘；/);
+  assert.match(with_('day0_open', 'SPY', 'benchmark'), /^从当天开盘起算（大盘按 09:30 开盘价），对比 SPY；/);
   assert.match(with_('day0_close', 'SPY', 'benchmark'), /^从当天收盘起算，对比 SPY；/);
   // Review Focus 1: a benchmark that could not be read says so, and the chips read the raw changes, never a row of 尚无
   const raw = zh(() => eventTableOf(EVENT_VIEW_V2_ID, EVENT_VIEW_V2_RAW));

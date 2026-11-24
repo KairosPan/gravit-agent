@@ -224,3 +224,18 @@ test("a version 2 view's flags are its horizons and its price is a level", () =>
   const open = { ...EVENT_VIEW_V2, parameters: { ...EVENT_VIEW_V2.parameters, base: 'prior_close' } };
   assert.doesNotMatch(splbPage(open, 260).h, /ev-level/);
 });
+
+test("a version 2 line's screen-reader label and its no-line sentence name what the line is", () => {
+  const label = h => h.match(/<svg class="ew-rel"[^>]*aria-label="([^"]*)"/)?.[1];
+  const bench = splbPage(withRel(EVENT_VIEW_V2, 'benchmark'), 260).h;
+  assert.match(label(bench), /^相对 SPY，起算价 = 100：最低 100，最高 125$/);
+  const self = splbPage(withRel(EVENT_VIEW_V2_RAW, 'self'), 260).h;
+  assert.match(label(self), /^自身走势，起算价 = 100：最低 100，最高 125$/);
+  // no line kept: the sentence says what it would have been against
+  assert.match(splbPage(EVENT_VIEW_V2, 260).h, /<p class="mk-note">视图没有保留这个事件相对 SPY 的走势<\/p>/);
+  assert.match(splbPage(EVENT_VIEW_V2_RAW, 260).h, /<p class="mk-note">视图没有保留这个事件的自身走势<\/p>/);
+  // version 1's words stay its own
+  const route = parseHash(marketHref(EVENT_VIEW_ID, 'WYNN', AT, 'ev-WYNN-2018-01-26'));
+  const v1 = withTable(ZH, () => eventHistoryHtml(eventOf(stateAt(route, { [EVENT_VIEW_ID]: { status: 'loaded', view: EVENT_VIEW } }, { 'stock:WYNN@2018-01-26': ready(BARS) }), 'stock:WYNN'), NOW));
+  assert.match(label(v1), /^相对大盘，消息前一天 = 100：/);
+});

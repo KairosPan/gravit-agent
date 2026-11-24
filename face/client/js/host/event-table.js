@@ -86,14 +86,18 @@ function splitOf(s, day0) {
 }
 
 // one row: a case of a group, or an anchor of the present case (its symbol the query's). `drawn`: how its measure becomes
-// chips, and how far after day 0 its link opens the market
-function rowOf(viewId, c, symbol, { chips: chipsOf, after = 60 }) {
+// chips, how far after day 0 its link opens the market and, under a benchmark read, the benchmark and the raw chips a case
+// with no figure against it at any horizon (its dates older than the benchmark's bars) shows instead of a row of none.
+// `raw`: that benchmark, when the row shows raw chips; `noVolume`: a measured row whose tape check did not run, not a listing
+function rowOf(viewId, c, symbol, { chips: chipsOf, after = 60, benchmark = null, rawChips = null }) {
   const id = str(c?.id) ?? '';
   const day0 = str(c?.day0);
   const date = str(c?.date);
   const source = sourceOf(c?.source);
   const measured = c?.state === 'measured' && c?.measure !== null && typeof c?.measure === 'object';
-  const chips = measured ? chipsOf(c.measure) : [];
+  const changes = measured ? list(c.measure.changes).filter(ch => Number.isInteger(ch?.k)) : [];
+  const raw = rawChips !== null && changes.length > 0 && changes.every(ch => valueOf(ch, 'benchmark') === null);
+  const chips = !measured ? [] : raw ? rawChips(c.measure) : chipsOf(c.measure);
   const price = num(c?.price);
   const skipped = num(c?.skipped);
   return {
@@ -108,6 +112,8 @@ function rowOf(viewId, c, symbol, { chips: chipsOf, after = 60 }) {
     price: price === null ? null : price.toFixed(2),
     split: splitOf(c?.splits, day0),
     listed: c?.listed === true,
+    raw: raw ? benchmark : null,
+    noVolume: measured && c?.tapeRan === false && c?.listed !== true,
     skipped: skipped !== null && skipped > 0 ? skipped : 0,
   };
 }
@@ -128,11 +134,11 @@ function summaryAtOf(s) {
   return ends.map(a => ({ label: horizonLabel(a.k), value: num(a.median) }));
 }
 
-// the base's words, one function per base the view may name
+// the base's words, one function per base the view may name; under no benchmark, day 0's open names no benchmark's open
 const BASIS = {
   prior_close: () => t('analog.basis.priorClose'),
   price: () => t('analog.basis.price'),
-  day0_open: () => t('analog.basis.day0Open'),
+  day0_open: benchmark => (benchmark === null ? t('analog.basis.day0OpenAlone') : t('analog.basis.day0Open')),
   day0_close: () => t('analog.basis.day0Close'),
 };
 
@@ -146,7 +152,7 @@ function basisOf(view) {
   const vs = against === 'benchmark' ? t('analog.against.benchmark', { symbol: benchmark })
     : benchmark === null ? t('analog.against.none')
     : t('analog.against.unread', { symbol: benchmark });
-  return { base, benchmark, against, line: t('analog.table.basis2', { basis: BASIS[base](), against: vs }) };
+  return { base, benchmark, against, line: t('analog.table.basis2', { basis: BASIS[base](benchmark), against: vs }) };
 }
 
 /** The table of event view `viewId`. A view that is not one gives an empty table. */
@@ -161,7 +167,10 @@ export function eventTableOf(viewId, view) {
   const v2 = view?.version === 2;
   const basis = v2 ? basisOf(view) : null;
   const last = v2 ? list(view.parameters?.horizons).filter(Number.isInteger).at(-1) ?? 0 : 0;
-  const drawn = chipsOf => (v2 ? { chips: horizonChips(basis.against), after: Math.max(60, last) } : { chips: fixedChips(chipsOf) });
+  const drawn = chipsOf => (v2 ? {
+    chips: horizonChips(basis.against), after: Math.max(60, last), benchmark: basis.benchmark,
+    rawChips: basis.against === 'benchmark' ? horizonChips('raw') : null,
+  } : { chips: fixedChips(chipsOf) });
   const query = view?.query;
   const anchors = list(query?.anchors);
   const present = anchors.length ? anchors.map(a => rowOf(viewId, a, str(query.symbol) ?? '', drawn(ANCHOR_CHIPS))) : null;

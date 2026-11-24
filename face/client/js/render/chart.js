@@ -188,8 +188,10 @@ export function eventCandlesSvg(bars, { day0, marks = [], flags = [], unit, leve
 
 /** The line against the market under an event's candles: the case's `rel` ([k, v] pairs, k sessions from day 0, the day
  *  before = 100) on the same `count` bars as the candles, day 0 at `day0`; a dashed 100 with its figure, the low and the
- *  high beside it; day 0's line. A point off the bars is left out; fewer than two draw nothing. */
-export function eventRelSvg(rel, { day0, count } = {}) {
+ *  high beside it; day 0's line. A point off the bars is left out; fewer than two draw nothing. `of`, a version 2 view's:
+ *  the benchmark's symbol the line is against (the base = 100), or `self` for the stock's own path; left out, version 1's
+ *  words, against the market. */
+export function eventRelSvg(rel, { day0, count, of } = {}) {
   if (!Number.isInteger(day0) || !Number.isInteger(count) || count < 2) return '';
   const points = (Array.isArray(rel) ? rel : [])
     .map(p => { const k = Array.isArray(p) ? number(p[0]) : null; return [k === null ? NaN : day0 + k, Array.isArray(p) ? number(p[1]) : null]; })
@@ -204,7 +206,9 @@ export function eventRelSvg(rel, { day0, count } = {}) {
   const x = fx1(centreOf(day0, count));
   const figure = (v, cls) => `<text class="${cls}" x="${EW - ER + 4}" y="${fx1(Y(v) + 3)}">${esc(String(Math.round(v)))}</text>`;
   const ends = [hi, lo].filter(v => Math.abs(Y(v) - Y(100)) > 10).map(v => figure(v, 'ew-price')).join('');
-  const described = t('markets.event.relSaid', { low: Math.round(lo), high: Math.round(hi) });
+  const range = { low: Math.round(lo), high: Math.round(hi) };
+  const described = of === undefined ? t('markets.event.relSaid', range)
+    : of === 'self' ? t('markets.event.relSaidSelf', range) : t('markets.event.relSaidBench', { symbol: String(of), ...range });
   return `<svg class="ew-rel" viewBox="0 0 ${EW} ${RH}" role="img" aria-label="${esc(described)}">` +
     `<line class="ew-rel-base" x1="${EL}" y1="${fx1(Y(100))}" x2="${EW - ER}" y2="${fx1(Y(100))}"></line>${figure(100, 'ew-price')}${ends}` +
     `<line class="ew-day0" x1="${x}" y1="${RT}" x2="${x}" y2="${RH - RB}"></line><path class="ew-rel-line" d="${line}"></path></svg>`;

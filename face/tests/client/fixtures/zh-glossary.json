@@ -104,6 +104,8 @@
       "markets.event.from": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"},
       "markets.event.gone": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"},
       "markets.event.noRel": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"},
+      "markets.event.noRelBench": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"},
+      "markets.event.noRelSelf": {"why": "an event analog's news event (a company's), not a prediction market's event contract", "zh": "事件"},
       "gbox.stub.events": {"why": "an event analog's table, in the gravit box, not a prediction market's event contract", "zh": "事件"},
       "markets.tab.macro": {"why": "the Macro & events tab's name: events at large, not the event contract form", "zh": "事件"}}},
     {"en":"shares","zh":"股","note":"A shares → A 股, {n} shares → {n} 股"},
