@@ -508,6 +508,9 @@ export function namedStates() {
     // the event table of a version 2 view (event analog redesign Task 9): under a report line in Messages, the view measured
     // from its price against SPY and the same view raw, its benchmark not read; on the task's page, the two drawn open
     ...eventTableV2States(),
+    // the market page at a version 2 event (event analog redesign Task 10): SPLB's listing from the v2 view, 250 sessions
+    // after day 0, a flag at each horizon, its price over its split a dashed level, the line against SPY
+    ['market-event-window-v2', marketEventWindowV2()],
   ];
 }
 
@@ -880,6 +883,33 @@ function marketEventWindow() {
   s = R.eventBarsLoaded(s, { key: 'stock:WYNN@2018-01-26', at: NOW,
     data: { ok: true, candles, source: 'Nasdaq · WYNN', adjustment: 'split-adjusted, not dividend-adjusted', more: true } });
   return { ...s, analog: { tasks: {}, views: { [EVENT_VIEW_ID]: { status: 'loaded', view: EVENT_VIEW_WITH_B } } } };
+}
+
+// a stock's page at a version 2 event (event analog redesign Task 10): SPLB at its 2019-05-10 listing from the v2 view, its
+// route's after 250 (the view's last horizon), its window synthetic weekday bars from day 0 near 40 (its price 160 over ×4),
+// and its line against SPY a made-up rise; every figure is made up
+function marketEventWindowV2() {
+  const fx = name => JSON.parse(readFileSync(new URL(`../../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
+  const all = fx('explore-all');
+  const nvda = all.items.find(i => i.key === 'stock:NVDA');
+  all.items.push({ ...nvda, key: 'stock:SPLB', base: 'SPLB', name: 'SPLB', at: nvda.at.map(l => ({ ...l, symbol: 'SPLB' })) });
+  const candles = [];
+  for (let t = Date.parse('2019-05-10T13:30:00Z'); candles.length < 260; t += 86_400_000) {
+    const wd = new Date(t).getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    const i = candles.length;
+    const c = Math.round((44 + 6 * Math.sin(i / 18) + i * 0.02) * 100) / 100;
+    const o = i === 0 ? 42 : candles[i - 1].c;
+    candles.push({ t, o, h: Math.max(o, c) + 0.6, l: Math.min(o, c) - 0.6, c, v: 1_000_000 });
+  }
+  const rel = Array.from({ length: 251 }, (_, k) => [k, Math.round((100 + 8 * Math.sin(k / 25) + k * 0.06) * 100) / 100]);
+  const view = { ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(c => (c.id === 'ev-SPLB-2019-05-10' ? { ...c, rel, relOf: 'benchmark' } : c)) };
+  const route = { screen: 'markets', id: 'stock:SPLB', event: { at: '2019-05-10', view: EVENT_VIEW_V2_ID, case: 'ev-SPLB-2019-05-10', after: 250 } };
+  let s = exploreFor(R.nav(emptyState(), route), all);
+  s = R.statementLoaded(R.holdingsLoaded(R.accountLoaded(s, { data: fx('account'), at: NOW }), { data: fx('holdings'), at: NOW }), { data: fx('statement'), at: NOW });
+  s = R.eventBarsLoaded(s, { key: 'stock:SPLB@2019-05-10@250', at: NOW,
+    data: { ok: true, candles, source: 'Nasdaq · SPLB', adjustment: 'split-adjusted, not dividend-adjusted', more: false } });
+  return { ...s, analog: { tasks: {}, views: { [EVENT_VIEW_V2_ID]: { status: 'loaded', view } } } };
 }
 
 // Get a code and Settings › Devices (sign-only-money Task 7)

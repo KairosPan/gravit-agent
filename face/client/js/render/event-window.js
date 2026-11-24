@@ -5,6 +5,9 @@
 // bars are), the case's line against the market (or a sentence when the view kept none), and a caption naming the bars' source,
 // their adjustment and, for a window older than five years read from Nasdaq, that Nasdaq filled it. A view that is gone, or a
 // case not in it, still draws the window and day 0 from `at`. Every text from the view is masked, then escaped.
+// A version 2 view (event analog redesign §4.5): the window runs to the route's `after` (the view's last horizon past 60), a
+// flag at every horizon after day 0 the bars reach, under the `price` base a dashed line at the price the case was measured
+// from (as the bars see it: over its split factor), and the line labelled with the benchmark, or as the stock's own path.
 import { esc } from '../html.js';
 import { t, th, sayOf } from '../i18n/words.js';
 import { maskExcerpt } from '../mask.js';
@@ -12,8 +15,8 @@ import { seg } from './controls.js';
 import { eventCandlesSvg, eventRelSvg } from './chart.js';
 import { chip, TIMING } from './event-table.js';
 import { candleRanges } from '../host/market-view.js';
-import { eventTableOf, pct, toneOf } from '../host/event-table.js';
-import { EVENT_RANGE, eventWindowOf, marksOf, nyDay } from '../host/event-window.js';
+import { eventTableOf, horizonLabel, pct, toneOf, valueOf } from '../host/event-table.js';
+import { EVENT_RANGE, afterOf, eventWindowOf, marksOf, nyDay, windowKey } from '../host/event-window.js';
 import { VIEW_ID_RE } from '../host/analog.js';
 
 const str = v => (typeof v === 'string' ? v : null);
@@ -25,11 +28,16 @@ const note = line => { const words = sayOf(line); return words ? `<p class="mk-n
 
 // the +5 and +60 flags: each figure of the case's against the market, its label the table's chip's
 const FLAGS = [[5, () => t('analog.chip.d5'), 'x5'], [60, () => t('analog.chip.d60'), 'x60']];
+// a version 2 measure's flags: each change after day 0 the bars reach, its horizon's label, its figure under the view's `against`
+const horizonFlags = (measure, against, day0, count) => list(measure.changes)
+  .filter(ch => Number.isInteger(ch?.k) && ch.k > 0 && day0 + ch.k < count && valueOf(ch, against) !== null)
+  .map(ch => { const v = valueOf(ch, against); return { index: day0 + ch.k, label: horizonLabel(ch.k), text: pct(v), tone: toneOf(v) }; });
 // the source whose bars fill a window older than Robinhood's five years
 const NASDAQ = 'Nasdaq'; // en-kept: the provider's name
 
-/** The event a stock's page is at, when the route is that page at one: its window's entry, and the view's case as the table
- *  models it (its row, its group) beside the case as it came (its measure and rel). Null for any other page. */
+/** The event a stock's page is at, when the route is that page at one: its window's key, entry and `after`, the view's
+ *  basis (version 2), and the view's case as the table models it (its row, its group) beside the case as it came (its measure
+ *  and rel). Null for any other page. */
 export function eventOf(state, id) {
   const route = state?.route;
   const event = route?.screen === 'markets' && route.id === id && typeof id === 'string' && id.startsWith('stock:') ? route.event : null;
@@ -40,14 +48,15 @@ export function eventOf(state, id) {
   const view = entry?.status === 'loaded' ? entry.view : null;
   const raw = view && caseId !== null ? [...list(view.query?.anchors), ...list(view.cases)].find(c => str(c?.id) === caseId) ?? null : null;
   let row = null;
+  const table = view ? eventTableOf(viewId, view) : null;
   if (raw) {
-    const table = eventTableOf(viewId, view);
     const rows = [...list(table.present).map(r => ({ row: r, group: null })), ...table.groups.flatMap(g => g.rows.map(r => ({ row: r, group: g.name })))];
     row = rows.find(r => r.row.id === caseId) ?? null;
   }
   const windows = state.markets?.event ?? {};
-  const key = `${id}@${event.at}`;
-  return { at: event.at, viewId, caseId, entry, view, raw, row, bars: Object.hasOwn(windows, key) ? windows[key] : null };
+  const after = afterOf(event);
+  const key = windowKey(id, event.at, after);
+  return { at: event.at, after, key, viewId, caseId, entry, view, basis: table?.basis ?? null, raw, row, bars: Object.hasOwn(windows, key) ? windows[key] : null };
 }
 
 /** The banner above the price: where the page came from and the way back; the case from the view, or a line on the view. */
@@ -87,21 +96,27 @@ export function eventHistoryHtml(ev, now) {
   const b = ev.bars;
   if (b?.status === 'error') return card(note(b.message || t('markets.event.failed')));
   if (b?.status !== 'ready') return card(note(t('common.loading')));
-  const shown = eventWindowOf(b.data?.candles, ev.at);
+  const shown = eventWindowOf(b.data?.candles, ev.at, ev.after ?? 60);
   if (!shown) return card(note(t('markets.event.noDay', { date: ev.at })));
   const { bars, day0 } = shown;
   const marks = marksOf(ev.view, ev.caseId, shown).map(m => ({
     index: m.index, kind: m.kind, label: maskExcerpt(m.kind === 'day0' ? m.label : [m.group, m.label].filter(Boolean).join(' · ')), // words-order: the view's own texts, group then label
   }));
   const measure = ev.raw?.state === 'measured' && ev.raw.measure !== null && typeof ev.raw.measure === 'object' ? ev.raw.measure : null;
-  const flags = measure ? FLAGS.filter(([n, , field]) => num(measure[field]) !== null && day0 + n < bars.length)
-    .map(([n, label, field]) => ({ index: day0 + n, label: label(), text: pct(measure[field]), tone: toneOf(measure[field]) })) : [];
+  const basis = ev.view?.version === 2 ? ev.basis : null;
+  const flags = !measure ? [] : basis ? horizonFlags(measure, basis.against, day0, bars.length)
+    : FLAGS.filter(([n, , field]) => num(measure[field]) !== null && day0 + n < bars.length)
+      .map(([n, label, field]) => ({ index: day0 + n, label: label(), text: pct(measure[field]), tone: toneOf(measure[field]) }));
+  // under the price base, the price the case was measured from as the bars see it (the price over its split factor)
+  const level = measure && basis?.base === 'price' ? num(measure.base) : null;
   const title = `<div class="ew-card-head">${th('markets.event.span', { first: nyDay(bars[0].t), last: nyDay(bars.at(-1).t) })}</div>`;
-  const candles = eventCandlesSvg(bars, { day0, marks, flags, unit: 'usd' });
+  const candles = eventCandlesSvg(bars, { day0, marks, flags, unit: 'usd', ...(level !== null ? { level } : {}) });
   let rel = '';
   if (ev.raw) {
     const line = eventRelSvg(ev.raw.rel, { day0, count: bars.length });
-    rel = line ? `<div class="ew-rel-head">${th('markets.event.relHead')}</div>${line}` : `<p class="mk-note">${th('markets.event.noRel')}</p>`;
+    const head = !basis ? th('markets.event.relHead')
+      : ev.raw.relOf === 'benchmark' && basis.benchmark !== null ? th('markets.event.relHeadBench', { symbol: basis.benchmark }) : th('markets.event.relHeadSelf');
+    rel = line ? `<div class="ew-rel-head">${head}</div>${line}` : `<p class="mk-note">${th('markets.event.noRel')}</p>`;
   }
   const source = str(b.data?.source);
   const filled = source?.startsWith(NASDAQ) && olderThanFive(bars[0].t, now) ? t('markets.event.filled', { source: NASDAQ }) : null;

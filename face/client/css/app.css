@@ -370,6 +370,7 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .ew-day0 { stroke: var(--accent-ink); stroke-width: 1.5; }
 .ew-chart .ew-day0-label { fill: var(--accent-ink); font-weight: 700; }
 .ew-mark { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; }
+.ev-level { stroke: var(--text); stroke-width: 1; stroke-dasharray: 6 4; opacity: 0.7; }
 .ew-flag rect { fill: var(--surface-2); }
 .ew-flag.up rect { fill: var(--up-fill); }
 .ew-flag.down rect { fill: var(--down-fill); }

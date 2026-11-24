@@ -1780,6 +1780,8 @@ export const EN = Object.freeze({
   'markets.event.noDay': 'No daily bar on {date}',
   'markets.event.said': 'Daily candles, {first} to {last}: low {low}, high {high}',
   'markets.event.relHead': 'Against the market (SPY) · the day before the news = 100',
+  'markets.event.relHeadBench': 'Against {symbol} · the base = 100',
+  'markets.event.relHeadSelf': 'Its own path · the base = 100',
   'markets.event.relSaid': 'Against the market, the day before the news = 100: low {low}, high {high}',
   'markets.event.noRel': 'The view did not keep this event’s line against the market',
   'markets.event.filled': 'filled by {source}',

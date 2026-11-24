@@ -5,7 +5,8 @@
 // session's id and a strategy's name read the same way. Two old forms still parse, for settle to place (app.js): #/messages/<id>
 // (Messages with the id it named) and #/channel/<workspaceId> (Messages carrying the workspace). A stock's page at an event
 // (spec 2026-11-12 §4.3) is #/markets/stock:<SYM>?at=<YYYY-MM-DD>&view=<view id>&case=<case id>: the id is what comes before
-// the `?`, and the query its `event` when the id is a stock's and `at` a real day — any other market's query is dropped.
+// the `?`, and the query its `event` when the id is a stock's and `at` a real day — any other market's query is dropped. Its
+// `after` (event analog redesign §4.5), the sessions drawn after day 0, is kept only from 61 to 250: 60 is the page's own.
 const TABS = ['portfolio', 'money', 'venues', 'agents', 'cards', 'rules', 'identity'];
 /** The Memory screen's tabs, in the order drawn; the first is the one an address with no tab, or an unknown one, opens. */
 export const MEMORY_TABS = Object.freeze(['lessons', 'decisions', 'waiting', 'health']);
@@ -20,6 +21,11 @@ function restOf(path) {
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const isDay = v => DAY_RE.test(v) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v);
 const named = v => (typeof v === 'string' && v !== '' ? v : null);
+// an `after` the page keeps: a whole number from 61 to 250, else none (60, the page's own, is never written)
+const afterOf = v => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\d{1,3}$/.test(v) ? Number(v) : NaN;
+  return Number.isInteger(n) && n > 60 && n <= 250 ? n : null;
+};
 
 // a markets path's id and, for a stock with a real `at`, its event; the id decoded as restOf decodes it
 function marketsOf(path) {
@@ -29,16 +35,17 @@ function marketsOf(path) {
   const params = new URLSearchParams(path.slice(q + 1));
   const at = params.get('at') ?? '';
   if (!isDay(at)) return { screen: 'markets', id };
-  const view = named(params.get('view')), kase = named(params.get('case'));
-  return { screen: 'markets', id, event: { at, ...(view ? { view } : {}), ...(kase ? { case: kase } : {}) } };
+  const view = named(params.get('view')), kase = named(params.get('case')), after = afterOf(params.get('after'));
+  return { screen: 'markets', id, event: { at, ...(view ? { view } : {}), ...(kase ? { case: kase } : {}), ...(after !== null ? { after } : {}) } };
 }
 
-/** A stock page's event as its hash's query, in the order at, view, case; nothing for any other route. */
+/** A stock page's event as its hash's query, in the order at, view, case, after; nothing for any other route. */
 function eventQuery(route) {
   const ev = route.screen === 'markets' && typeof route.id === 'string' && route.id.startsWith('stock:') ? route.event : null;
   if (!ev || !isDay(ev.at ?? '')) return '';
   const e = encodeURIComponent;
-  return `?at=${ev.at}${named(ev.view) ? `&view=${e(ev.view)}` : ''}${named(ev.case) ? `&case=${e(ev.case)}` : ''}`;
+  const after = afterOf(ev.after);
+  return `?at=${ev.at}${named(ev.view) ? `&view=${e(ev.view)}` : ''}${named(ev.case) ? `&case=${e(ev.case)}` : ''}${after !== null ? `&after=${after}` : ''}`;
 }
 
 export function parseHash(hash) {

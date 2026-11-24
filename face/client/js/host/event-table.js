@@ -48,8 +48,8 @@ export function factorText(f) {
   return String(Number(v.toPrecision(3)));
 }
 
-// a change's figure under the view's `against` (event-summary.mjs valueOf): against the benchmark, or raw without one
-const valueOf = (change, against) => num(against === 'raw' ? change?.r : change?.x);
+/** A change's figure under the view's `against` (event-summary.mjs valueOf): against the benchmark, or raw without one. */
+export const valueOf = (change, against) => num(against === 'raw' ? change?.r : change?.x);
 
 // a source link the page may open: http(s) alone
 const sourceOf = v => (typeof v === 'string' && /^https?:\/\//i.test(v) ? v : null);
@@ -62,8 +62,8 @@ const D60 = [() => t('analog.chip.d60'), 'x60'];
 const CASE_CHIPS = [DAY0, D5, D60];
 const ANCHOR_CHIPS = [DAY0, NEXT, D5, D60];
 
-// a version 2 chip's label: Day 0, the next day, then N days
-const horizonLabel = k => (k === 0 ? t('analog.chip.day0') : k === 1 ? t('analog.chip.next') : tn('analog.chip.days', k));
+/** A version 2 chip's label: Day 0, the next day, then N days. */
+export const horizonLabel = k => (k === 0 ? t('analog.chip.day0') : k === 1 ? t('analog.chip.next') : tn('analog.chip.days', k));
 
 // a version 1 measure's chips: the fixed labels, each over its field
 const fixedChips = chipsOf => measure => chipsOf.map(([label, field]) => ({ label: label(), text: pct(measure[field]), tone: toneOf(measure[field]) }));

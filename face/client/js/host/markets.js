@@ -33,7 +33,7 @@ import { venuesOf } from './account-view.js';
 import { joinExplore } from './explore-join.js';
 import { exploreHalves, joinOptsOf, orderOf, MARKET_EXPLORE as EXPLORE, CONNECTED_EXPLORE } from './explore-halves.js';
 import { said, isSaid } from '../i18n/words.js';
-import { windowAsk, windowPath, EVENT_RANGE } from './event-window.js';
+import { afterOf, windowAsk, windowKey, windowPath, EVENT_RANGE } from './event-window.js';
 import { toHash } from '../router.js';
 
 // a venue's state while the proxy re-serves the market's last read: the market is not answering — flagged, so recheckChina knows
@@ -714,7 +714,8 @@ export function startMarkets({
     if (full) store.dispatch('accountWatchLoaded', { items: store.get().markets.watch, error: 'full' });
   }
 
-  // A stock page at an event (spec 2026-11-12 §4.3): its window's daily bars read once per `<id>@<at>` from the US stocks line,
+  // A stock page at an event (spec 2026-11-12 §4.3): its window's daily bars read once per `<id>@<at>` (`<id>@<at>@<after>`
+  // when the page shows more than 60 sessions after day 0, event analog redesign §4.5) from the US stocks line,
   // beside the page's own reads, whatever line the page follows; the answer kept as it came (its `more` is never paged from). A
   // read that failed is read once more each time the page at that event is entered again (Task 9, ruling 6)
   let eventEntered = null;
@@ -722,12 +723,13 @@ export function startMarkets({
     const s = store.get();
     const { screen, id, event } = s.route ?? {};
     if (screen !== 'markets' || typeof id !== 'string' || !id.startsWith('stock:') || typeof event?.at !== 'string') { eventEntered = null; return; }
-    const key = `${id}@${event.at}`;
+    const after = afterOf(event);
+    const key = windowKey(id, event.at, after);
     const entering = eventEntered !== key;
     eventEntered = key;
     const kept = Object.hasOwn(s.markets.event ?? {}, key) ? s.markets.event[key] : undefined;
     if (kept !== undefined && !(entering && kept?.status === 'error')) return;
-    fly(`event:${key}`, windowPath(id.slice('stock:'.length), windowAsk(event.at, now())), (body, refused) => {
+    fly(`event:${key}`, windowPath(id.slice('stock:'.length), windowAsk(event.at, now(), after)), (body, refused) => {
       if (!refused && answered(body, 'candles')) store.dispatch('eventBarsLoaded', { key, data: body, at: now() });
       else store.dispatch('eventBarsFailed', { key, at: now(), message: messageOf(body) });
     }, ['eventBarsLoading', { key }]);

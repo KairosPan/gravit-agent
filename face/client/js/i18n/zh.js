@@ -1773,6 +1773,8 @@ export const ZH = Object.freeze({
   'markets.event.noDay': '{date} 没有日线',
   'markets.event.said': '日线 K 线，{first} 至 {last}：最低 {low}，最高 {high}',
   'markets.event.relHead': '相对大盘（SPY）· 消息前一天 = 100',
+  'markets.event.relHeadBench': '相对 {symbol} · 起算价 = 100',
+  'markets.event.relHeadSelf': '自身走势 · 起算价 = 100',
   'markets.event.relSaid': '相对大盘，消息前一天 = 100：最低 {low}，最高 {high}',
   'markets.event.noRel': '视图没有保留这个事件相对大盘的走势',
   'markets.event.filled': '{source} 补齐',
