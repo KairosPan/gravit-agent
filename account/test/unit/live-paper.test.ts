@@ -533,6 +533,28 @@ function stamped(id: string, rows: Row[], clockOf: SessionClock, o: { delayMs?: 
   return Object.assign(s, { stamp });
 }
 
+describe("US stocks: a close line (Nasdaq's last close, no real-time quote answered) is worded as a close, not as minutes behind", () => {
+  it("a market order in the session is refused saying the only price is Nasdaq's last close, not a real-time quote; a limit rests", async () => {
+    now = fromEt(2026, 10, 14, 11, 0);
+    try {
+      const h = home();
+      const us = stamped("us-test", [row("NVDA", "stock", "NVDA", "USD", 200)], usClock, { delayMs: 60_000 });
+      const was = us.listings.bind(us);
+      us.listings = async (q) => ((await was(q)) as Listing[]).map((m) => ({ ...m, quoteFrom: "Nasdaq \u00b7 close", quoteAt: new Date(fromEt(2026, 10, 13, 16, 0)).toISOString() }));
+      const { t } = await open(h, "paper-1", { all: [us] });
+      const m = ok(await t.market("NVDA"));
+      expect(m.refusesNow!.market).toContain("the only price of NVDA market just now is Nasdaq's last close, not a real-time quote");
+      expect(m.refusesNow!.market).not.toContain("minutes behind");
+      const refused = refusal(await t.place(order({ symbol: "NVDA", qty: 1 })));
+      expect(refused.message).toContain("Nasdaq's last close, not a real-time quote");
+      expect(refused.message).not.toMatch(/minutes behind|Cboe/);
+      expect(book(h).holdings["NVDA"]).toBeUndefined();
+    } finally {
+      now = NOW;
+    }
+  });
+});
+
 describe("stocks by their quote's own time: the regular session, extended hours, a quote that stopped moving", () => {
   it("fills only at a quote stamped inside a session the order trades in; an extended-hours limit trades pre-market and after-hours; a stale quote fills nothing", async () => {
     now = fromEt(2026, 10, 14, 11, 0);

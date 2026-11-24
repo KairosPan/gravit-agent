@@ -7,14 +7,14 @@
  * market service in-process, through the face's market proxy (src/market-proxy.ts: each read's cache and flights,
  * the `mcp-market` row's URL, `FACE_MARKET_URL`), never the account. A snapshot splits what it is asked by market:
  * - a US share: `GET /api/explore?q=<SYM>&key=stock:<SYM>&limit=1` at the market, once per symbol, kept 20 s by the proxy.
- *   The Market answers it keyless (the Market's live US quotes: Robinhood's or Nasdaq's real-time quote, else Cboe's delayed
- *   one). The row keyed `stock:<SYM>` with a `price` and its `quoteAt` becomes the quote's `price` and `as_of`,
+ *   The Market answers it keyless (the Market's live US quotes: Robinhood's or Nasdaq's real-time quote, else Nasdaq's last regular close, `Nasdaq · close`, where no real-time quote
+ *   answered: a `delayed` quote; a book that still holds `Cboe · 15 min delayed` rows reads them the same). The row keyed `stock:<SYM>` with a `price` and its `quoteAt` becomes the quote's `price` and `as_of`,
  *   `change24h` its `change` and `price - change24h` its `prev_close`;
  * - an A share: `GET /api/quotes?pairs=china|<code>,…` at the market, at most {@link CN_QUOTES_BATCH} codes a read (the
  *   market's cap), the codes sorted, kept 3 s by the proxy. The China row's `price`, `quoteAt`, `change24h`,
  *   `changePct24h` and `cn` (Tencent's previous close, volume, quote status and the session's phase) become the quote.
  * Every read runs in the same {@link QUOTES_CONCURRENCY} lanes, and the quotes come back in the order asked. `feedOf`
- * names the feed from the row's `quoteFrom`; a US quote is `delayed` when that word says so. Nothing is invented: no
+ * names the feed from the row's `quoteFrom`; a US quote is `delayed` when that word says so, and a close line (feed `nasdaq close`) always is. Nothing is invented: no
  * row, no `quoteAt`, a refusal - no price.
  *
  * Honest degradation, in the readers' words (`quotes unavailable: <reason>`, `unavailable: <reason>`):
@@ -110,16 +110,20 @@ const MARKET_SOURCE = "market";
 const FEEDS: ReadonlyMap<string, string> = new Map([
   ["robinhood real time", "robinhood"],
   ["nasdaq real time", "nasdaq"],
+  ["nasdaq close", "nasdaq close"],
   ["cboe 15 min delayed", "cboe delayed"],
   ["tencent", "tencent"],
 ]);
+
+/** The feed of a close line: Nasdaq's last regular close, where no real-time quote answered; the desk shows it as delayed. */
+const NASDAQ_CLOSE_FEED = "nasdaq close";
 
 /** A feed word lower-cased, its `·` dropped and its spaces collapsed and trimmed. */
 const plainWords = (text: string): string => text.toLowerCase().replace(/·/g, " ").replace(/\s+/g, " ").trim();
 
 /**
  * A quote's feed in the Market's words, from the row's `quoteFrom`: `Robinhood · real time` → `robinhood`,
- * `Nasdaq · real time` → `nasdaq`, `Cboe · 15 min delayed` → `cboe delayed`, `Tencent` → `tencent`; any other word
+ * `Nasdaq · real time` → `nasdaq`, `Nasdaq · close` → `nasdaq close`, `Cboe · 15 min delayed` → `cboe delayed` (older rows), `Tencent` → `tencent`; any other word
  * lower-cased, its `·` dropped and its spaces collapsed, at most 40 characters.
  * @param quoteFrom - the row's `quoteFrom`.
  */
@@ -197,7 +201,7 @@ function usQuoteOf(asset: MarketQuoteIdentity, answer: UpstreamAnswer, receivedA
       ...asset, transport: "poll", price: row.price, prev_close: prevClose, change,
       change_pct: prevClose === null || change === null ? null : Math.round((change / prevClose) * 1e6) / 1e4,
       volume: null, as_of: at, received_at: receivedAt, volume_as_of: null, source: MARKET_SOURCE, feed: feedOf(from),
-      basis: "previous_close", quote_status: verdict.stale ? "stale" : /delay/i.test(from) ? "delayed" : "live",
+      basis: "previous_close", quote_status: verdict.stale ? "stale" : /delay/i.test(from) || feedOf(from) === NASDAQ_CLOSE_FEED ? "delayed" : "live",
       market_status: "unknown", message: "",
     },
   };
@@ -217,6 +221,7 @@ function cnQuoteOf(asset: MarketQuoteIdentity, row: Record<string, unknown> | un
   const at = timeOf(market.quoteAt);
   if (!isPrice(market.price) || at === null) return unpriced(asset, `the Market read has no timed price for ${asset.symbol}`, receivedAt);
   const facts = isRecord(market.cn) ? market.cn : {};
+  const feed = feedOf(typeof market.quoteFrom === "string" ? market.quoteFrom : "");
   const phase = typeof facts.phase === "string" && CN_PHASES.has(facts.phase) ? facts.phase as CnSessionFacts["phase"] : undefined;
   const lastSession = typeof facts.lastSession === "string" ? facts.lastSession : null;
   return {
@@ -226,8 +231,8 @@ function cnQuoteOf(asset: MarketQuoteIdentity, row: Record<string, unknown> | un
     change_pct: isNumber(market.changePct24h) ? market.changePct24h : null,
     volume: isNumber(facts.volume) ? facts.volume : null,
     as_of: at, received_at: receivedAt, volume_as_of: null, source: MARKET_SOURCE,
-    feed: feedOf(typeof market.quoteFrom === "string" ? market.quoteFrom : ""), basis: "previous_close",
-    quote_status: stale ? "stale" : facts.quoteStatus === "delayed" ? "delayed" : "live",
+    feed, basis: "previous_close",
+    quote_status: stale ? "stale" : facts.quoteStatus === "delayed" || feed === NASDAQ_CLOSE_FEED ? "delayed" : "live",
     market_status: phase === undefined ? "unknown" : phase === "trading" ? "open" : "closed",
     message: "",
     ...(phase === undefined ? {} : { cn: { phase, lastSession } }),

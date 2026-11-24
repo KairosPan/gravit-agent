@@ -49,6 +49,7 @@ async function stubMarket(
 const ROWS: Record<string, unknown> = {
   NVDA: { key: "stock:NVDA", kind: "stock", name: "NVIDIA", price: 182.31, change24h: 2.16, changePct24h: 1.2, quoteFrom: "Nasdaq · real time", quoteAt: "2026-11-02T20:21:03Z" },
   SPY: { key: "stock:SPY", kind: "stock", name: "SPDR S&P 500", price: 600, change24h: -6, quoteFrom: "Cboe · 15 min delayed", quoteAt: "2026-11-02T20:06:00Z" },
+  AAPL: { key: "stock:AAPL", kind: "stock", name: "Apple", price: 270, change24h: 3, quoteFrom: "Nasdaq · close", quoteAt: "2026-11-02T21:00:00Z" },
   UNTIMED: { key: "stock:UNTIMED", kind: "stock", name: "x", price: 10 },
 };
 const explore = (q: URLSearchParams) => {
@@ -168,9 +169,24 @@ test("the US explore read and the A-share quotes read reach the market stub's /a
   assert.deepEqual([...new Set(paths)].sort(), ["/api/explore", "/api/quotes"], "the market's own paths, nothing under /api/account");
 });
 
+test("a close line (Nasdaq's last regular close) is the feed `nasdaq close` and a delayed quote; an older Cboe row still reads `cboe delayed`", async (t) => {
+  const stub = await stubMarket(explore);
+  t.after(() => stub.server.close());
+  const proxy = registerMarketProxy(noRoutes, { url: stub.url });
+  t.after(() => proxy.dispose());
+  const source = marketQuotes({ explore: proxy.explore, quotes: proxy.quotes, now: () => NOW });
+  const { quotes: [aapl, spy] } = await source.snapshot([us("AAPL"), us("SPY")]);
+  assert.equal(aapl?.feed, "nasdaq close");
+  assert.equal(aapl?.quote_status, "delayed");
+  assert.equal(aapl?.price, 270);
+  assert.equal(spy?.feed, "cboe delayed");
+  assert.equal(spy?.quote_status, "delayed");
+});
+
 test("feedOf names each of the market's feeds in the Market's words", () => {
   assert.equal(feedOf("Robinhood · real time"), "robinhood");
   assert.equal(feedOf("Nasdaq · real time"), "nasdaq");
+  assert.equal(feedOf("Nasdaq · close"), "nasdaq close");
   assert.equal(feedOf("Cboe · 15 min delayed"), "cboe delayed");
   assert.equal(feedOf("Tencent"), "tencent");
   assert.equal(feedOf("  Some · New   Feed "), "some new feed");

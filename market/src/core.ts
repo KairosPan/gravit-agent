@@ -95,7 +95,7 @@ const noPrice: Price = () => Promise.resolve(undefined);
 
 /** A US UNDERLYING'S PRICE AND DAY CHANGE as the market's public US stocks line gives them (the source whose kind is "stocks", by its own
  * line: PublicSource.line), kept OPTION_QUOTE_KEEP_MS in the read cache, with the line's own words for its source and delay. No line, no
- * price, or a refusal (Cboe refuses this place now): null, and the option row lists without a price */
+ * price, or a refusal (an answer the line cannot give now): null, and the option row lists without a price */
 function stocksQuote(cache: ReadCache, sources: () => PublicSource[]): UsQuote {
   return async (ticker) => {
     const src = sources().find((s) => s.kind === "stocks" && s.line);

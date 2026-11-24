@@ -17,7 +17,7 @@
  * A HOLIDAY IS KEPT FROM THE YEAR IT WAS FIRST KEPT, because a price history
  * is held to these days: a stock's daily bars on a first view
  * (live/history-stocks.ts) and every row of Cboe's daily file
- * (live/public-stocks.ts) are left out on a day this calendar calls closed,
+ * (live/public-stocks.ts; no longer read, its rows were held to the same days) are left out on a day this calendar calls closed,
  * as far back as the sources go — Nasdaq's days to 1990, Cboe's to 2004. So
  * Juneteenth is a holiday from 2022 and, for the market, Martin Luther King
  * Jr. Day from 1998 (JUNETEENTH_FROM and MLK_MARKET_FROM below). From 1990 on

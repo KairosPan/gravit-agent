@@ -281,8 +281,8 @@ export interface PublicSource {
   /** why nothing is traded through this listing itself, when nothing is (Stock Tokens: they trade from a connected wallet's own rows) */
   readOnly?: string | undefined;
   listings(o: ListingsQuery): Promise<Listing[] | Refusal>;
-  /** ONE MARKET'S LINE asked alone, by its own symbol, where the source can answer one market without a search — the US stocks line: one GET
-   * of Cboe at most, where a search of a short ticker reads forty (public-stocks.ts) — or null where it lists no such market now. A paper
+  /** ONE MARKET'S LINE asked alone, by its own symbol, where the source can answer one market without a search — the US stocks line: one read
+   * of the line's sources at most, where a search of a short ticker reads forty (public-stocks.ts) — or null where it lists no such market now. A paper
    * account prices a market it knows by it (live/paper.ts Pricer.find) */
   line?(symbol: string): Promise<Listing | null | Refusal>;
   /** the source's own reader of the markets someone is looking at now, in the venues' streams' shape (the US stocks line's background
@@ -2851,7 +2851,7 @@ export function hyperliquidPreIpoPublic(deps: PublicDeps = {}): PublicSource {
 }
 
 /** every public source, in the order the Markets screen asks them: the exchanges (PUBLIC_EXCHANGES unless others are named), Kalshi,
- * Polymarket, Polymarket US, Hyperliquid's perpetuals, trade.xyz, US stocks (real-time public quotes, Cboe's delayed ones behind them), Robinhood's Stock Tokens, xStocks at Gate, Ondo
+ * Polymarket, Polymarket US, Hyperliquid's perpetuals, trade.xyz, US stocks (real-time public quotes, Nasdaq's last close behind them), Robinhood's Stock Tokens, xStocks at Gate, Ondo
  * Stocks as LI.FI prices them, the eight exchanges' pre-IPO perpetuals and Hyperliquid's HIP-3 ones. The stocks come before the Stock
  * Tokens: a paper account lists a symbol by the first source that names it (paper.ts), and "NVDA" there is the share, not Robinhood's
  * token of it. Made once and kept: what each keeps lives in it */

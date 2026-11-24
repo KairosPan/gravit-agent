@@ -452,10 +452,17 @@ export const cboeQuoteInSession = (nowMs: number): boolean => nextRegularSession
  * line now carries account/calendar.ts usSessionFull, which says the phase too) */
 export const usSession = (nowMs: number): MarketSession => regularSession(nowMs);
 
-/** the words a line carries while the market is out of its session and the price is Cboe's (the close) */
-function usClosedWords(session: MarketSession): string {
+/** the source a close line names: Nasdaq's last regular close, where no real-time quote answered (a copy of the market's NASDAQ_CLOSE_FROM) */
+export const NASDAQ_CLOSE_FROM = "Nasdaq · close";
+
+/** whose close a close line's price is, by the close's own instant */
+const closeWords = (closeAt: number): string => `the price is Nasdaq's close of ${etDate(closeAt)}`;
+
+/** the words a line carries while the market is out of its session: that it is closed and when it opens, and — for a close line, its close's
+ * instant `closeAt` given — whose close the price is */
+function usClosedWords(session: MarketSession, closeAt?: number): string {
   const opens = session.opensAt ? Date.parse(session.opensAt) : NaN;
-  return `the US stock market is closed${Number.isFinite(opens) ? `: it opens ${etDate(opens)}, 09:30 New York` : ""}; Cboe's quote is from the close`;
+  return `the US stock market is closed${Number.isFinite(opens) ? `: it opens ${etDate(opens)}, 09:30 New York` : ""}${closeAt !== undefined ? `; ${closeWords(closeAt)}` : ""}`;
 }
 
 const PHASE_WORDS: Partial<Record<string, string>> = { pre: "pre-market trading", after: "after-hours trading", overnight: "the overnight session" };
@@ -467,22 +474,25 @@ function etClock(ms: number): string {
   return `${String(Math.floor(t.minutes / 60)).padStart(2, "0")}:${String(t.minutes % 60).padStart(2, "0")}`;
 }
 
-/** The words a line carries outside the regular session (none inside it): which phase is on and until when, and whose price it is — a
- * real-time source's quote from that phase; or, where the real-time price is not from the phase that is on or is older than SAID_LIVE_MS
- * (Nasdaq's last trade is taken however old: a share that has not traded since the close), that source's last trade or quote and when, in
- * which phase; or Cboe's close where no real-time source answered. Closed — or overnight for a share not traded then — usClosedWords.
- * `quoteAt` is the price's own time, `now` the listing's */
-function usSessionWords(session: MarketSession, quoteFrom: string, quoteAt?: number, now?: number): string | undefined {
-  if (session.open) return undefined;
+/** The words a line carries: outside the regular session, which phase is on and until when, and whose price it is — a real-time source's
+ * quote from that phase; or, where the real-time price is not from the phase that is on or is older than SAID_LIVE_MS (Nasdaq's last trade
+ * is taken however old: a share that has not traded since the close), that source's last trade or quote and when, in which phase; or, where
+ * no real-time source answered, Nasdaq's close and of which day (a close line: quoteFrom NASDAQ_CLOSE_FROM, `quoteAt` the close's instant).
+ * Closed — or overnight for a share not traded then — usClosedWords. Inside the regular session, a real-time line carries none and a close
+ * line that no real-time quote answered. `quoteAt` is the price's own time, `now` the listing's. A copy of the market's usSessionWords
+ * (account/test/unit/us-words-parity.test.ts proves it) */
+export function usSessionWords(session: MarketSession, quoteFrom: string, quoteAt?: number, now?: number): string | undefined {
+  const closeAt = quoteFrom === NASDAQ_CLOSE_FROM ? quoteAt : undefined;
+  if (session.open) return closeAt !== undefined ? `no real-time quote answered: ${closeWords(closeAt)}` : undefined;
   const phase = PHASE_WORDS[session.phase ?? ""];
   const ends = session.phaseEndsAt ? Date.parse(session.phaseEndsAt) : NaN;
   const opens = session.opensAt ? Date.parse(session.opensAt) : NaN;
   // overnight, a share is traded only where Robinhood's 24-hour market priced it (extendedHours): for any other, the market is closed
-  if (!phase || !Number.isFinite(ends) || (session.phase === "overnight" && !session.extendedHours)) return usClosedWords(session);
+  if (!phase || !Number.isFinite(ends) || (session.phase === "overnight" && !session.extendedHours)) return usClosedWords(session, closeAt);
   const until = `${phase} is on until ${etClock(ends)} New York`;
   const opening = Number.isFinite(opens) ? `; the regular session opens ${etDate(opens)}, 09:30 New York` : "";
   const who = quoteFrom === ROBINHOOD_FROM ? "Robinhood" : quoteFrom === NASDAQ_FROM ? "Nasdaq" : undefined;
-  if (!who) return `${until}, but no real-time quote answered: Cboe's quote is from the close${opening}`;
+  if (!who) return `${until}, but no real-time quote answered${closeAt !== undefined ? `: ${closeWords(closeAt)}` : ""}${opening}`;
   if (quoteAt === undefined || (usPhaseAt(quoteAt) === session.phase && (now ?? quoteAt) - quoteAt <= SAID_LIVE_MS)) return `${until}: the price is ${who}'s real-time quote${opening}`;
   const day = now !== undefined && etDate(now) === etDate(quoteAt) ? "" : ` on ${etDate(quoteAt)}`;
   return `${until}: the price is ${who}'s ${who === "Nasdaq" ? "last trade" : "quote"} at ${etClock(quoteAt)} New York${day} (${PHASE_NAMES[usPhaseAt(quoteAt)] ?? usPhaseAt(quoteAt)})${opening}`;

@@ -117,7 +117,7 @@ import { RWA_CATEGORY } from "./categories.ts";
 import { coarserThan } from "./history.ts";
 import { readAtOf, type Listing, type PublicSource } from "../market/shapes.ts";
 import { usClock } from "../account/calendar.ts";
-import { CBOE_DELAY_MS, cboeQuoteInSession, US_STOCKS_ID, usLineAt, usSession } from "../market/shapes.ts";
+import { CBOE_DELAY_MS, cboeQuoteInSession, NASDAQ_CLOSE_FROM, US_STOCKS_ID, usLineAt, usSession } from "../market/shapes.ts";
 import type { HubQuote, HubRange, HubTick, MarketHub } from "../market/shapes.ts";
 import { FRESH_MS as US_FRESH_MS } from "../market/shapes.ts";
 import { badOrder, CANDLE_INTERVALS, ceilTo, floorTo, HISTORY_MOST, INTERVAL_MS, inDollars, onStep, pick, type Candle, type CandleInterval, type CandlePage, type LiveTrader, type Market, type MarketKind, type MarketScope, type MarketStats, type OrderBook, type OrderEstimate, type OrderRequest, type OrderState, type OrderStatus, type OrderType, type Position, type SessionPhase, type Side, type TimeInForce } from "./trade.ts";
@@ -1274,6 +1274,9 @@ export async function paperSource(req: PaperRequest): Promise<{ source: LiveSour
     const name = q.m.name || q.m.symbol;
     const delay = delayOf(q);
     const so = said === "filled" ? "so nothing was filled" : said === "taken" ? "so it takes no market order now" : "so a trailing stop has no price of this moment to trail from";
+    // a close line (the market's: Nasdaq's last regular close, where no real-time quote answered) is no quote of the moment at all, whatever
+    // its one-minute delay says: said as what it is, not as minutes behind the market
+    if (delay > 0 && q.m.quoteFrom === NASDAQ_CLOSE_FROM) return `the only price of ${name} just now is Nasdaq's last close, not a real-time quote: a paper account never fills a stock at a delayed quote, ${so} — use a limit order, which rests until a real-time quote reaches it`;
     // the source by its name alone ("Cboe · 15 min delayed" is Cboe's)
     if (delay > 0) return `the only quote of ${name} just now is ${(q.m.quoteFrom ?? q.source.name).replace(/\s*·.*$/, "")}'s, ${Math.round(delay / 60_000)} minutes behind the market: a paper account never fills a stock at a delayed quote, ${so} — use a limit order, which rests until a real-time quote reaches it`;
     const at = Date.parse(q.m.quoteAt ?? "");

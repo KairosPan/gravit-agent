@@ -665,8 +665,7 @@ function ageWords(at, now) {
 // a source's words, with the price's age once it is past FRESH_MS
 const sourced = (from, at, now) => { const age = ageWords(at, now); return age ? `${from} · ${age}` : from; }; // words-order: a source and its age under the visual separator
 
-/** Where a row's price is from, in the Account's own words: the row's `quoteFrom` (`Robinhood · real time`, `Cboe · 15 min
- *  delayed`), else the venue its 24h change is from (`changeFrom`); else the first venue the owner connected that lists it —
+/** Where a row's price is from, in the Account's own words: the row's `quoteFrom` (`Robinhood · real time`, `Nasdaq · close`), else the venue its 24h change is from (`changeFrom`); else the first venue the owner connected that lists it —
  *  that line's `quoteFrom`, else its name; else nothing — never a public listing's line for itself. With the price's age
  *  (`· 2 min ago`) once its `quoteAt` — the row's, else that line's — is more than five seconds old. */
 export function sourceWordOf(item, now = Date.now()) {
