@@ -5,24 +5,32 @@
  * line per anchor of the present case, where the benchmark's bars start when they were read short (a benchmark that
  * could not be read is said once, with its words, on the measurement line), the header and one row per group and
  * `all` with one figure per horizon, the measured cases in the view's order with one figure per horizon, the
- * unmeasured ones with the words that say why (or, cut, by their reason), what the flags mean, under `price` the price sentence, and the fixed
- * sentences. Every figure is the change against the benchmark, or the raw change when the view is raw (`valueOf`).
+ * unmeasured ones with the words that say why (or, cut, by their reason), what the flags mean, under `price` the price
+ * sentence, and the fixed sentences. Every figure is the change against the benchmark, or the raw change when the view
+ * is raw (`valueOf`).
  *
- * When it is over the bound, each step below is taken in turn while it still is: (1) every note goes; (2) the
- * unmeasured entries are said by their reason instead of their words, each reason once with the companies it holds
- * (`unmeasured, needs a split record: DDD (bars ×4)`), a reason the market gave in its own words clipped to 80; (3) case
- * lines leave from the middle of the order, so the first and the last stay longest, with `… and N more in the view`
- * where they left, the anchors taking their short form (step 7) and then the texts their clipped one (step 6) before
- * the last case line goes; (4) each reason's
- * companies are cut from its end to `+N more` (to `N cases` when none is left); (5) the line that explains `quiet` and
- * `elsewhere` goes (it is never there while no case line shown carries either); (6) texts are clipped, all at once, by code point with `…` where they were clipped (the title to 20
- * characters, each anchor's label to 12, each group's name to 8 wherever it is printed, the words on an anchor's line,
- * the benchmark's words on the measurement line and the source on the benchmark's line to 80); (7) each measured
- * anchor's line takes a short form without its gap and its volume, with its first and its last horizon only.
- * (8) Whenever step 6 or 7 was taken, the case lines that left come back while the digest stays within the bound, the
- * earliest and the latest of them in turn, so the kept ones are still the two ends of the order; the `… and N more`
- * line says how many are still out and goes when none is. (9) A digest still over the bound says its unmeasured cases
- * as one count (`unmeasured: N cases`). (10) A digest still over the bound is refused (`INTERNAL`), never returned.
+ * When it is over the bound, each step below is taken in turn while it still is:
+ * (1) every note goes;
+ * (2) the unmeasured cases are said by their reason instead of their words, each reason on its own line once with the
+ *     companies it holds (`unmeasured, needs a split record: DDD (bars ×4)`); a reason the market gave in its own words
+ *     is those words with the case's symbol taken out, so every company refused alike shares one line, clipped to 80;
+ * (3) case lines leave from the middle of the order, so the first and the last stay longest, with `… and N more in
+ *     the view` where they left; before the last one goes, the anchors take their short form (step 7) and then the
+ *     texts their clipped one (step 6);
+ * (4) each reason's companies are cut from its end to `+N more`, the reason showing the most first, down to `N cases`
+ *     only where that is shorter than what it replaces;
+ * (5) the line that explains `quiet` and `elsewhere` goes (it is never there while no case line shown carries either);
+ * (6) texts are clipped, all at once, by code point with `…` where they were clipped (the title to 20 characters, each
+ *     anchor's label to 12, each group's name to 8 wherever it is printed, the words on an anchor's line, the
+ *     benchmark's words on the measurement line and the source on the benchmark's line to 80);
+ * (7) each measured anchor's line takes a short form without its gap and its volume, with its first and its last
+ *     horizon only;
+ * (8) the unmeasured cases are named alone on one line (`unmeasured: AAA, BBB`), their reasons gone;
+ * (9) they are said as one count (`unmeasured: N cases`).
+ * (10) Then, within the bound, what the steps freed comes back while it fits: a reason's companies that step 4 cut,
+ *     then the case lines that left, the earliest and the latest of them in turn, so the kept ones are still the two
+ *     ends of the order; the `… and N more` line says how many are still out and goes when none is.
+ * (11) A digest still over the bound is refused (`INTERNAL`), never returned.
  * Line 1, the measurement line, the header, each row's numbers and the fixed sentences are never cut. Numbers are
  * written as `format.mjs` writes them. The view is not changed.
  */
@@ -69,10 +77,11 @@ function clip(text, max) {
 
 /**
  * The reason an unmeasured case gives, said once for every case that gives it, and what this case adds to it: the
- * reasons the face writes by their kind, any other (the market's own words) as its words, clipped.
- * @param {string} words @returns {{ reason: string, detail: string | null }}
+ * reasons the face writes by their kind, any other (the market's own words) as its words with the case's own symbol
+ * taken out (`Nasdaq keeps no daily bars of …`), so every company refused alike shares one reason, clipped.
+ * @param {string} words @param {string} symbol @returns {{ reason: string, detail: string | null }}
  */
-function reasonOf(words) {
+function reasonOf(words, symbol) {
   /** @type {RegExpExecArray | null} */
   let m;
   if (/: there is no close before it; /.test(words)) {
@@ -88,22 +97,32 @@ function reasonOf(words) {
   if (/: the date's session is not in its bars$|: its bars do not cover the date$|^no session (on or )?after \S+ in its bars, which end /.test(words)) {
     return { reason: "date not in its bars", detail: null };
   }
-  return { reason: clip(words, CLIP.words), detail: null };
+  const own = symbol === "" ? null : new RegExp(`(?<![A-Za-z0-9.])${symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`, "g");
+  return { reason: clip(own === null ? words : words.replace(own, "…"), CLIP.words), detail: null };
 }
 
 /**
- * The unmeasured cases by reason, each reason in the order it first comes, with its entries: the symbol, its date when
- * the symbol is unmeasured more than once, and what the case adds to the reason.
+ * An unmeasured case as a list names it: its symbol, with its date when the symbol is unmeasured more than once.
+ * @param {EventCase[]} cases @returns {(k: EventCase) => string}
+ */
+function namer(cases) {
+  const count = new Map();
+  for (const k of cases) count.set(k.symbol, (count.get(k.symbol) ?? 0) + 1);
+  return (k) => `${k.symbol}${count.get(k.symbol) > 1 ? ` ${k.date}` : ""}`;
+}
+
+/**
+ * The unmeasured cases by reason, each reason in the order it first comes, with its entries: the case's name and what
+ * the case adds to the reason.
  * @param {EventCase[]} cases @returns {Array<{ reason: string, entries: string[] }>}
  */
 function byReason(cases) {
-  const count = new Map();
-  for (const k of cases) count.set(k.symbol, (count.get(k.symbol) ?? 0) + 1);
+  const name = namer(cases);
   /** @type {Map<string, string[]>} */
   const reasons = new Map();
   for (const k of cases) {
-    const { reason, detail } = reasonOf(String(k.words));
-    const entry = `${k.symbol}${count.get(k.symbol) > 1 ? ` ${k.date}` : ""}${detail === null ? "" : ` (${detail})`}`;
+    const { reason, detail } = reasonOf(String(k.words), k.symbol);
+    const entry = `${name(k)}${detail === null ? "" : ` (${detail})`}`;
     reasons.set(reason, [...(reasons.get(reason) ?? []), entry]);
   }
   return [...reasons].map(([reason, entries]) => ({ reason, entries }));
@@ -207,11 +226,12 @@ export function eventsDigest(view) {
   const flagged = measured.some((k) => k.flags.includes("quiet") || k.flags.includes("elsewhere"));
 
   let notes = true;
-  let unmeasuredWords = true;
+  /** How the unmeasured cases are said: with their words, by reason, as names alone (step 9), as one count (step 10). */
+  let said = /** @type {"words" | "reasons" | "names" | "count"} */ ("words");
   const reasons = byReason(unmeasured);
-  // How many entries each reason still shows (step 4), and whether they are said as one count (step 9).
+  const names = unmeasured.map(namer(unmeasured));
+  // How many entries each reason still shows (step 4).
   const reasonShown = reasons.map((r) => r.entries.length);
-  let counted = false;
   // The case lines shown are the first `head` and the last `tail` of the order; the ones between have left.
   let head = Math.ceil(measured.length / 2);
   let tail = measured.length - head;
@@ -246,8 +266,9 @@ export function eventsDigest(view) {
     /** @type {string[]} */
     let unmeasuredLine = [];
     if (unmeasured.length === 0) unmeasuredLine = [];
-    else if (unmeasuredWords) unmeasuredLine = [`unmeasured: ${unmeasured.map((k) => `${k.symbol} ${k.date} (${k.words})`).join("; ")}`];
-    else if (counted) unmeasuredLine = [`unmeasured: ${howMany(unmeasured.length)}`];
+    else if (said === "words") unmeasuredLine = [`unmeasured: ${unmeasured.map((k) => `${k.symbol} ${k.date} (${k.words})`).join("; ")}`];
+    else if (said === "names") unmeasuredLine = [`unmeasured: ${names.join(", ")}`];
+    else if (said === "count") unmeasuredLine = [`unmeasured: ${howMany(unmeasured.length)}`];
     else {
       unmeasuredLine = reasons.map((r, i) => {
         const shown = reasonShown[i];
@@ -265,7 +286,7 @@ export function eventsDigest(view) {
   let text = compose();
   const over = () => Buffer.byteLength(text) > DIGEST_MAX;
   if (over()) { notes = false; text = compose(); }
-  if (over()) { unmeasuredWords = false; text = compose(); }
+  if (over()) { said = "reasons"; text = compose(); }
   while (over() && head + tail > 0) {
     // before the last case line goes, the anchors take their short form, then the texts are clipped
     if (head + tail === 1 && !short) short = true;
@@ -273,18 +294,26 @@ export function eventsDigest(view) {
     else if (head > tail) head--; else tail--;
     text = compose();
   }
-  while (over() && reasonShown.some((n) => n > 0)) {
-    // the reason that shows the most entries gives up its last one
-    const i = reasonShown.indexOf(Math.max(...reasonShown));
+  // the reason that shows the most entries gives up its last one, while that makes the text shorter ("AAA" is shorter
+  // than "1 case": a cut that would lengthen it is not taken, and that reason keeps what it shows)
+  const held = reasons.map(() => false);
+  while (over()) {
+    const open = reasonShown.map((n, i) => (held[i] || n === 0 ? -1 : n));
+    const i = open.indexOf(Math.max(...open));
+    if (open[i] <= 0) break;
+    const before = text;
     reasonShown[i]--;
     text = compose();
+    if (Buffer.byteLength(text) >= Buffer.byteLength(before)) { reasonShown[i]++; text = before; held[i] = true; }
   }
   if (over() && flagsShown) { flagsShown = false; text = compose(); }
   if (over()) { clipped = true; text = compose(); }
   if (over()) { short = true; text = compose(); }
-  if ((clipped || short) && !over()) {
-    // The reasons' entries that were cut come back first, while they fit.
-    for (let i = 0; i < reasons.length; i++) {
+  if (over() && unmeasured.length > 0) { said = "names"; text = compose(); }
+  if (over() && unmeasured.length > 0) { said = "count"; text = compose(); }
+  if (!over()) {
+    // Whatever the last steps freed comes back while it fits: the reasons' entries that were cut first, then the cases.
+    for (let i = 0; said === "reasons" && i < reasons.length; i++) {
       while (reasonShown[i] < reasons[i].entries.length) {
         reasonShown[i]++;
         const before = text;
@@ -292,7 +321,7 @@ export function eventsDigest(view) {
         if (over()) { reasonShown[i]--; text = before; break; }
       }
     }
-    // Clipping made room: the cases that left come back, the earliest and the latest of them in turn, while they fit.
+    // The cases that left come back, the earliest and the latest of them in turn.
     for (let earliest = true; head + tail < measured.length; earliest = !earliest) {
       const before = { head, tail, text };
       if (earliest) head++; else tail++;
@@ -300,7 +329,6 @@ export function eventsDigest(view) {
       if (over()) { ({ head, tail, text } = before); break; }
     }
   }
-  if (over() && unmeasured.length > 0) { counted = true; text = compose(); }
   if (over()) throw refuse.digestOverBound();
   return text;
 }

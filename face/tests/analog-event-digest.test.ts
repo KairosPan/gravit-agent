@@ -202,7 +202,7 @@ test("an ordinary list still names the company that could not be measured", asyn
   const text = eventsDigest({ ...view, id: ID });
   assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
   const lines = text.split("\n");
-  assert.ok(lines.includes("unmeasured, Nasdaq keeps no daily bars of GONE: GONE"), text);
+  assert.ok(lines.includes("unmeasured, Nasdaq keeps no daily bars of …: GONE"), text);
   const measured = view.cases.filter((c) => c.state === "measured");
   assert.ok(text.includes(`hired: EVT ${measured[0]!.day0} ${measured[0]!.label} `), text);
   assert.ok(text.includes(`hired: EVT ${measured.at(-1)!.day0} ${measured.at(-1)!.label} `), text);
@@ -245,8 +245,61 @@ test("each reason is its own line; the market's own words are one reason each, c
   assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
   const lines = text.split("\n").filter((l) => l.startsWith("unmeasured"));
   assert.equal(lines.length, 2, text);
-  assert.equal(lines[0], `unmeasured, ${Array.from(gone[0].words as string).slice(0, 80).join("")}…: GONEA`);
-  assert.equal(lines[1], "unmeasured, Nasdaq keeps no daily bars of GONEB: GONEB");
+  // the case's own symbol is taken out of the market's words, so companies refused alike share a reason
+  assert.equal(lines[0], `unmeasured, ${Array.from(`Nasdaq keeps no daily bars of … ${"w".repeat(120)}`).slice(0, 80).join("")}…: GONEA`);
+  assert.equal(lines[1], "unmeasured, Nasdaq keeps no daily bars of …: GONEB");
+});
+
+test("sixteen companies the market refused share one reason, and case lines still show", async () => {
+  const refused = Array.from({ length: 16 }, (_, i) => `GON${String.fromCharCode(65 + i)}`);
+  const view = await scanEvents({
+    title: "CEO departures under investigation", horizons: [0, 5, 20, 60, 120, 250],
+    events: [
+      ...Array.from({ length: 24 }, (_, i) => ev({ date: dateAt(30 + i), group: i % 2 ? "hired" : "founder", label: "CEO steps down amid probe", source: `https://example.com/${i}` })),
+      ...refused.map((s) => ev({ symbol: s, date: "2018-07-27", source: `https://example.com/${s}` })),
+    ],
+    query: { symbol: "evt", anchors: [{ label: "CEO out", date: "2020-04-10", timing: "open" }] },
+    keep: keepOf(),
+  });
+  const text = eventsDigest({ ...view, id: ID });
+  assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
+  const lines = text.split("\n");
+  assert.ok(lines.includes(`unmeasured, Nasdaq keeps no daily bars of …: ${refused.join(", ")}`), text);
+  assert.ok(lines.some((l) => /^(hired|founder): EVT /.test(l)), text);
+});
+
+/** A view whose present case's symbol is `width` long (never clipped) over three anchors, two short cases and three
+ *  unmeasured of three reasons: the anchors take most of the bound, so the unmeasured lines are what is cut. */
+function tightView(width: number) {
+  const H = [0, 1, 5, 20, 60, 250];
+  const MEAS = measOf(H);
+  const words = ["no first-day open from its source: its price cannot be tied to the bars", "its bars are adjusted about ×4 since day 0 (its source's open 180.00, the bars' 45.00): a split record is needed", "day 0 would be 2020-01-10, 9 days after 2020-01-01: its bars do not cover the date"];
+  const base = { source: A, note: null, claimed: false, opened: false, verified: true, window: null, rel: null, tape: { vol0: 2, busiest: null, flags: [] }, flags: [], ...PLAIN };
+  const gone = words.map((w, i) => ({ ...base, id: `u${i}`, symbol: `AA${i}`, label: "x", group: "g", date: "2018-07-27", timing: "pre", verified: false, state: "unmeasured", words: w, day0: null, measure: null, tape: null, tapeRan: false, relOf: null }));
+  const measured = [1, 2].map((i) => ({ ...base, id: `c${i}`, symbol: "ABC", label: "l".repeat(80), group: "g", date: `2020-01-0${i}`, timing: "pre", state: "measured", words: null, day0: `2020-01-0${i}`, measure: MEAS }));
+  const anchors = [1, 2, 3].map((i) => ({ ...base, id: `q-${i}`, label: "a", date: "2020-06-19", timing: "pre", state: "measured", words: null, day0: "2020-06-19", measure: MEAS }));
+  return {
+    kind: "events", version: 2, at: "2020-06-19T15:00:00.000Z", title: "t", id: ID,
+    query: { symbol: "S".repeat(width), readDate: "2020-06-19", latest: "2020-06-19", today: null, sessionOpen: false, words: null, source: "Nasdaq · S", short: false, firstBar: "2010-01-04", anchors },
+    parameters: { base: "prior_close", horizons: H, benchmark: "SPY", against: "benchmark", ...PARAMETERS },
+    coverage: { asked: 5, measured: 2, unmeasured: gone.map((g) => ({ id: g.id, symbol: g.symbol, words: g.words })), verified: 2, unverified: 3, unopened: 0, quiet: 0, elsewhere: 0, noContext: 0, companies: { asked: 4, read: 1 }, sources: {}, short: [], adjustment: [], market: { source: "Nasdaq · SPY", words: null, firstBar: "2019-03-04", short: false }, benchmark: { symbol: "SPY", source: "Nasdaq · SPY", words: null, firstBar: "2019-03-04", short: false }, skipped: 0, listed: 0, sessionBars: 0, readFrom: null, deadline: false },
+    groups: { all: sumOf(H), named: [{ name: "g", summary: sumOf(H), paths: null }] },
+    cases: [...measured, ...gone], windowsDropped: 0,
+  } as unknown as Parameters<typeof eventsDigest>[0];
+}
+
+test("a reason's last company is cut only where the count is shorter, then names alone come before a count", () => {
+  const unmeasuredOf = (width: number) => {
+    const text = eventsDigest(tightView(width));
+    assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
+    return text.split("\n").filter((l) => l.startsWith("unmeasured"));
+  };
+  // "AA0" is shorter than "1 case": kept; "AA1 (bars ×4)" is longer: cut
+  assert.deepEqual(unmeasuredOf(282), [
+    "unmeasured, no first-day open from its source: AA0", "unmeasured, needs a split record: 1 case", "unmeasured, date not in its bars: AA2",
+  ]);
+  // a little tighter: the names alone, never a bare count while they fit
+  assert.deepEqual(unmeasuredOf(284), ["unmeasured: AA0, AA1, AA2"]);
 });
 
 test("case lines come back when clipping makes room", () => {
