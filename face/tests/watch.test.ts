@@ -2119,6 +2119,8 @@ test("a held name's move alert: lessons is asked after its delivery, its block g
   await h.wall.advance(0);
   await until("the block", () => h.sent.length === 2);
   await until("the lessons note", () => h.notes.length === 2);
+  /* the record goes on the ledger's own append chain, which no send, ask or note waits for: wait for it */
+  await until("the alert record", async () => (await h.alertRecords()).some((r) => r.kind === "alert"));
   assert.equal(fake.calls.length, 1);
   const [call] = fake.calls;
   const alert = (await h.alertRecords()).find((r) => r.kind === "alert");
@@ -2406,6 +2408,8 @@ async function lessonsSentHarness(answer: () => Promise<AlertLessonsAnswer | und
   await h.wall.advance(0);
   await until("the ask", () => fake.calls.length === 1);
   await until("the post", () => h.posts.length === 1);
+  /* the record goes on the ledger's own append chain, which neither the ask nor the post waits for */
+  await until("the alert record", async () => (await h.alertRecords()).some((r) => r.kind === "alert"));
   const hit = (await h.alertRecords()).find((r) => r.kind === "alert") as unknown as AlertHit;
   return { h, hit };
 }
