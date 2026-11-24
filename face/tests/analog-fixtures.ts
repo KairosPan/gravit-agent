@@ -9,13 +9,14 @@ export const START = Date.UTC(2020, 0, 1, 14, 30);
 export const dateAt = (i: number): string => new Date(START + i * DAY).toISOString().slice(0, 10);
 
 /** Bars from closes: open = the previous close (the first bar's own close), high and low the larger and smaller of
- * open and close, volume 1,000; `overrides[i]` replaces a bar's open or volume. */
-export function barsFrom(closes: readonly number[], overrides: Record<number, { o?: number; v?: number | null }> = {}): Bar[] {
+ * open and close, volume 1,000; `overrides[i]` replaces a bar's open or volume. Bar `i` is stamped on the day at index
+ * `from + i`, so a series can start later than 2020-01-01. */
+export function barsFrom(closes: readonly number[], overrides: Record<number, { o?: number; v?: number | null }> = {}, from = 0): Bar[] {
   return closes.map((c, i) => {
     const over = overrides[i];
     const o = over?.o ?? (i === 0 ? c : closes[i - 1]!);
     const v = over !== undefined && "v" in over ? over.v! : 1000;
-    return { t: START + i * DAY, o, h: Math.max(o, c), l: Math.min(o, c), c, v };
+    return { t: START + (from + i) * DAY, o, h: Math.max(o, c), l: Math.min(o, c), c, v };
   });
 }
 export const flat = (n: number, v: number): number[] => Array.from({ length: n }, () => v);
@@ -81,3 +82,6 @@ export const EVENT = barsFrom(EVENT_CLOSES, { 100: { o: 45, v: 5000 } });
 export const EVENT_GAPPED = EVENT.filter((_, i) => i !== 98 && i !== 99);
 /** The market over the same days: 400, but 396 on 2020-04-10 and 408 from index 160. */
 export const EVENT_MARKET = barsFrom(flat(171, 400).map((v, i) => (i === 100 ? 396 : i >= 160 ? 408 : v)));
+/** A listing: its first bar at index 100 (2020-04-10), opening at 45 and closing at 44 on a volume of 5,000; then
+ * EVENT's closes from day 0 on: 42, 43, 44, 45, 46; 46 to index 120; 48 from index 121 to the last, 170. */
+export const LISTED = barsFrom([44, 42, 43, 44, 45, 46, ...flat(15, 46), ...flat(50, 48)], { 0: { o: 45, v: 5000 } }, 100);

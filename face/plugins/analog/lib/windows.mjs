@@ -57,6 +57,22 @@ export function barOn(bars, date) {
 }
 
 /**
+ * The last bar of a series dated strictly before a `YYYY-MM-DD` date, or undefined when none is.
+ * @param {Bar[]} bars @param {string} date
+ * @returns {Bar | undefined}
+ */
+export function barBefore(bars, date) {
+  let lo = 0;
+  let hi = bars.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (dateOf(bars[mid].t) < date) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo > 0 ? bars[lo - 1] : undefined;
+}
+
+/**
  * The bars from 30 sessions before day `i` to 60 after, as many as there are, each `[k, o, h, l, c, v]`: `k` the
  * session relative to day 0, prices a percentage of `base` (day 0's close unless given) to two decimals, `v` as it is
  * (0 when missing).
