@@ -52,14 +52,14 @@ test("a record the bars do not show", () => {
   const twice = [{ date: "2015-03-19", new: 4, old: 1 }, { date: "2015-03-19", new: 4, old: 1 }];
   assert.deepEqual(
     tiePrice({ day0Open: 11, day0Date: "2008-03-19", statedOpen: 44, splits: twice }),
-    { words: "its split record gives ×16, its bars ×4.0" },
+    { words: "its split record gives ×16, its bars ×4" },
   );
 });
 
 test("the bars adjusted with no record", () => {
   assert.deepEqual(
     tiePrice({ day0Open: 10.5, day0Date: "2008-03-19", statedOpen: 42, splits: null }),
-    { words: "its bars are adjusted about ×4.0 since day 0 (its source's open 42.00, the bars' 10.50): a split record is needed" },
+    { words: "its bars are adjusted about ×4 since day 0 (its source's open 42.00, the bars' 10.50): a split record is needed" },
   );
 });
 
@@ -76,4 +76,16 @@ test("no stated open", () => {
 
 test("factorWords", () => {
   assert.deepEqual([4, 15, 240, 0.1, 1.5, 4.0000001].map(factorWords), ["4", "15", "240", "0.1", "1.5", "4"]);
+});
+
+test("the bars' factor is written as a factor is, a reverse split included", () => {
+  // a 1-for-25 reverse split since day 0: the bars' open is 25 times the stated one
+  assert.deepEqual(
+    tiePrice({ day0Open: 250, day0Date: "2008-03-19", statedOpen: 10, splits: null }),
+    { words: "its bars are adjusted about ×0.04 since day 0 (its source's open 10.00, the bars' 250.00): a split record is needed" },
+  );
+  assert.deepEqual(
+    tiePrice({ day0Open: 250, day0Date: "2008-03-19", statedOpen: 10, splits: [{ date: "2015-03-19", new: 1, old: 10 }] }),
+    { words: "its split record gives ×0.1, its bars ×0.04" },
+  );
 });

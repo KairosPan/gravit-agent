@@ -77,15 +77,21 @@ test("a case line has one figure per horizon and says what is special", async ()
     events: [ev({ symbol: "IPO", date: "2020-04-10", timing: "open", price: 160, stated_open: 180, splits: [{ date: "2020-05-01", new: 4, old: 1 }], splits_source: S })],
   }).then((v) => eventsDigest({ ...v, id: ID }).split("\n").find((l) => l.startsWith("hired: IPO "))!);
   const tied = await listing((u) => u === S || u === A);
-  assert.ok(tied.endsWith(" · price 160 · split ×4 · listing day · no volume check"), tied);
+  // a listing day has no volume check to make: the line does not say it twice
+  assert.ok(tied.endsWith(" · price 160 · split ×4 · listing day"), tied);
   assert.ok(tied.startsWith("hired: IPO 2020-04-10 CEO out day 0 "), tied);
   const unopened = await listing((u) => u === A);
-  assert.ok(unopened.endsWith(" · price 160 · split ×4 · listing day · no volume check · split record not opened"), unopened);
+  assert.ok(unopened.endsWith(" · price 160 · split ×4 · listing day · split record not opened"), unopened);
 
   const halted = EVENT.filter((_, i) => i < 101 || i > 110);
   const view = await scanEvents({ title: "t", events: [ev({ date: "2020-04-11" })], opened: (u) => u === A, keep: keepOf(fakeMarket({ EVT: { bars: halted }, SPY: { bars: EVENT_MARKET } })) });
   const line = eventsDigest({ ...view, id: ID }).split("\n").find((l) => l.startsWith("hired: EVT "))!;
   assert.ok(line.includes(" · skipped 10 sessions · quiet · elsewhere"), line);
+});
+
+test("under no benchmark, day 0's open says nothing of the benchmark's open", async () => {
+  const text = eventsDigest({ ...(await scanEvents({ title: "t", base: "day0_open", benchmark: "none", events: [ev()], keep: keepOf() })), id: ID });
+  assert.equal(text.split("\n")[2], "measured from day 0's open, raw, no benchmark: day 0 +1 +5 +20 +60");
 });
 
 test("under price the price sentence goes before the fixed ones", async () => {
@@ -196,11 +202,51 @@ test("an ordinary list still names the company that could not be measured", asyn
   const text = eventsDigest({ ...view, id: ID });
   assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
   const lines = text.split("\n");
-  assert.ok(lines.some((l) => l.startsWith("unmeasured: GONE 2018-07-27")), text);
+  assert.ok(lines.includes("unmeasured, Nasdaq keeps no daily bars of GONE: GONE"), text);
   const measured = view.cases.filter((c) => c.state === "measured");
   assert.ok(text.includes(`hired: EVT ${measured[0]!.day0} ${measured[0]!.label} `), text);
   assert.ok(text.includes(`hired: EVT ${measured.at(-1)!.day0} ${measured.at(-1)!.label} `), text);
   assert.match(text, /^… and \d+ more in the view$/m);
+});
+
+const TICKERS = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ", "KKK", "LLL", "MMM", "NNN", "OOO", "PPP", "QQQ", "RRR", "SSS", "TTT"];
+const listings = (n: number) => createBarsKeep({ ask: fakeMarket({ ...Object.fromEntries(TICKERS.slice(0, n).map((s) => [s, { bars: LISTED }])), SPY: { bars: EVENT_MARKET } }).ask });
+const ipo = (s: string, over: Record<string, unknown> = {}) => ev({ symbol: s, label: `${s} IPO`, group: "IPO", date: "2020-04-10", timing: "open", source: `https://example.com/${s}`, ...over });
+
+test("nineteen listings under prior_close keep their reason, said once", async () => {
+  const names = TICKERS.slice(0, 19);
+  const view = await scanEvents({ title: "Large IPOs", events: names.map((s) => ipo(s)), keep: listings(19) });
+  const text = eventsDigest({ ...view, id: ID });
+  assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
+  const line = text.split("\n").find((l) => l.startsWith("unmeasured"));
+  assert.equal(line, `unmeasured, no close before a first bar (use price, day0_open or day0_close): ${names.join(", ")}`, text);
+});
+
+test("cases that need a split record are named under that reason while case lines leave", async () => {
+  const S = "https://ir.example.com/splits";
+  const split = new Set(["DDD", "KKK", "SSS"]);
+  const events = TICKERS.map((s) => ipo(s, s === "TTT"
+    ? { price: 40, stated_open: 180, splits: [{ date: "2020-05-01", new: 16, old: 1 }], splits_source: S }
+    : { price: 40, stated_open: split.has(s) ? 180 : 45, label: `${s} IPO priced at the top of its range, upsized` }));
+  const view = await scanEvents({ title: "Large IPOs", base: "price", horizons: [0, 5, 20, 60, 120, 250], events, keep: listings(20) });
+  const text = eventsDigest({ ...view, id: ID });
+  assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
+  assert.match(text, /^… and \d+ more in the view$/m);
+  const lines = text.split("\n");
+  assert.ok(lines.includes("unmeasured, needs a split record: DDD (bars ×4), KKK (bars ×4), SSS (bars ×4)"), text);
+  assert.ok(lines.includes("unmeasured, split record and bars disagree: TTT (record ×16, bars ×4)"), text);
+});
+
+test("each reason is its own line; the market's own words are one reason each, clipped", () => {
+  const view = fullView();
+  const gone = view.cases.filter((k: any) => k.state === "unmeasured") as any[];
+  gone[0].words = `Nasdaq keeps no daily bars of GONEA ${"w".repeat(120)}`;
+  const text = eventsDigest(view);
+  assert.ok(Buffer.byteLength(text) <= 2048, String(Buffer.byteLength(text)));
+  const lines = text.split("\n").filter((l) => l.startsWith("unmeasured"));
+  assert.equal(lines.length, 2, text);
+  assert.equal(lines[0], `unmeasured, ${Array.from(gone[0].words as string).slice(0, 80).join("")}…: GONEA`);
+  assert.equal(lines[1], "unmeasured, Nasdaq keeps no daily bars of GONEB: GONEB");
 });
 
 test("case lines come back when clipping makes room", () => {
@@ -231,7 +277,7 @@ const caseTail = (c: any, against: "benchmark" | "raw") => {
     (c.price !== null ? ` · price ${c.price}` : "") + (c.factor !== null && c.factor !== 1 ? ` · split ×${c.factor}` : "") +
     (c.listed ? " · listing day" : "") + (c.skipped > 0 ? ` · skipped ${c.skipped} sessions` : "") +
     (c.flags.includes("quiet") ? " · quiet" : "") + (c.flags.includes("elsewhere") ? " · elsewhere" : "") +
-    (c.tapeRan ? "" : " · no volume check") + (c.verified ? "" : " · unverified") +
+    (c.tapeRan || c.listed ? "" : " · no volume check") + (c.verified ? "" : " · unverified") +
     (c.flags.includes("unopened") ? " · source not opened" : "") + (c.flags.includes("splitsUnopened") ? " · split record not opened" : "");
 };
 const BASE_LIST = ["prior_close", "price", "day0_open", "day0_close"] as const;

@@ -40,11 +40,11 @@ export function tiePrice({ day0Open, day0Date, statedOpen, splits }) {
   if (!splits || splits.length === 0) {
     if (Math.abs(fBars - 1) <= TIE_TOLERANCE) return { factor: 1, splitFactor: null };
     return {
-      words: `its bars are adjusted about ×${fBars.toFixed(1)} since day 0 (its source's open ${stated.toFixed(2)}, the bars' ${day0Open.toFixed(2)}): a split record is needed`,
+      words: `its bars are adjusted about ×${factorWords(fBars)} since day 0 (its source's open ${stated.toFixed(2)}, the bars' ${day0Open.toFixed(2)}): a split record is needed`,
     };
   }
   let fRecord = 1;
   for (const s of splits) if (s.date > day0Date) fRecord *= s.new / s.old;
   if (Math.abs(fBars / fRecord - 1) <= TIE_TOLERANCE) return { factor: fRecord, splitFactor: fRecord };
-  return { words: `its split record gives ×${factorWords(fRecord)}, its bars ×${fBars.toFixed(1)}` };
+  return { words: `its split record gives ×${factorWords(fRecord)}, its bars ×${factorWords(fBars)}` };
 }

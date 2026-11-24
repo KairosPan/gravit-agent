@@ -5,22 +5,26 @@
  * line per anchor of the present case, where the benchmark's bars start when they were read short (a benchmark that
  * could not be read is said once, with its words, on the measurement line), the header and one row per group and
  * `all` with one figure per horizon, the measured cases in the view's order with one figure per horizon, the
- * unmeasured ones with the words that say why, what the flags mean, under `price` the price sentence, and the fixed
+ * unmeasured ones with the words that say why (or, cut, by their reason), what the flags mean, under `price` the price sentence, and the fixed
  * sentences. Every figure is the change against the benchmark, or the raw change when the view is raw (`valueOf`).
  *
- * When it is over the bound, each step below is taken in turn while it still is: (1) every note goes; (2) every
- * unmeasured entry loses its words and reads `<SYMBOL> <date>`; (3) case lines leave from the middle of the order, so
- * the first and the last stay longest, with `… and N more in the view` where they left; (4) the unmeasured line is cut
- * from its end to `+N more`; (5) the line that explains `quiet` and `elsewhere` goes; (6) texts are clipped, all at
- * once, by code point with `…` where they were clipped (the title to 20 characters, each anchor's label to 12, each
- * group's name to 8 wherever it is printed, the words on an anchor's line, the benchmark's words on the measurement
- * line and the source on the benchmark's line to 80); (7) each measured anchor's line takes a short form without its
- * gap and its volume, with its first and its last horizon only. (8) Whenever step 6 or 7 was taken, the case lines
- * that left come back while the digest stays within the bound, the earliest and the latest of them in turn, so the
- * kept ones are still the two ends of the order; the `… and N more` line says how many are still out and goes when
- * none is. (9) A digest still over the bound is refused (`INTERNAL`), never returned. Line 1, the measurement line,
- * the header, each row's numbers and the fixed sentences are never cut. Numbers are written as `format.mjs` writes
- * them. The view is not changed.
+ * When it is over the bound, each step below is taken in turn while it still is: (1) every note goes; (2) the
+ * unmeasured entries are said by their reason instead of their words, each reason once with the companies it holds
+ * (`unmeasured, needs a split record: DDD (bars ×4)`), a reason the market gave in its own words clipped to 80; (3) case
+ * lines leave from the middle of the order, so the first and the last stay longest, with `… and N more in the view`
+ * where they left, the anchors taking their short form (step 7) and then the texts their clipped one (step 6) before
+ * the last case line goes; (4) each reason's
+ * companies are cut from its end to `+N more` (to `N cases` when none is left); (5) the line that explains `quiet` and
+ * `elsewhere` goes (it is never there while no case line shown carries either); (6) texts are clipped, all at once, by code point with `…` where they were clipped (the title to 20
+ * characters, each anchor's label to 12, each group's name to 8 wherever it is printed, the words on an anchor's line,
+ * the benchmark's words on the measurement line and the source on the benchmark's line to 80); (7) each measured
+ * anchor's line takes a short form without its gap and its volume, with its first and its last horizon only.
+ * (8) Whenever step 6 or 7 was taken, the case lines that left come back while the digest stays within the bound, the
+ * earliest and the latest of them in turn, so the kept ones are still the two ends of the order; the `… and N more`
+ * line says how many are still out and goes when none is. (9) A digest still over the bound says its unmeasured cases
+ * as one count (`unmeasured: N cases`). (10) A digest still over the bound is refused (`INTERNAL`), never returned.
+ * Line 1, the measurement line, the header, each row's numbers and the fixed sentences are never cut. Numbers are
+ * written as `format.mjs` writes them. The view is not changed.
  */
 import { DIGEST_MAX, pct, ratio, whole } from "./format.mjs";
 import { factorWords } from "./price-tie.mjs";
@@ -62,6 +66,51 @@ function clip(text, max) {
   const points = Array.from(text);
   return points.length <= max ? text : `${points.slice(0, max).join("")}…`;
 }
+
+/**
+ * The reason an unmeasured case gives, said once for every case that gives it, and what this case adds to it: the
+ * reasons the face writes by their kind, any other (the market's own words) as its words, clipped.
+ * @param {string} words @returns {{ reason: string, detail: string | null }}
+ */
+function reasonOf(words) {
+  /** @type {RegExpExecArray | null} */
+  let m;
+  if (/: there is no close before it; /.test(words)) {
+    return { reason: "no close before a first bar (use price, day0_open or day0_close)", detail: null };
+  }
+  if ((m = /^its bars are adjusted about ×(\S+) since day 0 .*: a split record is needed$/.exec(words))) {
+    return { reason: "needs a split record", detail: `bars ×${m[1]}` };
+  }
+  if ((m = /^its split record gives ×(\S+), its bars ×(\S+)$/.exec(words))) {
+    return { reason: "split record and bars disagree", detail: `record ×${m[1]}, bars ×${m[2]}` };
+  }
+  if (words.startsWith("no first-day open from its source")) return { reason: "no first-day open from its source", detail: null };
+  if (/: the date's session is not in its bars$|: its bars do not cover the date$|^no session (on or )?after \S+ in its bars, which end /.test(words)) {
+    return { reason: "date not in its bars", detail: null };
+  }
+  return { reason: clip(words, CLIP.words), detail: null };
+}
+
+/**
+ * The unmeasured cases by reason, each reason in the order it first comes, with its entries: the symbol, its date when
+ * the symbol is unmeasured more than once, and what the case adds to the reason.
+ * @param {EventCase[]} cases @returns {Array<{ reason: string, entries: string[] }>}
+ */
+function byReason(cases) {
+  const count = new Map();
+  for (const k of cases) count.set(k.symbol, (count.get(k.symbol) ?? 0) + 1);
+  /** @type {Map<string, string[]>} */
+  const reasons = new Map();
+  for (const k of cases) {
+    const { reason, detail } = reasonOf(String(k.words));
+    const entry = `${k.symbol}${count.get(k.symbol) > 1 ? ` ${k.date}` : ""}${detail === null ? "" : ` (${detail})`}`;
+    reasons.set(reason, [...(reasons.get(reason) ?? []), entry]);
+  }
+  return [...reasons].map(([reason, entries]) => ({ reason, entries }));
+}
+
+/** @param {number} n */
+const howMany = (n) => (n === 1 ? "1 case" : `${n} cases`);
 
 /** A horizon as the digest names it. @param {number} k */
 const horizonName = (k) => (k === 0 ? "day 0" : `+${k}`);
@@ -114,7 +163,8 @@ function anchorLine(symbol, a, q, against, { clipped, short }) {
 /**
  * One measured case, with its note when `withNote`, its group's name as given. The extras, in order: the raw change
  * when the view is against a benchmark and the case has no figure against it at the first horizon, the price, the
- * split factor, the listing day, the sessions skipped, the tape's flags, no volume check, unverified, a source and a
+ * split factor, the listing day, the sessions skipped, the tape's flags, no volume check (unless a listing day, which
+ * has none), unverified, a source and a
  * split record not opened, the note.
  * @param {EventCase} c @param {string} group @param {Against} against @param {boolean} withNote
  */
@@ -130,7 +180,7 @@ function caseLine(c, group, against, withNote) {
     (c.skipped > 0 ? ` · skipped ${c.skipped} sessions` : "") +
     (c.flags.includes("quiet") ? " · quiet" : "") +
     (c.flags.includes("elsewhere") ? " · elsewhere" : "") +
-    (c.tapeRan ? "" : " · no volume check") +
+    (c.tapeRan || c.listed ? "" : " · no volume check") +
     (c.verified ? "" : " · unverified") +
     (c.flags.includes("unopened") ? " · source not opened" : "") +
     (c.flags.includes("splitsUnopened") ? " · split record not opened" : "") +
@@ -158,7 +208,10 @@ export function eventsDigest(view) {
 
   let notes = true;
   let unmeasuredWords = true;
-  let unmeasuredShown = unmeasured.length;
+  const reasons = byReason(unmeasured);
+  // How many entries each reason still shows (step 4), and whether they are said as one count (step 9).
+  const reasonShown = reasons.map((r) => r.entries.length);
+  let counted = false;
   // The case lines shown are the first `head` and the last `tail` of the order; the ones between have left.
   let head = Math.ceil(measured.length / 2);
   let tail = measured.length - head;
@@ -176,24 +229,36 @@ export function eventsDigest(view) {
     const relative = bench.symbol === null
       ? "raw, no benchmark"
       : bench.words !== null ? `raw: ${bench.symbol} could not be read (${words(bench.words)})` : `against ${bench.symbol}`;
-    const measurement = `measured from ${FROM[p.base]}, ${relative}: ${p.horizons.map(horizonName).join(" ")}`;
+    const from = p.base === "day0_open" && bench.symbol === null ? "day 0's open" : FROM[p.base];
+    const measurement = `measured from ${from}, ${relative}: ${p.horizons.map(horizonName).join(" ")}`;
     const benchShort = bench.symbol !== null && bench.words === null && bench.short && bench.source !== null
       ? [`${bench.symbol}'s bars start ${bench.firstBar} (${words(bench.source)}): events before it have nothing to compare with`]
       : [];
     const rows = [...view.groups.named.map((g) => groupRow(group(g.name), g.summary)), groupRow("all", view.groups.all)];
     const lines = measured.map((k) => caseLine(k, group(k.group), against, notes));
     const cut = measured.length - head - tail;
+    const shown = [...lines.slice(0, head), ...lines.slice(lines.length - tail)];
     const cases = measured.length === 0 ? [] : [
-      casesLine(p.horizons), ...lines.slice(0, head), ...(cut > 0 ? [`… and ${cut} more in the view`] : []), ...lines.slice(lines.length - tail),
+      casesLine(p.horizons), ...shown.slice(0, head), ...(cut > 0 ? [`… and ${cut} more in the view`] : []), ...shown.slice(head),
     ];
-    const entries = unmeasured.map((k) => (unmeasuredWords ? `${k.symbol} ${k.date} (${k.words})` : `${k.symbol} ${k.date}`));
-    const more = unmeasured.length - unmeasuredShown;
-    const unmeasuredLine = unmeasured.length === 0 ? [] : [
-      `unmeasured: ${[...entries.slice(0, unmeasuredShown), ...(more > 0 ? [`+${more} more`] : [])].join("; ")}`,
-    ];
+    // what the flags mean is said while a case line shown carries one
+    const explained = flagsShown && shown.some((l) => / · (quiet|elsewhere)( · |$)/.test(l));
+    /** @type {string[]} */
+    let unmeasuredLine = [];
+    if (unmeasured.length === 0) unmeasuredLine = [];
+    else if (unmeasuredWords) unmeasuredLine = [`unmeasured: ${unmeasured.map((k) => `${k.symbol} ${k.date} (${k.words})`).join("; ")}`];
+    else if (counted) unmeasuredLine = [`unmeasured: ${howMany(unmeasured.length)}`];
+    else {
+      unmeasuredLine = reasons.map((r, i) => {
+        const shown = reasonShown[i];
+        const more = r.entries.length - shown;
+        const list = shown === 0 ? howMany(r.entries.length) : [...r.entries.slice(0, shown), ...(more > 0 ? [`+${more} more`] : [])].join(", ");
+        return `unmeasured, ${r.reason}: ${list}`;
+      });
+    }
     return [
       first, clipped ? clip(view.title, CLIP.title) : view.title, measurement, ...anchors, ...benchShort, columns, ...rows,
-      ...cases, ...unmeasuredLine, ...(flagsShown ? [FLAGS] : []), ...(p.base === "price" ? [PRICE_SENTENCE] : []),
+      ...cases, ...unmeasuredLine, ...(explained ? [FLAGS] : []), ...(p.base === "price" ? [PRICE_SENTENCE] : []),
       EVENT_SENTENCES,
     ].join("\n");
   };
@@ -202,14 +267,31 @@ export function eventsDigest(view) {
   if (over()) { notes = false; text = compose(); }
   if (over()) { unmeasuredWords = false; text = compose(); }
   while (over() && head + tail > 0) {
-    if (head > tail) head--; else tail--;
+    // before the last case line goes, the anchors take their short form, then the texts are clipped
+    if (head + tail === 1 && !short) short = true;
+    else if (head + tail === 1 && !clipped) clipped = true;
+    else if (head > tail) head--; else tail--;
     text = compose();
   }
-  while (over() && unmeasuredShown > 0) { unmeasuredShown--; text = compose(); }
+  while (over() && reasonShown.some((n) => n > 0)) {
+    // the reason that shows the most entries gives up its last one
+    const i = reasonShown.indexOf(Math.max(...reasonShown));
+    reasonShown[i]--;
+    text = compose();
+  }
   if (over() && flagsShown) { flagsShown = false; text = compose(); }
   if (over()) { clipped = true; text = compose(); }
   if (over()) { short = true; text = compose(); }
-  if (clipped && !over()) {
+  if ((clipped || short) && !over()) {
+    // The reasons' entries that were cut come back first, while they fit.
+    for (let i = 0; i < reasons.length; i++) {
+      while (reasonShown[i] < reasons[i].entries.length) {
+        reasonShown[i]++;
+        const before = text;
+        text = compose();
+        if (over()) { reasonShown[i]--; text = before; break; }
+      }
+    }
     // Clipping made room: the cases that left come back, the earliest and the latest of them in turn, while they fit.
     for (let earliest = true; head + tail < measured.length; earliest = !earliest) {
       const before = { head, tail, text };
@@ -218,6 +300,7 @@ export function eventsDigest(view) {
       if (over()) { ({ head, tail, text } = before); break; }
     }
   }
+  if (over() && unmeasured.length > 0) { counted = true; text = compose(); }
   if (over()) throw refuse.digestOverBound();
   return text;
 }

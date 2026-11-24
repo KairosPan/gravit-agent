@@ -241,7 +241,7 @@ test("a listing under base price, tied with no split", async () => {
   assert.deepEqual([unopened.splits!.opened, unopened.splits!.verified], [false, false]);
 
   const untied = await listing({ price: 160, stated_open: 180 });
-  assert.deepEqual([untied.state, untied.words, untied.measure], ["unmeasured", "its bars are adjusted about ×4.0 since day 0 (its source's open 180.00, the bars' 45.00): a split record is needed", null]);
+  assert.deepEqual([untied.state, untied.words, untied.measure], ["unmeasured", "its bars are adjusted about ×4 since day 0 (its source's open 180.00, the bars' 45.00): a split record is needed", null]);
 });
 test("prior_close on a listing is unmeasured with its words; day0_close measures it", async () => {
   const scan = (base?: string) => scanEvents({
