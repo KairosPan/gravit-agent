@@ -5,8 +5,9 @@
  * (`createViewStore`), both for the row's life, so two scans at once share each company's read and a later scan of
  * the same trading day reads again only SPY, the present case's stock and any history that was read short.
  *
- * The service: `scanEvents({ title, events, query? })`, the scan of a researched list of past events, each source marked opened
- * only when the page record holds it; `notePage(url)`, which records a page a reader opened; `pageOpened(url)`,
+ * The service: `scanEvents({ title, events, query?, base?, horizons?, benchmark? })`, the scan of a researched list of
+ * past events measured from the call's base at its horizons against its benchmark, each source (and each split
+ * record's page) marked opened only when the page record holds it; `notePage(url)`, which records a page a reader opened; `pageOpened(url)`,
  * whether the record holds it; `writeView(view)`, which stores a view under a new id and answers
  * `{ id, bytes, windowsDropped, casesDropped }`; `readView(id)`, a stored view by its id. The page record
  * (`createPageRecord`) is held in memory for the row's life, beside the keep. Every history is read from the market
@@ -38,9 +39,9 @@ export function apply(ctx, config) {
   const pages = createPageRecord();
   const store = createViewStore(viewsDir);
   const service = {
-    /** @param {{ title: unknown, events: unknown, query?: unknown }} args */
-    scanEvents: ({ title, events, query }) =>
-      scanEvents({ title, events, query, keep, now, opened: (url) => pages.has(url) }),
+    /** @param {{ title: unknown, events: unknown, query?: unknown, base?: unknown, horizons?: unknown, benchmark?: unknown }} args */
+    scanEvents: ({ title, events, query, base, horizons, benchmark }) =>
+      scanEvents({ title, events, query, base, horizons, benchmark, keep, now, opened: (url) => pages.has(url) }),
     /** @param {unknown} url */
     notePage: (url) => pages.note(url),
     /** @param {unknown} url */

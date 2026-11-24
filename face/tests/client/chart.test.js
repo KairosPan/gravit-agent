@@ -184,3 +184,33 @@ test('eventRelSvg: the line against the market on the window\'s bars, a dashed 1
   assert.equal(eventRelSvg([[0, 100]], { day0: 30, count: 91 }), '');
   assert.equal(eventRelSvg(null, { day0: 30, count: 91 }), '');
 });
+
+test('eventCandlesSvg with a level: one dashed ev-level line inside the plot, the y-range widened to hold it (event analog redesign Task 10)', () => {
+  const bars = windowBars(91);
+  const highs = Math.max(...bars.map(b => b.h));
+  const above = highs + 40;
+  const svg = eventCandlesSvg(bars, { day0: 0, marks: [], flags: [], unit: 'usd', level: above });
+  const levels = allOf(svg, /<line class="ev-level" x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/g);
+  assert.equal(levels.length, 1);
+  const [, x1, y1, x2, y2] = levels[0].map(Number);
+  assert.equal(y1, y2);
+  // inside the plot: between the top margin and the bottom one, from the left margin to the prices
+  assert.ok(y1 >= 34 && y1 <= 260 - 22, String(y1));
+  assert.ok(x1 >= 4 && x2 <= 640 - 60 && x1 < x2);
+  // the level above every high is the plot's top; the highest price line is its price
+  assert.equal(y1, 34);
+  const prices = allOf(svg, /<text class="ew-price"[^>]*>([^<]+)<\/text>/g).map(m => m[1]);
+  assert.equal(prices.at(-1), `$${above.toFixed(2)}`);
+  // every wick still inside the plot
+  for (const m of allOf(svg, /<line class="ew-wick (?:up|down)" x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" y2="([\d.]+)"/g)) {
+    assert.ok(Number(m[1]) >= 34 && Number(m[2]) <= 238);
+  }
+  // a level inside the range draws without moving it; no level, or none that is a number, draws none
+  const inside = eventCandlesSvg(bars, { day0: 0, level: bars[10].c });
+  assert.equal(allOf(inside, /class="ev-level"/g).length, 1);
+  assert.equal(allOf(inside, /<text class="ew-price"[^<]*/g).join(), allOf(eventCandlesSvg(bars, { day0: 0 }), /<text class="ew-price"[^<]*/g).join());
+  assert.doesNotMatch(eventCandlesSvg(bars, { day0: 0 }), /ev-level/);
+  assert.doesNotMatch(eventCandlesSvg(bars, { day0: 0, level: null }), /ev-level/);
+  assert.doesNotMatch(eventCandlesSvg(bars, { day0: 0, level: NaN }), /ev-level/);
+  assert.doesNotMatch(svg, /NaN|undefined/);
+});

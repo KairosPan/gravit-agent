@@ -1,8 +1,8 @@
 // face/tests/analog-windows.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { POST, PRE, barOn, dateOf, windowOf } from "../plugins/analog/lib/windows.mjs";
-import { MARKET, PAST, START, dateAt } from "./analog-fixtures.ts";
+import { POST, PRE, barBefore, barOn, dateOf, windowOf } from "../plugins/analog/lib/windows.mjs";
+import { EVENT_MARKET, MARKET, PAST, START, dateAt } from "./analog-fixtures.ts";
 
 test("a bar's date is its UTC date", () => {
   assert.equal(dateOf(START), "2020-01-01");
@@ -36,4 +36,12 @@ test("a series' bar on a date is looked up, not searched: after the first call a
   for (let k = 0; k < 500; k++) barOn(counted, "2020-05-04");
   assert.equal(reads, 0);
   assert.equal(barOn(counted, "2019-12-01"), undefined, "a date the series has no bar on");
+});
+
+test("a series' last bar before a date is the last dated strictly before it", () => {
+  assert.equal(barBefore(EVENT_MARKET, "2020-04-10")?.c, 400);
+  assert.equal(barBefore(EVENT_MARKET, "2020-04-11")?.c, 396);
+  assert.equal(barBefore(EVENT_MARKET, "2020-01-01"), undefined);
+  assert.equal(barBefore(EVENT_MARKET, "2030-01-01"), EVENT_MARKET.at(-1));
+  assert.equal(barBefore([], "2020-04-10"), undefined);
 });

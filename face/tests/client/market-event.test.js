@@ -10,7 +10,10 @@ import { emptyState } from '../../client/js/data/empty.js';
 import { wantedAnalog } from '../../client/js/host/analog.js';
 import { marketHref } from '../../client/js/host/event-table.js';
 import { nyDay, windowAsk, eventWindowOf, windowPath, marksOf } from '../../client/js/host/event-window.js';
-import { EVENT_VIEW, EVENT_VIEW_ID, EVENT_VIEW_WITH_B } from './helpers/event-view.js';
+import { eventOf, eventHistoryHtml } from '../../client/js/render/event-window.js';
+import { withTable } from '../../client/js/i18n/words.js';
+import { ZH } from '../../client/js/i18n/zh.js';
+import { EVENT_VIEW, EVENT_VIEW_ID, EVENT_VIEW_WITH_B, EVENT_VIEW_V2, EVENT_VIEW_V2_ID, EVENT_VIEW_V2_RAW } from './helpers/event-view.js';
 
 const DAY = 86_400_000;
 // weekday daily bars from a Monday, each starting at 14:30 UTC (09:30 in New York in winter, 10:30 in summer: the same day)
@@ -119,4 +122,120 @@ test('marksOf: the case’s day 0, then the other events of its symbol on a bar 
   assert.deepEqual(marksOf(null, 'ev-WYNN-2018-01-26', w), [{ index: 30, label: '', group: null, kind: 'day0' }]);
   assert.deepEqual(marksOf(EVENT_VIEW, 'ev-nope', w), [{ index: 30, label: '', group: null, kind: 'day0' }]);
   assert.deepEqual(marksOf(EVENT_VIEW, 'ev-WYNN-2018-01-26', null), []);
+});
+
+// ---- the event analog redesign (Task 10): a version 2 view's page follows its horizons and draws its price
+
+test('after round-trips through the router, past 60 alone', () => {
+  const hash = '#/markets/stock:IPO?at=2026-11-19&view=an-20261124-0000beef&case=ev-IPO-2026-11-19&after=250';
+  assert.deepEqual(parseHash(hash), { screen: 'markets', id: 'stock:IPO', event: { at: '2026-11-19', view: 'an-20261124-0000beef', case: 'ev-IPO-2026-11-19', after: 250 } });
+  assert.equal(toHash(parseHash(hash)), hash);
+  assert.equal(toHash(parseHash(marketHref('an-20261124-0000beef', 'IPO', '2026-11-19', 'ev-IPO-2026-11-19', 250))), hash);
+  for (const after of ['60', '0', '999', 'x', '61.5', '']) {
+    const parsed = parseHash(`#/markets/stock:IPO?at=2026-11-19&view=v&case=c&after=${after}`);
+    assert.deepEqual(parsed, { screen: 'markets', id: 'stock:IPO', event: { at: '2026-11-19', view: 'v', case: 'c' } }, after);
+    assert.equal(toHash(parsed), '#/markets/stock:IPO?at=2026-11-19&view=v&case=c');
+  }
+  assert.equal(parseHash('#/markets/stock:IPO?at=2026-11-19&after=61').event.after, 61);
+  assert.equal(toHash({ screen: 'markets', id: 'stock:IPO', event: { at: '2026-11-19', after: 60 } }), '#/markets/stock:IPO?at=2026-11-19');
+});
+
+test("windowAsk keeps today's ask at 60 and grows past it", () => {
+  const now = Date.parse('2026-11-12T00:00:00Z');
+  const day = Date.UTC(2018, 0, 26);
+  assert.deepEqual(windowAsk(AT, now), { since: day - 60 * DAY, before: day + 100 * DAY, limit: 200 });
+  assert.deepEqual(windowAsk(AT, now, 60), windowAsk(AT, now));
+  const far = Date.parse('2030-01-01T00:00:00Z');
+  const ask = windowAsk(AT, far, 250);
+  assert.equal(ask.limit, 390);
+  assert.equal((ask.before - day) / DAY, 404);
+  assert.equal(ask.since, day - 60 * DAY);
+  assert.equal(windowAsk(AT, far, 120).limit, 260);
+  assert.equal((windowAsk(AT, far, 120).before - day) / DAY, 196);
+  const soon = Date.parse('2018-06-01T00:00:00Z');
+  assert.equal(windowAsk(AT, soon, 250).before, soon, 'never past now');
+});
+
+test('eventWindowOf takes the after it is given', () => {
+  const longer = weekdays('2017-10-02', 400);
+  const w = eventWindowOf(longer, AT, 120);
+  assert.equal(w.bars.length, 30 + 1 + 120);
+  assert.equal(w.day0, 30);
+  assert.equal(nyDay(w.bars[30].t), AT);
+  // where the bars reach: the file's BARS end 115 sessions after day 0
+  const i = BARS.findIndex(b => nyDay(b.t) === AT);
+  assert.equal(eventWindowOf(BARS, AT, 120).bars.length, 30 + (BARS.length - i));
+  assert.equal(eventWindowOf(BARS, AT, 250).bars.length, 30 + (BARS.length - i));
+  assert.equal(eventWindowOf(BARS, AT).bars.length, 91);
+});
+
+const stateAt = (route, views, windows) => ({ route, analog: { tasks: {}, views }, markets: { event: windows } });
+const ready = candles => ({ status: 'ready', data: { candles, source: 'Nasdaq · X', adjustment: 'split-adjusted, not dividend-adjusted' }, at: 0 });
+const flagsOf = h => [...h.matchAll(/<g class="ew-flag [a-z]+">[^]*?<text[^>]*>([^<]+)<\/text><\/g>/g)].map(m => m[1]);
+const NOW = Date.parse('2026-11-24T15:00:00Z');
+
+test("a version 1 view's page is today's (Review Focus 5)", () => {
+  const route = parseHash(marketHref(EVENT_VIEW_ID, 'WYNN', AT, 'ev-WYNN-2018-01-26'));
+  assert.equal(route.event.after, undefined);
+  const s = stateAt(route, { [EVENT_VIEW_ID]: { status: 'loaded', view: EVENT_VIEW } }, { 'stock:WYNN@2018-01-26': ready(BARS) });
+  const ev = eventOf(s, 'stock:WYNN');
+  assert.equal(ev.key, 'stock:WYNN@2018-01-26');
+  assert.equal(ev.after, 60);
+  assert.equal(ev.bars.status, 'ready');
+  assert.deepEqual(windowAsk(AT, NOW, ev.after), { since: Date.UTC(2018, 0, 26) - 60 * DAY, before: Date.UTC(2018, 0, 26) + 100 * DAY, limit: 200 });
+  const h = withTable(ZH, () => eventHistoryHtml(ev, NOW));
+  assert.deepEqual(flagsOf(h), ['5 天 −14.6%', '60 天 +2.0%'], 'flags at +5 and +60 only');
+  assert.doesNotMatch(h, /ev-level/);
+  assert.match(h, /<div class="ew-rel-head">相对大盘（SPY）· 消息前一天 = 100<\/div>/);
+  // a v1 link carrying an after (never written by the table) still keys its own window
+  const wide = eventOf(stateAt({ ...route, event: { ...route.event, after: 120 } }, {}, {}), 'stock:WYNN');
+  assert.equal(wide.key, 'stock:WYNN@2018-01-26@120');
+});
+
+// SPLB's listing on 2019-05-10: day 0 is its first bar; its price 160 over its ×4 split, 40 in the bars' units
+const SPLB = 'ev-SPLB-2019-05-10';
+const REL = Array.from({ length: 251 }, (_, k) => [k, 100 + k / 10]);
+const withRel = (view, relOf) => ({ ...view, cases: view.cases.map(c => (c.id === SPLB ? { ...c, rel: REL, relOf } : c)) });
+const splbPage = (view, n, after = 250) => {
+  const route = parseHash(marketHref(EVENT_VIEW_V2_ID, 'SPLB', '2019-05-10', SPLB, after));
+  const key = after > 60 ? `stock:SPLB@2019-05-10@${after}` : 'stock:SPLB@2019-05-10';
+  const ev = eventOf(stateAt(route, { [EVENT_VIEW_V2_ID]: { status: 'loaded', view } }, { [key]: ready(weekdays('2019-05-10', n)) }), 'stock:SPLB');
+  return { ev, h: withTable(ZH, () => eventHistoryHtml(ev, NOW)) };
+};
+
+test("a version 2 view's flags are its horizons and its price is a level", () => {
+  const { ev, h } = splbPage(withRel(EVENT_VIEW_V2, 'benchmark'), 260);
+  assert.equal(ev.after, 250);
+  assert.equal(ev.key, 'stock:SPLB@2019-05-10@250');
+  // every horizon after day 0, its figure against the benchmark
+  assert.deepEqual(flagsOf(h), ['5 天 −11.2%', '20 天 −3.9%', '60 天 +2.9%', '120 天 +15.4%', '250 天 +22.1%']);
+  assert.equal([...h.matchAll(/class="ev-level"/g)].length, 1);
+  assert.match(h, /<div class="ew-rel-head">相对 SPY · 起算价 = 100<\/div>/);
+  // the window: a listing has no bar before, day 0 then 250 after
+  assert.match(h, /2019-05-10 至 2020-04-24/);
+  // fewer bars: the flags the bars reach
+  const short = splbPage(withRel(EVENT_VIEW_V2, 'benchmark'), 130).h;
+  assert.deepEqual(flagsOf(short), ['5 天 −11.2%', '20 天 −3.9%', '60 天 +2.9%', '120 天 +15.4%']);
+  // raw: the changes themselves, and the line its own path
+  const raw = splbPage(withRel(EVENT_VIEW_V2_RAW, 'self'), 260).h;
+  assert.deepEqual(flagsOf(raw), ['5 天 −9.9%', '20 天 −1.0%', '60 天 +6.3%', '120 天 +22.1%', '250 天 +33.5%']);
+  assert.match(raw, /<div class="ew-rel-head">自身走势 · 起算价 = 100<\/div>/);
+  // no price level outside the price base
+  const open = { ...EVENT_VIEW_V2, parameters: { ...EVENT_VIEW_V2.parameters, base: 'prior_close' } };
+  assert.doesNotMatch(splbPage(open, 260).h, /ev-level/);
+});
+
+test("a version 2 line's screen-reader label and its no-line sentence name what the line is", () => {
+  const label = h => h.match(/<svg class="ew-rel"[^>]*aria-label="([^"]*)"/)?.[1];
+  const bench = splbPage(withRel(EVENT_VIEW_V2, 'benchmark'), 260).h;
+  assert.match(label(bench), /^相对 SPY，起算价 = 100：最低 100，最高 125$/);
+  const self = splbPage(withRel(EVENT_VIEW_V2_RAW, 'self'), 260).h;
+  assert.match(label(self), /^自身走势，起算价 = 100：最低 100，最高 125$/);
+  // no line kept: the sentence says what it would have been against
+  assert.match(splbPage(EVENT_VIEW_V2, 260).h, /<p class="mk-note">视图没有保留这个事件相对 SPY 的走势<\/p>/);
+  assert.match(splbPage(EVENT_VIEW_V2_RAW, 260).h, /<p class="mk-note">视图没有保留这个事件的自身走势<\/p>/);
+  // version 1's words stay its own
+  const route = parseHash(marketHref(EVENT_VIEW_ID, 'WYNN', AT, 'ev-WYNN-2018-01-26'));
+  const v1 = withTable(ZH, () => eventHistoryHtml(eventOf(stateAt(route, { [EVENT_VIEW_ID]: { status: 'loaded', view: EVENT_VIEW } }, { 'stock:WYNN@2018-01-26': ready(BARS) }), 'stock:WYNN'), NOW));
+  assert.match(label(v1), /^相对大盘，消息前一天 = 100：/);
 });

@@ -90,9 +90,9 @@ for (const [id, folder] of Object.entries(FOLDERS)) {
   });
 }
 
-test("event-analogs: its about names the 20- and 60-session horizons, in English and in Chinese", () => {
+test("event-analogs: its about names the 250-session ceiling and the SPY default, in English and in Chinese", () => {
   const ability = kept("event-analogs");
   for (const [language, about] of [["en", ability.about], ["zh", ability.zh?.about ?? ""]] as const) {
-    for (const horizon of ["20", "60"]) assert.ok(about.includes(horizon), `the ${language} about names ${horizon}`);
+    for (const word of ["250", "SPY"]) assert.ok(about.includes(word), `the ${language} about names ${word}`);
   }
 });

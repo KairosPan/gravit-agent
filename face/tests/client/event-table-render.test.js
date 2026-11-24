@@ -7,7 +7,8 @@ import { eventTableHtml } from '../../client/js/render/event-table.js';
 import { marketHref } from '../../client/js/host/event-table.js';
 import { withTable } from '../../client/js/i18n/words.js';
 import { ZH } from '../../client/js/i18n/zh.js';
-import { EVENT_VIEW, EVENT_VIEW_ID } from './helpers/event-view.js';
+import { EVENT_VIEW, EVENT_VIEW_ID, EVENT_VIEW_V2, EVENT_VIEW_V2_ID, EVENT_VIEW_V2_RAW } from './helpers/event-view.js';
+import { EN } from '../../client/js/i18n/en.js';
 
 const loaded = view => ({ status: 'loaded', view });
 const draw = (entry, id = EVENT_VIEW_ID) => withTable(ZH, () => eventTableHtml(entry, id));
@@ -118,4 +119,95 @@ test('loading says so; failed draws its words; a view no longer kept is one line
   const gone = draw({ status: 'failed', error: 'HTTP 404', gone: true });
   assert.equal(gone, '<div class="et-state">这张对标表已不再保留</div>');
   assert.doesNotMatch(gone, /HTTP|et-caveats|et-failed/);
+});
+
+// version 2 (event analog redesign Task 9)
+const drawV2 = (view = EVENT_VIEW_V2, table = ZH) => withTable(table, () => eventTableHtml(loaded(view), EVENT_VIEW_V2_ID));
+const chipsOf = row => [...row.matchAll(/<span class="et-chip-label">([^<]+)<\/span>([^<]+)</g)].map(m => `${m[1]} ${m[2]}`);
+
+test('a version 1 view draws its basis line as today', () => {
+  assert.match(draw(loaded(EVENT_VIEW)), /<div class="et-basis">每个百分比都是相对大盘（SPY）的涨跌；当天是第一个能对消息作出反应的交易日<\/div>/);
+});
+
+test('a version 2 view draws its basis: the base and the benchmark', () => {
+  const h = drawV2();
+  assert.match(h, /<div class="et-basis">从来源给出的价格起算（如发行价），对比 SPY；当天是第一个能对消息作出反应的交易日<\/div>/);
+  assert.match(drawV2(EVENT_VIEW_V2_RAW), /<div class="et-basis">从来源给出的价格起算（如发行价），对比 SPY：读不到它的日线，以下是原始涨跌；[^<]+<\/div>/);
+  assert.match(drawV2(EVENT_VIEW_V2, EN), /<div class="et-basis">From the price its source gives \(an offer price\), against SPY; Day 0 is the first session that could react<\/div>/);
+});
+
+test('a version 2 row: six chips on its row, its price, its listing day', () => {
+  const h = drawV2();
+  const lsta = rowOf(h, 'LSTA 上市');
+  assert.deepEqual(chipsOf(lsta), ['当天 +9.1%', '5 天 −4.3%', '20 天 −11.9%', '60 天 −20.5%', '120 天 −10.2%', '250 天 +6.2%']);
+  assert.equal(lsta.match(/<div class="et-chips">/g)?.length, 1, 'one chips row');
+  assert.match(lsta, /<span class="et-price">价格 51\.00<\/span>/);
+  assert.match(lsta, /<span class="et-flag">上市首日<\/span>/);
+  assert.doesNotMatch(lsta, /et-split|跳过/);
+  assert.ok(lsta.includes(`href="${marketHref(EVENT_VIEW_V2_ID, 'LSTA', '2023-09-14', 'ev-LSTA-2023-09-14', 250).replaceAll('&', '&amp;')}"`));
+  const ant = rowOf(h, 'ANT 上市');
+  assert.deepEqual(chipsOf(ant), ['当天 +18.3%', '5 天 +4.1%', '20 天 尚无', '60 天 尚无', '120 天 尚无', '250 天 尚无']);
+  assert.match(ant, /价格 83\.00/);
+  assert.match(ant, /上市首日/);
+});
+
+test('a split row: 按拆股折算 ×4 with its split record link, new tab, no referrer, and its own badge', () => {
+  const splb = rowOf(drawV2(), 'SPLB 上市');
+  assert.match(splb, /<span class="et-price">价格 160\.00<\/span>/);
+  assert.match(splb, /<span class="et-split">按拆股折算 ×4<\/span><a class="et-src" href="https:\/\/example\.com\/splb-splits" target="_blank" rel="noopener noreferrer">拆股来源 ↗<\/a><span class="et-badge ok">已核实<\/span>/);
+  const cases = EVENT_VIEW_V2.cases.map(c => (c.splits ? { ...c, splits: { ...c.splits, source: 'javascript:alert(1)', opened: false, verified: false } } : c));
+  const bad = rowOf(drawV2({ ...EVENT_VIEW_V2, cases }), 'SPLB 上市');
+  assert.doesNotMatch(bad, /javascript:|拆股来源/);
+  assert.match(bad, /<span class="et-split">按拆股折算 ×4<\/span><span class="et-badge warn">未核实<\/span>/);
+  assert.match(drawV2(EVENT_VIEW_V2, EN), /<span class="et-split">Split-adjusted ×4<\/span><a class="et-src" [^>]+>Split record ↗<\/a>/);
+});
+
+test('a skipped row says how many sessions; an unmeasured one its words and its price', () => {
+  const h = drawV2();
+  const skpd = rowOf(h, 'SKPD 恢复交易');
+  assert.match(skpd, /<span class="et-shift">→ 按 03-24 算<\/span><span class="et-flag">跳过 10 个交易日<\/span>/);
+  assert.doesNotMatch(skpd, /上市首日/);
+  assert.match(drawV2(EVENT_VIEW_V2, EN), /<span class="et-flag">Skipped 10 sessions<\/span>/);
+  const tiec = rowOf(h, 'TIEC 上市');
+  assert.match(tiec, /^<div class="et-row unmeasured">/);
+  assert.match(tiec, /<div class="et-words">no first-day open from its source: its price cannot be tied to the bars<\/div>/);
+  assert.match(tiec, /价格 68\.00/);
+});
+
+test('a version 2 group with medians shows its first and last horizon', () => {
+  const at = EVENT_VIEW_V2.groups.named[0].summary.at.map(a => ({ ...a, median: a.k === 0 ? -0.05 : a.k === 250 ? 0.031 : 0.5 }));
+  const view = { ...EVENT_VIEW_V2, groups: { ...EVENT_VIEW_V2.groups, named: [{ ...EVENT_VIEW_V2.groups.named[0], summary: { ...EVENT_VIEW_V2.groups.named[0].summary, at } }] } };
+  assert.match(drawV2(view), /<div class="et-median"><span class="et-median-label">中位数<\/span><span class="et-chip down"><span class="et-chip-label">当天<\/span>−5\.0%<\/span><span class="et-chip up"><span class="et-chip-label">250 天<\/span>\+3\.1%<\/span><\/div>/);
+  assert.match(drawV2(), /不足 8 例/);
+});
+
+test('a case older than the benchmark\'s bars shows its raw chips, said to be raw, never a row of 尚无', () => {
+  const old = c => (c.id === 'ev-SKPD-2021-03-10' ? { ...c, measure: { ...c.measure, changes: c.measure.changes.map(ch => ({ ...ch, x: null })) } } : c);
+  const h = drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(old) });
+  const skpd = rowOf(h, 'SKPD 恢复交易');
+  assert.deepEqual(chipsOf(skpd), ['当天 +3.0%', '5 天 +1.8%', '20 天 −1.4%', '60 天 −3.2%', '120 天 −3.9%', '250 天 −4.8%']);
+  assert.match(skpd, /<div class="et-chips"><span class="et-flag">原始涨跌：SPY 没有这么早的行情<\/span>/);
+  // a case with a figure against it at some horizon keeps its own chips; a raw view says it once, in its head
+  assert.doesNotMatch(rowOf(h, 'ANT 上市'), /原始涨跌/);
+  assert.doesNotMatch(drawV2(EVENT_VIEW_V2_RAW), /原始涨跌：/);
+  assert.match(drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(old) }, EN), /<span class="et-flag">Raw changes: SPY has no bars this early<\/span>/);
+  // every horizon still ahead (no raw change either): not said to be raw
+  const ahead = c => (c.id === 'ev-SKPD-2021-03-10' ? { ...c, measure: { ...c.measure, changes: c.measure.changes.map(ch => ({ ...ch, r: null, x: null })) } } : c);
+  assert.doesNotMatch(rowOf(drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(ahead) }), 'SKPD 恢复交易'), /原始涨跌/);
+});
+
+test('a measured row whose volume was not checked says so, unless it is a listing day', () => {
+  const unchecked = c => (c.id === 'ev-SKPD-2021-03-10' || c.id === 'ev-LSTA-2023-09-14' ? { ...c, tapeRan: false } : c);
+  const h = drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(unchecked) });
+  assert.match(rowOf(h, 'SKPD 恢复交易'), /<span class="et-flag">未做量能核对<\/span>/);
+  assert.doesNotMatch(rowOf(h, 'LSTA 上市'), /未做量能核对/);
+  assert.doesNotMatch(rowOf(h, 'TIEC 上市'), /未做量能核对/);
+  assert.doesNotMatch(drawV2(), /未做量能核对/);
+  assert.match(drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(unchecked) }, EN), /<span class="et-flag">No volume check<\/span>/);
+});
+
+test("day 0's open says how the benchmark is measured", () => {
+  const view = { ...EVENT_VIEW_V2, parameters: { ...EVENT_VIEW_V2.parameters, base: 'day0_open' } };
+  assert.match(drawV2(view), /<div class="et-basis">从当天开盘起算（大盘按 09:30 开盘价），对比 SPY；/);
+  assert.match(drawV2(view, EN), /<div class="et-basis">From Day 0&#39;s open \(the benchmark from its 09:30 open\), against SPY;/);
 });

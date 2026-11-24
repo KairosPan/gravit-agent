@@ -1,30 +1,42 @@
 // face/plugins/analog/lib/events.mjs
 /**
- * An event's day 0, what the stock did after it against the market, the tape around it, and its window of bars.
+ * An event's day 0, its base, what the stock did after it against a benchmark, the tape around it, and its paths.
  * Pure functions over daily bars, oldest first: no clock, no I/O.
  *
  * Day 0 is the first session that could react to the event: the event's own date when it came before or during the
  * session (`pre`, `open`), the next session when it came after the close or on a day the market was shut (`post`,
- * `closed`); a date that is no session of the company's moves to its next one. Every change is measured from the
- * close before day 0, and against the market as (1 + stock) ÷ (1 + market) − 1, the market's bars paired with the
- * company's by date and never by position.
+ * `closed`); a date that is no session of the company's moves to its next one. Every change is measured from one
+ * base (spec §4.2): the close before day 0 (`prior_close`), a stated price (`price`), day 0's open (`day0_open`) or
+ * day 0's close (`day0_close`); and against a benchmark as (1 + stock) / (1 + benchmark) - 1, the benchmark's bars
+ * paired with the company's by date and never by position.
  */
-import { POST, barOn, dateOf, windowOf } from "./windows.mjs";
+import { PRE, barBefore, barOn, dateOf, windowOf } from "./windows.mjs";
 
 /**
  * @typedef {import("./bars.mjs").Bar} Bar
+ * @typedef {import("./windows.mjs").Path} Path
  * @typedef {{ date: string, timing: "pre" | "open" | "post" | "closed" }} When
- * @typedef {{ base: number, gap: number, r0: number, r1: number | null, r5: number | null, r20: number | null,
- *   r60: number | null, x0: number | null, x1: number | null, x5: number | null, x20: number | null,
- *   x60: number | null, low60: number, lowAt: number, sessionsAfter: number }} Measure
+ * @typedef {"prior_close" | "price" | "day0_open" | "day0_close"} Base
+ * @typedef {{ k: number, r: number | null, x: number | null }} Change
+ * @typedef {{ base: number, gap: number | null, changes: Change[], low: number | null, lowAt: number | null,
+ *   sessionsAfter: number }} Measure
+ * @typedef {{ value: number, benchBase: number | null }} Based
  * @typedef {{ vol0: number | null, busiest: { at: number, ratio: number } | null,
  *   flags: Array<"quiet" | "elsewhere"> }} Tape
  */
 
+/** The bases a case can be measured from. */
+export const BASES = ["prior_close", "price", "day0_open", "day0_close"];
+/** The most horizons a call can ask for. */
+export const HORIZONS_MAX = 6;
+/** The farthest horizon, in sessions after day 0. */
+export const HORIZON_MAX = 250;
+/** The horizons, in sessions after day 0, measured when a call names none. */
+export const DEFAULT_HORIZONS = [0, 1, 5, 20, 60];
+/** ... and under `day0_close`, whose horizon 0 would be its own base. */
+export const DEFAULT_HORIZONS_DAY0_CLOSE = [1, 5, 20, 60];
 /** When an event came: before the open, during the session, after the close, or on a day the market was shut. */
 export const TIMINGS = ["pre", "open", "post", "closed"];
-/** The fewest sessions a company needs before day 0. */
-export const MIN_BEFORE = 20;
 /** Day 0's volume is against the mean of this many sessions before it. */
 export const VOLUME_BASE = 50;
 /** The fewest of those sessions that must carry a volume for any ratio. */
@@ -37,9 +49,6 @@ export const ELSEWHERE = 3;
 export const ELSEWHERE_OVER = 1.5;
 /** The neighbours are the sessions this many either side of day 0. */
 export const NEIGHBOURS = 2;
-
-/** The horizons, in sessions after day 0, of the changes measured. */
-const HORIZONS = [0, 1, 5, 20, 60];
 
 /**
  * The index of day 0 for an event: `pre` and `open` take the first bar dated on or after the event's date, `post`
@@ -61,50 +70,83 @@ export function dayZero(bars, when) {
 }
 
 /**
- * A market close that is a positive finite number, or null.
- * @param {Bar | undefined} bar
+ * A price that is a positive finite number, or null.
+ * @param {number | undefined} p
  * @returns {number | null}
  */
-function closeOf(bar) {
-  return bar !== undefined && Number.isFinite(bar.c) && bar.c > 0 ? bar.c : null;
+function priceOf(p) {
+  return typeof p === "number" && Number.isFinite(p) && p > 0 ? p : null;
 }
 
 /**
- * What the stock did from the close before day `i0` (`i0 >= 1`): day 0's open (`gap`) and the closes 0, 1, 5, 20 and
- * 60 sessions on (`r_k`) over that close, minus one, null for a horizon not reached; each against the market (`x_k`),
- * null when the market lacks the date of the base or of the horizon's bar, or its close there is not a positive
- * finite number; the lowest low from day 0 through 60 sessions on (or the last bar) on the same footing, and its
- * session (the earliest on ties); and how many sessions follow day 0.
- * @param {Bar[]} bars @param {number} i0 @param {Bar[] | null} marketBars
+ * The base of day `i0` and its benchmark's, per spec §4.2: `prior_close` the close of the bar before day 0 (none when
+ * day 0 is the first bar) and the benchmark's close on that bar's date; `price` the given price (already divided by
+ * its split factor) and the benchmark's close on its last bar dated before day 0's date; `day0_open` day 0's open and
+ * the benchmark's open on day 0's date; `day0_close` day 0's close and the benchmark's close on day 0's date. A
+ * benchmark price that is not a positive finite number, a benchmark without the date, or none, gives `benchBase`
+ * null. A base that cannot be had gives the words why.
+ * @param {Bar[]} bars @param {number} i0 @param {Base} base @param {number | null} price
+ * @param {Bar[] | null} bench
+ * @returns {Based | { words: string }}
+ */
+export function baseOf(bars, i0, base, price, bench) {
+  const day0 = dateOf(bars[i0].t);
+  if (base === "prior_close") {
+    if (i0 < 1) {
+      return { words: `day 0 is its first bar (${day0}): there is no close before it; measure a listing from its price, day 0's open or day 0's close` };
+    }
+    const before = bars[i0 - 1];
+    return { value: before.c, benchBase: bench === null ? null : priceOf(barOn(bench, dateOf(before.t))?.c) };
+  }
+  if (base === "price") {
+    return { value: /** @type {number} */ (price), benchBase: bench === null ? null : priceOf(barBefore(bench, day0)?.c) };
+  }
+  if (base === "day0_open") {
+    const open = priceOf(bars[i0].o);
+    if (open === null) return { words: "day 0's open in its bars is not a price" };
+    return { value: open, benchBase: bench === null ? null : priceOf(barOn(bench, day0)?.o) };
+  }
+  return { value: bars[i0].c, benchBase: bench === null ? null : priceOf(barOn(bench, day0)?.c) };
+}
+
+/**
+ * What the stock did from its base: day 0's open over it (`gap`, under `prior_close` and `price` only, else null);
+ * at each horizon `k` the close `k` sessions after day 0 over it, minus one (`r`), null when the bars do not reach
+ * it, and against the benchmark (`x`), null when the benchmark lacks the horizon's date or its base, or its close
+ * there is not a positive finite number; the lowest low from day 0 (the session after, under `day0_close`) through
+ * the last horizon or the last bar, over the base, and its session (the earliest on ties), both null when that
+ * range is empty; and how many sessions follow day 0.
+ * @param {Bar[]} bars @param {number} i0 @param {Base} base @param {Based} based @param {number[]} horizons
+ * @param {Bar[] | null} bench
  * @returns {Measure}
  */
-export function measureEvent(bars, i0, marketBars) {
+export function measureCase(bars, i0, base, based, horizons, bench) {
   const last = bars.length - 1;
-  const base = bars[i0 - 1].c;
-  const marketBase = marketBars === null ? null : closeOf(barOn(marketBars, dateOf(bars[i0 - 1].t)));
-  /** @type {Record<string, number | null>} */
-  const changes = {};
-  for (const k of HORIZONS) {
+  const value = based.value;
+  /** @type {Change[]} */
+  const changes = horizons.map((k) => {
     const i = i0 + k;
-    const r = i <= last ? bars[i].c / base - 1 : null;
-    changes[`r${k}`] = r;
+    const r = i <= last ? bars[i].c / value - 1 : null;
     let x = null;
-    if (r !== null && marketBars !== null && marketBase !== null) {
-      const close = closeOf(barOn(marketBars, dateOf(bars[i].t)));
-      if (close !== null) x = (1 + r) / (close / marketBase) - 1;
+    if (r !== null && bench !== null && based.benchBase !== null) {
+      const close = priceOf(barOn(bench, dateOf(bars[i].t))?.c);
+      if (close !== null) x = (1 + r) / (close / based.benchBase) - 1;
     }
-    changes[`x${k}`] = x;
-  }
-  let low = Infinity;
-  let lowAt = 0;
-  for (let i = i0; i <= Math.min(i0 + POST, last); i++) {
-    if (bars[i].l < low) { low = bars[i].l; lowAt = i - i0; }
+    return { k, r, x };
+  });
+  let low = null;
+  let lowAt = null;
+  const through = Math.min(i0 + (horizons.at(-1) ?? 0), last);
+  for (let i = base === "day0_close" ? i0 + 1 : i0; i <= through; i++) {
+    if (low === null || bars[i].l < low) { low = bars[i].l; lowAt = i - i0; }
   }
   return {
-    base, gap: bars[i0].o / base - 1,
-    r0: /** @type {number} */ (changes.r0), r1: changes.r1, r5: changes.r5, r20: changes.r20, r60: changes.r60,
-    x0: changes.x0, x1: changes.x1, x5: changes.x5, x20: changes.x20, x60: changes.x60,
-    low60: low / base - 1, lowAt, sessionsAfter: last - i0,
+    base: value,
+    gap: base === "prior_close" || base === "price" ? bars[i0].o / value - 1 : null,
+    changes,
+    low: low === null ? null : low / value - 1,
+    lowAt,
+    sessionsAfter: last - i0,
   };
 }
 
@@ -153,25 +195,31 @@ export function tapeCheck(bars, i0) {
 }
 
 /**
- * The event's window, 30 sessions before day `i0` to 60 after, its prices a percentage of the close before day 0;
- * and its path against the market, `[k, value]` for each row whose date the market has: the company's close over that
- * base, divided by the market's close over the market's close on the base's date, times 100, to two decimals. The
- * path is empty when there is no market or it lacks the base's date.
- * @param {Bar[]} bars @param {number} i0 @param {Bar[] | null} marketBars
- * @returns {{ window: Array<[number, number, number, number, number, number]>, rel: Array<[number, number]> }}
+ * A case's paths: its window, 30 sessions before day `i0` to 60 after (none before a listing), as a percentage of
+ * its base; and `rel`, `[k, value]` from 30 sessions before day 0 to `through` after (as far as the bars go). Against
+ * a benchmark (`relOf: "benchmark"`) each value is the company's close over its base divided by the benchmark's close
+ * over its base, times 100, to two decimals, for each row whose date the benchmark has; empty when the benchmark
+ * lacks its base. With no benchmark (`relOf: "self"`) it is the company's own close over its base, times 100.
+ * @param {Bar[]} bars @param {number} i0 @param {Based} based @param {Bar[] | null} bench @param {number} through
+ * @returns {{ window: Path, rel: Array<[number, number]>, relOf: "benchmark" | "self" }}
  */
-export function eventWindow(bars, i0, marketBars) {
-  const base = bars[i0 - 1].c;
-  const window = windowOf(bars, i0, base);
+export function casePaths(bars, i0, based, bench, through) {
+  const value = based.value;
+  const window = windowOf(bars, i0, value);
   /** @type {Array<[number, number]>} */
   const rel = [];
-  const marketBase = marketBars === null ? null : closeOf(barOn(marketBars, dateOf(bars[i0 - 1].t)));
-  if (marketBars === null || marketBase === null) return { window, rel };
-  for (const [k] of window) {
-    const bar = bars[i0 + k];
-    const close = closeOf(barOn(marketBars, dateOf(bar.t)));
-    if (close === null) continue;
-    rel.push([k, Math.round(((bar.c / base) / (close / marketBase)) * 10_000) / 100]);
+  const relOf = bench === null ? "self" : "benchmark";
+  if (bench !== null && based.benchBase === null) return { window, rel, relOf };
+  const benchBase = /** @type {number} */ (based.benchBase);
+  for (let i = Math.max(0, i0 - PRE); i <= Math.min(bars.length - 1, i0 + through); i++) {
+    const bar = bars[i];
+    let ratio = bar.c / value;
+    if (bench !== null) {
+      const close = priceOf(barOn(bench, dateOf(bar.t))?.c);
+      if (close === null) continue;
+      ratio /= close / benchBase;
+    }
+    rel.push([i - i0, Math.round(ratio * 10_000) / 100]);
   }
-  return { window, rel };
+  return { window, rel, relOf };
 }

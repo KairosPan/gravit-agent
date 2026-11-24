@@ -7097,7 +7097,8 @@ table under the report and on the task's page, every figure a labelled %, and ea
 `行情 ›` opens its stock's page on 事件前后.
 
 **The automated half, no network.** `npm test` runs `analog-events`, `analog-event-summary`,
-`analog-event-scan`, `analog-event-digest`, `analog-bars`, `analog-windows`, `analog-symbols`,
+`analog-event-scan`, `analog-event-digest`, `analog-bars`, `analog-windows`, `analog-sessions`,
+`analog-price-tie`, `analog-symbols`,
 `analog-format`, `analog-views`, `analog-rows`, `analog-skill`,
 `source-reader`, `roles`, `task-view`, `task-relay`, `tasks`, `market-proxy` and the desk's
 `desk-tools`, and the client's `analog-host`, `event-table`, `event-table-render`, `thread`,
@@ -7136,10 +7137,14 @@ catalog lists `analog-guide` (the profile's `mechanics` root; Discover's skills)
    case has no case line, so read its `verified` and `flags` in the view. PASS: gravit's report
    names them as unverified, and no date the reader did not verify is told as checked.
 5. **A company gone is unmeasured.** PASS: a precedent whose stock no longer trades is in the
-   list, under its last ticker, on the digest's `unmeasured:` line (its ticker and date, with the
-   market's words when the digest has room: they go before any case line does, and the company itself
-   only once every case line has left) and in the view's `coverage.unmeasured` with the market's words,
-   and gravit's report says the list leans favourable for it.
+   list, under its last ticker, in the digest: with room, on the `unmeasured:` line with its date
+   and the market's words; cut, on a reason's line, `unmeasured, <reason>: TICKER, …` (the market's
+   words with each ticker taken out, so every company refused alike shares one line, as do the
+   face's own reasons such as `needs a split record`). Case lines leave before a reason's
+   companies are cut to `+N more`; only past that are the unmeasured named alone
+   (`unmeasured: TICKER, …`) and, last, counted (`unmeasured: N cases`), and the case lines then
+   come back while they fit. It is also in the view's `coverage.unmeasured` with the market's
+   words, and gravit's report says the list leans favourable for it.
 6. **The answer.** PASS: the report gives the counts by group, how the present case differs, the
    digest's caveats and its flags, and recommends no trade. Its `ready` report names the view
    (`an-…`), and the relay in the conversation ends, after its closing fence, with the face's line
@@ -7159,8 +7164,16 @@ catalog lists `analog-guide` (the profile's `mechanics` root; Discover's skills)
    02-06 marked, `5 天 −14.6%` and `60 天 +2.0%` flagged, the line against the market under them,
    and a caption saying Nasdaq filled 2018; an event within five years (BP 2023-09-12) says
    Robinhood. Choosing 1M leaves the event for the plain page.
+9. **The listing question.** In Messages: `ANT 以 83 美元上市，美国大型 IPO 上市后一年怎么走？`.
+   PASS: two tables, one from the offer price and one from the first close, ANT as the present
+   case; an IPO whose stock is gone is listed unmeasured; and an IPO that has split since (Visa,
+   say) is measured from its offer through the company's split record, its factor shown.
+10. **The question the tool cannot measure.** In Messages: `近五年美股 IPO，有多少只 30 个交易日内收盘跌破发行价？`.
+    PASS: gravit computes it itself from at most 40 histories read one at a time, labels each
+    number as its own with the method in a line, draws no table for them, and writes no file of
+    bars.
 
-**PASS is steps 1–8.** Record the date, the commit, the question, the view id, the counts of the
+**PASS is steps 1–10.** Record the date, the commit, the question, the view id, the counts of the
 first line and the unmeasured companies in `DEVELOPMENT.md` §7.4's manual analogs plan 3 row, and
 steps 7–8 in its event table row.
 

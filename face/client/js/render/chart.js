@@ -115,16 +115,19 @@ const MMDD = ms => nyDay(ms).slice(5);
  *  `up` when it closed at or above its open, else `down`; five price lines with their prices on the right; about seven date
  *  ticks (`MM-DD`, its New York day); day 0 (`day0`, an index) a light band and a solid line labelled with its date and the
  *  `day0` mark's label; each `other` mark a dashed line labelled as given; each flag ({ index, label, text, tone }) a chip
- *  near the bottom reading `label text`. A mark or flag off the bars is left out; fewer than two bars draw nothing. */
-export function eventCandlesSvg(bars, { day0, marks = [], flags = [], unit } = {}) {
+ *  near the bottom reading `label text`; `level`, a price (event analog redesign §4.5: the price a case was measured from, in
+ *  the bars' units), a dashed line across the plot, the range widened to hold it. A mark or flag off the bars is left out;
+ *  fewer than two bars draw nothing. */
+export function eventCandlesSvg(bars, { day0, marks = [], flags = [], unit, level } = {}) {
   const kept = Array.isArray(bars) ? bars : [];
   const n = kept.length;
   if (n < 2) return '';
   const ohlc = kept.map(b => [number(b?.o), number(b?.h), number(b?.l), number(b?.c)]);
   const whole = ohlc.filter(v => v.every(x => x !== null));
   if (whole.length < 2) return '';
-  const lo = Math.min(...whole.map(v => v[2]));
-  const hi = Math.max(...whole.map(v => v[1]));
+  const at = number(level);
+  const lo = Math.min(...whole.map(v => v[2]), ...(at !== null ? [at] : []));
+  const hi = Math.max(...whole.map(v => v[1]), ...(at !== null ? [at] : []));
   const span = hi - lo || 1;
   const plotH = EH - ET - EB;
   const Y = v => ET + ((hi - v) / span) * plotH;
@@ -176,16 +179,19 @@ export function eventCandlesSvg(bars, { day0, marks = [], flags = [], unit } = {
     return `<g class="ew-flag ${tone}"><rect x="${fx1(x)}" y="${y}" width="${fx1(w)}" height="16" rx="8"></rect>` +
       `<text x="${fx1(x + w / 2)}" y="${y + 12}" text-anchor="middle">${esc(words)}</text></g>`;
   }).join('');
+  const levelLine = at !== null ? `<line class="ev-level" x1="${EL}" y1="${fx1(Y(at))}" x2="${EW - ER}" y2="${fx1(Y(at))}"></line>` : '';
   const first = Number.isFinite(kept[0]?.t) ? nyDay(kept[0].t) : '';
   const last = Number.isFinite(kept.at(-1)?.t) ? nyDay(kept.at(-1).t) : '';
   const described = t('markets.event.said', { first, last, low: f(lo), high: f(hi) });
-  return `<svg class="ew-chart" viewBox="0 0 ${EW} ${EH}" role="img" aria-label="${esc(described)}">${grid}${day}${others}${candles}${chips}${ticks}</svg>`;
+  return `<svg class="ew-chart" viewBox="0 0 ${EW} ${EH}" role="img" aria-label="${esc(described)}">${grid}${day}${others}${levelLine}${candles}${chips}${ticks}</svg>`;
 }
 
 /** The line against the market under an event's candles: the case's `rel` ([k, v] pairs, k sessions from day 0, the day
  *  before = 100) on the same `count` bars as the candles, day 0 at `day0`; a dashed 100 with its figure, the low and the
- *  high beside it; day 0's line. A point off the bars is left out; fewer than two draw nothing. */
-export function eventRelSvg(rel, { day0, count } = {}) {
+ *  high beside it; day 0's line. A point off the bars is left out; fewer than two draw nothing. `of`, a version 2 view's:
+ *  the benchmark's symbol the line is against (the base = 100), or `self` for the stock's own path; left out, version 1's
+ *  words, against the market. */
+export function eventRelSvg(rel, { day0, count, of } = {}) {
   if (!Number.isInteger(day0) || !Number.isInteger(count) || count < 2) return '';
   const points = (Array.isArray(rel) ? rel : [])
     .map(p => { const k = Array.isArray(p) ? number(p[0]) : null; return [k === null ? NaN : day0 + k, Array.isArray(p) ? number(p[1]) : null]; })
@@ -200,7 +206,9 @@ export function eventRelSvg(rel, { day0, count } = {}) {
   const x = fx1(centreOf(day0, count));
   const figure = (v, cls) => `<text class="${cls}" x="${EW - ER + 4}" y="${fx1(Y(v) + 3)}">${esc(String(Math.round(v)))}</text>`;
   const ends = [hi, lo].filter(v => Math.abs(Y(v) - Y(100)) > 10).map(v => figure(v, 'ew-price')).join('');
-  const described = t('markets.event.relSaid', { low: Math.round(lo), high: Math.round(hi) });
+  const range = { low: Math.round(lo), high: Math.round(hi) };
+  const described = of === undefined ? t('markets.event.relSaid', range)
+    : of === 'self' ? t('markets.event.relSaidSelf', range) : t('markets.event.relSaidBench', { symbol: String(of), ...range });
   return `<svg class="ew-rel" viewBox="0 0 ${EW} ${RH}" role="img" aria-label="${esc(described)}">` +
     `<line class="ew-rel-base" x1="${EL}" y1="${fx1(Y(100))}" x2="${EW - ER}" y2="${fx1(Y(100))}"></line>${figure(100, 'ew-price')}${ends}` +
     `<line class="ew-day0" x1="${x}" y1="${RT}" x2="${x}" y2="${RH - RB}"></line><path class="ew-rel-line" d="${line}"></path></svg>`;

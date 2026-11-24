@@ -2099,6 +2099,24 @@ test("a stock page at an event reads its window once from the US stocks line, be
   r.markets.close();
 });
 
+test('a stock page at an event past 60 sessions reads a window of its own, its ask grown to cover it (event analog redesign Task 10)', async () => {
+  const path = windowPath('SPLB', windowAsk('2019-05-10', NOW, 250));
+  assert.match(path, /&limit=390$/);
+  const r = rig({ answer: p => (p === path ? { ok: true, candles: [], source: 'Nasdaq', more: false } : undefined) });
+  const route = { screen: 'markets', id: 'stock:SPLB', event: { at: '2019-05-10', view: 'an-20261124-0000beef', case: 'ev-SPLB-2019-05-10', after: 250 } };
+  r.store.dispatch('nav', route);
+  await settle();
+  assert.deepEqual(r.reads.filter(p => p.includes('since=')), [path]);
+  assert.equal(r.m().event['stock:SPLB@2019-05-10@250'].status, 'ready');
+  assert.equal(Object.hasOwn(r.m().event, 'stock:SPLB@2019-05-10'), false, 'never under the key of 60');
+  // the same day at 60 is today's window, read under today's key and ask
+  r.store.dispatch('nav', { ...route, event: { at: '2019-05-10' } });
+  await settle();
+  assert.equal(r.reads.filter(p => p.includes('since=')).at(-1), windowPath('SPLB', windowAsk('2019-05-10', NOW)));
+  assert.ok(Object.hasOwn(r.m().event, 'stock:SPLB@2019-05-10'));
+  r.markets.close();
+});
+
 test("an event window's refusal lands failed with the market's words; read once more each time the page is entered again (ruling 6)", async () => {
   const r = rig({ answer: p => (p.includes('since=') ? refused(400, { ok: false, error: 'since must be before before' }) : undefined) });
   const route = { screen: 'markets', id: 'stock:WYNN', event: { at: '2018-01-26' } };

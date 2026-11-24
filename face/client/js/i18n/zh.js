@@ -404,12 +404,24 @@ export const ZH = Object.freeze({
   'analog.chip.next': '次日',
   'analog.chip.d5': '5 天',
   'analog.chip.d60': '60 天',
+  // a version 2 view's chip past the next day, at its horizon (event analog redesign §4.5)
+  'analog.chip.days': '{n} 天',
   'analog.none': '尚无',
   // the event table (render/event-table.js): its head, the present case, a group, a row, its badges and links, the caveats
   'analog.table.loading': '正在读取对标表…',
   'analog.table.gone': '这张对标表已不再保留',
   'analog.table.counts': '{n} 个事件，量到 {measured} 个，{unmeasured} 个量不到',
   'analog.table.basis': '每个百分比都是相对大盘（SPY）的涨跌；当天是第一个能对消息作出反应的交易日',
+  // a version 2 view's head: the base its figures are measured from, and what they are against
+  'analog.table.basis2': '{basis}，{against}；当天是第一个能对消息作出反应的交易日',
+  'analog.basis.priorClose': '从消息前收盘起算',
+  'analog.basis.price': '从来源给出的价格起算（如发行价）',
+  'analog.basis.day0Open': '从当天开盘起算（大盘按 09:30 开盘价）',
+  'analog.basis.day0OpenAlone': '从当天开盘起算',
+  'analog.basis.day0Close': '从当天收盘起算',
+  'analog.against.benchmark': '对比 {symbol}',
+  'analog.against.none': '未对比大盘',
+  'analog.against.unread': '对比 {symbol}：读不到它的日线，以下是原始涨跌',
   'analog.table.present': '本次 · {symbol}',
   'analog.table.group': '{n} 例 · 量到 {measured} 例',
   'analog.table.ungrouped': '未分组',
@@ -428,6 +440,14 @@ export const ZH = Object.freeze({
   'analog.row.elsewhere': '放量在别的日子',
   'analog.row.source': '来源 ↗',
   'analog.row.market': '行情 ›',
+  // a version 2 row: its price, its split and its split record, a listing day, sessions skipped before its day 0
+  'analog.row.price': '价格 {price}',
+  'analog.row.split': '按拆股折算 ×{factor}',
+  'analog.row.splitSource': '拆股来源 ↗',
+  'analog.row.listed': '上市首日',
+  'analog.row.noVolume': '未做量能核对',
+  'analog.row.raw': '原始涨跌：{symbol} 没有这么早的行情',
+  'analog.row.skipped': '跳过 {n} 个交易日',
 
   // the operator's own browser wallet (wire/wallet.js, render/wallet-row.js, host/wallet-send.js): its refusals and its row
   'money.wallet.browser': '浏览器钱包',
@@ -1756,8 +1776,14 @@ export const ZH = Object.freeze({
   'markets.event.noDay': '{date} 没有日线',
   'markets.event.said': '日线 K 线，{first} 至 {last}：最低 {low}，最高 {high}',
   'markets.event.relHead': '相对大盘（SPY）· 消息前一天 = 100',
+  'markets.event.relHeadBench': '相对 {symbol} · 起算价 = 100',
+  'markets.event.relHeadSelf': '自身走势 · 起算价 = 100',
   'markets.event.relSaid': '相对大盘，消息前一天 = 100：最低 {low}，最高 {high}',
   'markets.event.noRel': '视图没有保留这个事件相对大盘的走势',
+  'markets.event.relSaidBench': '相对 {symbol}，起算价 = 100：最低 {low}，最高 {high}',
+  'markets.event.relSaidSelf': '自身走势，起算价 = 100：最低 {low}，最高 {high}',
+  'markets.event.noRelBench': '视图没有保留这个事件相对 {symbol} 的走势',
+  'markets.event.noRelSelf': '视图没有保留这个事件的自身走势',
   'markets.event.filled': '{source} 补齐',
 
   // the desk's status as the screens read it (host/desk-view.js): a time in New York's, as the server writes it, and the

@@ -6,6 +6,8 @@
 
 const DAY = 86_400_000;
 export const BEFORE = 30, AFTER = 60;
+// the most sessions a page draws after day 0: a view's last horizon at most
+const MOST_AFTER = 250;
 /** The range a stock's page at an event opens on (Around the event), beside the Account's: never read, only drawn pressed. */
 export const EVENT_RANGE = 'event';
 const str = v => (typeof v === 'string' ? v : null);
@@ -15,11 +17,20 @@ const NY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year
 /** A moment's day in New York, `YYYY-MM-DD`. */
 export const nyDay = ms => NY.format(new Date(ms));
 
-/** The dated ask for an event's window: from 60 days before `at` (more than 30 sessions) to the lesser of now and 100 days
- *  after it (more than 60 sessions), at most 200 bars. */
-export function windowAsk(at, now) {
+/** The dated ask for an event's window of `after` sessions after day 0 (60, or a view's last horizon up to 250): from 60
+ *  days before `at` (more than 30 sessions) to the lesser of now and ceil(after × 1.6 + 4) days after it (100 at 60: more
+ *  sessions than `after`), at most the larger of 200 and after + 140 bars. */
+export function windowAsk(at, now, after = AFTER) {
   const day = Date.parse(`${at}T00:00:00Z`);
-  return { since: day - 60 * DAY, before: Math.min(now, day + 100 * DAY), limit: 200 };
+  return { since: day - 60 * DAY, before: Math.min(now, day + Math.ceil(after * 1.6 + 4) * DAY), limit: Math.max(200, after + 140) };
+}
+
+/** The sessions a page at an event draws after day 0: its route's `after` when 61 to 250, else 60. */
+export const afterOf = event => (Number.isInteger(event?.after) && event.after > AFTER && event.after <= MOST_AFTER ? event.after : AFTER);
+
+/** The key of an event's window in `state.markets.event`: the page and its day, and its `after` only past 60. */
+export function windowKey(id, at, after = AFTER) {
+  return after > AFTER ? `${id}@${at}@${after}` : `${id}@${at}`;
 }
 
 /** The market proxy's read of a stock's daily bars for that ask, on the US stocks line whatever line the page follows. */
@@ -27,14 +38,14 @@ export function windowPath(symbol, ask) {
   return `/data/market/candles?venue=cboe&symbol=${encodeURIComponent(symbol)}&interval=1d&since=${ask.since}&before=${ask.before}&limit=${ask.limit}`;
 }
 
-/** The bars of the event's window — 30 before through 60 after the bar whose New York day is `at`, fewer where the bars end
- *  sooner — and day 0's index in them; null when no bar is that day. */
-export function eventWindowOf(bars, at) {
+/** The bars of the event's window — 30 before through `after` (60 unless asked) after the bar whose New York day is `at`,
+ *  fewer where the bars end sooner — and day 0's index in them; null when no bar is that day. */
+export function eventWindowOf(bars, at, after = AFTER) {
   const kept = list(bars).filter(b => Number.isFinite(b?.t));
   const i = kept.findIndex(b => nyDay(b.t) === at);
   if (i < 0) return null;
   const start = Math.max(0, i - BEFORE);
-  return { bars: kept.slice(start, i + AFTER + 1), day0: i - start };
+  return { bars: kept.slice(start, i + after + 1), day0: i - start };
 }
 
 /** The marks on a window: the case's day 0 (unlabelled when the view or the case is not there), then each other case or anchor
