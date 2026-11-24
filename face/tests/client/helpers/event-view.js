@@ -15,3 +15,74 @@ export const EVENT_VIEW_WITH_B = {
   groups: { ...EVENT_VIEW.groups, named: [EVENT_VIEW.groups.named[0], { name: WYNN_B_CASE.group, summary: { ...EVENT_VIEW.groups.named[0].summary, n: 1, n0: 1 }, paths: null }, EVENT_VIEW.groups.named[1]] },
   cases: [...EVENT_VIEW.cases.slice(0, 1), WYNN_B_CASE, ...EVENT_VIEW.cases.slice(1)],
 };
+
+// A version 2 view (event analog redesign, Task 6's shape), synthetic: measured from the price its source gives, at six
+// horizons, against SPY. The present case ANT with one anchor, its listing (price 83, factor 1, listed); group 大型 IPO with
+// LSTA listed at its price (factor 1), SPLB listed at 160.00 with a ×4 split record whose page a reader opened, TIEC
+// unmeasured (its price could not be tied to its bars), and SKPD whose day 0 skipped 10 sessions. Every figure is made up:
+// each `r` differs from its `x`, so a chip that reads the wrong one shows. Test data only.
+export const EVENT_VIEW_V2_ID = 'an-20261124-0000beef';
+const HORIZONS_V2 = [0, 5, 20, 60, 120, 250];
+const changesOf = (xs, rs) => HORIZONS_V2.map((k, i) => ({ k, r: rs[i] ?? null, x: xs[i] ?? null }));
+const measureOf = (base, xs, rs) => ({ base, gap: null, changes: changesOf(xs, rs), low: null, lowAt: null, sessionsAfter: 300 });
+const caseV2 = over => ({
+  claimed: true, opened: true, verified: true, note: null, statedOpen: null, tape: null, tapeRan: true, window: null, rel: null,
+  relOf: null, factor: null, splits: null, listed: false, skipped: 0, flags: [], words: null, ...over,
+});
+const unmeasuredV2 = over => caseV2({ state: 'unmeasured', day0: null, measure: null, tapeRan: false, ...over });
+const summaryV2 = (n, against) => ({ n, against, at: HORIZONS_V2.map(k => ({ k, n, median: null, down: null })), q1: null, q3: null, worst: null });
+export const EVENT_VIEW_V2 = {
+  kind: 'events', version: 2, at: '2026-11-24T15:00:00.000Z', title: '大型 IPO 上市后的走势',
+  query: {
+    symbol: 'ANT', readDate: '2026-11-24', latest: '2026-11-24', today: null, sessionOpen: false, words: null, source: 'Nasdaq · ANT', short: true, firstBar: '2026-11-19',
+    anchors: [caseV2({
+      id: 'q-1', label: 'ANT 上市', date: '2026-11-19', timing: 'open', source: 'https://example.com/ant-prospectus', price: 83, statedOpen: 91.3,
+      state: 'measured', day0: '2026-11-19', measure: measureOf(83, [0.1832, 0.0411], [0.1905, 0.0533]), factor: 1, listed: true,
+    })],
+  },
+  parameters: {
+    base: 'price', horizons: HORIZONS_V2, benchmark: 'SPY', against: 'benchmark', volumeBase: 50, minVolumes: 20, quiet: 1.5, elsewhere: 3,
+    elsewhereOver: 1.5, neighbours: 2, minGroup: 8, pre: 30, post: 60, tieTolerance: 0.02, calendarDays: 7,
+  },
+  coverage: {
+    asked: 4, measured: 3, unmeasured: [{ id: 'ev-TIEC-2020-12-10', symbol: 'TIEC', words: 'no first-day open from its source: its price cannot be tied to the bars' }],
+    verified: 4, unverified: 0, unopened: 0, quiet: 0, elsewhere: 0, noContext: 0, companies: { asked: 4, read: 4 }, sources: { Nasdaq: 4 }, short: [],
+    adjustment: ['split-adjusted, not dividend-adjusted'], market: { source: 'Nasdaq · SPY', words: null, firstBar: '1995-01-05', short: false },
+    benchmark: { symbol: 'SPY', source: 'Nasdaq · SPY', words: null, firstBar: '1995-01-05', short: false },
+    skipped: 1, listed: 3, sessionBars: 0, readFrom: '2026-11-24T14:59:00.000Z', deadline: false,
+  },
+  groups: { all: summaryV2(4, 'benchmark'), named: [{ name: '大型 IPO', summary: summaryV2(4, 'benchmark'), paths: null }] },
+  cases: [
+    caseV2({
+      id: 'ev-LSTA-2023-09-14', symbol: 'LSTA', label: 'LSTA 上市', group: '大型 IPO', date: '2023-09-14', timing: 'open', source: 'https://example.com/lsta-pricing',
+      price: 51, statedOpen: 56.1, state: 'measured', day0: '2023-09-14', factor: 1, listed: true,
+      measure: measureOf(51, [0.0912, -0.0434, -0.1187, -0.2051, -0.1022, 0.0617], [0.1001, -0.0312, -0.0954, -0.1733, -0.0581, 0.1422]),
+    }),
+    caseV2({
+      id: 'ev-SPLB-2019-05-10', symbol: 'SPLB', label: 'SPLB 上市', group: '大型 IPO', date: '2019-05-10', timing: 'open', source: 'https://example.com/splb-pricing',
+      price: 160, statedOpen: 168, state: 'measured', day0: '2019-05-10', factor: 4, listed: true,
+      splits: { list: [{ date: '2021-07-20', new: 4, old: 1 }], factor: 4, source: 'https://example.com/splb-splits', opened: true, verified: true },
+      measure: measureOf(40, [-0.0762, -0.1123, -0.0391, 0.0288, 0.1544, 0.2209], [-0.0711, -0.0987, -0.0102, 0.0631, 0.2205, 0.3349]),
+    }),
+    caseV2({
+      id: 'ev-SKPD-2021-03-10', symbol: 'SKPD', label: 'SKPD 恢复交易', group: '大型 IPO', date: '2021-03-10', timing: 'pre', source: 'https://example.com/skpd-notice',
+      price: 12.5, statedOpen: 12.5, state: 'measured', day0: '2021-03-24', factor: 1, skipped: 10, flags: ['skipped'],
+      measure: measureOf(12.5, [0.0213, 0.0054, -0.0321, -0.0617, -0.0809, -0.1204], [0.0301, 0.0177, -0.0144, -0.0322, -0.0391, -0.0478]),
+    }),
+    unmeasuredV2({
+      id: 'ev-TIEC-2020-12-10', symbol: 'TIEC', label: 'TIEC 上市', group: '大型 IPO', date: '2020-12-10', timing: 'open', source: 'https://example.com/tiec-pricing',
+      price: 68, statedOpen: null, words: 'no first-day open from its source: its price cannot be tied to the bars',
+    }),
+  ],
+  windowsDropped: 0,
+};
+// The same view when its benchmark could not be read: raw, every change against it null, the benchmark's words set.
+const rawChanges = c => (c.measure === null ? c : { ...c, measure: { ...c.measure, changes: c.measure.changes.map(ch => ({ ...ch, x: null })) } });
+export const EVENT_VIEW_V2_RAW = {
+  ...EVENT_VIEW_V2,
+  query: { ...EVENT_VIEW_V2.query, anchors: EVENT_VIEW_V2.query.anchors.map(rawChanges) },
+  parameters: { ...EVENT_VIEW_V2.parameters, against: 'raw' },
+  coverage: { ...EVENT_VIEW_V2.coverage, benchmark: { symbol: 'SPY', source: null, words: 'Nasdaq did not answer for SPY', firstBar: null, short: false } },
+  groups: { all: summaryV2(4, 'raw'), named: [{ name: '大型 IPO', summary: summaryV2(4, 'raw'), paths: null }] },
+  cases: EVENT_VIEW_V2.cases.map(rawChanges),
+};

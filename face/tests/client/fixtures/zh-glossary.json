@@ -141,7 +141,9 @@
       "markets.chart.closes": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"},
       "lunhui.stock.sealedHeld": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"},
       "lunhui.stock.sealedHeldFrom": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"},
-      "lunhui.stock.touchedOpen": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"}
+      "lunhui.stock.touchedOpen": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"},
+      "analog.basis.priorClose": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"},
+      "analog.basis.day0Close": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"}
     }},
     {"en":"Copy","zh":"复制","note":"the Copy key and the verb"},
     {"en":"Loading…","zh":"加载中…","note":"the loading word"}

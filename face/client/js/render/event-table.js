@@ -3,7 +3,9 @@
 // market), the present case first, then each group in the view's order with its rows; under the card, always, the caveats.
 // A measured row carries its labelled chips and its link to the market page at its event; an unmeasured one is muted, with the
 // market's words as they came. Every text from the view is escaped and masked as a worker's words. A view still being read
-// is one line, a failed read its words, a view the face no longer keeps one line saying so and nothing else.
+// is one line, a failed read its words, a view the face no longer keeps one line saying so and nothing else. A version 2
+// view (event analog redesign §4.5) says its base and benchmark in the head and has a chip per horizon; its row adds its
+// price, its split with the split record's link and that record's own badge, a listing day and the sessions day 0 skipped.
 import { esc, cls } from '../html.js';
 import { t, th, thn, sayOf } from '../i18n/words.js';
 import { maskExcerpt } from '../mask.js';
@@ -30,12 +32,25 @@ export const chip = ({ label, text: value, tone }) =>
 const badge = row => (row.verified ? `<span class="et-badge ok">${th('analog.row.verified')}</span>`
   : `<span class="et-badge warn">${row.source === null ? th('analog.row.unverified') : th('analog.row.dateUnverified')}</span>`);
 
+// a version 2 row's price and its split: the factor, the split record's link (http(s) alone) and the record's own badge
+function pricedHtml(row) {
+  if (row.price === null && row.split === null) return '';
+  const price = row.price !== null ? `<span class="et-price">${th('analog.row.price', { price: row.price })}</span>` : '';
+  const sp = row.split;
+  const split = sp === null ? '' : `<span class="et-split">${th('analog.row.split', { factor: sp.factor })}</span>` +
+    (sp.source !== null ? `<a class="et-src" href="${esc(sp.source)}" target="_blank" rel="noopener noreferrer">${th('analog.row.splitSource')}</a>` : '') +
+    (sp.verified ? `<span class="et-badge ok">${th('analog.row.verified')}</span>` : `<span class="et-badge warn">${th('analog.row.unverified')}</span>`);
+  return `<div class="et-priced">${price}${split}</div>`;
+}
+
 function rowHtml(row) {
   const timing = Object.hasOwn(TIMING, row.timing ?? '') ? `<span class="et-timing">${TIMING[row.timing]()}</span>` : '';
   const top = `<div class="et-row-top"><span class="et-label">${text(row.label)}</span>` +
     (row.date ? `<span class="et-date">${esc(row.date)}</span>` : '') + timing +
-    (row.shifted ? `<span class="et-shift">${th('analog.row.shifted', { date: row.day0.slice(5) })}</span>` : '') + `${badge(row)}</div>`;
-  const note = row.note ? `<div class="et-note">${text(row.note)}</div>` : '';
+    (row.shifted ? `<span class="et-shift">${th('analog.row.shifted', { date: row.day0.slice(5) })}</span>` : '') +
+    (row.skipped > 0 ? `<span class="et-flag">${thn('analog.row.skipped', row.skipped)}</span>` : '') +
+    (row.listed ? `<span class="et-flag">${th('analog.row.listed')}</span>` : '') + `${badge(row)}</div>`;
+  const note = pricedHtml(row) + (row.note ? `<div class="et-note">${text(row.note)}</div>` : '');
   const flags = row.flags.filter(f => Object.hasOwn(FLAG, f)).map(f => `<span class="et-flag">${FLAG[f]()}</span>`).join('');
   const body = row.measured ? `<div class="et-chips">${row.chips.map(chip).join('')}${flags}</div>` : `<div class="et-words">${text(row.words)}</div>`;
   const links = (row.source !== null ? `<a class="et-src" href="${esc(row.source)}" target="_blank" rel="noopener noreferrer">${th('analog.row.source')}</a>` : '') +
@@ -49,8 +64,11 @@ function groupHtml(group, foldId) {
   const name = group.name === null ? th('analog.table.ungrouped') : text(group.name);
   const heading = `<span class="et-group-name">${name}</span><span class="et-group-count">${thn('analog.table.group', group.count, { measured: group.measured })}</span>`;
   const s = group.summary;
-  const summary = s
-    ? `<div class="et-median"><span class="et-median-label">${th('analog.table.median')}</span>${chip({ label: t('analog.chip.day0'), text: pct(s.x0), tone: toneOf(s.x0) })}${chip({ label: t('analog.chip.d60'), text: pct(s.x60), tone: toneOf(s.x60) })}</div>`
+  // version 2's medians come labelled, at its first and last horizon; version 1's at day 0 and 60
+  const medians = s === null ? null : Array.isArray(s) ? s.map(m => chip({ label: m.label, text: pct(m.value), tone: toneOf(m.value) })).join('')
+    : chip({ label: t('analog.chip.day0'), text: pct(s.x0), tone: toneOf(s.x0) }) + chip({ label: t('analog.chip.d60'), text: pct(s.x60), tone: toneOf(s.x60) });
+  const summary = medians !== null
+    ? `<div class="et-median"><span class="et-median-label">${th('analog.table.median')}</span>${medians}</div>`
     : `<div class="et-few">${th('analog.table.few')}</div>`;
   const rows = group.rows.map(rowHtml).join('');
   if (foldId) return `<details class="et-group" id="${esc(foldId)}"><summary class="et-group-head">${heading}${summary}</summary>${rows}</details>`;
@@ -68,7 +86,7 @@ export function eventTableHtml(entry, viewId, { fold } = {}) {
   const table = eventTableOf(viewId, entry.view);
   const { asked, measured, unmeasured } = table.counts;
   const head = `<div class="et-head"><div class="et-title">${text(table.title)}</div>` +
-    `<div class="et-counts">${thn('analog.table.counts', asked, { measured, unmeasured })}</div><div class="et-basis">${th('analog.table.basis')}</div></div>`;
+    `<div class="et-counts">${thn('analog.table.counts', asked, { measured, unmeasured })}</div><div class="et-basis">${table.basis === null ? th('analog.table.basis') : text(table.basis.line)}</div></div>`;
   const present = table.present
     ? `<div class="et-present"><div class="et-group-head"><span class="et-group-name">${th('analog.table.present', { symbol: maskExcerpt(table.present[0]?.symbol ?? '') })}</span></div>${table.present.map(rowHtml).join('')}</div>`
     : '';

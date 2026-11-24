@@ -403,12 +403,23 @@ export const EN = Object.freeze({
   'analog.chip.next': 'Next day',
   'analog.chip.d5': '5 days',
   'analog.chip.d60': '60 days',
+  // a version 2 view's chip past the next day, at its horizon (event analog redesign §4.5)
+  'analog.chip.days': { one: '{n} day', other: '{n} days' },
   'analog.none': '—',
   // the event table (render/event-table.js): its head, the present case, a group, a row, its badges and links, the caveats
   'analog.table.loading': 'Reading the analog table…',
   'analog.table.gone': 'This analog table is no longer kept',
   'analog.table.counts': { one: '{n} event, {measured} measured, {unmeasured} could not be', other: '{n} events, {measured} measured, {unmeasured} could not be' },
   'analog.table.basis': 'Every percentage is against the market (SPY); Day 0 is the first session that could react',
+  // a version 2 view's head: the base its figures are measured from, and what they are against
+  'analog.table.basis2': '{basis}, {against}; Day 0 is the first session that could react',
+  'analog.basis.priorClose': 'From the close before the news',
+  'analog.basis.price': 'From the price its source gives (an offer price)',
+  'analog.basis.day0Open': "From Day 0's open",
+  'analog.basis.day0Close': "From Day 0's close",
+  'analog.against.benchmark': 'against {symbol}',
+  'analog.against.none': 'not against the market',
+  'analog.against.unread': 'against {symbol}: its daily bars could not be read, so these are raw changes',
   'analog.table.present': 'This time · {symbol}',
   'analog.table.group': { one: '{n} case · {measured} measured', other: '{n} cases · {measured} measured' },
   'analog.table.ungrouped': 'No group',
@@ -427,6 +438,12 @@ export const EN = Object.freeze({
   'analog.row.elsewhere': 'Busiest on another day',
   'analog.row.source': 'Source ↗',
   'analog.row.market': 'Chart ›',
+  // a version 2 row: its price, its split and its split record, a listing day, sessions skipped before its day 0
+  'analog.row.price': 'Price {price}',
+  'analog.row.split': 'Split-adjusted ×{factor}',
+  'analog.row.splitSource': 'Split record ↗',
+  'analog.row.listed': 'Listing day',
+  'analog.row.skipped': { one: 'Skipped {n} session', other: 'Skipped {n} sessions' },
 
   // the operator's own browser wallet (wire/wallet.js, render/wallet-row.js, host/wallet-send.js): its refusals and its row
   'money.wallet.browser': 'Browser wallet',

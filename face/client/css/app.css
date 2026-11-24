@@ -332,7 +332,12 @@ details.et-group[open] > summary.et-group-head::before { content: '⌄'; }
 .et-badge.ok { background: var(--up-fill); color: var(--up); }
 .et-badge.warn { background: var(--warn-fill); color: var(--warn-text); }
 .et-note, .et-words { font-size: calc(12px * var(--fs)); }
-.et-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+/* a version 2 row's price and split (event analog redesign §4.5): one line that wraps, its split record a link, its own badge */
+.et-priced { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; font-size: calc(12px * var(--fs)); }
+.et-price { font-variant-numeric: tabular-nums; }
+.et-split { font-variant-numeric: tabular-nums; color: var(--dim); }
+.et-priced .et-src { font-size: calc(12px * var(--fs)); }
+.et-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; } /* six horizons wrap on a narrow screen */
 .et-chip { display: inline-flex; align-items: baseline; gap: 4px; padding: 1px 8px; border-radius: var(--radius-pill); font-size: calc(12px * var(--fs)); font-weight: 600; font-variant-numeric: tabular-nums; }
 .et-chip-label { font-weight: 400; }
 .et-chip.up { background: var(--up-fill); color: var(--up); }

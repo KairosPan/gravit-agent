@@ -39,7 +39,7 @@ import { computeSpot, computeAll, h100Quote, deepseekQuote, h100History } from '
 import { emptyState } from '../../../client/js/data/empty.js';
 import { MIN } from '../../../client/js/time.js';
 import { VIEW_1027 } from './lunhui-view.js';
-import { EVENT_VIEW, EVENT_VIEW_ID, EVENT_VIEW_WITH_B } from './event-view.js';
+import { EVENT_VIEW, EVENT_VIEW_ID, EVENT_VIEW_WITH_B, EVENT_VIEW_V2, EVENT_VIEW_V2_ID, EVENT_VIEW_V2_RAW } from './event-view.js';
 import { stockDrawerHtml } from '../../../client/js/render/lunhui/stock.js';
 import { deskStatus, DESK_NOW } from './desk-status.js';
 import { deskNews, deskPageStatus, deskRoutines, deskNewsWithReports } from './desk-news.js';
@@ -505,6 +505,24 @@ export function namedStates() {
     // them; no form, the indices then a question on one; H100's page with its facts, current value and 3M settles; its current value not
     // answering; a token's page
     ...marketsComputeStates(),
+    // the event table of a version 2 view (event analog redesign Task 9): under a report line in Messages, the view measured
+    // from its price against SPY and the same view raw, its benchmark not read; on the task's page, the two drawn open
+    ...eventTableV2States(),
+  ];
+}
+
+const RAW_V2_VIEW_ID = 'an-20261124-0000dead';
+function eventTableV2States() {
+  const report = (id, views) => m(id, { from: 'system', kind: 'task', text: '[task · IPO analogs · ready]', data: { form: 'report', task: 'wv', status: 'ready', title: 'IPO analogs', body: `Read ${views.join(', ')}`, views } });
+  const views = { [EVENT_VIEW_V2_ID]: { status: 'loaded', view: EVENT_VIEW_V2 }, [RAW_V2_VIEW_ID]: { status: 'loaded', view: { ...EVENT_VIEW_V2_RAW, id: RAW_V2_VIEW_ID } } };
+  const thread = onConv(R.hostList(emptyState(), { conversations: [conv('ew', { messages: [report('v1', [EVENT_VIEW_V2_ID, RAW_V2_VIEW_ID])], loaded: true })], channels: [], bots: [] }), 'ew');
+  const task = { id: 'wv', title: 'IPO analogs', origin: 'web', state: 'done', group: 'done', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1 };
+  const worker = conv('wv', { title: 'IPO analogs', loaded: true, messages: [m('wv1', { text: 'Measured the listings' })] });
+  const page = R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('ew'), worker], channels: [], bots: [] }), { conversation: 'ew', tasks: [task], at: NOW }), { screen: 'task', id: 'wv' });
+  const read = { status: 'loaded', task: { ...task, eventViews: [EVENT_VIEW_V2_ID, RAW_V2_VIEW_ID], namedViews: [EVENT_VIEW_V2_ID, RAW_V2_VIEW_ID] } };
+  return [
+    ['thread-event-table-v2', { ...thread, analog: { tasks: {}, views } }],
+    ['task-event-table-v2', { ...page, analog: { tasks: { wv: read }, views } }],
   ];
 }
 
