@@ -4,7 +4,7 @@
 export const KEEP = 8;
 
 // a shape stands alone: no [A-Za-z0-9_] before it, and after it neither those nor a character of its own body's class
-// (so xoxb-1234567890 is not the front of xoxb-1234567890-abcdefghij_more)
+// (so a Slack shape, xoxb-<digits>-<letters>, is not the front of the longer word xoxb-<digits>-<letters>_more)
 const B = '(?<![A-Za-z0-9_])';
 const WORD_END = '(?![A-Za-z0-9_])';
 const DASH_END = '(?![A-Za-z0-9_-])';

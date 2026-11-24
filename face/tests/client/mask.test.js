@@ -184,9 +184,11 @@ test('a long run of word characters is masked in linear time', () => {
 });
 
 test('a dash shape is not the front of a longer word', () => {
-  assert.deepEqual(secrets('xoxb-1234567890-abcdefghij_more'), []);
+  // built by concatenation, so no literal in the tree has a secret scanner's Slack shape
+  const slack = 'xoxb-' + '1234567890-abcdefghij';
+  assert.deepEqual(secrets(slack + '_more'), []);
   assert.deepEqual(secrets(SAMPLES.aiza + '-more'), [], 'a fixed-length dash shape followed by a dash');
-  assert.equal(secrets('xoxb-1234567890-abcdefghij.').length, 1);
+  assert.equal(secrets(slack + '.').length, 1);
 });
 
 test('a URL password stops at a comma, a colon or a bracket', () => {

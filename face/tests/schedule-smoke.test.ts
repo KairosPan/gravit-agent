@@ -30,14 +30,16 @@
  *
  * WHAT STANDS IN. The model is a stub on `stub/echo`, the tree's default route, so a firing's own route; its every
  * reply - text or tool call - reports all four token buckets, as in tests/desk-smoke.test.ts, and it answers each
- * firing by the order id on its wake message's provenance line. The clock row runs on a WallClock (tests/desk-fakes.ts)
- * that moves only when told, over a fake calendar holding the one session; its tick is a day, so only the test's own
- * `tick()` calls tick. `builtin:brief` answers `BRIEF-BLOCK`; a script producer runs under node (process.execPath)
- * for python, so `scripts/p.py` holds JavaScript. The phone is a recorder set as the conversation's outlet; the face's
- * lines go to the test's own log, printed when the test fails. A long tool is `mcp__smoke__daily_bars`, a global
- * stand-in the desk's `mcp__*__daily_bars` admits, which answers nothing but its call's abort. AKShare is off; the
- * quote source is one fake over two tables, a market each, that only `builtin:report` asks; the calendars are fakes
- * too, the A-share one on Beijing dates. No watch runs. Nothing leaves the machine.
+ * firing by the order id on its wake message's provenance line. The clock row runs on a WallClock
+ * (tests/desk-fakes.ts) that moves only when told, over a fake calendar holding the one session; its tick is a day, so
+ * only the test's own `tick()` calls tick. The routines' clock row (src/routine-clock.ts) runs on that clock too, on
+ * its own 30 s tick; no routine is stored, so its ticks run nothing. `builtin:brief` answers `BRIEF-BLOCK`; a script
+ * producer runs under node (process.execPath) for python, so `scripts/p.py` holds JavaScript. The phone is a recorder
+ * set as the conversation's outlet; the face's lines go to the test's own log, printed when the test fails. A long
+ * tool is `mcp__smoke__daily_bars`, a global stand-in the desk's `mcp__*__daily_bars` admits, which answers nothing
+ * but its call's abort. AKShare is off; the quote source is one fake over two tables, a market each, that only
+ * `builtin:report` asks; the calendars are fakes too, the A-share one on Beijing dates. No watch runs. Nothing leaves
+ * the machine.
  *
  * WHERE IT RUNS. `tests/tmp/schedule-smoke-<pid>/`, inside the repository and without a `.git` of its own, as
  * tests/desk-smoke.test.ts explains - the harness home and the bots root there too, since the OS temp areas are
@@ -76,6 +78,7 @@ import { bjDate } from "../src/et.ts";
 import type { MarketSession } from "../src/market-clock.ts";
 import type { MarketQuote, MarketQuoteIdentity, MarketQuotePayload, MarketQuoteSource } from "../src/market-quotes.ts";
 import { defaultProducerRunner } from "../src/producer.ts";
+import { ROUTINE_TICK_MS } from "../src/routine-clock.ts";
 import { setupFaceProfile } from "../src/setup.ts";
 import { parseStanding, rehashOrder, renderOrder, STANDING_FILE, writeStanding, type ArmEntry } from "../src/standing.ts";
 import type { Market } from "../src/symbols.ts";
@@ -731,7 +734,11 @@ test("schedule smoke: a real firing end to end, its deadline, refusals, missed a
     assert.equal(follow.turn?.outcome, "ended");
     heard(at.sent, [SLOW_LINE, done("follow")], "the cut turn's line, then the next firing's text");
     assert.equal(created.length - at.created, 2, "a session each");
-    assert.equal(clock.pending(), 1, "and no firing left a timer behind: the clock's one timer is the clock row's own next tick");
+    /* the clock's two timers are its two rows' own next ticks: the standing orders' a day after the boot, and the
+     * routines' (src/routine-clock.ts, on the schedule's clock by design) within its 30 s tick of now */
+    const routinesNext = clock.due().find((t) => t > clock.now() && t <= clock.now() + ROUTINE_TICK_MS);
+    assert.deepEqual(clock.due(), [routinesNext, Date.parse(BOOT_AT) + TICK_MS],
+      `and no firing left a timer behind: the clock's timers are its two rows' own next ticks; saw ${clock.due().map((t) => new Date(t).toISOString()).join(", ")}`);
     const slowTurns = await deskTurns(slowId);
     assert.deepEqual(slowTurns.map((e) => [e.source, e.outcome, e.usage]), [["schedule", "timed-out", usageOf(1)]],
       "the cut turn reaches events.jsonl, its one model call's tokens with it");
