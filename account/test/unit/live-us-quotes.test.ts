@@ -490,6 +490,28 @@ describe("the chain: Robinhood while fresh and listed under that ticker, else Na
     expect(most).toBe(NASDAQ_AT_ONCE);
   });
 
+  it("rotates Nasdaq's eight: a second ask asks the symbols the first did not", async () => {
+    // twenty symbols Robinhood prices none of, Nasdaq answering each at once: every ask is eight symbols, the ones with no answer kept first.
+    // What is asked is what the chain hands Nasdaq's source (an answer it keeps is served to it without a request)
+    const http: Http = async (url) => (url === ROBINHOOD_PRICES ? RH_ALL() : NQ_JPM);
+    const deps = { pace: async () => undefined, http, clock: () => NOW };
+    const source = nasdaqSource(deps);
+    const asked: string[] = [];
+    const symbols = Array.from({ length: 20 }, (_, i) => `X${String.fromCharCode(65 + i)}`);
+    const q = usQuote(deps, { ...source, quote: (s: string) => (asked.push(s), source.quote(s)) });
+    const askedNow = () => asked.splice(0);
+    const first = await q.many(symbols, { listed: () => true });
+    expect(askedNow()).toEqual(symbols.slice(0, 8));
+    expect(first.size).toBe(8);
+    // within FRESH_MS: 9 to 16 are asked, and the map holds 16 — 1 to 8 from Nasdaq's latest answers
+    const second = await q.many(symbols, { listed: () => true });
+    expect(askedNow()).toEqual(symbols.slice(8, 16));
+    expect([...second.keys()].sort()).toEqual(symbols.slice(0, 16).sort());
+    // the third asks the four not asked yet, then the first four again
+    await q.many(symbols, { listed: () => true });
+    expect(askedNow().sort()).toEqual([...symbols.slice(16), ...symbols.slice(0, 4)].sort());
+  });
+
   it("one deadline for all of it: what has not answered by RT_WAIT_MS is not waited for — its answer, when it comes, is kept for the next ask", async () => {
     expect(RT_WAIT_MS).toBe(1_500);
     // Nasdaq answers JPM at once and V a second late

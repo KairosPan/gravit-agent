@@ -1,6 +1,6 @@
 /** US STOCK QUOTES IN REAL TIME, KEYLESS: the price of a US share as the market has it now, so a listing (public-stocks.ts) — and a paper
  * account, which fills at it — is not fifteen minutes behind. Two sources, each through the fixed-host guard (public-markets.ts
- * PUBLIC_HOSTS); where neither answers in time, the caller says Cboe's delayed quote, which it asks AT THE SAME TIME, not after.
+ * PUBLIC_HOSTS); where neither answers in time, the caller says Nasdaq's last daily close (us-closes.ts).
  *
  * What is read, and what it is (checked keyless from this machine on Wed 2026-10-14 between 16:30 and 17:50 UTC, 12:30–13:50 New York, in
  * the regular session):
@@ -12,7 +12,7 @@
  *                       ask within a cent), but SATS is EchoStar's token (/rhj/assets: tokenName "EchoStar • Robinhood Token", isin
  *                       US2787681061) while EchoStar's share trades as ECHO — Nasdaq answers SATS "Symbol not exists.", Cboe's book lists
  *                       ECHO and not SATS, and Robinhood's SATS bid and ask (87.87/87.93 at 17:49 UTC) are ECHO's. So a Robinhood quote is
- *                       taken only for a ticker the caller says the market lists under that name (UsAsk.listed: Cboe's symbol book).
+ *                       taken only for a ticker the caller says the market lists under that name (UsAsk.listed: the market's symbol directory).
  *                       `bid` and `ask` are the UNDERLYING SHARE's quote, in dollars; `tokenBid` and `tokenAsk` are the token's (the share's
  *                       times the token's multiplier, 1.0011 for CRM that day) and are not read. `generatedAt` is the answer's own stamp,
  *                       ONE for all 194 quotes: Robinhood writes the whole answer about every fifteen seconds (16:51:47, 16:52:02, 16:52:17,
@@ -67,13 +67,13 @@
  * The chain (usQuote), with ONE deadline (RT_WAIT_MS) for all of it: Robinhood's quote for a symbol it quotes and the caller says is listed
  * under that ticker, while its stamp is fresh (FRESH_MS) and the session is one it trades (pre-market, the regular session, after-hours — and
  * overnight while ROBINHOOD_OVERNIGHT says so); else Nasdaq's, in pre-market, the regular session and after-hours, for at most one batch
- * (NASDAQ_AT_ONCE) of the symbols asked, the first ones; else nothing, and the caller says Cboe's delayed quote. Nasdaq is asked AT THE SAME
+ * (NASDAQ_AT_ONCE) of the symbols asked, those it has no recent answer for first; else nothing, and the caller says Nasdaq's last daily close. Nasdaq is asked AT THE SAME
  * TIME as Robinhood, never after it: for every symbol Robinhood's latest answer does not price fresh now (each of them, before Robinhood has
  * answered once), so a share Robinhood does not quote waits for one round trip, not two. What has not answered by the deadline is not waited
  * for: its answer, when it comes, is KEPT UNTIL THE NEXT ASK, which takes it whenever a new one is not back in time — a Nasdaq answer comes in
  * 1.2 to 3.3 s (measured 2026-10-16), past the deadline more often than not, and one thrown away at the next ask's start would never be used.
  * It is taken only WHILE IT IS RECENT (Nasdaq.latest): it came within FRESH_MS, and no refusal that says to wait holds Nasdaq back now — an
- * answer from hours before, or from before Nasdaq refused, is no real-time quote, and the line is Cboe's, said as delayed.
+ * answer from hours before, or from before Nasdaq refused, is no real-time quote, and the line is Nasdaq's last close, said as delayed.
  * One refusal of Nasdaq that says to wait (an edge's page, a place rule, a 429) holds back every Nasdaq ask, every symbol, quote and chart, for
  * as long as holdBackMs says; NO ANSWER holds nothing until it is the source's way (NO_ANSWER_HOLD_AFTER in a row, with no answer between): one
  * slow request is one symbol's lost ask, not every share's twenty seconds. Robinhood's one answer likewise. Every answer carries the source's
@@ -703,7 +703,7 @@ export function nasdaqChart(deps: PublicDeps = {}): ((symbol: string) => Promise
 
 /** what a caller of the chain says with its ask */
 export interface UsAsk {
-  /** whether the market lists a share under this very ticker (Cboe's symbol book): Robinhood's quote is taken only for a symbol this says
+  /** whether the market lists a share under this very ticker (the market's symbol directory): Robinhood's quote is taken only for a symbol this says
    * yes to, since Robinhood names a share by its token's symbol and that is not always the share's ticker (SATS is EchoStar's token; the
    * share is ECHO). Not given — no book to check against — Robinhood's quote is taken for none, and Nasdaq, which knows the tickers, is asked */
   listed?: ((symbol: string) => boolean) | undefined;
@@ -715,8 +715,8 @@ export interface UsAsk {
 export interface UsQuotes {
   /** one share's real-time quote, or nothing (the caller says Cboe's delayed one) */
   (symbol: string, ask?: UsAsk): Promise<UsQuote | undefined>;
-  /** many at once, within RT_WAIT_MS: Robinhood's one answer for the ones `listed` allows, and AT THE SAME TIME Nasdaq for the first
-   * NASDAQ_AT_ONCE of the ones Robinhood's latest answer does not price fresh; a symbol neither priced in time — nor by a recent answer of
+  /** many at once, within RT_WAIT_MS: Robinhood's one answer for the ones `listed` allows, and AT THE SAME TIME Nasdaq for NASDAQ_AT_ONCE
+   * of the ones Robinhood's latest answer does not price fresh — those Nasdaq has no recent answer for first, so a longer list is asked in turns; a symbol neither priced in time — nor by a recent answer of
    * Nasdaq's that came after an earlier ask had stopped waiting (Nasdaq.latest) — is not in the map */
   many(symbols: readonly string[], ask?: UsAsk): Promise<Map<string, UsQuote>>;
   /** start reading Robinhood's answer where the session is one it is taken in, so a caller with something else to wait for first (Cboe's
@@ -760,7 +760,10 @@ export function usQuote(deps: PublicDeps = {}, nasdaq: Nasdaq = nasdaqSource(dep
       const q = last?.quotes.get(s);
       return !!q && !!listed && listed(s) && freshQuote(q, start);
     };
-    const ofNasdaq = on.nasdaq ? want.filter((s) => !priced(s)).slice(0, NASDAQ_AT_ONCE) : [];
+    // Nasdaq's eight at a time go to the shares it has no recent answer for first, the list's order kept within each group, so a list longer
+    // than eight is asked in turns: the ones asked last time wait while the ones not asked yet go
+    const unpriced = on.nasdaq ? want.filter((s) => !priced(s)) : [];
+    const ofNasdaq = [...unpriced.filter((s) => nasdaq.latest(s) === undefined), ...unpriced.filter((s) => nasdaq.latest(s) !== undefined)].slice(0, NASDAQ_AT_ONCE);
     const ofRobinhood = new Map<string, UsQuote>();
     const rh =
       on.robinhood && listed
@@ -844,7 +847,7 @@ export interface UsFeedOptions {
   source: string;
   /** the chain whose two sources it reads (usQuote): a listing and this reader share one answer of each, and one hold of each */
   quotes: Pick<UsQuotes, "robinhood" | "nasdaq" | "sessions">;
-  /** whether the market lists a share under this very ticker (Cboe's symbol book): Robinhood's quote is taken only for one it says yes to,
+  /** whether the market lists a share under this very ticker (the market's symbol directory): Robinhood's quote is taken only for one it says yes to,
    * since Robinhood names a share by its token's symbol (UsAsk.listed) */
   listed: (symbol: string) => boolean;
   clock?: (() => number) | undefined;

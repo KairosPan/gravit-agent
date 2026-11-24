@@ -81,6 +81,7 @@ import { stockHistory } from "./history-stocks.ts";
 import { badHistory, fin, fixedHosts, has, keeper, LIST_MS, list, nonNeg, pos, PUBLIC_HOSTS, publicNo, rec, round, str, type Listing, type PublicDeps, type PublicSource } from "./public-markets.ts";
 import type { Candle, MarketSession } from "./trade.ts";
 import { realHttp, unreachable, type HttpReply } from "./types.ts";
+import { closedSessionBefore } from "./us-closes.ts";
 import { FRESH_MS, NASDAQ_AT_ONCE, NASDAQ_FROM, nasdaqSource, ROBINHOOD_FROM, ROBINHOOD_OVERNIGHT, usQuote, UsQuoteFeed, type NasdaqClosing, type UsQuote } from "./us-quotes.ts";
 
 /** whether Robinhood's quotes are taken in the overnight session (us-quotes.ts, where it is set): a share Robinhood priced is then offered
@@ -216,17 +217,6 @@ const CHANGE_PHASES = new Set(["pre", "regular", "after"]);
 export const CLOSE_RETRY_MS = 60_000;
 /** the closes one read of Nasdaq found are kept for this many shares and closes at most (the oldest let go first); a close never changes */
 const CLOSES_KEPT = 1_000;
-
-/** THE REFERENCE CLOSE of a price stamped `ms`: the last regular session that has closed by then — the day before's in pre-market and the
- * regular session, the same day's in after-hours — as the calendar says it. Each step back is half a day, shorter than the time between one
- * session's close and the next one's (21 hours at the least, after an early close), so none is passed over */
-function closedSessionBefore(ms: number): { opensAt: number; closesAt: number } | undefined {
-  for (let k = 1; k <= 24; k++) {
-    const s = nextRegularSession(ms - k * 12 * 3_600_000);
-    if (s.closesAt <= ms) return s;
-  }
-  return undefined;
-}
 
 /** a Nasdaq trade's change is measured from this reference close: the trade is in a phase with a change, and its stamp — to the minute —
  * less CLOSE_PRINT_MS is past that close. A trade stamped in the close's own minute (4:00 PM) may be the regular session's last, whose
