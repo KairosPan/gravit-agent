@@ -89,7 +89,8 @@ import { refuse } from "./errors.mjs";
  *   groups: { all: EventSummary, named: Array<{ name: string, summary: EventSummary, paths: Paths | null }> },
  *   cases: EventCase[], windowsDropped: 0 }} EventsView `against` is `benchmark` when a benchmark was asked and its
  *   history read, else `raw`; `market` is SPY's read, `benchmark` the benchmark's; `noContext` counts the measured
- *   cases whose first change has no figure against the benchmark; `skipped` and `listed` count cases
+ *   cases whose first change has no figure against the benchmark; `skipped` and `listed` count cases, the unmeasured
+ *   ones included (an unmeasured case keeps the `listed` and `skipped` day 0's check found, when it ran)
  */
 
 /** The most events one scan takes. */

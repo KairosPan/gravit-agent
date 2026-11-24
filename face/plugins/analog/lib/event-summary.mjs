@@ -10,7 +10,8 @@
  * the figures strictly under 0 over that horizon's count.
  *
  * A group's path runs from day 0 for as long as 8 or more of its measured cases have the session: at each, the median
- * and the quartiles of their values against the market, indexed to 100 at the close before day 0, to two decimals.
+ * and the quartiles of their `rel` values (against the benchmark, or the stock's own path when the view is raw), each
+ * indexed to 100 at the case's base, to two decimals.
  */
 import { MIN_GROUP, quantile } from "./stats.mjs";
 

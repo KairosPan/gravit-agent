@@ -56,7 +56,7 @@ const PARAMETERS = {
         symbol: { type: "string", description: "the company's current US ticker, such as NVDA", required: true },
         label: { type: "string", description: `a short label, at most ${LIMITS.label} characters`, required: true },
         group: { type: "string", description: `the event's group, at most ${LIMITS.group} characters`, required: true },
-        date: { type: "string", description: "YYYY-MM-DD, the date the news first became public", required: true },
+        date: { type: "string", description: "YYYY-MM-DD, the date the news first became public (a listing: its first trading day)", required: true },
         timing: { type: "string", enum: [...TIMINGS], description: TIMING_WORDS, required: true },
         source: { type: "string", description: `the source's http(s) URL without credentials, at most ${LIMITS.source} characters`, required: true },
         verified: { type: "boolean", description: "whether the source reader verified the date at the source", required: true },
