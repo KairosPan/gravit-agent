@@ -129,7 +129,8 @@ export const ROBINHOOD_OVERNIGHT = true;
 export const FRESH_MS = 120_000;
 /** the ONE deadline of the chain: a listing waits this long at most for the real-time sources, then says what answered. The callers allow a
  * source four seconds in all (paper.ts SOURCE_MS, explore.ts), the first search of a ticker waits up to 1.5 s for the symbol directory before
- * it (public-stocks.ts), and Cboe's quotes are asked at the same time as this chain */
+ * it (public-stocks.ts), and the daily bars of Nasdaq's last close for the lines this chain does not price are waited for after it, to
+ * public-stocks.ts CLOSE_WAIT_MS from the listing's start */
 export const RT_WAIT_MS = 1_500;
 /** Robinhood's one answer for every symbol is kept this long at most — less where its next write is out for certain sooner (nextWrite): it
  * writes a new one about every fifteen seconds */
@@ -614,7 +615,7 @@ export function nasdaqSource(deps: PublicDeps = {}): Nasdaq {
       const a = answers.get(symbol.trim().toUpperCase());
       const now = clock();
       // an answer from hours before (a share searched this morning), or one from before Nasdaq said to wait (a 429, an edge's hold), is no
-      // quote of now: the line is then Cboe's, said as delayed — never this one, said as real time
+      // quote of now: the line is then Nasdaq's last close, said as not real time — never this one, said as real time
       if (!a || now - a.at >= FRESH_MS || (held && now < held.until)) return undefined;
       return a.q;
     },
@@ -709,6 +710,9 @@ export interface UsAsk {
   listed?: ((symbol: string) => boolean) | undefined;
   /** how long the chain is waited for, RT_WAIT_MS unless said */
   waitMs?: number | undefined;
+  /** told each refusal a source answered this ask with (Robinhood's read, Nasdaq's quote of a share): the chain passes a refusal over, and
+   * a caller that lists nothing answers with it (public-stocks.ts) */
+  refused?: ((r: Refusal) => void) | undefined;
 }
 
 /** the chain over both (usQuote) */
@@ -769,7 +773,10 @@ export function usQuote(deps: PublicDeps = {}, nasdaq: Nasdaq = nasdaqSource(dep
       on.robinhood && listed
         ? robinhood().then(
             (all) => {
-              if (isRefusal(all)) return;
+              if (isRefusal(all)) {
+                ask.refused?.(all);
+                return;
+              }
               const now = clock();
               for (const s of want) {
                 const q = all.get(s);
@@ -784,7 +791,8 @@ export function usQuote(deps: PublicDeps = {}, nasdaq: Nasdaq = nasdaqSource(dep
       ofNasdaq.map((s) =>
         nasdaq.quote(s).then(
           (q) => {
-            if (q && !isRefusal(q)) ofNq.set(s, q);
+            if (isRefusal(q)) ask.refused?.(q);
+            else if (q) ofNq.set(s, q);
           },
           () => undefined,
         ),
@@ -883,7 +891,7 @@ interface Share {
  *                first answer each of them, AT THE SAME TIME as Robinhood is read, never after it — at most NASDAQ_AT_ONCE on their way at
  *                once, in pre-market, the regular session and after-hours; its answer set aside, never a share's first quote, while
  *                Robinhood is still to give that (ROBINHOOD_FIRST_MS);
- * and Cboe never: its delayed quote is the line's (public-stocks.ts), never this reader's, so a delayed quote is never pushed as live. A
+ * and a close never: Nasdaq's last close is the line's (public-stocks.ts), never this reader's, so a close is never pushed as live. A
  * share's quote is its source's own, with its own stamp (`at`: Robinhood's "unchanged since", Nasdaq's last trade, to the minute) — and it
  * is LIVE while that stamp is fresh (FRESH_MS, the chain's own rule) and its source's session is on: otherwise its last word, its age said.
  * Robinhood's young quote stands over Nasdaq's, and one source's quote replaces the other's only with a newer stamp. A share is read while

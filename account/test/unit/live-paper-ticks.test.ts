@@ -8,7 +8,7 @@ import type { ExchangeClient } from "../../src/portfolio/live/exchange.ts";
 import { exchangeTickers, readLike, type Listing, type PublicSource } from "../../../market/src/live/public-markets.ts";
 import { HUB_URLS, IDLE_MS, joinHubs, StreamHub, type WebSocketLike } from "../../../market/src/live/stream-hub.ts";
 import { usClock, usSessionFull } from "../../src/portfolio/account/calendar.ts";
-import { CBOE_DELAY_MS, CBOE_FROM } from "../../../market/src/live/public-stocks.ts";
+import { CBOE_DELAY_MS, CBOE_FROM, NASDAQ_CLOSE_FROM, US_CLOSE_DELAY_MS } from "../../../market/src/live/public-stocks.ts";
 import { ROBINHOOD_FROM, ROBINHOOD_PRICES, usQuote, UsQuoteFeed } from "../../../market/src/live/us-quotes.ts";
 import type { Candle, CandlePage, LiveTrader, Market, OrderBook, OrderRequest } from "../../src/portfolio/live/trade.ts";
 import type { LiveSource } from "../../src/portfolio/live/types.ts";
@@ -1029,6 +1029,29 @@ describe("US shares on the background reader (feat/paper-live phase 3): a fill a
       await opened.source.settle!();
       expect(book(h).orders[placed.ref]).toMatchObject({ status: "open", note: "its trail starts at the session's first real-time quote" });
       expect(book(h).orders[placed.ref]!.stopPrice).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a market order on a share the US stocks line prices at Nasdaq's last close is refused: a close is never a real-time quote, so a paper account never fills at it", async () => {
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    // Monday 23 November 2026, 10:00 New York: the regular session; no live source priced AAPL, so its line is Friday's close (the market's
+    // close line: public-stocks.ts, its delay US_CLOSE_DELAY_MS, stamped at the close)
+    vi.setSystemTime(Date.parse("2026-11-23T15:00:00Z"));
+    try {
+      const close = (): Listing => ({ symbol: "AAPL", name: "Apple Inc.", kind: "stock", base: "AAPL", quote: "USD", price: 342.56, open: true, types: [], quoteAt: "2026-11-20T21:00:00.000Z", delayMs: US_CLOSE_DELAY_MS, quoteFrom: NASDAQ_CLOSE_FROM, session: usSessionFull(Date.now(), false), change24h: -6.65, changePct24h: -1.9043, venueName: "US stocks" });
+      const us: PublicSource = { id: "cboe", name: "US stocks", kind: "stocks", connectTo: "alpaca", connector: "live:alpaca", sessions: usClock, listings: async () => [close()], line: async (sym) => (sym === "AAPL" ? close() : null) };
+      const h = home();
+      const opened = await paperSource({ home: h, venue: "paper-1", label: "", cashUsd: 10_000, sources: () => [us], clock: Date.now });
+      if (isRefusal(opened)) throw new Error(opened.message);
+      const m = ok(await opened.source.trader!.market("AAPL"));
+      expect(m).toMatchObject({ quoteFrom: NASDAQ_CLOSE_FROM, delayMs: US_CLOSE_DELAY_MS, price: 342.56 });
+      expect(m.refusesNow!.market).toContain("use a limit order");
+      const r = refusal(await opened.source.trader!.place(order({ symbol: "AAPL", qty: 1 })));
+      expect(r.message).toContain("a paper account never fills a stock at a delayed quote");
+      expect(book(h).fills).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
