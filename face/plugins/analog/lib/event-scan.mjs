@@ -21,9 +21,10 @@
  * group, and may carry a source, `verified` and a note, checked the same way; an anchor's source may be left out.
  */
 import {
-  ELSEWHERE, ELSEWHERE_OVER, MIN_BEFORE, MIN_VOLUMES, NEIGHBOURS, QUIET, TIMINGS, VOLUME_BASE,
-  dayZero, eventWindow, measureEvent, tapeCheck,
+  BASES, DEFAULT_HORIZONS, DEFAULT_HORIZONS_DAY0_CLOSE, ELSEWHERE, ELSEWHERE_OVER, HORIZONS_MAX, HORIZON_MAX,
+  MIN_VOLUMES, NEIGHBOURS, QUIET, TIMINGS, VOLUME_BASE, dayZero, tapeCheck,
 } from "./events.mjs";
+import { SPLITS_MAX } from "./price-tie.mjs";
 import { groupPaths, orderCases, summarizeEvents } from "./event-summary.mjs";
 import { normalizeSymbol } from "./symbols.mjs";
 import { MIN_GROUP } from "./stats.mjs";
@@ -40,10 +41,15 @@ import { refuse } from "./errors.mjs";
  * @typedef {import("./windows.mjs").Path} Path
  * @typedef {import("./bars.mjs").BarsKeep} BarsKeep
  * @typedef {import("./bars.mjs").History} History
+ * @typedef {import("./events.mjs").Base} Base
+ * @typedef {import("./price-tie.mjs").Split} Split
+ * @typedef {{ price: number | null, statedOpen: number | null, splits: Split[] | null, splitsSource: string | null }}
+ *   PriceIn a case's stated price, the first-day open its source states and the splits after it, under `base: price`
+ *   only; all null under any other base
  * @typedef {{ symbol: string, label: string, group: string, date: string, timing: When["timing"], source: string,
- *   verified: boolean, note: string | null }} EventIn
+ *   verified: boolean, note: string | null } & PriceIn} EventIn
  * @typedef {{ label: string, date: string, timing: When["timing"], source: string | null, verified: boolean,
- *   note: string | null }} AnchorIn
+ *   note: string | null } & PriceIn} AnchorIn
  * @typedef {{ state: "measured" | "unmeasured", words: string | null, day0: string | null, measure: Measure | null,
  *   tape: Tape | null, flags: string[], window: Path | null, rel: Array<[number, number]> | null }} Measured
  * @typedef {{ id: string, symbol: string, label: string, group: string, date: string, timing: string, source: string,
@@ -84,6 +90,11 @@ export const SCAN_DEADLINE_MS = 480_000;
 const DEADLINE_WORDS = "not read before the deadline";
 const NEW_YORK = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
 const EVENT_SHAPE = "an object with symbol, label, group, date, timing, source and verified";
+const HORIZONS_WORDS = `1 to ${HORIZONS_MAX} whole numbers of sessions from 0 to ${HORIZON_MAX}, each larger than the one before`;
+/** A case's price fields as the tool names them, in the order they are checked. */
+const PRICE_FIELDS = ["price", "stated_open", "splits", "splits_source"];
+/** @type {PriceIn} */
+const NO_PRICE = { price: null, statedOpen: null, splits: null, splitsSource: null };
 const ANCHOR_SHAPE = "an object with label, date and timing, and optionally source, verified and note";
 
 /** @param {unknown} raw @returns {raw is Record<string, unknown>} */
@@ -193,12 +204,79 @@ function checkClaim(claimed, source, opened, measured) {
   return { claimed, opened: isOpened, verified: claimed && isOpened, flags };
 }
 
+/** @param {unknown} raw */
+const given = (raw) => raw !== null && raw !== undefined;
+/** @param {unknown} raw @returns {raw is number} */
+const isPositive = (raw) => typeof raw === "number" && Number.isFinite(raw) && raw > 0;
+
 /**
- * One event, checked in the order symbol, label, group, date, timing, source, verified, note.
- * @param {unknown} raw @param {number} i
+ * A positive finite number, or the refusal of `field`.
+ * @param {unknown} raw @param {string} field
+ * @returns {number}
+ */
+function positiveIn(raw, field) {
+  if (!isPositive(raw)) throw refuse.invalidEvents(field, "a positive number");
+  return raw;
+}
+
+/**
+ * A case's split record: 1 to `SPLITS_MAX` splits, each a real date and `new` shares for `old`, both positive whole
+ * numbers, kept in the order given; or the refusal of the first bad one.
+ * @param {unknown} raw @param {string} field
+ * @returns {Split[]}
+ */
+function splitsIn(raw, field) {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > SPLITS_MAX) {
+    throw refuse.invalidEvents(field, `a list of 1 to ${SPLITS_MAX} splits, each {date, new, old}`);
+  }
+  return raw.map((split, j) => {
+    const at = `${field}[${j}]`;
+    if (!isObject(split)) throw refuse.invalidEvents(at, "a split {date, new, old}");
+    const date = dateIn(split.date, `${at}.date`);
+    for (const key of ["new", "old"]) {
+      const n = split[key];
+      if (!Number.isSafeInteger(n) || /** @type {number} */ (n) <= 0) throw refuse.invalidEvents(`${at}.${key}`, "a whole number above 0");
+    }
+    return { date, new: /** @type {number} */ (split.new), old: /** @type {number} */ (split.old) };
+  });
+}
+
+/**
+ * A case's price fields: under any base but `price` each is refused when given and all are null; under `price` the
+ * price is required, the stated open optional, and the splits and the page that lists them come together.
+ * @param {Record<string, unknown>} raw @param {string} at @param {Base} base
+ * @returns {PriceIn}
+ */
+function priceIn(raw, at, base) {
+  if (base !== "price") {
+    const stray = PRICE_FIELDS.find((key) => given(raw[key]));
+    if (stray !== undefined) throw refuse.invalidEvents(`${at}.${stray}`, "only with base price");
+    return { ...NO_PRICE };
+  }
+  if (!given(raw.price)) throw refuse.invalidEvents(`${at}.price`, "a positive price, as its source states it, under base price");
+  const price = positiveIn(raw.price, `${at}.price`);
+  const statedOpen = given(raw.stated_open) ? positiveIn(raw.stated_open, `${at}.stated_open`) : null;
+  let splits = null;
+  let splitsSource = null;
+  if (given(raw.splits)) {
+    splits = splitsIn(raw.splits, `${at}.splits`);
+    if (!given(raw.splits_source)) {
+      throw refuse.invalidEvents(`${at}.splits_source`, "the URL of the page that lists the splits, given with splits");
+    }
+    splitsSource = sourceIn(raw.splits_source, `${at}.splits_source`);
+  } else if (given(raw.splits_source)) {
+    throw refuse.invalidEvents(`${at}.splits`, "given with splits_source");
+  }
+  return { price, statedOpen, splits, splitsSource };
+}
+
+/**
+ * One event, checked in the order symbol, label, group, date, timing, source, verified, note, then its price's fields
+ * ({@link priceIn}).
+ * @param {unknown} raw @param {number} i @param {Base} base
  * @returns {EventIn}
  */
-function eventIn(raw, i) {
+function eventIn(raw, i, base) {
   const at = `events[${i}]`;
   if (!isObject(raw)) throw refuse.invalidEvents(at, EVENT_SHAPE);
   const symbol = symbolIn(raw.symbol, `${at}.symbol`);
@@ -209,16 +287,16 @@ function eventIn(raw, i) {
   const source = sourceIn(raw.source, `${at}.source`);
   if (typeof raw.verified !== "boolean") throw refuse.invalidEvents(`${at}.verified`, "true or false");
   const note = noteIn(raw.note, `${at}.note`);
-  return { symbol, label, group, date, timing, source, verified: raw.verified, note };
+  return { symbol, label, group, date, timing, source, verified: raw.verified, note, ...priceIn(raw, at, base) };
 }
 
 /**
- * One anchor of the present case, checked in the order label, date, timing, source, verified, note; the source may be
- * left out, and `verified` is false when left out.
- * @param {unknown} raw @param {number} i
+ * One anchor of the present case, checked in the order label, date, timing, source, verified, note, then its price's
+ * fields ({@link priceIn}); the source may be left out, and `verified` is false when left out.
+ * @param {unknown} raw @param {number} i @param {Base} base
  * @returns {AnchorIn}
  */
-function anchorIn(raw, i) {
+function anchorIn(raw, i, base) {
   const at = `query.anchors[${i}]`;
   if (!isObject(raw)) throw refuse.invalidEvents(at, ANCHOR_SHAPE);
   const label = textOf(raw.label, `${at}.label`, LIMITS.label);
@@ -228,15 +306,15 @@ function anchorIn(raw, i) {
   const verified = raw.verified ?? false;
   if (typeof verified !== "boolean") throw refuse.invalidEvents(`${at}.verified`, "true or false, or left out");
   const note = noteIn(raw.note, `${at}.note`);
-  return { label, date, timing, source, verified, note };
+  return { label, date, timing, source, verified, note, ...priceIn(raw, at, base) };
 }
 
 /**
  * The present case: its company and 1 to 3 anchors; null when left out.
- * @param {unknown} raw
+ * @param {unknown} raw @param {Base} base
  * @returns {{ symbol: string, anchors: AnchorIn[] } | null}
  */
-function queryIn(raw) {
+function queryIn(raw, base) {
   if (raw === null || raw === undefined) return null;
   if (!isObject(raw)) throw refuse.invalidEvents("query", "an object with symbol and anchors, or left out");
   const symbol = symbolIn(raw.symbol, "query.symbol");
@@ -244,21 +322,71 @@ function queryIn(raw) {
   if (!Array.isArray(list) || list.length === 0 || list.length > ANCHORS_MAX) {
     throw refuse.invalidEvents("query.anchors", `a list of 1 to ${ANCHORS_MAX} anchors, each ${ANCHOR_SHAPE}`);
   }
-  return { symbol, anchors: list.map(anchorIn) };
+  return { symbol, anchors: list.map((a, i) => anchorIn(a, i, base)) };
+}
+
+/**
+ * The call's base: one of `BASES`, `prior_close` when left out.
+ * @param {unknown} raw
+ * @returns {Base}
+ */
+function baseIn(raw) {
+  if (!given(raw)) return "prior_close";
+  const base = typeof raw === "string" ? raw.trim() : "";
+  if (!BASES.includes(base)) throw refuse.invalidEvents("base", `one of ${BASES.join(", ")}`);
+  return /** @type {Base} */ (base);
+}
+
+/**
+ * The call's horizons: 1 to `HORIZONS_MAX` whole numbers from 0 to `HORIZON_MAX`, strictly increasing; the default
+ * when left out. Under `day0_close` the default starts at 1 and a 0 is refused, day 0's close being the base itself.
+ * @param {unknown} raw @param {Base} base
+ * @returns {number[]}
+ */
+function horizonsIn(raw, base) {
+  if (!given(raw)) return [...(base === "day0_close" ? DEFAULT_HORIZONS_DAY0_CLOSE : DEFAULT_HORIZONS)];
+  const ok = Array.isArray(raw) && raw.length >= 1 && raw.length <= HORIZONS_MAX
+    && raw.every((k, i) => Number.isInteger(k) && k >= 0 && k <= HORIZON_MAX && (i === 0 || k > raw[i - 1]));
+  if (!ok) throw refuse.invalidEvents("horizons", HORIZONS_WORDS);
+  const horizons = /** @type {number[]} */ (raw);
+  if (base === "day0_close" && horizons[0] === 0) {
+    throw refuse.invalidEvents("horizons[0]", "0 is day 0's close itself under day0_close; start at 1");
+  }
+  return [...horizons];
+}
+
+/**
+ * The call's benchmark: a ticker as `normalizeSymbol` writes it, null for `none`, `SPY` when left out.
+ * @param {unknown} raw
+ * @returns {string | null}
+ */
+function benchmarkIn(raw) {
+  if (!given(raw)) return MARKET_SYMBOL;
+  if (typeof raw === "string" && raw.trim() === "none") return null;
+  try {
+    return normalizeSymbol(raw);
+  } catch {
+    throw refuse.invalidEvents("benchmark", "a ticker like SPY or QQQ, or none");
+  }
 }
 
 /**
  * The scan's input as people give it, checked and normalized; the first problem found is the refusal, in the order
- * title, events (the list, each event's fields, duplicates, groups), query.
- * @param {{ title: unknown, events: unknown, query?: unknown }} raw
- * @returns {{ title: string, events: EventIn[], query: { symbol: string, anchors: AnchorIn[] } | null }}
+ * title, base, horizons, benchmark, events (the list, each event's fields then its price's, duplicates, groups), query
+ * (each anchor the same).
+ * @param {{ title: unknown, events: unknown, query?: unknown, base?: unknown, horizons?: unknown, benchmark?: unknown }} raw
+ * @returns {{ title: string, events: EventIn[], query: { symbol: string, anchors: AnchorIn[] } | null, base: Base,
+ *   horizons: number[], benchmark: string | null }}
  */
-export function normalizeEvents({ title: rawTitle, events: rawEvents, query: rawQuery }) {
+export function normalizeEvents({ title: rawTitle, events: rawEvents, query: rawQuery, base: rawBase, horizons: rawHorizons, benchmark: rawBenchmark }) {
   const title = textOf(rawTitle, "title", LIMITS.title);
+  const base = baseIn(rawBase);
+  const horizons = horizonsIn(rawHorizons, base);
+  const benchmark = benchmarkIn(rawBenchmark);
   if (!Array.isArray(rawEvents) || rawEvents.length === 0 || rawEvents.length > EVENTS_MAX) {
     throw refuse.invalidEvents("events", `a list of 1 to ${EVENTS_MAX} events`);
   }
-  const events = rawEvents.map(eventIn);
+  const events = rawEvents.map((e, i) => eventIn(e, i, base));
   /** @type {Map<string, number>} */
   const seen = new Map();
   events.forEach((e, i) => {
@@ -269,7 +397,7 @@ export function normalizeEvents({ title: rawTitle, events: rawEvents, query: raw
   });
   const groups = new Set(events.map((e) => e.group));
   if (groups.size > GROUPS_MAX) throw refuse.invalidEvents("events", `at most ${GROUPS_MAX} groups, got ${groups.size}`);
-  return { title, events, query: queryIn(rawQuery) };
+  return { title, events, query: queryIn(rawQuery, base), base, horizons, benchmark };
 }
 
 /**

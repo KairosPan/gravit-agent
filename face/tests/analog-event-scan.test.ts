@@ -25,8 +25,8 @@ test("pageKey folds what a model rewrites and keeps what tells two pages apart",
 test("the input as people give it is normalized", () => {
   const got = normalizeEvents({ title: "  CEO scandals  ", events: [ev({ symbol: " evt ", label: " x ", note: "  " })], query: { symbol: "evt", anchors: [{ label: "first report", date: "2020-04-10", timing: "open" }] } });
   assert.equal(got.title, "CEO scandals");
-  assert.deepEqual(got.events[0], { symbol: "EVT", label: "x", group: "hired", date: "2020-04-10", timing: "pre", source: A, verified: true, note: null });
-  assert.deepEqual(got.query, { symbol: "EVT", anchors: [{ label: "first report", date: "2020-04-10", timing: "open", source: null, verified: false, note: null }] });
+  assert.deepEqual(got.events[0], { symbol: "EVT", label: "x", group: "hired", date: "2020-04-10", timing: "pre", source: A, verified: true, note: null, price: null, statedOpen: null, splits: null, splitsSource: null });
+  assert.deepEqual(got.query, { symbol: "EVT", anchors: [{ label: "first report", date: "2020-04-10", timing: "open", source: null, verified: false, note: null, price: null, statedOpen: null, splits: null, splitsSource: null }] });
   assert.equal(normalizeEvents({ title: "t", events: [ev()] }).query, null);
 });
 test("every bad field is refused by its name and index", () => {
@@ -46,6 +46,62 @@ test("every bad field is refused by its name and index", () => {
   bad([ev()], "query.symbol", { query: { symbol: "", anchors: [] } });
   bad([ev()], "query.anchors", { query: { symbol: "EVT", anchors: [] } });
   bad([ev()], "query.anchors[0].date", { query: { symbol: "EVT", anchors: [{ label: "x", date: "today", timing: "pre" }] } });
+});
+const refusedAs = (args: Record<string, unknown>, message: string) =>
+  assert.throws(() => normalizeEvents({ title: "t", events: [ev()], ...args } as Parameters<typeof normalizeEvents>[0]),
+    (e: unknown) => e instanceof AnalogError && e.code === "INVALID_EVENTS" && e.message === `INVALID_EVENTS ${message}`, message);
+test("the call's choices are normalized", () => {
+  const plain = normalizeEvents({ title: "t", events: [ev()] });
+  assert.deepEqual([plain.base, plain.horizons, plain.benchmark], ["prior_close", [0, 1, 5, 20, 60], "SPY"]);
+  const close = normalizeEvents({ title: "t", events: [ev()], base: "day0_close" });
+  assert.deepEqual([close.base, close.horizons, close.benchmark], ["day0_close", [1, 5, 20, 60], "SPY"]);
+  const chosen = normalizeEvents({ title: "t", events: [ev()], base: " day0_open ", horizons: [0, 250], benchmark: " qqq " });
+  assert.deepEqual([chosen.base, chosen.horizons, chosen.benchmark], ["day0_open", [0, 250], "QQQ"]);
+  assert.equal(normalizeEvents({ title: "t", events: [ev()], benchmark: "none" }).benchmark, null);
+  assert.deepEqual(normalizeEvents({ title: "t", events: [ev()], base: "day0_close", horizons: [1, 2, 3, 4, 5, 6] }).horizons, [1, 2, 3, 4, 5, 6]);
+});
+test("each bad choice is refused by name", () => {
+  refusedAs({ base: "close" }, "base: one of prior_close, price, day0_open, day0_close");
+  refusedAs({ base: 1 }, "base: one of prior_close, price, day0_open, day0_close");
+  for (const horizons of [[], [0, 1, 2, 3, 4, 5, 6], [5, 5], [60, 5], [251], [-1], [1.5], "5", [Number.NaN]]) {
+    refusedAs({ horizons }, "horizons: 1 to 6 whole numbers of sessions from 0 to 250, each larger than the one before");
+  }
+  refusedAs({ base: "day0_close", horizons: [0, 5] }, "horizons[0]: 0 is day 0's close itself under day0_close; start at 1");
+  for (const benchmark of ["not a ticker", "", 7]) refusedAs({ benchmark }, "benchmark: a ticker like SPY or QQQ, or none");
+  // the call's choices are checked before the events
+  assert.throws(() => normalizeEvents({ title: "t", events: [], base: "close" }), invalid("base"));
+});
+test("a price's fields come only with base price", () => {
+  for (const [field, value] of [["price", 83], ["stated_open", 83], ["splits", [{ date: "2015-03-19", new: 4, old: 1 }]], ["splits_source", "https://ex.com/s"]] as const) {
+    refusedAs({ events: [ev({ [field]: value })] }, `events[0].${field}: only with base price`);
+    refusedAs({ base: "day0_open", events: [ev({ [field]: value })] }, `events[0].${field}: only with base price`);
+    refusedAs({ query: { symbol: "EVT", anchors: [{ label: "x", date: "2020-04-10", timing: "pre", [field]: value }] } }, `query.anchors[0].${field}: only with base price`);
+  }
+});
+test("under base price a case states its price, and its splits with the page that lists them", () => {
+  const p = (over: Record<string, unknown>, message: string) => refusedAs({ base: "price", events: [ev({ price: 44, ...over })] }, message);
+  refusedAs({ base: "price", events: [ev()] }, "events[0].price: a positive price, as its source states it, under base price");
+  for (const price of [0, -1, "83", Number.POSITIVE_INFINITY]) p({ price }, "events[0].price: a positive number");
+  p({ stated_open: -1 }, "events[0].stated_open: a positive number");
+  p({ stated_open: "56.5" }, "events[0].stated_open: a positive number");
+  const S = "https://investor.visa.com/x";
+  for (const splits of [[], "4:1", Array.from({ length: 21 }, () => ({ date: "2015-03-19", new: 4, old: 1 }))]) {
+    p({ splits, splits_source: S }, "events[0].splits: a list of 1 to 20 splits, each {date, new, old}");
+  }
+  p({ splits: ["4:1"], splits_source: S }, "events[0].splits[0]: a split {date, new, old}");
+  p({ splits: [{ date: "2015-02-30", new: 4, old: 1 }], splits_source: S }, "events[0].splits[0].date: a date YYYY-MM-DD");
+  p({ splits: [{ date: "2015-03-19", new: 1.5, old: 1 }], splits_source: S }, "events[0].splits[0].new: a whole number above 0");
+  p({ splits: [{ date: "2015-03-19", new: 4, old: 0 }], splits_source: S }, "events[0].splits[0].old: a whole number above 0");
+  p({ splits: [{ date: "2015-03-19", new: 4, old: 1 }] }, "events[0].splits_source: the URL of the page that lists the splits, given with splits");
+  p({ splits_source: S }, "events[0].splits: given with splits_source");
+  p({ splits: [{ date: "2015-03-19", new: 4, old: 1 }], splits_source: "https://u:p@investor.visa.com/x" }, "events[0].splits_source: an http(s) URL without credentials, at most 500 characters");
+  refusedAs({ base: "price", query: { symbol: "EVT", anchors: [{ label: "x", date: "2020-04-10", timing: "pre" }] }, events: [ev({ price: 44 })] }, "query.anchors[0].price: a positive price, as its source states it, under base price");
+
+  const got = normalizeEvents({ title: "t", base: "price", events: [ev({ price: 44, stated_open: 56.5, splits: [{ date: " 2015-03-19 ", new: 4, old: 1 }], splits_source: ` ${S} ` })],
+    query: { symbol: "EVT", anchors: [{ label: "x", date: "2020-04-10", timing: "pre", price: 7 }] } });
+  assert.deepEqual(got.events[0], { symbol: "EVT", label: "CEO out", group: "hired", date: "2020-04-10", timing: "pre", source: A, verified: true, note: null,
+    price: 44, statedOpen: 56.5, splits: [{ date: "2015-03-19", new: 4, old: 1 }], splitsSource: S });
+  assert.deepEqual(got.query!.anchors[0], { label: "x", date: "2020-04-10", timing: "pre", source: null, verified: false, note: null, price: 7, statedOpen: null, splits: null, splitsSource: null });
 });
 test("a duplicate names both events, and five groups say how many", () => {
   assert.throws(() => normalizeEvents({ title: "t", events: [ev(), ev({ date: "2020-04-11" }), ev()] }), /^AnalogError: INVALID_EVENTS events\[2\]: the same symbol and date as events\[0\]$/);
