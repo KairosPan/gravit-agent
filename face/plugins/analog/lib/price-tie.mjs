@@ -7,8 +7,8 @@
  * by a factor it read only from the bars.
  */
 
-/** How far the bars' factor may stand from the one the tie uses: a reported open written to the cent against bars kept
- * to four decimals. */
+/** How far the bars' factor may stand from the one the tie uses: the bars keep about nine significant digits, and the
+ * 2% covers an open its source wrote to the cent, which on an old listing split many times over is a coarse figure. */
 export const TIE_TOLERANCE = 0.02;
 
 /** The most splits a case's record holds. */
@@ -30,7 +30,8 @@ export function factorWords(f) {
 
 /**
  * @param {{ day0Open: number, day0Date: string, statedOpen: number | null, splits: Split[] | null }} a
- * @returns {{ factor: number, splitFactor: number | null } | { words: string }}
+ * @returns {{ factor: number, splitFactor: number | null } | { words: string }} `splitFactor` null when no split in the
+ *   record is after day 0
  */
 export function tiePrice({ day0Open, day0Date, statedOpen, splits }) {
   if (!isPrice(statedOpen)) return { words: "no first-day open from its source: its price cannot be tied to the bars" };
@@ -43,8 +44,10 @@ export function tiePrice({ day0Open, day0Date, statedOpen, splits }) {
       words: `its bars are adjusted about ×${factorWords(fBars)} since day 0 (its source's open ${stated.toFixed(2)}, the bars' ${day0Open.toFixed(2)}): a split record is needed`,
     };
   }
+  const since = splits.filter((s) => s.date > day0Date);
   let fRecord = 1;
-  for (const s of splits) if (s.date > day0Date) fRecord *= s.new / s.old;
-  if (Math.abs(fBars / fRecord - 1) <= TIE_TOLERANCE) return { factor: fRecord, splitFactor: fRecord };
+  for (const s of since) fRecord *= s.new / s.old;
+  // a record with no split after day 0 divides the price by nothing: no split factor, as with no record
+  if (Math.abs(fBars / fRecord - 1) <= TIE_TOLERANCE) return { factor: fRecord, splitFactor: since.length > 0 ? fRecord : null };
   return { words: `its split record gives ×${factorWords(fRecord)}, its bars ×${factorWords(fBars)}` };
 }

@@ -56,7 +56,8 @@ import { refuse } from "./errors.mjs";
  *   note: string | null } & PriceIn} AnchorIn
  * @typedef {import("./event-summary.mjs").Against} Against
  * @typedef {{ list: Split[], factor: number, source: string, opened: boolean, verified: boolean }} SplitRecord the
- *   splits a case's price was divided by, their factor and the page that lists them, `verified` when a reader opened it
+ *   splits a case's price was divided by, their factor and the page that lists them, `verified` when a reader opened it;
+ *   a case whose record has no split after day 0 keeps none (its price is divided by nothing)
  * @typedef {{ state: "measured" | "unmeasured", words: string | null, day0: string | null, measure: Measure | null,
  *   tape: Tape | null, tapeRan: boolean, flags: string[], window: Path | null, rel: Array<[number, number]> | null,
  *   relOf: "benchmark" | "self" | null, factor: number | null, splits: SplitRecord | null, listed: boolean,

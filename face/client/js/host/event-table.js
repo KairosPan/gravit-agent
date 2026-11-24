@@ -73,9 +73,12 @@ const horizonChips = against => measure => list(measure.changes).filter(ch => Nu
   return { label: horizonLabel(ch.k), text: pct(v), tone: toneOf(v) };
 });
 
-// a version 2 row's split: its factor as written, its record's page (http(s) alone) and whether a reader opened it
-function splitOf(s) {
+// a version 2 row's split: its factor as written, its record's page (http(s) alone) and whether a reader opened it; none
+// when no split in the record is after day 0 (the scan stores none then; a view stored before it did may hold one)
+function splitOf(s, day0) {
   if (s === null || typeof s !== 'object') return null;
+  const dates = list(s.list).map(x => str(x?.date)).filter(d => d !== null);
+  if (day0 !== null && dates.length > 0 && dates.every(d => d <= day0)) return null;
   const factor = factorText(s.factor);
   if (factor === null) return null;
   const source = sourceOf(s.source);
@@ -103,7 +106,7 @@ function rowOf(viewId, c, symbol, { chips: chipsOf, after = 60 }) {
     measured, words: str(c?.words), chips,
     href: measured && day0 !== null && symbol !== '' && id !== '' ? marketHref(viewId, symbol, day0, id, after) : null,
     price: price === null ? null : price.toFixed(2),
-    split: splitOf(c?.splits),
+    split: splitOf(c?.splits, day0),
     listed: c?.listed === true,
     skipped: skipped !== null && skipped > 0 ? skipped : 0,
   };

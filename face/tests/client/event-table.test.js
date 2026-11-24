@@ -205,3 +205,9 @@ test('a split source is kept only when http(s)', () => {
   const splb = rowOf(eventTableOf(EVENT_VIEW_V2_ID, { ...EVENT_VIEW_V2, cases }), 'ev-SPLB-2019-05-10');
   assert.deepEqual(splb.split, { factor: '4', source: null, verified: false });
 });
+
+test('a split record with no split after day 0 is no split', () => {
+  const cases = EVENT_VIEW_V2.cases.map(c => (c.splits ? { ...c, factor: 1, splits: { ...c.splits, list: [{ date: '2019-05-10', new: 4, old: 1 }], factor: 1 } } : c));
+  const splb = rowOf(eventTableOf(EVENT_VIEW_V2_ID, { ...EVENT_VIEW_V2, cases }), 'ev-SPLB-2019-05-10');
+  assert.equal(splb.split, null);
+});

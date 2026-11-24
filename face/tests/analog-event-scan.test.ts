@@ -242,6 +242,10 @@ test("a listing under base price, tied with no split", async () => {
 
   const untied = await listing({ price: 160, stated_open: 180 });
   assert.deepEqual([untied.state, untied.words, untied.measure], ["unmeasured", "its bars are adjusted about ×4 since day 0 (its source's open 180.00, the bars' 45.00): a split record is needed", null]);
+
+  // a record whose splits are all on or before day 0 divides the price by nothing: no split stored, no flag
+  const before = await listing({ price: 40, stated_open: 45, splits: [{ date: "2019-01-02", new: 2, old: 1 }, { date: "2020-04-10", new: 3, old: 1 }], splits_source: S }, (u) => u === A);
+  assert.deepEqual([before.state, before.factor, before.splits, before.flags, before.verified], ["measured", 1, null, [], true]);
 });
 test("prior_close on a listing is unmeasured with its words; day0_close measures it", async () => {
   const scan = (base?: string) => scanEvents({

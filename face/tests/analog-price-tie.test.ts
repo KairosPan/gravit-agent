@@ -40,11 +40,11 @@ test("a split record the bars confirm", () => {
 test("a split on or before day 0 adjusts nothing", () => {
   assert.deepEqual(
     tiePrice({ day0Open: 11, day0Date: "2008-03-19", statedOpen: 11, splits: [{ date: "2008-01-02", new: 2, old: 1 }] }),
-    { factor: 1, splitFactor: 1 },
+    { factor: 1, splitFactor: null },
   );
   assert.deepEqual(
     tiePrice({ day0Open: 11, day0Date: "2008-03-19", statedOpen: 11, splits: [{ date: "2008-03-19", new: 2, old: 1 }] }),
-    { factor: 1, splitFactor: 1 },
+    { factor: 1, splitFactor: null },
   );
 });
 
