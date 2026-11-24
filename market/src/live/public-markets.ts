@@ -129,9 +129,9 @@
  *   Stock Tokens        GET api.robinhood.com/rhj/assets and /rhj/prices/{symbol}, the reads robinhood.ts makes: each token, and its own bid
  *                       and ask in dollars per token (tokenBid, tokenAsk). The listing itself is only read: the tokens trade from a
  *                       connected wallet on Robinhood Chain, against USDG through LI.FI (dex.ts), where the wallet's own rows offer them
- *   US stocks           Cboe's own delayed quotes (public-stocks.ts): GET cdn-api.cboe.com/api/global/delayed_quotes/quotes/{symbol}.json,
- *                       fifteen minutes behind the market, its intraday minutes and daily closes for a history; Nasdaq Trader's symbol
- *                       directory (us-directory.ts, www.nasdaqtrader.com) for a search. Read-only: a US stock trades at a connected broker (Alpaca, Robinhood) or in a paper account
+ *   US stocks           real-time quotes from Robinhood or Nasdaq, else Nasdaq's last close (public-stocks.ts); price history from Robinhood,
+ *                       then Nasdaq (history-stocks.ts); Nasdaq Trader's symbol directory (us-directory.ts, www.nasdaqtrader.com) for a
+ *                       search. Cboe is no longer read. Read-only: a US stock trades at a connected broker (Alpaca, Robinhood) or in a paper account
  *   xStocks, Ondo       tokenised shares priced where they trade without a key (public-rwa.ts): an xStock at Gate's spot ticker
  *                       (api.gateio.ws /api/v4/spot/tickers), with xStocks' own trading state (api.xstocks.fi); an Ondo Stock as LI.FI
  *                       prices it (li.quest /v1/token). Each carries its issuer's own words, as the wallet's rows do (dex.ts)
@@ -336,13 +336,13 @@ export interface PublicDeps {
 }
 
 /** the only hosts a public source's own GETs go to (Hyperliquid's info endpoint, a POST, has its own guard: hyperliquidInfo): the event
- * venues, Robinhood's, Cboe's delayed-quote CDN, xStocks' and LI.FI's (public-stocks.ts, public-rwa.ts), Coinbase Exchange's, for a pair's
+ * venues, Robinhood's, xStocks' and LI.FI's (public-stocks.ts, public-rwa.ts), Coinbase Exchange's, for a pair's
  * long price history only (live/history-crypto.ts), then the eight pre-IPO perpetuals'
  * venues (Binance's USDⓈ-M futures host and Bybit's v5 host the last two; Gate's host serves the xStocks tickers too), then the US stocks'
  * real-time quotes and charts (Nasdaq's, us-quotes.ts) and Nasdaq's per-symbol news feeds (www.nasdaq.com, news.ts, before the last two).
  * Polymarket's Data API (beside its CLOB) is asked for its latest trades only, keyless.
  * Polymarket US's public gateway is its keyless market data only: its signed API (api.polymarket.us) is never asked from here */
-export const PUBLIC_HOSTS: readonly string[] = ["external-api.kalshi.com", "gamma-api.polymarket.com", "clob.polymarket.com", "data-api.polymarket.com", "gateway.polymarket.us", "api.robinhood.com", "api.nasdaq.com", "cdn-api.cboe.com", "www.nasdaqtrader.com", "api.xstocks.fi", "li.quest", "api.exchange.coinbase.com", "www.okx.com", "api.gateio.ws", "futures.kraken.com", "www.deribit.com", "api-futures.kucoin.com", "contract.mexc.com", "www.nasdaq.com", "fapi.binance.com", "api.bybit.com"];
+export const PUBLIC_HOSTS: readonly string[] = ["external-api.kalshi.com", "gamma-api.polymarket.com", "clob.polymarket.com", "data-api.polymarket.com", "gateway.polymarket.us", "api.robinhood.com", "api.nasdaq.com", "www.nasdaqtrader.com", "api.xstocks.fi", "li.quest", "api.exchange.coinbase.com", "www.okx.com", "api.gateio.ws", "futures.kraken.com", "www.deribit.com", "api-futures.kucoin.com", "contract.mexc.com", "www.nasdaq.com", "fapi.binance.com", "api.bybit.com"];
 const KALSHI = "https://external-api.kalshi.com/trade-api/v2";
 const GAMMA = "https://gamma-api.polymarket.com";
 const CLOB = "https://clob.polymarket.com";

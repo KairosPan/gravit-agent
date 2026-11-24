@@ -20,12 +20,10 @@
  *               headers it already sends): daily bars back to 1990 or an ETF's start in one call (AAPL 9,266 days, 9.7 s), any window of
  *               dates — the source for MAX and for every page scrolled left before a chart's first day. A day whose open it gives as 0 (485 of
  *               AAPL's, nearly all of 1990 and 1991) is left out and said
- *   Cboe        GET cdn-api.cboe.com/api/global/delayed_quotes/charts/historical/{SYM}.json (public-stocks.ts): every day since 2004 in one
- *               file — the daily fallback where Robinhood and Nasdaq both refuse. Its rows on days the market was closed (2025-05-26 copies
- *               05-23) and its repeated dates (SPY 2024-12-31) are left out, and its volume from 2021-10-15 to 2022-06-17 (about 45% of the
- *               consolidated figure) is Nasdaq's for that stretch, or none where Nasdaq does not answer. Its month of ten-minute
- *               regular-session bars (charts/one_month, 15 minutes late) is the hourly and four-hour fallback, and its minutes with
- *               Nasdaq's one-price-a-minute samples the finer one, the latest session only
+ *   Cboe        no longer read (2026-11): its history files served the daily fallback (every day since 2004), the hourly one (a month of
+ *               ten-minute bars) and the minutes, and the host no longer answers this machine. Where Robinhood refuses the minutes, Nasdaq's
+ *               one-price-a-minute samples of the latest session answer (us-quotes.ts Nasdaq.chart); where Robinhood and Nasdaq both refuse
+ *               the days or the hours, the first refusal is the answer
  *
  * Every page says its source, that its prices are split-adjusted and not dividend-adjusted, and which hours it covers. The overnight
  * session (20:00–04:00 New York, Sunday to Thursday night) has no real keyless bars: an extended-hours series says each such night as a gap
@@ -60,9 +58,6 @@ const INTRADAY_KEEP_MS = 60_000;
 const DAILY_KEEP_MS = 600_000;
 /** how long one Robinhood page may take */
 const ROBINHOOD_MS = 8_000;
-/** Cboe's volume is short from here to there (history-sources.md: about 45% of the consolidated volume) */
-const CBOE_SHORT_FROM = fromEt(2021, 10, 15, 9, 30);
-const CBOE_SHORT_TO = fromEt(2022, 6, 17, 9, 30);
 
 type RhInterval = "minute" | "5minute" | "hour" | "day";
 type RhSpan = "day" | "week" | "month" | "3month" | "year" | "5year";
@@ -77,13 +72,8 @@ export interface StockHistoryDeps {
   clock: () => number;
   /** Nasdaq as the US stocks line reads it (its memory of each symbol's class, its hold after a refusal), for daily bars by dates */
   nasdaq: Nasdaq;
-  /** Cboe's every day since 2004, as public-stocks.ts reads and keeps it (its own non-trading days and repeated dates already left out) */
-  cboeDaily: (symbol: string) => Promise<Candle[] | Refusal>;
-  /** the latest session's minutes where Robinhood refuses: Cboe's real minutes and Nasdaq's samples, merged (public-stocks.ts) */
+  /** the latest session's minutes where Robinhood refuses: Nasdaq's one-price-a-minute samples (public-stocks.ts) */
   minutes: (symbol: string) => Promise<Candle[] | Refusal>;
-  /** Cboe's last month of ten-minute regular-session bars (public-stocks.ts, charts/one_month), each at its start: the hourly and four-hour
-   * fallback where Robinhood refuses (absent: none) */
-  month?: ((symbol: string) => Promise<Candle[] | Refusal>) | undefined;
 }
 
 const fin = (v: unknown): number | undefined => {
@@ -158,21 +148,6 @@ export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: strin
     return { bar, words: open ? "Today so far" : "Built from Robinhood's 1-minute bars of the session: its daily bar is not published yet" };
   };
 
-  /** Cboe's days, with its short volume taken from Nasdaq for that stretch, or left unsaid where Nasdaq does not answer */
-  const cboeDays = async (sym: string): Promise<Candle[] | Refusal> => {
-    const days = await d.cboeDaily(sym);
-    if (isRefusal(days)) return days;
-    if (!days.some((b) => b.t >= CBOE_SHORT_FROM && b.t <= CBOE_SHORT_TO)) return days;
-    const nq = await nasdaqDays(sym, ymd(CBOE_SHORT_FROM), ymd(CBOE_SHORT_TO));
-    const vol = new Map(nq && !isRefusal(nq) ? nq.bars.map((b) => [ymd(b.t), b.v]) : []);
-    return days.map((b) => {
-      if (b.t < CBOE_SHORT_FROM || b.t > CBOE_SHORT_TO) return b;
-      const { v: _short, ...rest } = b;
-      const v = vol.get(ymd(b.t));
-      return v !== undefined ? { ...rest, v } : rest;
-    });
-  };
-
   const intraday = async (sym: string, interval: CandleInterval, w: CandleWindow, now: number): Promise<CandlePage | Refusal> => {
     // hours over three months come from the three months' window; a page scrolled left before the month's window reaches is asked there too,
     // so it says where the window its view was drawn from starts — never the month's, newer than the bars it is asked before
@@ -182,19 +157,11 @@ export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: strin
     const rh = await robinhood(sym, rhInterval, span, bounds);
     const fold = interval === "15m" || interval === "4h";
     if (isRefusal(rh)) {
-      // hours from Cboe's month of ten-minute bars (15 minutes late, the regular session), where it answers
-      if ((interval === "1h" || interval === "4h") && d.month) {
-        const month = await d.month(sym);
-        if (!isRefusal(month) && month.length) {
-          const bars = foldBars(month, interval, "new-york");
-          return { bars, more: false, ...(bars.length ? { ends: `Intraday history starts ${nyDay(bars[0]!.t)} ${nyClock(bars[0]!.t)} New York: Cboe's month of ten-minute bars answered (Robinhood: ${rh.message})` } : {}), source: `Cboe · 10-minute regular-session bars, 15 min delayed · ${sym}`, adjustment: SPLIT_ONLY, session: REGULAR_ONLY, folded: `${INTERVAL_WORDS[interval]} bars folded from Cboe's 10-minute bars` };
-        }
-      }
-      // the latest session from Cboe's minutes (15 minutes late, the regular session) and Nasdaq's samples beside them
+      // the latest session from Nasdaq's one-price-a-minute samples
       const m = await d.minutes(sym);
       if (isRefusal(m)) return rh;
       const bars = foldBars(m, interval, "new-york");
-      return { bars, more: false, ...(bars.length ? { ends: `Intraday history starts ${nyDay(bars[0]!.t)} ${nyClock(bars[0]!.t)} New York: only the latest session's minutes answered (Robinhood: ${rh.message})` } : {}), source: `Cboe · 15 min delayed, regular session · Nasdaq one-price-a-minute samples outside it · ${sym}`, adjustment: SPLIT_ONLY, session: "the latest session only" };
+      return { bars, more: false, ...(bars.length ? { ends: `Intraday history starts ${nyDay(bars[0]!.t)} ${nyClock(bars[0]!.t)} New York: only the latest session's minutes answered (Robinhood: ${rh.message})` } : {}), source: `Nasdaq · one-price-a-minute samples · ${sym}`, adjustment: SPLIT_ONLY, session: "the latest session only" };
     }
     const bars = interval === "1m" || interval === "5m" || interval === "1h" ? rh.map(({ session: _s, ...b }) => b) : foldBars(rh, interval, "new-york");
     const first = bars[0]?.t;
@@ -228,7 +195,7 @@ export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: strin
       ...(weekly ? { folded: `weekly bars folded from ${source}'s daily bars (weeks from Monday)` } : {}),
       ...extra,
     });
-    // A PAGE SCROLLED LEFT: Nasdaq's days before the chart's first, by dates, one request — Cboe's where Nasdaq refuses
+    // A PAGE SCROLLED LEFT: Nasdaq's days before the chart's first, by dates, one request
     if (w.since === undefined) {
       const until = w.until ?? now;
       const n = limitOf(w);
@@ -243,10 +210,7 @@ export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: strin
         const started = !bars.length || bars[0]!.t > fromEt(Number(from.slice(0, 4)), Number(from.slice(5, 7)), Number(from.slice(8, 10)), 9, 30) + 10 * DAY;
         return label(bars, "Nasdaq", started ? { ends: bars.length ? `Nasdaq's daily history of ${sym} starts ${nyDay(bars[0]!.t)}${nq.noOpen ? `: its days before give no opening price and are left out` : ""}` : `Nasdaq keeps no daily bars of ${sym} before ${nyDay(until)}` } : { more: true });
       }
-      const cb = await cboeDays(sym);
-      if (isRefusal(cb)) return isRefusal(nq) ? nq : cb;
-      const bars = cb.filter((b) => b.t < until).slice(-(weekly ? n * 5 : n));
-      return label(bars, "Cboe", bars.length && bars.length >= (weekly ? n * 5 : n) ? { more: true } : { ends: bars.length ? `Cboe's daily history of ${sym} starts ${nyDay(bars[0]!.t)}` : `Cboe keeps no daily bars of ${sym} before ${nyDay(until)}` });
+      return nq;
     }
     // A FIRST VIEW: Robinhood's year or five years where they reach the start, Nasdaq's by dates for anything older (MAX: all of it).
     // A dated window (an event's: since and until both) asks Nasdaq only to until's date, and the session's minutes only where it
@@ -265,7 +229,7 @@ export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: strin
     }
     if (!days) {
       const nq = await nasdaqDays(sym, since <= 0 ? "1970-01-01" : ymd(since), ymd(end));
-      // Nasdaq answering no days at all for dates the market traded is no answer: Cboe's are asked
+      // Nasdaq answering no days at all for dates the market traded is no answer: the first refusal is kept
       if (nq === null || (!isRefusal(nq) && !nq.bars.length)) refused ??= no("E_VENUE_REJECTED", { venue, message: `Nasdaq keeps no daily bars of ${sym}` });
       else if (isRefusal(nq)) refused ??= nq;
       else {
@@ -276,15 +240,8 @@ export function stockHistory(d: StockHistoryDeps, venue: string): (symbol: strin
         if (nq.noOpen && nq.lastNoOpen !== undefined && nq.lastNoOpen >= (first ?? Number.POSITIVE_INFINITY)) noOpen = `Nasdaq gives no opening price for ${nq.noOpen.toLocaleString("en-US")} of its days, the last ${nyDay(nq.lastNoOpen)}: they are left out, never given one`;
       }
     }
-    if (!days) {
-      const cb = await cboeDays(sym);
-      if (isRefusal(cb)) return refused ?? cb;
-      days = cb.filter((b) => b.t >= since);
-      source = "Cboe";
-      const first = days[0]?.t;
-      if (first !== undefined && first > since + 10 * DAY) ends = `Cboe's daily history of ${sym} starts ${nyDay(first)}`;
-    }
-    // held to the calendar's market days, as Cboe's rows are when they are read (public-stocks.ts): a day the calendar wrongly called closed
+    if (!days) return refused ?? no("E_VENUE_REJECTED", { venue, message: `No daily bars of ${sym} answered` });
+    // held to the calendar's market days, as Nasdaq's rows are: a day the calendar wrongly called closed
     // would lose its real bar here — calendar.ts says how far back its rules hold
     days = days.filter((b) => b.t >= since && isMarketDay(b.t));
     const today = w.until !== undefined && w.until <= latestOpen(now) ? undefined : await todayFrom(sym, days, now);

@@ -1,15 +1,16 @@
 /** A US STOCK'S LONG PRICE HISTORY, keyless (live/history-stocks.ts, feat/paper-live phase H), against stand-ins that answer as each source
  * answered live on 2026-10-16 and 2026-10-17: Robinhood's historicals (fixed windows, each bar's session, its interpolated filler),
- * Nasdaq's daily bars by dates (us-quotes.ts Nasdaq.daily: its days with no opening price left out and counted), Cboe's every day since 2004
- * (public-stocks.ts: its copied holiday rows and repeated dates left out). Which window each range and size asks, the folds (15m from 5m,
+ * Nasdaq's daily bars by dates (us-quotes.ts Nasdaq.daily: its days with no opening price left out and counted); Cboe is no longer read.
+ * Which window each range and size asks, the folds (15m from 5m,
  * 4h from New York's hours, weeks from Monday), today's bar built from the session's minutes, the nights said as gaps, where intraday
- * history starts, a page scrolled left by dates, Cboe's short volume, and the words on every page. Nothing leaves the process. */
+ * history starts, a page scrolled left by dates, the first refusal kept where both refuse, and the words on every page. Nothing leaves the process. */
 import { describe, expect, it } from "vitest";
 import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import { et, fromEt, isMarketDay } from "../../src/calendar.ts";
 import { no } from "../../src/refuse.ts";
 import { nyDay, rangeSince } from "../../src/live/history.ts";
 import { EXTENDED_HOURS, LATE_OPEN_WORDS, REGULAR_DAYS, REGULAR_FROM_TEN, REGULAR_ONLY, ROBINHOOD_HISTORICALS, SPLIT_ONLY, stockHistory, type StockHistoryDeps } from "../../src/live/history-stocks.ts";
+import { PUBLIC_HOSTS } from "../../src/live/public-markets.ts";
 import { usStocksPublic } from "../../src/live/public-stocks.ts";
 import type { Candle, CandlePage } from "../../src/live/trade.ts";
 import type { Http, HttpReply } from "../../src/live/types.ts";
@@ -119,7 +120,7 @@ function nasdaq(o: { refuse?: Refusal; from?: string } = {}) {
   return { nasdaq: n as unknown as Nasdaq, asked };
 }
 
-function history(o: { http?: Http; nq?: ReturnType<typeof nasdaq>; cboe?: StockHistoryDeps["cboeDaily"]; minutes?: StockHistoryDeps["minutes"]; now?: number } = {}) {
+function history(o: { http?: Http; nq?: ReturnType<typeof nasdaq>; minutes?: StockHistoryDeps["minutes"]; now?: number } = {}) {
   const r = robinhood(o.now ?? NOW);
   const nq = o.nq ?? nasdaq();
   const paced: string[] = [];
@@ -129,8 +130,7 @@ function history(o: { http?: Http; nq?: ReturnType<typeof nasdaq>; cboe?: StockH
       pace: async (host) => void paced.push(host),
       clock: () => o.now ?? NOW,
       nasdaq: nq.nasdaq,
-      cboeDaily: o.cboe ?? (async () => no("E_VENUE_UNREACHABLE", { venue: "cboe", message: "Cboe did not answer" })),
-      minutes: o.minutes ?? (async () => no("E_VENUE_UNREACHABLE", { venue: "cboe", message: "Cboe did not answer" })),
+      minutes: o.minutes ?? (async () => no("E_VENUE_REJECTED", { venue: "cboe", message: "Nasdaq keeps no minutes" })),
     },
     "cboe",
   );
@@ -235,12 +235,12 @@ describe("intraday: Robinhood's fixed windows", () => {
     expect(back.ends).toBe(`Intraday history starts ${nyDay(month.bars[0]!.t)} 04:00 New York: Robinhood publishes no older hourly bars without a broker's key`);
   });
 
-  it("where Robinhood keeps no history of a share: the latest session's minutes from Cboe and Nasdaq, said as theirs; both refusing, Robinhood's words", async () => {
+  it("where Robinhood keeps no history of a share: the latest session's minutes from Nasdaq's samples, said as its; both refusing, Robinhood's words", async () => {
     const minutes: Candle[] = [{ t: fromEt(2026, 10, 13, 9, 31), o: 1, h: 2, l: 1, c: 2, v: 10 }, { t: fromEt(2026, 10, 13, 9, 34), o: 2, h: 3, l: 2, c: 3, v: 5 }];
     const s = history({ minutes: async () => minutes });
     const p = page(await s.h("ZZZZ", "5m", { since: rangeSince("1D", NOW), limit: 5_000, range: "1D" }));
     expect(p.bars).toEqual([{ t: fromEt(2026, 10, 13, 9, 30), o: 1, h: 3, l: 1, c: 3, v: 15 }]);
-    expect(p.source).toBe("Cboe · 15 min delayed, regular session · Nasdaq one-price-a-minute samples outside it · ZZZZ");
+    expect(p.source).toBe("Nasdaq · one-price-a-minute samples · ZZZZ");
     const none = await history().h("ZZZZ", "5m", { since: rangeSince("1D", NOW), limit: 5_000, range: "1D" });
     expect((none as Refusal).message).toBe("Robinhood keeps no history of ZZZZ");
   });
@@ -353,79 +353,34 @@ describe("daily and weekly: Robinhood's year or five, Nasdaq's by dates for all 
     expect(both.nq.asked).toEqual([["AAPL", "2017-11-27", "2026-10-13"]]);
   });
 
-  it("where Robinhood and Nasdaq both refuse, Cboe's days — their short volume from 2021-10-15 to 2022-06-17 left unsaid where Nasdaq gives none", async () => {
-    const cboe: Candle[] = [fromEt(2021, 10, 14, 9, 30), fromEt(2021, 10, 15, 9, 30), fromEt(2022, 6, 17, 9, 30), fromEt(2022, 6, 21, 9, 30), fromEt(2026, 10, 12, 9, 30)].map((t) => ({ t, o: 10, h: 11, l: 9, c: 10.5, v: 777 }));
+  it("where Robinhood and Nasdaq both refuse: the first refusal is the answer, for a first view and for a page scrolled left, and no Cboe days are asked", async () => {
     const refuse = no("E_VENUE_GEOBLOCKED", { venue: "nasdaq", message: "Nasdaq does not serve this location: that is its own rule, and the market does not look for a way around it" });
     const down: Http = async () => json({ detail: "unavailable" }, 503);
-    const s = history({ http: down, nq: nasdaq({ refuse }), cboe: async () => cboe });
-    const p = page(await s.h("AAPL", "1d", { since: fromEt(2021, 10, 1), limit: 5_000 }));
-    expect(p.bars.map((b) => b.v)).toEqual([777, undefined, undefined, 777, 777]);
-    expect(p.source).toBe("Cboe · AAPL");
-    // Nasdaq answering that stretch: its volume in place of Cboe's
-    const nq = nasdaq();
-    const n = nq.nasdaq.daily.bind(nq.nasdaq);
-    let first = true;
-    (nq.nasdaq as { daily: Nasdaq["daily"] }).daily = async (sym, from, to) => (first ? ((first = false), refuse) : n(sym, from, to));
-    const fixed = page(await history({ http: down, nq, cboe: async () => cboe }).h("AAPL", "1d", { since: fromEt(2021, 10, 1), limit: 5_000 }));
-    expect(fixed.bars.map((b) => b.v)).toEqual([777, 5000, 5000, 777, 777]);
+    // a first view: Robinhood refused first, and its refusal is kept
+    const first = await history({ http: down, nq: nasdaq({ refuse }) }).h("AAPL", "1d", { since: fromEt(2025, 10, 1), limit: 5_000 });
+    expect(isRefusal(first)).toBe(true);
+    expect((first as Refusal).code).not.toBe("E_VENUE_GEOBLOCKED");
+    // a page scrolled left asks Nasdaq alone: its refusal is the answer
+    const left = await history({ http: down, nq: nasdaq({ refuse }) }).h("AAPL", "1d", { until: fromEt(2021, 6, 22, 9, 30), limit: 300 });
+    expect((left as Refusal).code).toBe("E_VENUE_GEOBLOCKED");
   });
 });
 
 describe("through the US stocks line (public-stocks.ts)", () => {
-  it("hours where Robinhood keeps none: Cboe's month of ten-minute regular-session bars, each at its start (ten minutes before its label), folded into New York's hours", async () => {
-    const month = json({ timestamp: "2026-10-13 14:45:06", symbol: "AAPL", data: [["09:40", 330, 331, 329, 330.5], ["09:50", 330.5, 332, 330, 331], ["10:00", 331, 331.5, 330.2, 331.2], ["10:10", 331.2, 333, 331, 332.8]].map(([clock, o, h, l, c], i) => ({ datetime: `2026-10-12T${clock}:00`, sequence_number: i, price: { open: o, high: h, low: l, close: c }, volume: { stock_volume: 1000 } })) });
-    const http: Http = async (url) => (url.includes("/charts/one_month/AAPL.json") ? month : json({ detail: "unavailable" }, 503));
-    const src = usStocksPublic({ http, clock: () => NOW, pace: async () => undefined });
-    const p = (await src.candles!("AAPL", "1h", { since: fromEt(2026, 10, 12, 0, 0) })) as CandlePage;
-    // 09:30–09:40, 09:40–09:50 and 09:50–10:00 are the 09:00 hour's; 10:00–10:10 the 10:00 hour's
-    expect(p.bars).toEqual([
-      { t: fromEt(2026, 10, 12, 9, 0), o: 330, h: 332, l: 329, c: 331.2, v: 3000 },
-      { t: fromEt(2026, 10, 12, 10, 0), o: 331.2, h: 333, l: 331, c: 332.8, v: 1000 },
-    ]);
-    expect([p.source, p.session, p.folded]).toEqual(["Cboe · 10-minute regular-session bars, 15 min delayed · AAPL", REGULAR_ONLY, "hourly bars folded from Cboe's 10-minute bars"]);
-  });
-
-  /** Cboe's daily file as it answered live, with its own quirks: a closed day's row copying the day before (Memorial Day 2025), and a date
-   * written twice */
-  const CBOE_DAYS = json({ timestamp: "11:00:08", data: [{ date: "2025-05-23", volume: 100, open: 1, high: 2, low: 1, close: 2 }, { date: "2025-05-26", volume: 100, open: 1, high: 2, low: 1, close: 2 }, { date: "2025-05-27", volume: 200, open: 2, high: 3, low: 2, close: 3 }, { date: "2025-05-27", volume: 999, open: 9, high: 9, low: 9, close: 9 }, { date: "2025-05-28", volume: 300, open: 3, high: 4, low: 3, close: 4 }] });
-  it("Cboe's days where the others refuse: its copied holiday row and its repeated date left out; Robinhood asked first at its fixed host", async () => {
+  it("no request reaches Cboe: Robinhood and Nasdaq refusing, the days, hours and minutes are refused or Nasdaq's, and the host is off the allowlist", async () => {
     const sent: string[] = [];
     const http: Http = async (url) => {
       sent.push(url);
-      if (url.includes("/charts/historical/SPY.json")) return CBOE_DAYS;
+      expect(url).not.toContain("cboe.com");
       if (url.includes("api.nasdaq.com")) return { status: 403, body: undefined, text: "<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD></HTML>" };
       return json({ detail: "unavailable" }, 503);
     };
     const src = usStocksPublic({ http, clock: () => NOW, pace: async () => undefined });
-    const p = (await src.candles!("SPY", "1d", { since: fromEt(2025, 5, 1) })) as CandlePage;
-    expect(p.bars.map((b) => [et(b.t).m, et(b.t).d, b.c])).toEqual([[5, 23, 2], [5, 27, 3], [5, 28, 4]]);
-    expect(sent[0]!.startsWith(`${ROBINHOOD_HISTORICALS}/SPY/?interval=day&span=year&bounds=regular`)).toBe(false);
-    expect(sent.some((u) => u.startsWith(`${ROBINHOOD_HISTORICALS}/SPY/?interval=day&span=5year&bounds=regular`))).toBe(true);
-    expect(sent.every((u) => ["api.robinhood.com", "api.nasdaq.com", "cdn-api.cboe.com"].includes(new URL(u).host))).toBe(true);
-  });
-
-  /** three rows of Cboe's SPY file as it answered on 2026-11-11: Friday 18 June 2021 is a session, with its own prices and volume — Juneteenth
-   * closed no exchange before Monday 20 June 2022, and the file has no row for that day */
-  const CBOE_JUNE_2021 = json({ timestamp: "11:00:08", data: [{ date: "2021-06-17", volume: 83963699, open: 421.62, high: 423.02, low: 419.32, close: 421.97 }, { date: "2021-06-18", volume: 110255685, open: 417.16, high: 417.83, low: 414.7, close: 414.92 }, { date: "2021-06-21", volume: 70626500, open: 416.85, high: 421.06, low: 415.93, close: 420.86 }] });
-  const JUNE_2021_CLOSES = [["Thu 17 Jun 2021", 421.97], ["Fri 18 Jun 2021", 414.92], ["Mon 21 Jun 2021", 420.86]];
-  const cboeJune2021 = () => {
-    const http: Http = async (url) => {
-      if (url.includes("/charts/historical/SPY.json")) return CBOE_JUNE_2021;
-      if (url.includes("api.nasdaq.com")) return { status: 403, body: undefined, text: "<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD></HTML>" };
-      return json({ detail: "unavailable" }, 503);
-    };
-    return usStocksPublic({ http, clock: () => NOW, pace: async () => undefined });
-  };
-
-  it("Cboe's days where the others refuse keep the session of Friday 18 June 2021: a first view", async () => {
-    const p = (await cboeJune2021().candles!("SPY", "1d", { since: fromEt(2021, 6, 1) })) as CandlePage;
-    expect(p.bars.map((b) => [nyDay(b.t), b.c])).toEqual(JUNE_2021_CLOSES);
-    expect(p.source).toBe("Cboe · SPY");
-  });
-
-  it("Cboe's days where Nasdaq refuses keep it on a page scrolled left too: the file's rows are held to the same calendar as they are read", async () => {
-    const p = (await cboeJune2021().candles!("SPY", "1d", { until: fromEt(2021, 6, 22, 9, 30), limit: 300 })) as CandlePage;
-    expect(p.bars.map((b) => [nyDay(b.t), b.c])).toEqual(JUNE_2021_CLOSES);
-    expect(p.source).toBe("Cboe · SPY");
+    for (const size of ["1d", "1h", "1m"] as const) expect(isRefusal(await src.candles!("AAPL", size, { since: fromEt(2026, 10, 1) }))).toBe(true);
+    for (const o of [{ limit: 3 }, { q: "Apple", limit: 3 }, { q: "AAPL", limit: 3 }]) await src.listings(o);
+    await src.line?.("AAPL");
+    expect(sent.some((u) => u.includes("cboe.com"))).toBe(false);
+    expect(sent.some((u) => u.includes("api.robinhood.com") || u.includes("api.nasdaq.com"))).toBe(true);
+    expect(PUBLIC_HOSTS.includes("cdn-api.cboe.com")).toBe(false);
   });
 });

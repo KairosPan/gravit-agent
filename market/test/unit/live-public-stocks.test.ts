@@ -271,27 +271,16 @@ describe("US stocks, keyless: Nasdaq's last close where no real-time source answ
     expect(CBOE_DELAY_MS).toBe(15 * 60_000);
   });
 
-  it("price history where Robinhood keeps none and Nasdaq keeps no minutes: Cboe's minutes folded into 5m and 1h bars, its daily closes for 1d (since the start asked), the volume in shares", async () => {
-    // Nasdaq keeps no daily bars of AAPL here either: the days are Cboe's
+  it("price history where Robinhood keeps none and Nasdaq keeps no minutes: the minutes and days are refused, and nothing is asked of Cboe", async () => {
+    // Nasdaq keeps no daily bars of AAPL here either
     const net = network([["fromdate=", NQ_NONE], ...routes(), ...noRealTime()]);
     const src = usStocksPublic({ http: net.http, clock: () => NOW, pace: async () => undefined });
-    const five = ((await src.candles!("AAPL", "5m", { since: NOW - 3_600_000 })) as CandlePage).bars;
-    expect(five).toEqual([
-      { t: fromEt(2026, 10, 13, 9, 30), o: 344.665, h: 347.61, l: 344.665, c: 346.8, v: 2137693 },
-      { t: fromEt(2026, 10, 13, 9, 35), o: 346.8, h: 348.1, l: 346.1, c: 347.5, v: 400000 },
-    ]);
-    // a bar that began before the start asked is not one of them (the exchanges' rule): the hour is asked from two hours back
-    const hour = ((await src.candles!("aapl", "1h", { since: NOW - 2 * 3_600_000 })) as CandlePage).bars;
-    expect(hour).toEqual([{ t: fromEt(2026, 10, 13, 9, 0), o: 344.665, h: 348.1, l: 344.665, c: 347.5, v: 2537693 }]);
-    const days = (await src.candles!("AAPL", "1d", { since: fromEt(2026, 10, 1) })) as CandlePage;
-    expect(days.bars.map((b) => [b.t, b.c])).toEqual([[fromEt(2026, 10, 9, 9, 30), 341], [fromEt(2026, 10, 12, 9, 30), 340.97]]);
-    expect([days.source, days.adjustment]).toEqual(["Cboe · AAPL", "split-adjusted, not dividend-adjusted"]);
-    // the minutes once, the days once: both kept. Cboe's month of ten-minute bars, the hourly fallback first, has no file here (asked each
-    // time: a refusal is not kept)
-    await src.candles!("AAPL", "1h", { since: NOW - 2 * 3_600_000 });
-    expect(net.sent.filter((s) => s.url.includes("/charts/")).map((s) => s.url.split("/charts/")[1])).toEqual(["intraday/AAPL.json", "one_month/AAPL.json", "historical/AAPL.json", "one_month/AAPL.json"]);
+    const five = (await src.candles!("AAPL", "5m", { since: NOW - 3_600_000 })) as Refusal;
+    expect(isRefusal(five)).toBe(true);
+    expect(isRefusal(await src.candles!("aapl", "1h", { since: NOW - 2 * 3_600_000 }))).toBe(true);
+    expect(isRefusal(await src.candles!("AAPL", "1d", { since: fromEt(2026, 10, 1) }))).toBe(true);
+    expect(cboeSent(net)).toEqual([]);
     expect((await src.candles!("^SPX", "1h", { since: NOW - 3_600_000 }) as Refusal).code).toBe("E_ACCOUNT_BAD_ACTION");
-    expect((await src.candles!("ZZZZ", "1h", { since: NOW - 3_600_000 }) as Refusal).message).toContain("keeps no history");
   });
 
   it("Nasdaq refusing this network — a 451 — off-hours is its answer for the whole listing, held back as any public source's is; one share's daily read refused beside others answering leaves that line out", async () => {
@@ -541,42 +530,31 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Nasdaq'
     expect(e.note).toBe("after-hours trading is on until 17:00 New York: the price is Robinhood's real-time quote; the regular session opens Mon 30 Nov, 09:30 New York");
   });
 
-  it("price history where Robinhood keeps none: Cboe's real minute bars and Nasdaq's one-price-a-minute samples for the minutes Cboe has none of (pre-market, the minutes since Cboe's last), asked at once and merged by time, folded into 5m and 1h bars at their real instants; a bar's volume only where every minute has one; either refusing leaves the other's; 1d Cboe's where Nasdaq has no days", async () => {
-    // Nasdaq's points on Tuesday 13 October: 04:00, 04:01 and 04:07 in pre-market; 09:31, which Cboe has (its own bar is taken); 09:38 and
-    // 10:28, after Cboe's last minute (09:36), fifteen minutes behind (x written as New York's wall clock)
+  it("price history where Robinhood keeps none: Nasdaq's one-price-a-minute samples alone, folded into 5m and 1h bars at their real instants, no volume said; Nasdaq refusing, or keeping no minutes, is a refusal; nothing is asked of Cboe", async () => {
+    // Nasdaq's points on Tuesday 13 October: 04:00, 04:01 and 04:07 in pre-market, 09:31 and 09:38 in the session, 10:28 (x written as New York's wall clock)
     const wall = (h: number, m: number) => Date.UTC(2026, 9, 13, h, m);
     const chart = json({ data: { symbol: "AAPL", timeAsOf: "Oct 13, 2026 10:30 AM ET", chart: [[4, 0, 342.21], [4, 1, 341.77], [4, 7, 343.08], [9, 31, 346.97], [9, 38, 347.9], [10, 28, 349]].map(([h, m, y]) => ({ z: { dateTime: `${h}:${String(m).padStart(2, "0")} AM ET`, value: String(y) }, x: wall(h!, m!), y })) } });
     const net = network(live(NOW, [[nq("AAPL", "stocks", "chart"), chart]]));
     const src = usStocksPublic({ http: net.http, clock: () => NOW, pace: async () => undefined });
-    const five = ((await src.candles!("AAPL", "5m", { since: fromEt(2026, 10, 13, 0, 0) })) as CandlePage).bars;
-    expect(five).toEqual([
+    const p = (await src.candles!("AAPL", "5m", { since: fromEt(2026, 10, 13, 0, 0) })) as CandlePage;
+    expect(p.bars).toEqual([
       { t: fromEt(2026, 10, 13, 4, 0), o: 342.21, h: 342.21, l: 341.77, c: 341.77 },
       { t: fromEt(2026, 10, 13, 4, 5), o: 343.08, h: 343.08, l: 343.08, c: 343.08 },
-      // Cboe's 09:31 and 09:32, their real range and volume (Nasdaq's 09:31 sample left out)
-      { t: fromEt(2026, 10, 13, 9, 30), o: 344.665, h: 347.61, l: 344.665, c: 346.8, v: 2137693 },
-      // Cboe's 09:36 and Nasdaq's 09:38 sample: no volume said for a bar with a sampled minute in it
-      { t: fromEt(2026, 10, 13, 9, 35), o: 346.8, h: 348.1, l: 346.1, c: 347.9 },
+      { t: fromEt(2026, 10, 13, 9, 30), o: 346.97, h: 346.97, l: 346.97, c: 346.97 },
+      { t: fromEt(2026, 10, 13, 9, 35), o: 347.9, h: 347.9, l: 347.9, c: 347.9 },
       { t: fromEt(2026, 10, 13, 10, 25), o: 349, h: 349, l: 349, c: 349 },
     ]);
+    expect(p.source).toBe("Nasdaq · one-price-a-minute samples · AAPL");
     const hour = ((await src.candles!("AAPL", "1h", { since: fromEt(2026, 10, 13, 0, 0) })) as CandlePage).bars;
-    expect(hour).toEqual([
-      { t: fromEt(2026, 10, 13, 4, 0), o: 342.21, h: 343.08, l: 341.77, c: 343.08 },
-      { t: fromEt(2026, 10, 13, 9, 0), o: 344.665, h: 348.1, l: 344.665, c: 347.9 },
-      { t: fromEt(2026, 10, 13, 10, 0), o: 349, h: 349, l: 349, c: 349 },
-    ]);
-    // both asked once (kept), at the same time — Nasdaq's after its turn in its line, so in either order — the days are Cboe's
-    // (Cboe's month of ten-minute bars, the hourly fallback first, has no file here)
-    expect(net.sent.filter((s) => s.url.includes("/chart")).map((s) => s.url.replace(/^https:\/\/[^/]+/, "")).sort()).toEqual(["/api/global/delayed_quotes/charts/intraday/AAPL.json", "/api/global/delayed_quotes/charts/one_month/AAPL.json", "/api/quote/AAPL/chart?assetclass=stocks"]);
-    expect(((await src.candles!("AAPL", "1d", { since: fromEt(2026, 10, 1) })) as CandlePage).bars.map((b) => b.c)).toEqual([341, 340.97]);
-    // Nasdaq's edge refusing: Cboe's regular-session minutes alone
+    expect(hour.map((b) => b.v)).toEqual([undefined, undefined, undefined]);
+    expect(hour.map((b) => b.t)).toEqual([fromEt(2026, 10, 13, 4, 0), fromEt(2026, 10, 13, 9, 0), fromEt(2026, 10, 13, 10, 0)]);
+    expect(cboeSent(net)).toEqual([]);
+    // Nasdaq's edge refusing, and Robinhood: Robinhood's refusal, the source asked first
     const refused = network(live(NOW, [["/chart?", { status: 403, body: undefined, text: "<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD></HTML>" }]]));
-    const cboe = ((await usStocksPublic({ http: refused.http, clock: () => NOW, pace: async () => undefined }).candles!("AAPL", "5m", { since: NOW - 3_600_000 })) as CandlePage).bars;
-    expect(cboe[0]).toEqual({ t: fromEt(2026, 10, 13, 9, 30), o: 344.665, h: 347.61, l: 344.665, c: 346.8, v: 2137693 });
-    // Cboe refusing: Nasdaq's samples alone; both refusing: Cboe's refusal
-    const noCboe = network([["/charts/intraday/", { status: 503, body: undefined, text: "" }], ...live(NOW, [[nq("AAPL", "stocks", "chart"), chart]])]);
-    expect(((await usStocksPublic({ http: noCboe.http, clock: () => NOW, pace: async () => undefined }).candles!("AAPL", "1h", { since: fromEt(2026, 10, 13, 0, 0) })) as CandlePage).bars.map((b) => b.v)).toEqual([undefined, undefined, undefined]);
-    const neither = network([["/charts/intraday/", { status: 503, body: undefined, text: "" }], ["/chart?", { status: 403, body: undefined, text: "<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD></HTML>" }], ...live(NOW)]);
-    // both refusing: Robinhood's refusal, the source asked first
+    const r = (await usStocksPublic({ http: refused.http, clock: () => NOW, pace: async () => undefined }).candles!("AAPL", "5m", { since: NOW - 3_600_000 })) as Refusal;
+    expect(isRefusal(r)).toBe(true);
+    expect(cboeSent(refused)).toEqual([]);
+    const neither = network([["/chart?", { status: 403, body: undefined, text: "<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD></HTML>" }], ...live(NOW)]);
     expect(((await usStocksPublic({ http: neither.http, clock: () => NOW, pace: async () => undefined }).candles!("AAPL", "1h", { since: NOW - 3_600_000 })) as Refusal).message).toBe("Robinhood keeps no history of AAPL");
   });
 
