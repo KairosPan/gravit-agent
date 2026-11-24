@@ -96,7 +96,8 @@ function rowOf(viewId, c, symbol, { chips: chipsOf, after = 60, benchmark = null
   const source = sourceOf(c?.source);
   const measured = c?.state === 'measured' && c?.measure !== null && typeof c?.measure === 'object';
   const changes = measured ? list(c.measure.changes).filter(ch => Number.isInteger(ch?.k)) : [];
-  const raw = rawChips !== null && changes.length > 0 && changes.every(ch => valueOf(ch, 'benchmark') === null);
+  // raw only when some horizon has a raw change to show: with every horizon still ahead, the row stays as it is
+  const raw = rawChips !== null && changes.some(ch => valueOf(ch, 'raw') !== null) && changes.every(ch => valueOf(ch, 'benchmark') === null);
   const chips = !measured ? [] : raw ? rawChips(c.measure) : chipsOf(c.measure);
   const price = num(c?.price);
   const skipped = num(c?.skipped);

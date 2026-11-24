@@ -191,6 +191,9 @@ test('a case older than the benchmark\'s bars shows its raw chips, said to be ra
   assert.doesNotMatch(rowOf(h, 'ANT 上市'), /原始涨跌/);
   assert.doesNotMatch(drawV2(EVENT_VIEW_V2_RAW), /原始涨跌：/);
   assert.match(drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(old) }, EN), /<span class="et-flag">Raw changes: SPY has no bars this early<\/span>/);
+  // every horizon still ahead (no raw change either): not said to be raw
+  const ahead = c => (c.id === 'ev-SKPD-2021-03-10' ? { ...c, measure: { ...c.measure, changes: c.measure.changes.map(ch => ({ ...ch, r: null, x: null })) } } : c);
+  assert.doesNotMatch(rowOf(drawV2({ ...EVENT_VIEW_V2, cases: EVENT_VIEW_V2.cases.map(ahead) }), 'SKPD 恢复交易'), /原始涨跌/);
 });
 
 test('a measured row whose volume was not checked says so, unless it is a listing day', () => {
