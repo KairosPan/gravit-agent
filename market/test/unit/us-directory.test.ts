@@ -119,6 +119,7 @@ describe("usDirectory", () => {
     for (const a of asked) {
       expect(a.init?.maxText).toBeGreaterThanOrEqual(1_000_000);
       expect(Object.keys(a.init?.headers ?? {}).map((k) => k.toLowerCase())).not.toContain("user-agent");
+      expect(a.init?.headers?.accept).toBe("text/plain");
     }
   });
 });
@@ -131,5 +132,13 @@ describe("fixedHosts", () => {
     await guarded(`${NASDAQ_TRADER}/nasdaqlisted.txt`, { maxText: 2_000_000 });
     expect(asked[0]?.init?.maxText).toBe(2_000_000);
     expect(Object.keys(asked[0]?.init?.headers ?? {})).not.toContain("user-agent");
+  });
+
+  it("lets the directory's accept: text/plain replace the guard's application/json (Nasdaq Trader answers 406 to JSON)", async () => {
+    const { http, asked } = standIn();
+    const guarded = fixedHosts(http, PUBLIC_HOSTS, 5_000);
+    await usDirectory({ http: guarded, pace: async () => undefined, clock: () => 0 }).entries();
+    expect(asked.length).toBe(2);
+    for (const a of asked) expect(a.init?.headers?.accept).toBe("text/plain");
   });
 });

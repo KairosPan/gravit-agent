@@ -108,7 +108,9 @@ export function usDirectory(deps: { http: Http; pace: Pace; clock: () => number 
     // any other, never a rejection kept for twelve hours
     try {
       await pace(VENUE);
-      r = await http(`${NASDAQ_TRADER}/${name}`, { maxText: FILE_TEXT_MAX });
+      // asked as the plain text it is: the host guard's default `accept: application/json` gets HTTP 406 from Nasdaq Trader (seen live
+      // 2026-11-24, the first read after the restart)
+      r = await http(`${NASDAQ_TRADER}/${name}`, { maxText: FILE_TEXT_MAX, headers: { accept: "text/plain" } });
     } catch {
       return no("E_VENUE_UNREACHABLE", { venue: VENUE, message: `${NAME} did not answer` });
     }
