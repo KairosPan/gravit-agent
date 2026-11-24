@@ -1,12 +1,13 @@
 // face/plugins/analog/lib/event-summary.mjs
 /**
- * What a group of events did afterwards against the market, the group's median path, and the order its cases are
- * shown in. Pure functions: no clock, no I/O.
+ * What a group of events did afterwards, at the horizons the call chose, against the benchmark or raw, the group's
+ * median path, and the order its cases are shown in. Pure functions: no clock, no I/O.
  *
- * `n` counts a group's measured cases and `n0`, `n1`, `n5`, `n20` and `n60` those of them with a change against the
- * market at each horizon. A horizon reached by fewer than 8 cases gets no median and no share below zero (and, at 60
- * sessions, no quartiles), so a handful of cases never reads as a median; the worst day 0 is named only when day 0 has
- * its median. A share below zero counts the changes strictly under 0 over that horizon's count.
+ * `n` counts a group's measured cases and each horizon's `n` those of them with a figure there: the change against
+ * the benchmark (`x`) under `benchmark`, the raw change (`r`) under `raw`. A horizon reached by fewer than 8 cases gets
+ * no median and no share below zero (and, at the last horizon, no quartiles), so a handful of cases never reads as a
+ * median; the worst at the first horizon is named only when that horizon has its median. A share below zero counts
+ * the figures strictly under 0 over that horizon's count.
  *
  * A group's path runs from day 0 for as long as 8 or more of its measured cases have the session: at each, the median
  * and the quartiles of their values against the market, indexed to 100 at the close before day 0, to two decimals.
@@ -15,51 +16,66 @@ import { MIN_GROUP, quantile } from "./stats.mjs";
 
 /**
  * @typedef {import("./events.mjs").Measure} Measure
- * @typedef {{ n: number, n0: number, n1: number, n5: number, n20: number, n60: number, x0: number | null,
- *   x1: number | null, x5: number | null, x20: number | null, x60: number | null, x60q1: number | null,
- *   x60q3: number | null, down0: number | null, down1: number | null, down5: number | null, down20: number | null,
- *   down60: number | null, worst0: { id: string, x0: number } | null }} EventSummary
+ * @typedef {import("./events.mjs").Change} Change
+ * @typedef {"benchmark" | "raw"} Against
+ * @typedef {{ k: number, n: number, median: number | null, down: number | null }} AtHorizon
+ * @typedef {{ n: number, against: Against, at: AtHorizon[], q1: number | null, q3: number | null,
+ *   worst: { id: string, value: number } | null }} EventSummary
  * @typedef {{ median: number[], q1: number[], q3: number[] }} Paths
  */
-
-/** The horizons, in sessions after day 0, a summary reads. */
-export const HORIZONS = [0, 1, 5, 20, 60];
 
 /** @param {number} value @returns {number} */
 const twoDecimals = (value) => Math.round(value * 100) / 100;
 
 /**
- * The summary of a group of events.
+ * A change's figure: against the benchmark (`x`) or raw (`r`); null when it has none.
+ * @param {Change | undefined} change
+ * @param {Against} against
+ * @returns {number | null}
+ */
+export function valueOf(change, against) {
+  if (!change) return null;
+  const v = against === "raw" ? change.r : change.x;
+  return typeof v === "number" ? v : null;
+}
+
+/**
+ * The summary of a group of events at `horizons`; a case's figure at horizon `j` is its `measure.changes[j]`.
  * @param {Array<{ id: string, state: string, measure: Measure | null }>} cases
+ * @param {number[]} horizons
+ * @param {Against} against
  * @returns {EventSummary}
  */
-export function summarizeEvents(cases) {
+export function summarizeEvents(cases, horizons, against) {
   const measured = cases.filter((c) => c.state === "measured" && c.measure !== null);
-  /** @type {Record<string, any>} */
-  const out = { n: measured.length };
-  for (const k of HORIZONS) {
-    const key = /** @type {"x0" | "x1" | "x5" | "x20" | "x60"} */ (`x${k}`);
-    const values = /** @type {number[]} */ (
-      measured.map((c) => c.measure?.[key]).filter((v) => typeof v === "number"));
+  /** @param {number} j @returns {Array<{ id: string, value: number }>} */
+  const valuesAt = (j) => measured.flatMap((c) => {
+    const value = valueOf(c.measure?.changes[j], against);
+    return value === null ? [] : [{ id: c.id, value }];
+  });
+  const at = horizons.map((k, j) => {
+    const values = valuesAt(j).map((v) => v.value);
     const enough = values.length >= MIN_GROUP;
-    out[`n${k}`] = values.length;
-    out[key] = enough ? quantile(values, 0.5) : null;
-    out[`down${k}`] = enough ? values.filter((v) => v < 0).length / values.length : null;
-    if (k === 60) {
-      out.x60q1 = enough ? quantile(values, 0.25) : null;
-      out.x60q3 = enough ? quantile(values, 0.75) : null;
-    }
+    return {
+      k, n: values.length,
+      median: enough ? quantile(values, 0.5) : null,
+      down: enough ? values.filter((v) => v < 0).length / values.length : null,
+    };
+  });
+  const last = horizons.length - 1;
+  const lastValues = last >= 0 ? valuesAt(last).map((v) => v.value) : [];
+  const quartiles = lastValues.length >= MIN_GROUP;
+  /** @type {{ id: string, value: number } | null} */
+  let worst = null;
+  if (at.length > 0 && at[0]?.median !== null) {
+    for (const v of valuesAt(0)) if (worst === null || v.value < worst.value) worst = v;
   }
-  /** @type {{ id: string, x0: number } | null} */
-  let worst0 = null;
-  if (out.n0 >= MIN_GROUP) {
-    for (const c of measured) {
-      const x0 = c.measure?.x0;
-      if (typeof x0 === "number" && (worst0 === null || x0 < worst0.x0)) worst0 = { id: c.id, x0 };
-    }
-  }
-  out.worst0 = worst0;
-  return /** @type {EventSummary} */ (out);
+  return {
+    n: measured.length, against, at,
+    q1: quartiles ? quantile(lastValues, 0.25) : null,
+    q3: quartiles ? quantile(lastValues, 0.75) : null,
+    worst,
+  };
 }
 
 /**
@@ -86,22 +102,26 @@ export function groupPaths(cases) {
 
 /**
  * The cases in the order they are shown: groups in the order they first appear; inside a group the measured cases
- * with a day 0 against the market, most negative first, then the measured ones without it by their own day 0, most
- * negative first, then the unmeasured as given. The sort is stable.
+ * with a figure at the first horizon (against the benchmark, or raw under `raw`), most negative first, then the
+ * measured ones without it by their raw change there, most negative first, then the unmeasured as given. The sort is
+ * stable.
  * @template {{ group: string, state: string, measure: Measure | null }} T
  * @param {T[]} cases
+ * @param {Against} against
  * @returns {T[]}
  */
-export function orderCases(cases) {
+export function orderCases(cases, against) {
   /** @type {Map<string, number>} */
   const groups = new Map();
   for (const c of cases) if (!groups.has(c.group)) groups.set(c.group, groups.size);
   /** @param {T} c @returns {[number, number]} the case's tier inside its group and its value there */
   const rank = (c) => {
-    const m = c.state === "measured" ? c.measure : null;
-    if (m === null) return [2, 0];
-    if (typeof m.x0 === "number") return [0, m.x0];
-    return [1, m.r0];
+    const first = c.state === "measured" ? c.measure?.changes[0] : undefined;
+    const value = valueOf(first, against);
+    if (value !== null) return [0, value];
+    const raw = valueOf(first, "raw");
+    if (raw !== null) return [1, raw];
+    return [2, 0];
   };
   return cases
     .map((c) => ({ c, g: /** @type {number} */ (groups.get(c.group)), r: rank(c) }))
