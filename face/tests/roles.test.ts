@@ -77,8 +77,8 @@ test("gravit's preset has five role rows: the shipped library is cn-market-analy
 
 /* The source reader (analogs spec §6.5; charter D29): `web_search` alone in its mask (the face gives its children
  * web_fetch itself), no route of its own, and a persona that wants a page it opened behind every date and a
- * report of nine fixed lines per event. */
-test("source-reader: web_search alone, no model, the report's nine lines", () => {
+ * report of thirteen fixed lines per event. */
+test("source-reader: web_search alone, no model, the report's thirteen lines", () => {
   const source = readRoles(ROLES_ROOT).find((role) => role.id === "source-reader")!;
   assert.deepEqual(source.allow, ["web_search"]);
   assert.equal(source.model, undefined);
@@ -91,7 +91,7 @@ test("source-reader: web_search alone, no model, the report's nine lines", () =>
   }
   const lines = source.persona.split("\n");
   assert.ok(lines.includes("EVENT"), "the block opens with EVENT on a line of its own");
-  for (const key of ["company:", "ticker:", "date:", "timing:", "source:", "quote:", "status:", "note:"]) {
+  for (const key of ["company:", "ticker:", "date:", "timing:", "price:", "stated open:", "splits:", "splits source:", "source:", "quote:", "status:", "note:"]) {
     assert.ok(lines.some((line) => line.startsWith(`${key} `)), key);
   }
 });

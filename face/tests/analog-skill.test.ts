@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 const SKILL = fileURLToPath(new URL("../../dsh/skills/mechanics/analog-guide/SKILL.md", import.meta.url));
 const README = fileURLToPath(new URL("../../dsh/README.md", import.meta.url));
 const DESCRIPTION =
-  "How to answer \"what happened after cases like this\" — analog_events for a news event measured against past ones, the source reader for finding and dating them, and how to report the result without advising a trade.";
+  "How to answer \"what happened after cases like this\" — analog_events for news and listings measured against past ones from the base you choose, the source reader for finding and dating them, your own calculation from daily bars when the tool cannot measure the question, and how to report the result without advising a trade.";
 /** The body's budget, in bytes. */
-const BODY_MAX = 4000;
+const BODY_MAX = 7500;
 
 /** The file split into its frontmatter's fields and its body. */
 function readSkill(): { fields: Record<string, string>; body: string } {
@@ -85,6 +85,18 @@ test("the analog guide gives the present case's anchors a source and verified, a
 test("the analog guide's ready report names the event view ids for the face to draw", () => {
   const body = readSkill().body.replace(/\s+/g, " ");
   assert.ok(body.includes("Your `ready` report names the id of every event view to draw"));
+});
+
+test("the analog guide gives gravit the choice and the way out, and keeps chart shapes out", () => {
+  const body = readSkill().body.replace(/\s+/g, " ");
+  for (const phrase of ["prior_close", "price", "day0_open", "day0_close",
+    "never answer that something cannot be measured while its bars exist", "write no file of bars anywhere",
+    "At most 40 histories a question", "your own calculation", "never after", "Never adjust a price yourself", "chart shapes"]) {
+    assert.ok(body.includes(phrase), phrase);
+  }
+  for (const phrase of ["Numbers from the digest only", "One tool reads the past"]) {
+    assert.equal(body.includes(phrase), false, phrase);
+  }
 });
 
 test("dsh/README.md's mechanics row names the analog guide", () => {
