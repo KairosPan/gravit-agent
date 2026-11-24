@@ -27,7 +27,7 @@ export interface HttpReply {
   /** a redirect's target, its host only — never followed, and never its path, which may carry a place or an address */
   location?: string | undefined;
 }
-export type Http = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number }) => Promise<HttpReply>;
+export type Http = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number; maxText?: number | undefined }) => Promise<HttpReply>;
 
 /** the real network: one request, a timeout (the body's too), no redirect followed — a redirect comes back as the answer it is, with the
  * host it pointed at, so it is told as the venue answering and not as "did not answer" */
@@ -46,7 +46,7 @@ export const realHttp: Http = async (url, init = {}) => {
   } catch {
     body = undefined;
   }
-  return { status: r.status, body, text: text.slice(0, 2000), ...(wait ? { retryAfterMs: wait } : {}) };
+  return { status: r.status, body, text: text.slice(0, init.maxText ?? 2000), ...(wait ? { retryAfterMs: wait } : {}) };
 };
 
 /** a Retry-After header — seconds, or an HTTP date — as milliseconds from now; nothing when it says nothing usable. An hour at most */

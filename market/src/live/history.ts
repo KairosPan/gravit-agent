@@ -236,7 +236,7 @@ export function overnightGaps(from: number, to: number): Array<{ from: number; t
 export type Lane = (cost?: number) => Promise<void>;
 /** the line a source waits in before each request to `host` (PublicDeps.pace; absent: the process's own line for that host, hostLane) */
 export type Pace = (host: HistoryHost, cost?: number) => Promise<void>;
-export type HistoryHost = "coinbase" | "okx" | "hyperliquid" | "robinhood" | "nasdaq" | "nasdaq-www";
+export type HistoryHost = "coinbase" | "okx" | "hyperliquid" | "robinhood" | "nasdaq" | "nasdaq-www" | "nasdaqtrader";
 
 /** A LINE: at most `max` of weight sent in any `perMs`, in the order asked; a turn that would go past it waits for the oldest to age out.
  * Real time by default (`now`, `sleep` are for tests): a stopped test clock never holds a line shut */
@@ -278,6 +278,8 @@ export const HOST_LIMITS: Readonly<Record<HistoryHost, { max: number; perMs: num
   nasdaq: { max: 8, perMs: 2_000 },
   // Nasdaq's website host, its per-symbol news feeds (news.ts): its own line, apart from the API's, two a second
   "nasdaq-www": { max: 4, perMs: 2_000 },
+  // Nasdaq Trader's symbol directory (us-directory.ts): two small files twice a day, one at a time, a second apart
+  nasdaqtrader: { max: 1, perMs: 1_000 },
 };
 const LANES = new Map<HistoryHost, Lane>();
 /** the process's own line for a host: every source asking it waits in the same one */

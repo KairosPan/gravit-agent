@@ -342,7 +342,7 @@ export interface PublicDeps {
  * real-time quotes and charts (Nasdaq's, us-quotes.ts) and Nasdaq's per-symbol news feeds (www.nasdaq.com, news.ts, before the last two).
  * Polymarket's Data API (beside its CLOB) is asked for its latest trades only, keyless.
  * Polymarket US's public gateway is its keyless market data only: its signed API (api.polymarket.us) is never asked from here */
-export const PUBLIC_HOSTS: readonly string[] = ["external-api.kalshi.com", "gamma-api.polymarket.com", "clob.polymarket.com", "data-api.polymarket.com", "gateway.polymarket.us", "api.robinhood.com", "api.nasdaq.com", "cdn-api.cboe.com", "api.xstocks.fi", "li.quest", "api.exchange.coinbase.com", "www.okx.com", "api.gateio.ws", "futures.kraken.com", "www.deribit.com", "api-futures.kucoin.com", "contract.mexc.com", "www.nasdaq.com", "fapi.binance.com", "api.bybit.com"];
+export const PUBLIC_HOSTS: readonly string[] = ["external-api.kalshi.com", "gamma-api.polymarket.com", "clob.polymarket.com", "data-api.polymarket.com", "gateway.polymarket.us", "api.robinhood.com", "api.nasdaq.com", "cdn-api.cboe.com", "www.nasdaqtrader.com", "api.xstocks.fi", "li.quest", "api.exchange.coinbase.com", "www.okx.com", "api.gateio.ws", "futures.kraken.com", "www.deribit.com", "api-futures.kucoin.com", "contract.mexc.com", "www.nasdaq.com", "fapi.binance.com", "api.bybit.com"];
 const KALSHI = "https://external-api.kalshi.com/trade-api/v2";
 const GAMMA = "https://gamma-api.polymarket.com";
 const CLOB = "https://clob.polymarket.com";
@@ -424,7 +424,7 @@ export function fixedHosts(http: Http, hosts: readonly string[], timeoutMs: numb
       throw new Error("not a URL: not asked");
     }
     if (u.protocol !== "https:" || u.username || u.password || u.port || !hosts.includes(u.hostname) || (init.method ?? "GET") !== "GET" || init.body !== undefined) throw new Error(`${u.protocol}//${u.host} is not asked: a public market is read with a GET from ${hosts.join(", ")} only`);
-    return http(url, { method: "GET", headers: { accept: "application/json", ...(init.headers ?? {}) }, timeoutMs: Math.min(init.timeoutMs ?? timeoutMs, timeoutMs) });
+    return http(url, { method: "GET", headers: { accept: "application/json", ...(init.headers ?? {}) }, timeoutMs: Math.min(init.timeoutMs ?? timeoutMs, timeoutMs), ...(init.maxText !== undefined ? { maxText: init.maxText } : {}) });
   };
 }
 

@@ -1,0 +1,91 @@
+ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol
+ABR$D|Arbor Realty Trust 6.375% Series D Cumulative Redeemable Preferred Stock, Liquidation Preference $25.00 per Share|N|ABRpD|N|100|N|ABR-D
+AMC|AMC Entertainment Holdings, Inc. Class A Common Stock|N|AMC|N|100|N|AMC
+ANET|Arista Networks, Inc. Common Stock|N|ANET|N|100|N|ANET
+BA|Boeing Company (The) Common Stock|N|BA|N|100|N|BA
+BABA|Alibaba Group Holding Limited American Depositary Shares each representing eight Ordinary share|N|BABA|N|100|N|BABA
+BB|BlackBerry Limited Common Stock|N|BB|N|100|N|BB
+BE|Bloom Energy Corporation Class A Common Stock|N|BE|N|40|N|BE
+BF.B|Brown Forman Inc Class B Common Stock|N|BF.B|N|100|N|BF.B
+BMNR|BitMine Immersion Technologies, Inc. Common Stock|N|BMNR|N|100|N|BMNR
+BRK.B|Berkshire Hathaway Inc. New Common Stock|N|BRK.B|N|40|N|BRK.B
+CCL|Carnival Corporation Ltd. Common Shares|N|CCL|N|100|N|CCL
+CIEN|Ciena Corporation Common Stock|N|CIEN|N|40|N|CIEN
+CLS|Celestica, Inc. Common Stock|N|CLS|N|40|N|CLS
+COHR|Coherent Corp. Common Stock|N|COHR|N|40|N|COHR
+CRCL|Circle Internet Group, Inc. Class A Common Stock|N|CRCL|N|100|N|CRCL
+CRM|Salesforce, Inc. Common Stock|N|CRM|N|100|N|CRM
+CVNA|Carvana Co. Class A Common Stock|N|CVNA|N|100|N|CVNA
+DELL|Dell Technologies Inc. Class C Common Stock |N|DELL|N|40|N|DELL
+DIS|Walt Disney Company (The) Common Stock|N|DIS|N|100|N|DIS
+DOCN|DigitalOcean Holdings, Inc. Common Stock|N|DOCN|N|100|N|DOCN
+ELF|e.l.f. Beauty, Inc. Common Stock|N|ELF|N|100|N|ELF
+EWT|iShares MSCI Taiwan ETF|P|EWT|Y|100|N|EWT
+EWY|iShares MSCI South Korea ETF|P|EWY|Y|100|N|EWY
+F|Ford Motor Company Common Stock|N|F|N|100|N|F
+FICO|Fair Isaac Corporation Common Stock|N|FICO|N|40|N|FICO
+FIG|Figma, Inc. Class A Common Stock|N|FIG|N|100|N|FIG
+FIX|Comfort Systems USA, Inc. Common Stock|N|FIX|N|10|N|FIX
+GDX|VanEck Gold Miners ETF|P|GDX|Y|100|N|GDX
+GE|GE Aerospace Common Stock|N|GE|N|40|N|GE
+GEV|GE Vernova Inc. Common Stock|N|GEV|N|40|N|GEV
+GLD|SPDR Gold Shares|P|GLD|Y|40|N|GLD
+GLW|Corning Incorporated Common Stock|N|GLW|N|100|N|GLW
+GME|GameStop Corporation Common Stock|N|GME|N|100|N|GME
+HII|Huntington Ingalls Industries, Inc. Common Stock|N|HII|N|40|N|HII
+HIMS|Hims & Hers Health, Inc. Class A Common Stock|N|HIMS|N|100|N|HIMS
+HPE|Hewlett Packard Enterprise Company Common Stock|N|HPE|N|100|N|HPE
+HWM|Howmet Aerospace Inc. Common Stock|N|HWM|N|100|N|HWM
+IBM|International Business Machines Corporation Common Stock|N|IBM|N|100|N|IBM
+INDA|iShares MSCI India ETF|Z|INDA|Y|100|N|INDA
+INFQ|Infleqtion, Inc. Common Stock|N|INFQ|N|100|N|INFQ
+IONQ|IonQ, Inc. Common Stock|N|IONQ|N|100|N|IONQ
+JBL|Jabil Inc. Common Stock|N|JBL|N|40|N|JBL
+JNJ|Johnson & Johnson Common Stock|N|JNJ|N|40|N|JNJ
+JOBY|Joby Aviation, Inc. Common Stock|N|JOBY|N|100|N|JOBY
+JPM|JP Morgan Chase & Co. Common Stock|N|JPM|N|40|N|JPM
+KSS|Kohl's Corporation Common Stock|N|KSS|N|100|N|KSS
+LHX|L3Harris Technologies, Inc. Common Stock|N|LHX|N|100|N|LHX
+LLY|Eli Lilly and Company Common Stock|N|LLY|N|10|N|LLY
+LMT|Lockheed Martin Corporation Common Stock|N|LMT|N|40|N|LMT
+MCD|McDonald's Corporation Common Stock|N|MCD|N|100|N|MCD
+MOD|Modexus Solutions, Inc. Common Stock|N|MOD|N|100|N|MOD
+NET|Cloudflare, Inc. Class A Common Stock|N|NET|N|40|N|NET
+NOW|ServiceNow, Inc. Common Stock|N|NOW|N|100|N|NOW
+NU|Nu Holdings Ltd. Class A Ordinary Shares|N|NU|N|100|N|NU
+OKLO|Oklo Inc. Class A common stock|N|OKLO|N|100|N|OKLO
+ONTO|Onto Innovation Inc. Common Stock|N|ONTO|N|40|N|ONTO
+ORCL|Oracle Corporation Common Stock|N|ORCL|N|100|N|ORCL
+P|Everpure, Inc. Class A common stock|N|P|N|100|N|P
+PATH|UiPath, Inc. Class A Common Stock|N|PATH|N|100|N|PATH
+PFE|Pfizer, Inc. Common Stock|N|PFE|N|100|N|PFE
+PL|Planet Labs PBC Class A Common Stock|N|PL|N|100|N|PL
+PR|Permian Resources Corporation Class A Common Stock|N|PR|N|100|N|PR
+PWR|Quanta Services, Inc. Common Stock|N|PWR|N|40|N|PWR
+RBLX|Roblox Corporation Class A Common Stock|N|RBLX|N|100|N|RBLX
+RDDT|Reddit, Inc. Class A Common Stock|N|RDDT|N|100|N|RDDT
+RDW|Redwire Corporation Common Stock|N|RDW|N|100|N|RDW
+SCHD|Schwab US Dividend Equity ETF|P|SCHD|Y|100|N|SCHD
+SGOV|iShares 0-3 Month Treasury Bond ETF|N|SGOV|Y|100|N|SGOV
+SLV|iShares Silver Trust|P|SLV|Y|100|N|SLV
+SMR|NuScale Power Corporation Class A Common Stock|N|SMR|N|100|N|SMR
+SNAP|Snap Inc. Class A Common Stock|N|SNAP|N|100|N|SNAP
+SNOW|Snowflake Inc. Common Stock|N|SNOW|N|40|N|SNOW
+SPMO|Invesco S&P 500 Momentum ETF|P|SPMO|Y|100|N|SPMO
+SPY|State Street SPDR S&P 500 ETF Trust|P|SPY|Y|40|N|SPY
+TE|T1 Energy Inc. Common Stock|N|TE|N|100|N|TE
+TSM|Taiwan Semiconductor Manufacturing Company Ltd.|N|TSM|N|40|N|TSM
+UBER|Uber Technologies, Inc. Common Stock|N|UBER|N|100|N|UBER
+UMC|United Microelectronics Corporation (NEW) Common Stock|N|UMC|N|100|N|UMC
+UNH|UnitedHealth Group Incorporated Common Stock (DE)|N|UNH|N|40|N|UNH
+UPS|United Parcel Service, Inc. Common Stock|N|UPS|N|100|N|UPS
+USO|United States Oil Fund|P|USO|Y|100|N|USO
+V|Visa Inc.|N|V|N|40|N|V
+VRT|Vertiv Holdings, LLC Class A Common Stock|N|VRT|N|40|N|VRT
+VST|Vistra Corp. Common Stock|N|VST|N|100|N|VST
+VTI|Vanguard Morningstar Total Stock Market ETF|P|VTI|Y|40|N|VTI
+XLK|State Street Technology Select Sector SPDR ETF|P|XLK|Y|100|N|XLK
+XOM|ExxonMobil Holdings Corporation Common Stock|N|XOM|N|100|N|XOM
+ZETA|Zeta Global Holdings Corp. Class A Common Stock|N|ZETA|N|100|N|ZETA
+ZZZTX|TXSE Test Stk 5 Common Stock|F|ZZZTX|N|40|Y|ZZZTX
+File Creation Time: 1123202621:31||||||

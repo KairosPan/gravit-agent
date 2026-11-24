@@ -1,0 +1,126 @@
+Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares
+AAOI|Applied Optoelectronics, Inc. - Common Stock|G|N|N|100|N|N
+AAPL|Apple Inc. - Common Stock|Q|N|N|40|N|N
+ABCL|AbCellera Biologics Inc. - Common Shares|Q|N|N|100|N|N
+ADBE|Adobe Inc. - Common Stock|Q|N|N|40|N|N
+AEHR|Aehr Test Systems - Common Stock|S|N|N|100|N|N
+AEIS|Advanced Energy Industries, Inc. - Common Stock|Q|N|N|40|N|N
+ALAB|Astera Labs, Inc. - Common Stock|Q|N|N|40|N|N
+AMAT|Applied Materials, Inc. - Common Stock|Q|N|N|40|N|N
+AMBA|Ambarella, Inc. - Ordinary Shares|Q|N|N|100|N|N
+AMD|Advanced Micro Devices, Inc. - Common Stock|Q|N|N|40|N|N
+AMKR|Amkor Technology, Inc. - Common Stock|Q|N|N|100|N|N
+AMZN|Amazon.com, Inc. - Common Stock|Q|N|N|40|N|N
+ANT|Anthropic, PBC - Class A Common Stock|Q|N|N|100|N|N
+APLD|Applied Digital Corporation - Common Stock|Q|N|N|100|N|N
+APP|Applovin Corporation - Class A Common Stock|Q|N|N|40|N|N
+ASML|ASML Holding N.V. - New York Registry Shares|Q|N|N|10|N|N
+ASTS|AST SpaceMobile, Inc. - Class A Common Stock|Q|N|N|100|N|N
+AUR|Aurora Innovation, Inc.  - Class A Common Stock|Q|N|N|100|N|N
+AVAV|AeroVironment, Inc. - Common Stock|Q|N|N|100|N|N
+AVGO|Broadcom Inc. - Common Stock|Q|N|N|40|N|N
+AXON|Axon Enterprise, Inc. - Common Stock|Q|N|N|40|N|N
+AXTI|AXT Inc - Common Stock|Q|N|N|100|N|N
+BND|Vanguard Total Bond Market ETF|G|N|N|100|Y|N
+BULL|Webull Corporation - Class A Ordinary Shares|S|N|N|100|N|N
+CBRS|Cerebras Systems Inc. - Class A Common Stock|Q|N|N|100|N|N
+CEG|Constellation Energy Corporation - Common Stock When-Issued|Q|N|N|40|N|N
+CELH|Celsius Holdings, Inc. - Common Stock|S|N|N|100|N|N
+CLOV|Clover Health Investments, Corp.  - Class A Common stock|Q|N|N|100|N|N
+CLSK|CleanSpark, Inc. - Common Stock|S|N|N|100|N|N
+COIN|Coinbase Global, Inc. - Class A Common Stock|Q|N|N|100|N|N
+COST|Costco Wholesale Corporation - Common Stock|Q|N|N|40|N|N
+CRDO|Credo Technology Group Holding Ltd - Ordinary Shares|Q|N|N|100|N|N
+CRWD|CrowdStrike Holdings, Inc. - Class A Common Stock|Q|N|N|100|N|N
+CRWV|CoreWeave, Inc. - Class A Common Stock|Q|N|N|100|N|N
+CSCO|Cisco Systems, Inc. - Common Stock|Q|N|N|100|N|N
+CTSH|Cognizant Technology Solutions Corporation - Class A Common Stock|Q|N|N|100|N|N
+DDOG|Datadog, Inc. - Class A Common Stock|Q|N|N|100|N|N
+DJT|Trump Media & Technology Group Corp. - Common Stock|G|N|N|100|N|N
+ECHO|EchoStar Corporation - Common stock|Q|N|N|100|N|N
+FISV|Fiserv, Inc. - Common Stock|Q|N|N|100|N|N
+FLNC|Fluence Energy, Inc. - Class A Common Stock|Q|N|N|100|N|N
+FLY|Firefly Aerospace Inc. - Common Stock|G|N|N|100|N|N
+FTNT|Fortinet, Inc. - Common Stock|Q|N|N|100|N|N
+FUTU|Futu Holdings Limited - American Depositary Shares|G|N|N|100|N|N
+GLXY|Galaxy Digital Inc. - Class A common stock|Q|N|N|100|N|N
+GOOGL|Alphabet Inc. - Class A Common Stock|Q|N|N|40|N|N
+HOOD|Robinhood Markets, Inc. - Class A Common Stock|Q|N|N|100|N|N
+IBIT|iShares Bitcoin Trust ETF|G|N|N|100|Y|N
+IBRX|ImmunityBio, Inc. - Common Stock|Q|N|N|100|N|N
+INOD|Innodata Inc. - Common Stock|G|N|N|100|N|N
+INTC|Intel Corporation - Common Stock|Q|N|N|100|N|N
+INTU|Intuit Inc. - Common Stock|Q|N|N|40|N|N
+IREN|IREN Limited - Ordinary Shares|Q|N|N|100|N|N
+KLAC|KLA Corporation  - Common Stock|Q|N|N|100|N|N
+KTOS|Kratos Defense & Security Solutions, Inc. - Common Stock|Q|N|N|100|N|N
+LITE|Lumentum Holdings Inc. - Common Stock|Q|N|N|40|N|N
+LRCX|Lam Research Corporation - Common Stock|Q|N|N|40|N|N
+LULU|lululemon athletica inc. - Common Stock|Q|N|N|100|N|N
+LUNR|Intuitive Machines, Inc. - Class A Common Stock|G|N|N|100|N|N
+MDB|MongoDB, Inc. - Class A Common Stock|G|N|N|40|N|N
+META|Meta Platforms, Inc. - Class A Common Stock|Q|N|N|40|N|N
+MPWR|Monolithic Power Systems, Inc. - Common Stock|Q|N|N|10|N|N
+MRNA|Moderna, Inc. - Common Stock|Q|N|N|100|N|N
+MRVL|Marvell Technology, Inc. - Common Stock|Q|N|N|100|N|N
+MSFT|Microsoft Corporation - Common Stock|Q|N|N|40|N|N
+MSTR|Strategy Inc - Class A Common Stock|Q|N|N|100|N|N
+MTSI|MACOM Technology Solutions Holdings, Inc. - Common Stock|Q|N|N|40|N|N
+MU|Micron Technology, Inc. - Common Stock|Q|N|N|10|N|N
+MXL|MaxLinear, Inc - Common Stock|Q|N|N|100|N|N
+NAVN|Navan, Inc. - Class A Common Stock|Q|N|N|100|N|N
+NBIS|Nebius Group N.V. - Class A Ordinary Shares|Q|N|N|100|N|N
+NFLX|Netflix, Inc. - Common Stock|Q|N|N|100|N|N
+NNE|Nano Nuclear Energy Inc. - common stock|S|N|N|100|N|N
+NVDA|NVIDIA Corporation - Common Stock|Q|N|N|100|N|N
+NVTS|Navitas Semiconductor Corporation - Common Stock|G|N|N|100|N|N
+ON|ON Semiconductor Corporation - Common Stock|Q|N|N|100|N|N
+OUST|Ouster, Inc. - Common Stock|Q|N|N|100|N|N
+PANW|Palo Alto Networks, Inc. - Common Stock|Q|N|N|40|N|N
+PENG|Penguin Solutions, Inc. - Common Stock|Q|N|N|100|N|N
+PLTR|Palantir Technologies Inc. - Class A Common Stock|Q|N|N|100|N|N
+POET|POET Technologies Inc. - Common Shares|S|N|N|100|N|N
+POWL|Powell Industries, Inc. - Common Stock|Q|N|N|100|N|N
+PYPL|PayPal Holdings, Inc. - Common Stock|Q|N|N|100|N|N
+QBTS|D-Wave Quantum Inc. - Common Stock|Q|N|N|100|N|N
+QCOM|QUALCOMM Incorporated - Common Stock|Q|N|N|100|N|N
+QQQ|Invesco QQQ Trust, Series 1|G|N|N|40|Y|N
+QUBT|Quantum Computing Inc. - Common Stock|S|N|N|100|N|N
+RCAT|Red Cat Holdings, Inc. - Common Stock|S|N|N|100|N|N
+RGTI|Rigetti Computing, Inc.  - Common stock|S|N|N|100|N|N
+RIVN|Rivian Automotive, Inc. - Class A Common Stock|Q|N|N|100|N|N
+RKLB|Rocket Lab Corporation - Common Stock|Q|N|N|100|N|N
+RUN|Sunrun Inc. - Common Stock|Q|N|N|100|N|N
+SATS|Strive, Inc. - 15.00% Series A Perpetual SATS Preferred Stock|G|N|N|100|N|N
+SHOP|Shopify Inc. - Class A Subordinate Voting Shares|Q|N|N|100|N|N
+SHY|iShares 1-3 Year Treasury Bond ETF|G|N|N|100|Y|N
+SIMO|Silicon Motion Technology Corporation - American Depositary Shares, each representing four ordinary shares|Q|N|N|40|N|N
+SKHY|SK hynix Inc. - American Depositary Shares|Q|N|N|100|N|N
+SLS|SELLAS Life Sciences Group, Inc.  - Common Stock|S|N|N|100|N|N
+SMCI|Super Micro Computer, Inc. - Common Stock|Q|N|N|100|N|N
+SMH|VanEck Semiconductor ETF|G|N|N|40|Y|N
+SNDK|Sandisk Corporation - Common Stock When-Issued|Q|N|N|10|N|N
+SOFI|SoFi Technologies, Inc.  - Common Stock|Q|N|N|100|N|N
+SOUN|SoundHound AI, Inc. - Class A Common Stock|G|N|N|100|N|N
+SOXX|iShares PHLX SOX Semiconductor Sector Index Fund|G|N|N|40|Y|N
+SPCX|Space Exploration Technologies Corp. - Class A Common Stock|Q|N|N|100|N|N
+TEAM|Atlassian Corporation  - Class A Common Stock|Q|N|N|100|N|N
+TEM|Tempus AI, Inc. - Class A Common Stock|Q|N|N|100|N|N
+TER|Teradyne, Inc. - Common Stock|Q|N|N|40|N|N
+TSEM|Tower Semiconductor Ltd. - Ordinary Shares|Q|N|N|100|N|N
+TSLA|Tesla, Inc.  - Common Stock|Q|N|N|40|N|N
+TTD|The Trade Desk, Inc. - Class A Common Stock|G|N|N|100|N|N
+TTEQ|T. Rowe Price Technology ETF|G|N|N|100|Y|N
+TTWO|Take-Two Interactive Software, Inc. - Common Stock|Q|N|N|100|N|N
+USAR|USA Rare Earth, Inc. - Common Stock|G|N|N|100|N|N
+VICR|Vicor Corporation - Common Stock|Q|N|N|100|N|N
+VSAT|ViaSat, Inc. - Common Stock|Q|N|N|100|N|N
+WDAY|Workday, Inc. - Class A Common Stock|Q|N|N|100|N|N
+WDC|Western Digital Corporation - Common Stock|Q|N|N|40|N|N
+WMT|Walmart Inc. - Common Stock|Q|N|N|100|N|N
+WULF|TeraWulf Inc. - Common Stock|S|N|N|100|N|N
+WYFI|WhiteFiber, Inc. - Ordinary Shares|S|N|N|100|N|N
+XNDU|Xanadu Quantum Technologies Limited - Class B Subordinate Voting Shares|G|N|N|100|N|N
+ZM|Zoom Communications, Inc. - Class A Common Stock|Q|N|N|100|N|N
+ZS|Zscaler, Inc. - Common Stock|Q|N|N|100|N|N
+File Creation Time: 1123202621:31|||||||
