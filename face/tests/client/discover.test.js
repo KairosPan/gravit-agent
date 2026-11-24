@@ -275,9 +275,9 @@ test("the event analog's page: State, About, Ask gravit with its hint, What it d
   assert.ok(at.every(i => i > 0), `every section drawn: ${at}`);
   assert.deepEqual([...at].sort((a, b) => a - b), at, 'in that order');
   assert.ok(h.indexOf('<span class="kv-k">State</span>') < at[0], 'State first');
-  assert.match(h, /<div class="dsec-line">Give gravit a stock and what just happened to it\.[^<]*<\/div><div class="dsec-line">The answer is a table/, 'About: a line per paragraph');
+  assert.match(h, /<div class="dsec-line">Give gravit a stock and what just happened to it, or a listing\.[^<]*<\/div><div class="dsec-line">The answer is a table/, 'About: a line per paragraph');
   const keys = askKeys(h);
-  assert.equal(keys.length, 3);
+  assert.equal(keys.length, 4);
   assert.ok(keys.every(k => !/disabled/.test(k)), 'none disabled');
   assert.match(keys[0], /^<button type="button" class="btn-sm ask-key" data-action="askAbility" data-text="NVDA&#39;s board opened an investigation into its CEO\. What did stocks do after events like this\?">$/);
   assert.match(h, /data-action="askAbility"[^>]*>NVDA&#39;s board opened an investigation into its CEO\. What did stocks do after events like this\?<\/button>/);
@@ -296,14 +296,14 @@ test("the event analog's page: State, About, Ask gravit with its hint, What it d
 test('the ask keys are disabled without a conversation, saying so; with the ability not on they are disabled and say nothing', () => {
   for (const s of [abilityAt('ability:event-analogs'), R.tasksOff(abilityAt('ability:event-analogs'), { at: 1 }), conversing(abilityAt('ability:event-analogs'), null)]) {
     const h = renderPlugin(s);
-    assert.equal(askKeys(h).length, 3);
+    assert.equal(askKeys(h).length, 4);
     assert.ok(askKeys(h).every(k => / disabled>$/.test(k)), 'every key disabled');
     assert.match(h, new RegExp(`<div class="dsec-line dim">gravit${apos}s conversation is not available</div>`));
     assert.doesNotMatch(h, /Nothing is sent until you send it/);
   }
   const off = renderPlugin(conversing(abilityAt('ability:event-analogs', withAbility(0, { state: 'off' }))));
   assert.match(off, /<span class="kv-k">State<\/span><span class="kv-v">Off<\/span>/);
-  assert.equal(askKeys(off).length, 3);
+  assert.equal(askKeys(off).length, 4);
   assert.ok(askKeys(off).every(k => / disabled>$/.test(k)));
   assert.doesNotMatch(off, /Nothing is sent until you send it|conversation is not available/);
   assert.ok(askKeys(renderPlugin(conversing(abilityAt('ability:event-analogs', withAbility(0, { state: 'starting' }))))).every(k => / disabled>$/.test(k)), 'starting: disabled');

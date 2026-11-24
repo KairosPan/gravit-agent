@@ -31,12 +31,12 @@ test('Abilities: one item per ability, in the order served, its text the top lev
   const [first, second] = items;
   assert.equal(first.shelf, 'abilities'); assert.equal(first.kindCode, 'ability'); assert.equal(first.kind, 'Ability');
   assert.equal(first.name, 'Event analogs');
-  assert.equal(first.line, 'What stocks did after past events like this one, measured against the market');
+  assert.equal(first.line, 'What stocks did after past events and listings like this one, against the market');
   assert.deepEqual(first.mark, { type: 'glyph', icon: 'rewind' });
   assert.equal(first.dim, false); assert.equal(first.chip, null);
   assert.equal(first.text.name, first.name); assert.equal(first.text.blurb, first.line);
   assert.match(first.text.about, /^Give gravit a stock/);
-  assert.equal(first.text.asks.length, 3); assert.equal(first.text.limits.length, 4);
+  assert.equal(first.text.asks.length, 4); assert.equal(first.text.limits.length, 4);
   assert.equal(first.source.id, 'event-analogs'); assert.equal(first.source.state, 'on');
   assert.equal(second.name, 'Read-through'); assert.deepEqual(second.mark, { type: 'glyph', icon: 'arrows' });
 });
@@ -44,7 +44,7 @@ test('Abilities: one item per ability, in the order served, its text the top lev
 test('Abilities in Chinese: each text field from the overlay when it has it, from the top level when not', () => {
   const zh = itemsOf(discover(), {}, 'zh').abilities[0];
   assert.equal(zh.name, '事件对标'); assert.equal(zh.text.name, '事件对标');
-  assert.equal(zh.line, zh.text.blurb); assert.match(zh.line, /^一件事发生后/);
+  assert.equal(zh.line, zh.text.blurb); assert.match(zh.line, /^一件事或一次上市之后/);
   assert.ok(zh.text.asks[0].startsWith('NVDA 董事会'));
   assert.equal(itemsOf(discover(), {}, 'en').abilities[0].name, 'Event analogs', 'English reads the top level');
   const top = abilitiesListing().abilities[0];
