@@ -359,7 +359,7 @@ describe("daily and weekly: Robinhood's year or five, Nasdaq's by dates for all 
     // a first view: Robinhood refused first, and its refusal is kept
     const first = await history({ http: down, nq: nasdaq({ refuse }) }).h("AAPL", "1d", { since: fromEt(2025, 10, 1), limit: 5_000 });
     expect(isRefusal(first)).toBe(true);
-    expect((first as Refusal).code).not.toBe("E_VENUE_GEOBLOCKED");
+    expect([(first as Refusal).venue, (first as Refusal).code, (first as Refusal).message]).toEqual(["cboe", "E_VENUE_UNREACHABLE", "Robinhood did not answer"]);
     // a page scrolled left asks Nasdaq alone: its refusal is the answer
     const left = await history({ http: down, nq: nasdaq({ refuse }) }).h("AAPL", "1d", { until: fromEt(2021, 6, 22, 9, 30), limit: 300 });
     expect((left as Refusal).code).toBe("E_VENUE_GEOBLOCKED");

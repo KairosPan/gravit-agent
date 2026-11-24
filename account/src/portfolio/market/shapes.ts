@@ -70,8 +70,8 @@ export interface PublicSource {
   /** why nothing is traded through this listing itself, when nothing is (Stock Tokens: they trade from a connected wallet's own rows) */
   readOnly?: string | undefined;
   listings(o: ListingsQuery): Promise<Listing[] | Refusal>;
-  /** ONE MARKET'S LINE asked alone, by its own symbol, where the source can answer one market without a search — the US stocks line: one GET
-   * of Cboe at most, where a search of a short ticker reads forty (public-stocks.ts) — or null where it lists no such market now. A paper
+  /** ONE MARKET'S LINE asked alone, by its own symbol, where the source can answer one market without a search — the US stocks line: one
+   * daily read of Nasdaq at most, where a search of a short ticker starts eight (public-stocks.ts) — or null where it lists no such market now. A paper
    * account prices a market it knows by it (live/paper.ts Pricer.find) */
   line?(symbol: string): Promise<Listing | null | Refusal>;
   /** the source's own reader of the markets someone is looking at now, in the venues' streams' shape (the US stocks line's background
@@ -455,8 +455,9 @@ export const usSession = (nowMs: number): MarketSession => regularSession(nowMs)
 /** the source a close line names: Nasdaq's last regular close, where no real-time quote answered (a copy of the market's NASDAQ_CLOSE_FROM) */
 export const NASDAQ_CLOSE_FROM = "Nasdaq · close";
 
-/** whose close a close line's price is, by the close's own instant */
-const closeWords = (closeAt: number): string => `the price is Nasdaq's close of ${etDate(closeAt)}`;
+/** whose close a close line's price is, by the close's own instant — and that its day's change is from the close before that one, not from
+ * the last close before now as a real-time line's is (a copy of the market's closeWords) */
+const closeWords = (closeAt: number): string => `the price is Nasdaq's close of ${etDate(closeAt)}, its change from the close before`;
 
 /** the words a line carries while the market is out of its session: that it is closed and when it opens, and — for a close line, its close's
  * instant `closeAt` given — whose close the price is */

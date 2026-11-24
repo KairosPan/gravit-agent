@@ -9,6 +9,7 @@
 import { isRefusal, type Refusal } from "../core/errors.ts";
 import { et, fromEt, nextRegularSession } from "../calendar.ts";
 import type { Candle } from "./trade.ts";
+import { unreachable } from "./types.ts";
 import type { Nasdaq } from "./us-quotes.ts";
 
 /** the source words of a line priced by a daily close (English, as every `quoteFrom` word is: the face does not translate them) */
@@ -73,6 +74,11 @@ export interface DailyCloses {
   bars(symbol: string, now: number): Promise<readonly Candle[] | null | Refusal>;
   /** the bars at hand for the share, without reading — the latest kept, whichever close they were read for */
   held(symbol: string): readonly Candle[] | undefined;
+  /** whether a read of the share for the reference close before `now` is worth one of a listing's NASDAQ_AT_ONCE slots: none made yet for
+   * that close, one on its way (it is shared, and waited for), or one that did not find the session's bar and whose retry is due. False
+   * where the last read for that close found the bar, or answered null, a refusal or bars without the bar and its retry is not due yet —
+   * bars() would only say that answer again, so a slot given to it is a slot another share does not get */
+  due(symbol: string, now: number): boolean;
   clear(): void;
 }
 
@@ -119,7 +125,8 @@ export function dailyCloses(nasdaq: Pick<Nasdaq, "daily">, clock: () => number):
       }
       const entry = e;
       entry.reading = (async () => {
-        const d = await nasdaq.daily(s, ymd(ref.closesAt - LOOKBACK_MS), ymd(ref.closesAt)).catch((): Refusal | null => null);
+        // a read that throws (a stand-in, a fault below the guard) is Nasdaq not answering, said as such — never "Nasdaq does not know it"
+        const d = await nasdaq.daily(s, ymd(ref.closesAt - LOOKBACK_MS), ymd(ref.closesAt)).catch((err: unknown): Refusal => unreachable("nasdaq", "Nasdaq", err));
         entry.ref = ref.closesAt;
         entry.retryAt = clock() + DAYS_RETRY_MS;
         if (d === null || isRefusal(d)) {
@@ -137,6 +144,13 @@ export function dailyCloses(nasdaq: Pick<Nasdaq, "daily">, clock: () => number):
       return answer(entry);
     },
     held: (symbol) => kept.get(sym(symbol))?.bars,
+    due(symbol, now) {
+      const ref = closedSessionBefore(now);
+      const e = kept.get(sym(symbol));
+      if (!ref) return false;
+      if (!e || e.reading) return true;
+      return !(e.ref === ref.closesAt && (e.found || clock() < e.retryAt));
+    },
     clear: () => kept.clear(),
   };
 }

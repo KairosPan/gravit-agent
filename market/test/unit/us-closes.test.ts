@@ -127,4 +127,37 @@ describe("dailyCloses: one read per share per reference close", () => {
     expect(n.asked).toHaveLength(2);
     expect(c.held("ZZZZ")).toBeUndefined();
   });
+
+  it("due: a share whose read answered null, a refusal or bars without the session is not due until its retry; a found close is not due; one never read, or on its way, is", async () => {
+    const b = await bars();
+    let now = fromEt(2026, 11, 23, 22, 0);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((go) => (release = go));
+    const n = standIn(async () => null);
+    const c = dailyCloses({ daily: (s, f, t) => (s === "SLOW" ? gate.then(() => ({ bars: b, noOpen: 0 })) : s === "AAPL" ? Promise.resolve({ bars: b, noOpen: 0 }) : s === "BAD" ? Promise.resolve(REFUSAL) : n.daily(s, f, t)) }, () => now);
+    expect(c.due("ZZZZ", now)).toBe(true);
+    await c.bars("ZZZZ", now);
+    await c.bars("BAD", now);
+    await c.bars("AAPL", now);
+    expect([c.due("ZZZZ", now), c.due("BAD", now), c.due("AAPL", now)]).toEqual([false, false, false]);
+    // a read on its way is shared: due, and waited for
+    const on = c.bars("SLOW", now);
+    expect(c.due("SLOW", now)).toBe(true);
+    release();
+    await on;
+    expect(c.due("SLOW", now)).toBe(false);
+    // the retry due: the null and the refusal are due again; the found close is not
+    now += DAYS_RETRY_MS;
+    expect([c.due("ZZZZ", now), c.due("BAD", now), c.due("AAPL", now)]).toEqual([true, true, false]);
+    // Tuesday's close: every share is due for its new reference session
+    now = fromEt(2026, 11, 24, 16, 30);
+    expect(c.due("AAPL", now)).toBe(true);
+  });
+
+  it("a read that throws is Nasdaq not answering (E_VENUE_UNREACHABLE), not a symbol Nasdaq does not know", async () => {
+    const now = fromEt(2026, 11, 23, 22, 0);
+    const c = dailyCloses({ daily: () => Promise.reject(new Error("socket hang up")) }, () => now);
+    const got = await c.bars("AAPL", now);
+    expect(isRefusal(got) ? [got.code, got.venue] : got).toEqual(["E_VENUE_UNREACHABLE", "nasdaq"]);
+  });
 });

@@ -454,8 +454,8 @@ export interface Nasdaq {
   quote(symbol: string): Promise<UsQuote | null | Refusal>;
   /** the last answer Nasdaq gave for the share — a late one among them, kept until the next ask takes it — WHILE IT IS RECENT: it came within
    * FRESH_MS, and no refusal that says to wait holds Nasdaq back now (an answer from before Nasdaq refused is not what it says now). Else
-   * undefined: never answered, answered too long ago, or held back (null: it has no real-time quote for it). Its own stamp says how old its
-   * quote is */
+   * undefined: never answered, answered too long ago, or held back (null: it has no real-time quote for it, or — kept LIST_MS — does not
+   * know the symbol). Its own stamp says how old its quote is */
   latest(symbol: string): UsQuote | null | undefined;
   /** ONE READ OF A SHARE'S QUOTE PAGE FOR ITS LAST REGULAR CLOSE (NasdaqClosing), asked now — through the one lane and the one hold, as
    * every ask of Nasdaq is — and kept by no one here: the caller keeps the close it finds (public-stocks.ts). Null where Nasdaq does not
@@ -616,7 +616,10 @@ export function nasdaqSource(deps: PublicDeps = {}): Nasdaq {
       const now = clock();
       // an answer from hours before (a share searched this morning), or one from before Nasdaq said to wait (a 429, an edge's hold), is no
       // quote of now: the line is then Nasdaq's last close, said as not real time — never this one, said as real time
-      if (!a || now - a.at >= FRESH_MS || (held && now < held.until)) return undefined;
+      // a symbol Nasdaq does not know is said as such (null) for as long as that answer is kept (LIST_MS), not FRESH_MS: it is answered,
+      // so Nasdaq's eight at a time (many) put it behind the shares with no recent answer, where its ask costs nothing (quote answers it
+      // from what is kept) — never at the front, holding a slot a share Nasdaq can price is owed
+      if (!a || now - a.at >= (a.listed ? FRESH_MS : LIST_MS) || (held && now < held.until)) return undefined;
       return a.q;
     },
     /** the minutes, oldest first, as one-minute bars at the minute's price — open, high, low and close the same, no volume: SAMPLES, not

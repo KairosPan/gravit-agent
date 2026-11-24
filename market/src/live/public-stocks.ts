@@ -17,10 +17,12 @@
  * and one hold), read once per share per close and kept (us-closes.ts dailyCloses: a read that failed, or came without the last closed
  * session's bar, is asked again no sooner than DAYS_RETRY_MS) — and only for the shares someone looks at: one listing starts NASDAQ_AT_ONCE
  * reads at most, so a long list fills over a few reads. The line is the latest bar whose session has closed (lastClose): its close, stamped
- * at that session's close, its change against the bar before it, its words naming the day ("the price is Nasdaq's close of Mon 23 Nov").
+ * at that session's close, its change against the bar before it, its words naming the day and what its change is from ("the price is Nasdaq's close of Mon 23 Nov, its change from the close before").
  * Nasdaq's quote page is not read for it: at 21:58 New York on Monday 2026-11-23 it still said Friday's price, while the chart asked by
  * dates had Monday's bar. A line neither the chain nor the bars price is left out; nothing listed and a refusal from Robinhood, Nasdaq or
- * a daily read, that refusal is the answer.
+ * a daily read, that refusal is the answer — and nothing listed while daily reads are still out at the deadline, that Nasdaq did not answer
+ * in time (E_VENUE_UNREACHABLE), never an empty list that reads as "no such shares". A daily read that answered null, a refusal or bars
+ * without the session, its retry not due (DailyCloses.due), takes none of the NASDAQ_AT_ONCE reads.
  *
  * The DAY'S CHANGE on a line (change24h, changePct24h) is the change of the line's price from the last regular-session close before the
  * price's own time — yesterday's close in pre-market and the regular session, today's in after-hours — so the price less the change is that
@@ -37,8 +39,8 @@
  * files, read whole on their own lane, kept twelve hours), read for a search (the ticker whole, then its start, then the company's name), the
  * lines' names, which tickers the market lists and which are ETFs (Nasdaq is asked for those as an ETF first). A plain ticker (one to five
  * letters, a class letter after a dot) is a stock or an ETF; an index (^SPX), a futures root or a preferred share ("ABR$D") is not offered.
- * A ROBINHOOD QUOTE is taken for a ticker only where the directory lists it and, where Robinhood has a token of that symbol, the token's
- * name (/rhj/assets, us-tokens.ts) and the directory's agree (us-tokens.ts listedGate): SATS is EchoStar's token, while the directory's
+ * A ROBINHOOD QUOTE is taken for a ticker only where the directory lists it, Robinhood has a token of that symbol, and the token's name
+ * (/rhj/assets, us-tokens.ts) and the directory's agree (us-tokens.ts listedGate): SATS is EchoStar's token, while the directory's
  * SATS is Strive's preferred stock. Until both have answered, only for the well-known few this file names itself (US_SHARES). The
  * directory refusing at cold start leaves the well-known list priced and a ticker typed whole answered; a search by a company's name then
  * answers the directory's refusal, and the notes say that company names are unavailable. Once the directory has answered, a search past its
@@ -58,8 +60,9 @@
  * (`sessions`) for a paper account to judge a quote's own time by. Out of the regular session the line says so, and says when a real-time
  * price is not from the phase that is on; a close line says whose close it is, in any phase.
  *
- * WAITING: a listing waits for the daily reads it started (and the Nasdaq reads of a close a Robinhood line wants) to CLOSE_WAIT_MS from its
- * start at most — an answer that comes later is kept for the next read. ONE SHARE'S LINE (line: a paper account pricing a share it knows)
+ * WAITING: a listing waits for the daily reads it started (and the Nasdaq reads of a close a Robinhood line wants) to CLOSE_WAIT_MS from
+ * the start of its real-time read at most, and never past LISTING_MS from its own start — the directory's first read (DIR_WAIT_MS) is in
+ * that, so a cold listing still answers inside the callers' four seconds; an answer that comes later is kept for the next read. ONE SHARE'S LINE (line: a paper account pricing a share it knows)
  * asks the chain and, where it needs them, the daily bars for that share alone — one read at most, where a search of a short ticker starts
  * eight — and THE BACKGROUND READER (feed: live/us-quotes.ts UsQuoteFeed) reads the shares someone is looking at as Robinhood and Nasdaq
  * write them, sharing this line's one answer of each; usLineAt says a line again at the reader's newer quote.
@@ -67,13 +70,13 @@
  * Every GET goes through the fixed-host guard (public-markets.ts PUBLIC_HOSTS); a 451, a 429, an edge's 403 page or no answer from a source is
  * held back as any public source's is (holdBackMs). */
 import { isRefusal, type Refusal } from "../core/errors.ts";
-import { et, etDate, fromEt, isMarketDay, nextRegularSession, regularSession, usClock, usPhaseAt, usSessionFull } from "../calendar.ts";
+import { et, etDate, nextRegularSession, regularSession, usClock, usPhaseAt, usSessionFull } from "../calendar.ts";
 import { no } from "../refuse.ts";
 import { hostLane } from "./history.ts";
 import { stockHistory } from "./history-stocks.ts";
-import { badHistory, fixedHosts, has, keeper, LIST_MS, list, nonNeg, pos, PUBLIC_HOSTS, publicNo, rec, round, type Listing, type PublicDeps, type PublicSource } from "./public-markets.ts";
+import { badHistory, fixedHosts, has, PUBLIC_HOSTS, round, type Listing, type PublicDeps, type PublicSource } from "./public-markets.ts";
 import type { Candle, MarketSession } from "./trade.ts";
-import { realHttp, unreachable, type HttpReply } from "./types.ts";
+import { realHttp } from "./types.ts";
 import { closedSessionBefore, closeOfSession, dailyCloses, lastClose, NASDAQ_CLOSE_FROM, US_CLOSE_DELAY_MS, type SessionClose } from "./us-closes.ts";
 import { usDirectory, type DirEntry } from "./us-directory.ts";
 import { FRESH_MS, NASDAQ_AT_ONCE, NASDAQ_FROM, nasdaqSource, ROBINHOOD_FROM, ROBINHOOD_OVERNIGHT, usQuote, UsQuoteFeed, type NasdaqClosing, type UsQuote } from "./us-quotes.ts";
@@ -111,6 +114,10 @@ const NO_NAMES = "Company names are unavailable: Nasdaq Trader's symbol director
  * Nasdaq that is slow or hangs does not hold back the lines the chain priced past the callers' four seconds. An answer that comes later is
  * kept for the next read */
 export const CLOSE_WAIT_MS = 2_500;
+/** a whole listing answers within this long of its start, whatever it waited for: the directory's first read (DIR_WAIT_MS), the real-time
+ * chain (RT_WAIT_MS) and the closes (CLOSE_WAIT_MS) would add up to the callers' cut (exploreAcross and a paper account allow a source four
+ * seconds), so the closes' deadline is cut to this from the listing's own start */
+export const LISTING_MS = 3_500;
 /** a real-time quote said to be the phase's own live quote: in the phase that is on, and no older than FRESH_MS and the minute to which
  * Nasdaq stamps a trade */
 const SAID_LIVE_MS = FRESH_MS + 60_000;
@@ -129,8 +136,9 @@ export const cboeQuoteInSession = (nowMs: number): boolean => nextRegularSession
  * line now carries account/calendar.ts usSessionFull, which says the phase too) */
 export const usSession = (nowMs: number): MarketSession => regularSession(nowMs);
 
-/** whose close a close line's price is, by the close's own instant */
-const closeWords = (closeAt: number): string => `the price is Nasdaq's close of ${etDate(closeAt)}`;
+/** whose close a close line's price is, by the close's own instant — and that its day's change is from the close before that one, not from
+ * the last close before now as a real-time line's is (a close line's change is its close against the bar before it: closeDay) */
+const closeWords = (closeAt: number): string => `the price is Nasdaq's close of ${etDate(closeAt)}, its change from the close before`;
 
 /** the words a line carries while the market is out of its session: that it is closed and when it opens, and — for a close line, its close's
  * instant `closeAt` given — whose close the price is */
@@ -276,6 +284,10 @@ export function usLineAt(m: Listing, rt: UsQuote, now: number): Listing {
   };
 }
 
+/** the answer where nothing is listed, no source refused, and daily reads of Nasdaq's were still out at the deadline: Nasdaq was too slow,
+ * which is not "no such share" — an empty list would read as that */
+const closesLate = (): Refusal => no("E_VENUE_UNREACHABLE", { venue: "nasdaq", message: "Nasdaq did not answer in time: no close of these shares yet, try again shortly" });
+
 /** at most `ms` waiting for `p` (it goes on after) */
 function within(p: Promise<unknown>, ms: number): Promise<void> {
   let t: ReturnType<typeof setTimeout> | undefined;
@@ -327,7 +339,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       nasdaq,
       minutes: async (sym) => {
         const nq = await nasdaq.chart(sym);
-        return nq && !isRefusal(nq) ? nq : isRefusal(nq) ? nq : no("E_VENUE_REJECTED", { venue: id, message: `Nasdaq keeps no minutes of ${sym}` });
+        return nq ?? no("E_VENUE_REJECTED", { venue: id, message: `Nasdaq keeps no minutes of ${sym}` });
       },
     },
     id,
@@ -404,28 +416,53 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
    *     session or after-hours whose close nothing at hand says — NASDAQ_AT_ONCE reads at most, the unpriced lines holding no bars first,
    *     then the unpriced holding an earlier close's, then the Robinhood lines; a line whose bars have the session it wants is not asked;
    *   · then Nasdaq's quote page for the close a Robinhood line in pre-market or after-hours still wants (wantsClose), NASDAQ_AT_ONCE at most.
-   * Each refusal a daily read answers is told to `refused` */
-  const settle = async (lines: Array<{ sym: string; rt: UsQuote | undefined }>, now: number, by: number, refused: (r: Refusal) => void): Promise<void> => {
+   * A share whose daily read for this close answered null, a refusal or bars without the session, and whose retry is not due
+   * (DailyCloses.due), takes no slot: its read would only say that again. Each refusal a daily read answers is told to `refused`. Answers
+   * whether daily reads were still out when the wait ended (the caller says Nasdaq did not answer in time where nothing else is listed) */
+  const settle = async (lines: Array<{ sym: string; rt: UsQuote | undefined }>, now: number, by: number, refused: (r: Refusal) => void): Promise<{ pending: boolean }> => {
     const none: string[] = [];
     const older: string[] = [];
     const changes: string[] = [];
+    const notDue: string[] = [];
     const base = closedSessionBefore(now);
     for (const { sym, rt } of lines) {
       const ref = rt ? closeWanted(sym, rt) : base;
       if (!ref) continue;
       const held = daily.held(sym);
       if (held && closeOfSession(held, ref)) continue;
+      if (!daily.due(sym, now)) {
+        notDue.push(sym);
+        continue;
+      }
       (rt ? changes : held ? older : none).push(sym);
     }
-    const reads = [...none, ...older, ...changes].slice(0, NASDAQ_AT_ONCE).map((sym) =>
-      daily.bars(sym, now).then(
-        (r) => {
-          if (isRefusal(r)) refused(r);
-        },
-        () => undefined,
+    // a share not due still says its kept refusal (bars() answers it from what is kept, with no read): the listing's answer where nothing
+    // else is listed, as on the read that got it
+    await Promise.all(
+      notDue.map((sym) =>
+        daily.bars(sym, now).then(
+          (r) => {
+            if (isRefusal(r)) refused(r);
+          },
+          () => undefined,
+        ),
       ),
     );
+    let out = 0;
+    const reads = [...none, ...older, ...changes].slice(0, NASDAQ_AT_ONCE).map((sym) => {
+      out++;
+      return daily
+        .bars(sym, now)
+        .then(
+          (r) => {
+            if (isRefusal(r)) refused(r);
+          },
+          () => undefined,
+        )
+        .finally(() => out--);
+    });
     if (reads.length) await within(Promise.all(reads), by - Date.now());
+    const pending = out > 0;
     const asks: Promise<void>[] = [];
     for (const l of lines) {
       if (asks.length >= NASDAQ_AT_ONCE) break;
@@ -433,6 +470,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       if (ref) asks.push(askClose(l.sym, ref));
     }
     if (asks.length) await within(Promise.all(asks), by - Date.now());
+    return { pending };
   };
   /** a share's last close as the bars at hand say it at `now` (lastClose): the close line's price */
   const closeNow = (sym: string, now: number): SessionClose | undefined => {
@@ -506,10 +544,10 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       };
       const rt = (await live.many([sym], { listed: gate(), refused: said })).get(sym);
       const now = clock();
-      await settle([{ sym, rt }], now, started + CLOSE_WAIT_MS, said);
+      const { pending } = await settle([{ sym, rt }], now, started + CLOSE_WAIT_MS, said);
       if (rt) return listing(sym, rt, undefined, entry?.name, now);
       const close = closeNow(sym, now);
-      return close ? listing(sym, undefined, close, entry?.name, now) : (refused ?? null);
+      return close ? listing(sym, undefined, close, entry?.name, now) : (refused ?? (pending ? closesLate() : null));
     },
     reset: () => {
       live.clear();
@@ -519,6 +557,8 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       tokens.clear();
     },
     async listings(o) {
+      // the listing's own start: its closes are not waited for past LISTING_MS from here, the directory's wait included
+      const begun = Date.now();
       // Robinhood's one answer for every share it quotes is on its way while the directory is read (it is kept, and asked once)
       live.warm();
       const Q = (o.q ?? "").trim().toUpperCase();
@@ -580,11 +620,12 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       );
       const now = clock();
       // the closes: Nasdaq's daily bars for what the chain did not price and for the close beside a Robinhood price, and right after the
-      // close one read of Nasdaq's quote page — waited for to CLOSE_WAIT_MS from the start at most
-      await settle(
+      // close one read of Nasdaq's quote page — waited for to CLOSE_WAIT_MS from the start of the real-time read at most, and never past
+      // LISTING_MS from the listing's own start (a cold directory's wait is in that)
+      const { pending } = await settle(
         pool.map((e) => ({ sym: e.symbol, rt: rt.get(e.symbol) })),
         now,
-        started + CLOSE_WAIT_MS,
+        Math.min(started + CLOSE_WAIT_MS, begun + LISTING_MS),
         said,
       );
       const out: Listing[] = [];
@@ -594,8 +635,10 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
         if (q || close) out.push(listing(e.symbol, q, close, names?.get(e.symbol)?.name ?? (e.name !== e.symbol ? e.name : undefined), now));
       }
       // nothing listed: the refusal that says why no price came (Robinhood's, Nasdaq's, a daily read's) — else, for a search with no directory
-      // to look names up in, the directory's — not a list with no prices
+      // to look names up in, the directory's; else, daily reads still out at the deadline, that Nasdaq did not answer in time — not a list
+      // with no prices
       if (!out.length && (refused || dirRefused)) return (refused ?? dirRefused)!;
+      if (!out.length && pending) return closesLate();
       if (!Q) shown = { of: out.length, total: US_SHARES.length };
       return out;
     },

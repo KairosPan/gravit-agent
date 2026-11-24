@@ -3,7 +3,7 @@
  * it; nothing on the desk's own import path does (the plan's module weight).
  *
  * THE STAMP (M4, M11). A price is stamped with its feed, upper-cased, and its exchange's time: a US share's as
- * desk-tools.ts `quoteTime` writes it (`ROBINHOOD 10:21:03 ET`, `CBOE DELAYED 10:05:00 ET`), an A share's as its
+ * desk-tools.ts `quoteTime` writes it (`ROBINHOOD 10:21:03 ET`, `NASDAQ CLOSE 16:00:00 ET`), an A share's as its
  * `cnQuoteTime` does (`TENCENT 14:03:12 Beijing`), each dated when not `now`'s date on its own clock - so the phone
  * and `desk_quotes` stamp one print alike. A stamp never
  * names a process: the price is the Market's read, and the feed made it.

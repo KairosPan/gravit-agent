@@ -89,8 +89,8 @@ export interface Market {
   rule?: string | undefined;
   /** the order types the venue takes here */
   types: OrderType[];
-  /** an order type listed here that the market cannot take NOW, and why, in the venue's words — a paper account's US share whose only quote
-   * is Cboe's, fifteen minutes behind the market, takes no market order (live/paper.ts: a limit rests until a real-time quote reaches it).
+  /** an order type listed here that the market cannot take NOW, and why, in the venue's words — a paper account's US share whose only price
+   * is Nasdaq's last close, no real-time quote, takes no market order (live/paper.ts: a limit rests until a real-time quote reaches it).
    * The account refuses such an order when it prepares it, with these words (account/live-orders.ts plan) */
   refusesNow?: Partial<Record<OrderType, string>> | undefined;
   /** the times in force it takes here (absent: only its own default, which is not chosen) */
@@ -155,7 +155,7 @@ export interface Market {
   /** the price's own time, ISO 8601 — the last trade or the quote it is, as its source stamps it — where the source stamps one: a paper
    * account fills a stock only at a quote stamped inside a session it trades in (paper.ts) */
   quoteAt?: string | undefined;
-  /** how far behind the market the source's price is, in ms (Cboe's delayed file: 15 minutes; 0: real time), where the source says */
+  /** how far behind the market the source's price is, in ms (a close line: US_CLOSE_DELAY_MS, never real time; 0: real time), where the source says */
   delayMs?: number | undefined;
   /** which source the price came from, in words ("Nasdaq · real time"), where a line reads more than one */
   quoteFrom?: string | undefined;

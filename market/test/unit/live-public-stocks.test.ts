@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import { etDate, fromEt, usClock } from "../../src/calendar.ts";
 import { PUBLIC_HOSTS, publicSources, type Listing } from "../../src/live/public-markets.ts";
-import { CBOE_DELAY_MS, CBOE_FROM, CLOSE_WAIT_MS, cboeQuoteInSession, DIR_WAIT_MS, NASDAQ_CLOSE_FROM, ROBINHOOD_OVERNIGHT, US_CLOSE_DELAY_MS, US_SHARES, US_STOCKS_LINE, US_STOCKS_NAME, US_STOCKS_READ_ONLY, usLineAt, usStocksPublic } from "../../src/live/public-stocks.ts";
+import { CBOE_DELAY_MS, CBOE_FROM, CLOSE_WAIT_MS, cboeQuoteInSession, DIR_WAIT_MS, LISTING_MS, NASDAQ_CLOSE_FROM, ROBINHOOD_OVERNIGHT, US_CLOSE_DELAY_MS, US_SHARES, US_STOCKS_LINE, US_STOCKS_NAME, US_STOCKS_READ_ONLY, usLineAt, usStocksPublic } from "../../src/live/public-stocks.ts";
 import type { Candle, CandlePage } from "../../src/live/trade.ts";
 import type { Http, HttpReply } from "../../src/live/types.ts";
 import { NASDAQ_FROM, ROBINHOOD_FROM, ROBINHOOD_OVERNIGHT as OVERNIGHT_IN_QUOTES, ROBINHOOD_PRICES, RT_WAIT_MS } from "../../src/live/us-quotes.ts";
@@ -106,7 +106,7 @@ describe("US stocks, keyless: Nasdaq's last close where no real-time source answ
     expect(got.map((m) => m.symbol)).toEqual(["NVDA", "AAPL"]);
     // Monday's close (340.97), stamped at Monday's 16:00, against Friday's (341); no bid or ask: a close is no book
     const closes = new Date(fromEt(2026, 10, 13, 16)).toISOString();
-    expect(got[1]).toEqual({ symbol: "AAPL", name: "Apple Inc.", kind: "stock", base: "AAPL", quote: "USD", price: 340.97, quoteAt: closeIso(2026, 10, 12), delayMs: US_CLOSE_DELAY_MS, quoteFrom: NASDAQ_CLOSE_FROM, open: true, types: [], session: { open: true, closesAt: closes, phase: "regular", phaseEndsAt: closes, extendedHours: false }, note: "no real-time quote answered: the price is Nasdaq's close of Mon 12 Oct", change24h: -0.03, changePct24h: -0.0088, venueName: US_STOCKS_NAME });
+    expect(got[1]).toEqual({ symbol: "AAPL", name: "Apple Inc.", kind: "stock", base: "AAPL", quote: "USD", price: 340.97, quoteAt: closeIso(2026, 10, 12), delayMs: US_CLOSE_DELAY_MS, quoteFrom: NASDAQ_CLOSE_FROM, open: true, types: [], session: { open: true, closesAt: closes, phase: "regular", phaseEndsAt: closes, extendedHours: false }, note: "no real-time quote answered: the price is Nasdaq's close of Mon 12 Oct, its change from the close before", change24h: -0.03, changePct24h: -0.0088, venueName: US_STOCKS_NAME });
     expect([NASDAQ_CLOSE_FROM, US_CLOSE_DELAY_MS]).toEqual(["Nasdaq · close", 60_000]);
     // Robinhood's token names and its one answer, Nasdaq for each share (as a stock, then as an ETF) and its daily bars once each, Nasdaq
     // Trader's directory for the names (its two files, kept twelve hours) — and nothing of Cboe's
@@ -259,7 +259,7 @@ describe("US stocks, keyless: Nasdaq's last close where no real-time source answ
     const got = await listings({ limit: 1 }, network([...routes(), ...noRealTime()]), () => night);
     // by design: the session in full — the overnight session is on, and with no real-time price for it no extended-hours order is offered
     expect(got[0]!.session).toEqual({ open: false, opensAt: new Date(fromEt(2026, 10, 14, 9, 30)).toISOString(), phase: "overnight", phaseEndsAt: new Date(fromEt(2026, 10, 14, 4, 0)).toISOString(), extendedHours: false });
-    expect(got[0]!.note).toBe("the US stock market is closed: it opens Wed 14 Oct, 09:30 New York; the price is Nasdaq's close of Tue 13 Oct");
+    expect(got[0]!.note).toBe("the US stock market is closed: it opens Wed 14 Oct, 09:30 New York; the price is Nasdaq's close of Tue 13 Oct, its change from the close before");
     expect([got[0]!.price, got[0]!.quoteAt, got[0]!.change24h]).toEqual([181, closeIso(2026, 10, 13), 1.34]);
     expect(got[0]!.open).toBe(true);
     // the window: from 09:45 to 16:15 New York on a market day
@@ -315,8 +315,8 @@ describe("US stocks off-hours and between turns: Nasdaq's last close, dated, nev
     expect(aapl.changePct24h).toBe(1.9033);
     expect(aapl.bid).toBeUndefined();
     expect(aapl.session!.extendedHours).toBe(false);
-    expect(aapl.note!.endsWith(`the price is Nasdaq's close of ${etDate(fromEt(2026, 11, 23, 16, 0))}`)).toBe(true);
-    expect(aapl.note).toBe("the US stock market is closed: it opens Tue 24 Nov, 09:30 New York; the price is Nasdaq's close of Mon 23 Nov");
+    expect(aapl.note!.endsWith(`the price is Nasdaq's close of ${etDate(fromEt(2026, 11, 23, 16, 0))}, its change from the close before`)).toBe(true);
+    expect(aapl.note).toBe("the US stock market is closed: it opens Tue 24 Nov, 09:30 New York; the price is Nasdaq's close of Mon 23 Nov, its change from the close before");
     // the bars by dates: ten days back from the close, as Nasdaq's chart page asks them
     expect(net.sent.filter((s) => s.url.includes("fromdate=")).map((s) => s.url.split("?")[1])).toEqual(["assetclass=stocks&fromdate=2026-11-13&todate=2026-11-23"]);
     expect(cboeSent(net)).toEqual([]);
@@ -362,7 +362,7 @@ describe("US stocks off-hours and between turns: Nasdaq's last close, dated, nev
     expect(first.slice(0, 8).every((m) => m.quoteFrom === NASDAQ_FROM)).toBe(true);
     const spy = first[8]!;
     expect([spy.symbol, spy.quoteFrom, spy.price, spy.quoteAt, spy.delayMs]).toEqual(["SPY", NASDAQ_CLOSE_FROM, 655, closeIso(2026, 11, 20), US_CLOSE_DELAY_MS]);
-    expect(spy.note).toBe("no real-time quote answered: the price is Nasdaq's close of Fri 20 Nov");
+    expect(spy.note).toBe("no real-time quote answered: the price is Nasdaq's close of Fri 20 Nov, its change from the close before");
     expect(spy.session!.phase).toBe("regular");
     expect(dailySent(net)).toEqual(["SPY"]);
     // ten seconds on, SPY is asked first and is Nasdaq's; the others' answers are still recent
@@ -509,14 +509,14 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Nasdaq'
     // BRK.B at Nasdaq's close, said so — and no extended-hours order offered beside it: a paper account never fills one at a close
     const brk = await read(after, "BRK.B");
     expect([brk.quoteFrom, brk.session!.extendedHours]).toEqual([NASDAQ_CLOSE_FROM, false]);
-    expect(brk.note).toBe("after-hours trading is on until 20:00 New York, but no real-time quote answered: the price is Nasdaq's close of Tue 13 Oct; the regular session opens Wed 14 Oct, 09:30 New York");
+    expect(brk.note).toBe("after-hours trading is on until 20:00 New York, but no real-time quote answered: the price is Nasdaq's close of Tue 13 Oct, its change from the close before; the regular session opens Wed 14 Oct, 09:30 New York");
     // overnight, 22:00: Robinhood's AAPL may take an extended-hours limit; JPM (Nasdaq keeps no overnight session) is Nasdaq's close and may not
     const night = fromEt(2026, 10, 13, 22, 0);
     const na = await read(night, "AAPL");
     expect([na.quoteFrom, na.session!.phase, na.session!.extendedHours]).toEqual([ROBINHOOD_FROM, "overnight", true]);
     expect(na.note).toBe("the overnight session is on until 04:00 New York: the price is Robinhood's real-time quote; the regular session opens Wed 14 Oct, 09:30 New York");
     const nj = await read(night, "JPM");
-    expect([nj.quoteFrom, nj.session!.phase, nj.session!.extendedHours, nj.note]).toEqual([NASDAQ_CLOSE_FROM, "overnight", false, "the US stock market is closed: it opens Wed 14 Oct, 09:30 New York; the price is Nasdaq's close of Tue 13 Oct"]);
+    expect([nj.quoteFrom, nj.session!.phase, nj.session!.extendedHours, nj.note]).toEqual([NASDAQ_CLOSE_FROM, "overnight", false, "the US stock market is closed: it opens Wed 14 Oct, 09:30 New York; the price is Nasdaq's close of Tue 13 Oct, its change from the close before"]);
     // Saturday: closed; no real-time source is asked, Nasdaq's last close (the bars here end on Tuesday: Tuesday's, dated so)
     const saturday = fromEt(2026, 10, 17, 12, 0);
     const sat = network(live(saturday));
@@ -754,7 +754,7 @@ describe("one share's line, asked alone (line) — what a paper account prices a
     const alone = network([...many, anyDays, ...noRealTime()]);
     const src = usStocksPublic({ pace: async () => undefined, http: alone.http, clock: () => NOW });
     const line = (await src.line!("v")) as Listing;
-    expect(line).toMatchObject({ symbol: "V", name: "Visa Inc.", kind: "stock", price: 330, quoteFrom: NASDAQ_CLOSE_FROM, delayMs: US_CLOSE_DELAY_MS, venueName: US_STOCKS_NAME, note: "no real-time quote answered: the price is Nasdaq's close of Mon 12 Oct" });
+    expect(line).toMatchObject({ symbol: "V", name: "Visa Inc.", kind: "stock", price: 330, quoteFrom: NASDAQ_CLOSE_FROM, delayMs: US_CLOSE_DELAY_MS, venueName: US_STOCKS_NAME, note: "no real-time quote answered: the price is Nasdaq's close of Mon 12 Oct, its change from the close before" });
     expect(dailySent(alone)).toEqual(["V"]);
     expect(alone.sent.filter((x) => x.url.includes("/info?")).map((x) => x.url.split("/quote/")[1])).toEqual(["V/info?assetclass=stocks", "V/info?assetclass=etf"]);
     expect(cboeSent(alone)).toEqual([]);
@@ -796,5 +796,75 @@ describe("one share's line, asked alone (line) — what a paper account prices a
     const n = usLineAt(cboeLine, { symbol: "AAPL", price: 343, bid: 342.9, ask: 343.1, at: night - 10_000, delayMs: 0, from: ROBINHOOD_FROM }, night);
     expect([n.session?.phase, n.session?.extendedHours, n.change24h]).toEqual(["overnight", true, undefined]);
     expect(n.note).toBe("the overnight session is on until 04:00 New York: the price is Robinhood's real-time quote; the regular session opens Wed 14 Oct, 09:30 New York");
+  });
+});
+
+describe("the final review's fixes: a cold listing's deadline, Nasdaq late, and the slots of shares that cannot be read", () => {
+  /** Monday 23 November 2026, 21:58 New York: off-hours, every line a close */
+  const MON_NIGHT = fromEt(2026, 11, 23, 21, 58);
+  const hang = () => new Promise<HttpReply>(() => undefined);
+
+  it("a cold directory whose lane really waits, and the daily bars hanging: the listing answers within LISTING_MS of its own start — and, nothing listed, says Nasdaq did not answer in time, never []", async () => {
+    expect(LISTING_MS).toBe(3_500);
+    const base = network([...dirRoutes(), ...noRealTime()]);
+    // the nasdaqtrader lane never lets the directory's read go: DIR_WAIT_MS is spent waiting on it
+    const pace = async (lane: string) => (lane === "nasdaqtrader" ? new Promise<void>(() => undefined) : undefined);
+    const src = usStocksPublic({ pace, http: (url, init) => (url.includes("fromdate=") ? hang() : base.http(url, init)), clock: () => MON_NIGHT });
+    const t0 = Date.now();
+    const got = await src.listings({ limit: 2 });
+    const took = Date.now() - t0;
+    expect(took).toBeGreaterThanOrEqual(DIR_WAIT_MS);
+    expect(took).toBeLessThan(LISTING_MS + 250);
+    expect(isRefusal(got) ? [got.code, got.message] : got).toEqual(["E_VENUE_UNREACHABLE", "Nasdaq did not answer in time: no close of these shares yet, try again shortly"]);
+  });
+
+  it("off-hours, Nasdaq's daily bars hanging past the deadline: the listing and one share's line are a refusal in the market's words, not an empty list or null", async () => {
+    const base = network([...dirRoutes(), ...noRealTime()]);
+    const src = usStocksPublic({ pace: async () => undefined, http: (url, init) => (url.includes("fromdate=") ? hang() : base.http(url, init)), clock: () => MON_NIGHT });
+    const got = await src.listings({ q: "AAPL", limit: 5 });
+    expect(isRefusal(got) ? got.code : got).toBe("E_VENUE_UNREACHABLE");
+    const one = await src.line!("NVDA");
+    expect(one && isRefusal(one) ? one.message : one).toBe("Nasdaq did not answer in time: no close of these shares yet, try again shortly");
+    // a ticker Nasdaq answers it does not know is still no line, not a refusal
+    const known = network([...dirRoutes(), ...noRealTime(), days(NOV)]);
+    expect(await usStocksPublic({ pace: async () => undefined, http: known.http, clock: () => MON_NIGHT }).listings({ q: "ZZZZ", limit: 5 })).toEqual([]);
+  });
+
+  it("a share whose daily read answered null, its retry not due, takes none of Nasdaq's eight reads: the next eight shares are read", async () => {
+    // NOV holds NVDA, AAPL, BRK.B and SPY: MSFT to AVGO answer "Symbol not exists." on the first listing
+    const net = network([days(NOV), ...dirRoutes(), ...noRealTime()]);
+    const src = usStocksPublic({ pace: async () => undefined, http: net.http, clock: () => MON_NIGHT });
+    await src.listings({ limit: 17 });
+    // (a share Nasdaq does not know is asked as a stock, then as an ETF: one read, two requests)
+    const read = () => [...new Set(dailySent(net))];
+    expect(read()).toEqual(US_SHARES.slice(0, 8));
+    net.sent.splice(0);
+    await src.listings({ limit: 17 });
+    expect(read()).toEqual(US_SHARES.slice(8, 16));
+  });
+
+  it("in session, a share Nasdaq said it does not know keeps no slot among Nasdaq's eight once its peers' answers have aged: the ninth share is asked", async () => {
+    const at = fromEt(2026, 11, 23, 10, 0);
+    let t = at;
+    const stamp = (ms: number) => {
+      const m = Math.floor((ms - fromEt(2026, 11, 23, 0, 0)) / 60_000);
+      const h = Math.floor(m / 60);
+      return `Nov 23, 2026 ${h > 12 ? h - 12 : h}:${String(m % 60).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"} ET`;
+    };
+    const info = (url: string) => {
+      const s = symOf(url);
+      if (s === "NVDA") return NQ_NONE;
+      return json({ data: { symbol: s, primaryData: { lastSalePrice: "$100.50", netChange: "+1.00", percentageChange: "+1.00%", lastTradeTimestamp: stamp(t - 60_000), isRealTime: true, bidPrice: "$100.49", askPrice: "$100.51" }, secondaryData: null }, message: null, status: { rCode: 200 } });
+    };
+    const net = network([["/info?", info], days(NOV), ...dirRoutes(), ["/rhj/prices", rhAnswer(at - 5_000, [["CRM", "234.98", "235.12"]])]]);
+    const src = usStocksPublic({ pace: async () => undefined, http: net.http, clock: () => t });
+    const first = (await src.listings({ limit: 9 })) as Listing[];
+    expect(first.find((m) => m.symbol === "SPY")?.quoteFrom).toBe(NASDAQ_CLOSE_FROM);
+    // three minutes on: the seven priced answers are past FRESH_MS, NVDA's "unknown" is kept ten minutes — it goes behind them, and SPY,
+    // ninth on the list, gets the eighth slot
+    t = at + 3 * 60_000;
+    const later = (await src.listings({ limit: 9 })) as Listing[];
+    expect(later.find((m) => m.symbol === "SPY")?.quoteFrom).toBe(NASDAQ_FROM);
+    expect(later.find((m) => m.symbol === "NVDA")?.quoteFrom).toBe(NASDAQ_CLOSE_FROM);
   });
 });

@@ -103,9 +103,11 @@ export function usDirectory(deps: { http: Http; pace: Pace; clock: () => number 
 
   /** one file's text, or the refusal that says why not */
   const file = async (name: string): Promise<string | Refusal> => {
-    await pace(VENUE);
     let r;
+    // the lane's wait inside the try as well: a pace that throws is the directory not answering — a refusal, held DIRECTORY_RETRY_MS like
+    // any other, never a rejection kept for twelve hours
     try {
+      await pace(VENUE);
       r = await http(`${NASDAQ_TRADER}/${name}`, { maxText: FILE_TEXT_MAX });
     } catch {
       return no("E_VENUE_UNREACHABLE", { venue: VENUE, message: `${NAME} did not answer` });

@@ -1268,8 +1268,8 @@ export async function paperSource(req: PaperRequest): Promise<{ source: LiveSour
    * the US line takes a real-time quote at all (US_FRESH_MS); an open order is judged only at one STOCK_JUDGE_MS old at most */
   const realTime = (q: Quoted, maxAgeMs: number): boolean => q.m.kind === "stock" && delayOf(q) === 0 && Number.isFinite(Date.parse(q.m.quoteAt ?? "")) && ageOf(q) <= maxAgeMs;
   const secs = (ms: number): string => (ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : ms < 120_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`);
-  /** why a US share's quote fills nothing now, in words: the only quote is Cboe's — fifteen minutes behind the market — or the old delayed
-   * line's; or its real-time quote is older than the order may take */
+  /** why a US share's quote fills nothing now, in words: the only price is Nasdaq's last close, no real-time quote; or a delayed quote (an
+   * old paper book's Cboe line, fifteen minutes behind); or its real-time quote is older than the order may take */
   const stockStale = (q: Quoted, maxAgeMs: number, said: "filled" | "taken" | "trail" = "filled"): string => {
     const name = q.m.name || q.m.symbol;
     const delay = delayOf(q);

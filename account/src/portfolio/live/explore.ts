@@ -42,7 +42,7 @@
  *     the row and said in `missing`, as compareAcross leaves it out of the best.
  * A row's price and 24-hour change are its most traded venue's (`changeFrom` says which venue the change is from; `quoteFrom`, on the row
  * and on each line, which source a price came from and how far behind it is, where a line reads more than one: a US stock's real-time quote,
- * or Cboe's 15 minutes delayed; `quoteAt`, beside it, the price's own time as that source stamps it — a real-time source's last trade is
+ * or Nasdaq's last close; `quoteAt`, beside it, the price's own time as that source stamps it — a real-time source's last trade is
  * a day old in pre-market for a share that has not traded since, and nothing on the way here ages it). Its volume is counted
  * once per market: venues that read the same exchange's data (two accounts at OKX; MetaMask's mm, Polymarket's CLOB and its public Gamma
  * data, which all report Gamma's volume for one Polymarket market) count it once, the largest figure of them, and different exchanges'
@@ -180,10 +180,10 @@ export interface ExploreAt {
   bid?: number | undefined;
   ask?: number | undefined;
   /** which source this line's price, bid and ask came from, and how far behind the market it is, in the source's words (Market.quoteFrom:
-   * "Robinhood · real time", "Cboe · 15 min delayed"), where a line reads more than one source — the US stocks line, whose name says none */
+   * "Robinhood · real time", "Nasdaq · close"), where a line reads more than one source — the US stocks line, whose name says none */
   quoteFrom?: string | undefined;
-  /** the price's own time, ISO 8601, as its source stamps it (Market.quoteAt: Nasdaq's last trade, Robinhood's quote, Cboe's last trade
-   * fifteen minutes behind), where the line's market stamps one: "real time" is the source, not the price's age — a share not yet traded in
+  /** the price's own time, ISO 8601, as its source stamps it (Market.quoteAt: Nasdaq's last trade, Robinhood's quote, the instant of
+   * Nasdaq's last close), where the line's market stamps one: "real time" is the source, not the price's age — a share not yet traded in
    * pre-market carries yesterday's last trade */
   quoteAt?: string | undefined;
   /** the market takes orders now, as the venue says — except a Kalshi event past its close, which is closed whatever the listing says */
@@ -675,7 +675,7 @@ function atOf(r: Reader, m: Market, symbol = m.symbol, price = priceOf(m), open 
     ...(price !== undefined ? { price } : {}),
     ...(pos(m.bid) !== undefined ? { bid: m.bid } : {}),
     ...(pos(m.ask) !== undefined ? { ask: m.ask } : {}),
-    // the US stocks line's name says no source (a real-time quote or Cboe's delayed one): its price says which, with how far behind it is,
+    // the US stocks line's name says no source (a real-time quote or Nasdaq's last close): its price says which, with how far behind it is,
     // and its own time (the line's note, which would say a real-time last trade is yesterday's, is the listing's read-only words here)
     ...quoteOf(m),
     ...(typeof open === "boolean" ? { open } : {}),

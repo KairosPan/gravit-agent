@@ -17,6 +17,7 @@ const cases: { name: string; now: string; overnight: boolean; from: string; quot
   { name: "after-hours, a Nasdaq quote", now: "2026-11-17T22:00:00Z", overnight: false, from: "Nasdaq · real time", quoteAt: at("2026-11-17T21:58:00Z") },
   { name: "after-hours, an old Nasdaq trade", now: "2026-11-17T22:00:00Z", overnight: false, from: "Nasdaq · real time", quoteAt: at("2026-11-17T20:00:00Z") },
   { name: "overnight, Robinhood", now: "2026-11-18T03:00:00Z", overnight: true, from: "Robinhood · real time", quoteAt: at("2026-11-18T02:59:00Z") },
+  { name: "closed, a Robinhood quote: no close line", now: "2026-11-21T17:00:00Z", overnight: false, from: "Robinhood · real time", quoteAt: at("2026-11-20T20:59:00Z") },
   { name: "overnight, a share not traded then, with a close line", now: "2026-11-18T03:00:00Z", overnight: false, from: NASDAQ_CLOSE_FROM, quoteAt: CLOSE },
 ];
 
@@ -31,6 +32,9 @@ describe("the US line's session words, the account's copy and the market's", () 
       const words = accountWords(session, c.from, c.quoteAt, now);
       expect(words).toBe(marketWords(session, c.from, c.quoteAt, now));
       if (c.from === NASDAQ_CLOSE_FROM) expect(words).not.toMatch(/Cboe/);
+      // a close line says its change is from the close before; a line no close priced names no close
+      if (c.from === NASDAQ_CLOSE_FROM) expect(words).toMatch(/Nasdaq's close of \w{3} \d+ \w{3}, its change from the close before/);
+      else expect(words ?? "").not.toMatch(/close of/);
     });
   }
   it("say a close line's close in the regular session", () => {

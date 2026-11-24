@@ -113,14 +113,15 @@ export function robinhoodTokenNames(deps: { http: Http; pace: Pace; clock: () =>
   };
 }
 
-/** Robinhood's quote may be taken for `symbol`: with both maps, the directory lists it and, where a token of that symbol exists, the
- * names agree; with either map missing, only US_SHARES (the cold-start set) */
+/** Robinhood's quote may be taken for `symbol`: with both maps, the directory lists it, Robinhood has a token of that symbol and the
+ * token's name agrees with the directory's — a ticker with no token of its name is not taken (Robinhood quotes by token symbol, and a
+ * quote under a symbol no token names is one nothing here can check); with either map missing, only US_SHARES (the cold-start set) */
 export function listedGate(dir: ReadonlyMap<string, DirEntry> | undefined, tokens: ReadonlyMap<string, string> | undefined): (symbol: string) => boolean {
   if (!dir || !tokens) return (s) => US_SHARES.includes(s);
   return (s) => {
     const entry = dir.get(s);
     if (!entry) return false;
     const token = tokens.get(s);
-    return token === undefined || namesAgree(token, entry.name);
+    return token !== undefined && namesAgree(token, entry.name);
   };
 }

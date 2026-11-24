@@ -232,7 +232,7 @@ function cnQuoteOf(asset: MarketQuoteIdentity, row: Record<string, unknown> | un
     volume: isNumber(facts.volume) ? facts.volume : null,
     as_of: at, received_at: receivedAt, volume_as_of: null, source: MARKET_SOURCE,
     feed, basis: "previous_close",
-    quote_status: stale ? "stale" : facts.quoteStatus === "delayed" || feed === NASDAQ_CLOSE_FEED ? "delayed" : "live",
+    quote_status: stale ? "stale" : facts.quoteStatus === "delayed" ? "delayed" : "live",
     market_status: phase === undefined ? "unknown" : phase === "trading" ? "open" : "closed",
     message: "",
     ...(phase === undefined ? {} : { cn: { phase, lastSession } }),

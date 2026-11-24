@@ -331,7 +331,7 @@ type DeskQuote = ReturnType<typeof deskQuote>;
  * York's clock to the second, with the New York date before it when that is not `now`'s - a quote from
  * before midnight in New York is dated, whatever the UTC date says. A time `Date` cannot read stays as
  * the source gave it.
- * @param feed - the quote's feed, `robinhood`, `nasdaq` or `cboe delayed`; empty when the source has none.
+ * @param feed - the quote's feed, `robinhood`, `nasdaq` or `nasdaq close`; empty when the source has none.
  * @param asOf - the quote's time, as the source gave it.
  * @param now - the time the call is answered at, in ms since the epoch.
  */

@@ -93,6 +93,19 @@ describe("usDirectory", () => {
     expect(asked.length).toBeGreaterThan(n);
   });
 
+  it("a pace that throws is a refusal, held ten minutes like any other, never a rejection kept twelve hours", async () => {
+    let now = 1_800_000_000_000;
+    let fail = true;
+    const { http, asked } = standIn();
+    const dir = usDirectory({ http, pace: async () => (fail ? Promise.reject(new Error("lane closed")) : undefined), clock: () => now });
+    const r = await dir.entries();
+    expect(isRefusal(r) ? r.code : r).toBe("E_VENUE_UNREACHABLE");
+    expect(asked).toHaveLength(0);
+    fail = false;
+    now += DIRECTORY_RETRY_MS;
+    expect(isRefusal(await dir.entries())).toBe(false);
+  });
+
   it("a file without its header row is a refusal", async () => {
     const http: Http = async () => ({ status: 200, body: undefined, text: "just a page" });
     expect(isRefusal(await usDirectory({ http, pace, clock: () => 0 }).entries())).toBe(true);

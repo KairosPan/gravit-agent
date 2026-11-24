@@ -36,11 +36,15 @@ describe("namesAgree", () => {
 });
 
 describe("listedGate", () => {
-  it("with both maps the directory must list the symbol and the names must agree", () => {
+  it("with both maps the directory must list the symbol, a token must carry it and the names must agree", () => {
     const gate = listedGate(DIR, TOKENS);
     expect(gate("SATS")).toBe(false);
     expect(gate("AAPL")).toBe(true);
     expect(gate("ZZZZ")).toBe(false);
+    // a ticker the directory lists with no token of that symbol: no name to check, not taken (WMT is listed, and Robinhood has no WMT token)
+    expect(DIR.has("WMT")).toBe(true);
+    expect(TOKENS.has("WMT")).toBe(false);
+    expect(gate("WMT")).toBe(false);
   });
 
   it("with either map missing, only US_SHARES", () => {

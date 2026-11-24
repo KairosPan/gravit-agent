@@ -369,8 +369,8 @@ export class LiveOrders {
     if (!inDollars(mk.quote)) return no("E_ACCOUNT_UNPRICED", { venue: v.id, message: `${mk.symbol} is priced in ${mk.quote}: the account trades markets priced in dollars, so that every limit means dollars` });
     if (!mk.open) return no("E_VENUE_MARKET_CLOSED", { venue: v.id, message: `${v.name}: ${mk.name} takes no orders now${mk.note ? ` (${mk.note})` : ""}` });
     if (!mk.types.includes(type)) return no("E_VENUE_ORDER_INVALID", { venue: v.id, message: `${v.name} takes ${mk.types.join(", ")} orders in ${mk.name}, not ${type} orders` });
-    // a type the market lists but cannot take now, in its own words (a paper account's US share whose only quote is Cboe's, fifteen minutes
-    // behind: no market order) — refused before the owner is shown it to sign, or an agent's card is raised
+    // a type the market lists but cannot take now, in its own words (a paper account's US share whose only price is Nasdaq's last close,
+    // no real-time quote: no market order) — refused before the owner is shown it to sign, or an agent's card is raised
     const notNow = mk.refusesNow?.[type];
     if (notNow) return no("E_VENUE_ORDER_INVALID", { venue: v.id, message: `${v.name}: ${notNow}`, detail: { refusesNow: type } });
     // what the market takes besides the type: a time in force it lists, post-only and reduce-only where it says so
