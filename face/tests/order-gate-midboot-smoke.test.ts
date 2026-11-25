@@ -310,8 +310,8 @@ async function openEventsTab(port: number, cookie: string) {
 }
 
 test("mid-boot: while a slow row holds boot() open, a live order tool is held for a card or denied - never dispatched", {
-  skip: gated && "set FACE_SMOKE=1",
-}, async () => {
+  skip: gated && "set FACE_SMOKE=1", timeout: 120_000,
+}, async (t) => {
   /* A scratch home: the seat off (never the operator's Account), then the
    * two fixture rows. The stand-in carries a seat write's name, so the gate
    * sees what the seat's real tool would show it. */
@@ -348,18 +348,27 @@ test("mid-boot: while a slow row holds boot() open, a live order tool is held fo
   let settled: { ok: boolean; error?: unknown } | undefined;
   booting.then(() => { settled = { ok: true }; }, (error: unknown) => { settled = { ok: false, error }; });
 
-  /** Wait for a condition INSIDE the window: fail at once if the boot settled
-   * first - then nothing below would be testing the window at all. */
-  const midboot = async <T>(what: string, probe: () => T | undefined | Promise<T | undefined>, ms = 10_000): Promise<T> => {
-    const deadline = Date.now() + ms;
+  /** Wait for a condition INSIDE the window, for as long as the window is
+   * open: fail at once if the boot settled first - then nothing below would be
+   * testing the window at all - or once the test is aborted (its `timeout`),
+   * so a boot that never reaches the window still ends the test. No wall clock
+   * of its own: the window is the slow row's to hold, until this test releases
+   * it or its `holdCapMs` passes, and how long the tree takes to get there is
+   * the machine's load, not the gate's behaviour. A deadline from the boot's
+   * start failed in the full `FACE_SMOKE=1` run, which boots a face in several
+   * files at once: a cold boot that takes ~2.5 s alone took over 15 s there,
+   * still progressing row by row when the 10 s deadline fired. */
+  const midboot = async <T>(what: string, probe: () => T | undefined | Promise<T | undefined>): Promise<T> => {
     for (;;) {
       if (settled !== undefined) {
-        throw new Error(`bootFace settled before ${what} - the slow row did not hold the boot open` +
+        throw new Error(`bootFace settled before ${what} - ` + (drill.slowDone === undefined
+          ? "the slow row did not hold the boot open"
+          : `the slow row held it for its whole ${drill.holdCapMs} ms cap`) +
           (settled.ok ? "" : `: ${String(settled.error)}`));
       }
+      if (t.signal.aborted) throw new Error(`the test was aborted (its timeout) while waiting for ${what}`);
       const value = await probe();
       if (value !== undefined) return value;
-      if (Date.now() >= deadline) throw new Error(`timed out after ${ms} ms waiting for ${what}`);
       await sleep(20);
     }
   };
@@ -378,6 +387,7 @@ test("mid-boot: while a slow row holds boot() open, a live order tool is held fo
       drill.root !== undefined && drill.root.get("webServer") !== undefined && drill.root.get("connection") !== undefined
         ? drill.root
         : undefined);
+    const windowAt = Date.now();
     const port = boundPort(root);
     const base = `http://127.0.0.1:${port}`;
     /* The tab's cookie. `/` is mounted by main.ts only after bootFace; the
@@ -471,7 +481,8 @@ test("mid-boot: while a slow row holds boot() open, a live order tool is held fo
     assertStillBooting("after the three mid-boot calls and the two memory writes");
     const rel = (at: number | undefined): string => (at === undefined ? "never" : `+${at - t0}ms`);
     console.log(
-      `midboot observed: order stand-in registered ${rel(drill.standinRegistered)}, unary /api served ${rel(firstServed)},` +
+      `midboot observed: order stand-in registered ${rel(drill.standinRegistered)}, the window reached ${rel(windowAt)},` +
+        ` unary /api served ${rel(firstServed)},` +
         ` card raised and held, agentless and swallowed calls denied - all before the slow row was released (+${Date.now() - t0}ms)`,
     );
 
