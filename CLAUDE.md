@@ -40,6 +40,7 @@ the Account's home with the phone networks' secrets.
 | `bots/` · `roles/` | the bots (dsh presets; `gravit` the default) and the role library (`ROLE.md` + `role.yml`, one `role_<id>` tool each) |
 | `docs/` | `dsh-upgrade-guide.md`, `research/` (frozen inputs), `design/`, and `superpowers/` (local only: specs, plans, runbooks) |
 | `compose.yml` | the optional isolated run, three boxes with the face's 3090 the only port published (`face/README.md` "The three-box drill"); the three host processes are the daily one |
+| `.github/workflows/ci.yml` | CI on a PR to `main` and a push to `main`: the market's, the account's and the face's (`FACE_SMOKE=1`) suites with typechecks, three Ubuntu jobs, no secrets |
 
 ## Commands
 ```bash
