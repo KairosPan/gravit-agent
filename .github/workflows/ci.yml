@@ -1,0 +1,92 @@
+# CI: the market's, the account's and the face's suites with their typechecks, on a pull request to main, a push to
+# main, or by hand. Three jobs on hosted Ubuntu runners, each installing only the packages its suite imports; separate
+# runners keep the account's and the market's fixed test ports (4701-4705, 4800) apart. No secrets: the suites use
+# fakes and reach no live source. A red run is left red: no retries, no skips.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  market:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            market/package-lock.json
+            account/package-lock.json
+            face/package-lock.json
+      - run: npm ci
+        working-directory: market
+      - run: npm run typecheck
+        working-directory: market
+      - run: npm test
+        working-directory: market
+
+  account:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            market/package-lock.json
+            account/package-lock.json
+            face/package-lock.json
+      # the account's tests import ../market/src and ../market/test
+      - run: npm ci
+        working-directory: market
+      - run: npm ci
+        working-directory: account
+      - run: npm run typecheck
+        working-directory: account
+      - run: npm test
+        working-directory: account
+
+  face:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            market/package-lock.json
+            account/package-lock.json
+            face/package-lock.json
+      # face's lock resolves gravit-memory (a public repository) over ssh; the runner has no ssh key
+      - run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+      # the smoke files' stand-in Account runs account/ and market/src
+      - run: npm ci
+        working-directory: market
+      - run: npm ci
+        working-directory: account
+      - run: npm ci
+        working-directory: face
+      - run: npm run typecheck
+        working-directory: face
+      - run: npm test
+        working-directory: face
+        env:
+          FACE_SMOKE: "1"
