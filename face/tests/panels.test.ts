@@ -121,7 +121,11 @@ test("defaultAgentProber: a real binary answers with its first line; absence and
   const node = await probe("node");
   assert.match(node ?? "", /^v\d+\./, "node --version's first line");
   assert.equal(await probe("no-such-binary-face-test-9f3a"), null, "ENOENT");
-  assert.equal(await probe("true"), null, "exits 0 with no output — nothing to show");
+  /* a script of our own that exits 0 and prints nothing: `true` is not one everywhere (GNU coreutils' answers
+   * `--version` with "true (GNU coreutils) 9.7", seen on the CI's Ubuntu runner 2026-11-25; macOS's prints nothing) */
+  const silent = join(await mkdtemp(join(tmpdir(), "face-prober-")), "silent");
+  await writeFile(silent, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  assert.equal(await probe(silent), null, "exits 0 with no output — nothing to show");
 });
 
 test("defaultAuthProber: no status recipe means unknown without spawning anything", async () => {
